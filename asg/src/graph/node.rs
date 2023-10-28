@@ -28,6 +28,8 @@ impl Into<Tree> for Node {
     }
 }
 
+use std::collections::HashMap;
+
 use Node::*;
 
 pub struct Tree {
@@ -42,7 +44,7 @@ impl Tree {
     pub fn root(&self) -> &Node {
         self.nodes
             .last()
-            .expect("This Asg is empty! It has no root node!")
+            .expect("This Tree is empty! This should never have happened!")
     }
 
     fn merge(mut self, other: Tree, op: Node) -> Tree {
@@ -172,6 +174,94 @@ pub fn log(mut x: Tree) -> Tree {
 
 pub fn exp(mut x: Tree) -> Tree {
     unary_op!(x, Exp)
+}
+
+pub enum EvaluationError {
+    VariableNotFound,
+    Unknown,
+}
+
+#[derive(Clone)]
+struct NodeState {
+    value: f64,
+    visited: usize,
+    finished: bool,
+}
+
+pub struct Evaluator<'a> {
+    tree: &'a Tree,
+    state: Vec<NodeState>,
+    stack: Vec<usize>,
+}
+
+impl<'a> Evaluator<'a> {
+    pub fn new(tree: &'a Tree) -> Evaluator {
+        Evaluator {
+            tree,
+            state: vec![
+                NodeState {
+                    value: 0.,
+                    visited: 0,
+                    finished: false
+                };
+                tree.nodes.len()
+            ],
+            stack: Vec::with_capacity(tree.nodes.len()),
+        }
+    }
+
+    pub fn run(&mut self, vars: &HashMap<char, f64>) -> Result<f64, EvaluationError> {
+        self.stack.push(self.tree.nodes.len() - 1);
+        while let Some(index) = self.stack.pop() {
+            let prev: usize = *(self.stack.last().unwrap_or(&index));
+            let mut state = self.state[index].clone();
+            if state.finished {
+                continue;
+            }
+            match &self.tree.nodes[index] {
+                Constant(value) => {
+                    state.value = *value;
+                    state.visited = 1;
+                    state.finished = true;
+                }
+                Symbol(_) => todo!(),
+                Add(lhs, rhs) => {
+                    if state.visited < 2 {
+                        state.visited += 1;
+                    } else {
+                        state.value = self.state[*lhs].value + self.state[*rhs].value;
+                        state.finished = true;
+                    }
+                }
+                Subtract(lhs, rhs) => {
+                    if state.visited < 2 {
+                        state.visited += 1;
+                    } else {
+                        state.value = self.state[*lhs].value - self.state[*rhs].value;
+                        state.finished = true;
+                    }
+                }
+                Multiply(_, _) => todo!(),
+                Divide(_, _) => todo!(),
+                Pow(_, _) => todo!(),
+                Min(_, _) => todo!(),
+                Max(_, _) => todo!(),
+                Negate(_) => todo!(),
+                Sqrt(_) => todo!(),
+                Abs(_) => todo!(),
+                Sin(_) => todo!(),
+                Cos(_) => todo!(),
+                Tan(_) => todo!(),
+                Log(_) => todo!(),
+                Exp(_) => todo!(),
+            }
+            self.state[index] = state;
+        }
+        match self.state.last() {
+            Some(state) => Ok(state.value),
+            None => Err(EvaluationError::Unknown),
+        }
+    }
 }
 
 #[cfg(test)]
