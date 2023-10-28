@@ -28,6 +28,12 @@ impl Into<Tree> for Node {
     }
 }
 
+impl From<f64> for Tree {
+    fn from(value: f64) -> Self {
+        return Constant(value).into();
+    }
+}
+
 use std::collections::HashMap;
 
 use Node::*;
