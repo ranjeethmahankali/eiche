@@ -34,13 +34,29 @@ impl From<f64> for Tree {
     }
 }
 
-use std::collections::HashMap;
+impl From<f64> for Node {
+    fn from(value: f64) -> Self {
+        return Constant(value);
+    }
+}
 
-use Node::*;
+impl From<char> for Node {
+    fn from(value: char) -> Self {
+        return Symbol(value);
+    }
+}
+
+impl From<char> for Tree {
+    fn from(c: char) -> Self {
+        return Symbol(c).into();
+    }
+}
 
 pub struct Tree {
     nodes: Vec<Node>,
 }
+
+use Node::*;
 
 impl Tree {
     pub fn new(node: Node) -> Tree {
@@ -200,6 +216,8 @@ pub struct Evaluator<'a> {
     stack: Vec<usize>,
 }
 
+use std::collections::HashMap;
+
 impl<'a> Evaluator<'a> {
     pub fn new(tree: &'a Tree) -> Evaluator {
         Evaluator {
@@ -293,38 +311,42 @@ impl<'a> Evaluator<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Node::*, Tree};
-
-    fn symbol(label: char) -> Tree {
-        return Symbol(label).into();
-    }
-
     #[test]
     fn add() {
-        let sum = symbol('x') + symbol('y');
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let sum = x + y;
         assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Add(0, 1)]);
     }
 
     #[test]
     fn multiply() {
-        let sum = symbol('x') * symbol('y');
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let sum = x * y;
         assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Multiply(0, 1)]);
     }
 
     #[test]
     fn subtract() {
-        let sum = symbol('x') - symbol('y');
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let sum = x - y;
         assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Subtract(0, 1)]);
     }
 
     #[test]
     fn divide() {
-        let sum = symbol('x') / symbol('y');
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let sum = x / y;
         assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Divide(0, 1)]);
     }
 
     #[test]
     fn negate() {
-        let neg = -symbol('x');
+        let x: Tree = 'x'.into();
+        let neg = -x;
         assert_eq!(neg.nodes, vec![Symbol('x'), Negate(0)]);
     }
 }

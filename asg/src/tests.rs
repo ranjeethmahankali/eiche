@@ -9,7 +9,7 @@ mod tests {
     #[test]
     fn constant() {
         let pi: f64 = 3.14;
-        let x: Tree = Constant(pi).into();
+        let x: Tree = pi.into();
         match x.root() {
             Constant(val) if *val == pi => (),
             _ => assert!(false),
