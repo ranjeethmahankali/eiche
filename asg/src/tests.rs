@@ -3,8 +3,8 @@
 mod tests {
     use std::collections::HashMap;
 
-    use crate::graph::node::Node::*;
-    use crate::graph::node::*;
+    use crate::tree::Node::*;
+    use crate::tree::*;
 
     #[test]
     fn constant() {
