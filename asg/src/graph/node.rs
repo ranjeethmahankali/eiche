@@ -213,47 +213,67 @@ impl<'a> Evaluator<'a> {
     pub fn run(&mut self, vars: &HashMap<char, f64>) -> Result<f64, EvaluationError> {
         self.stack.push(self.tree.nodes.len() - 1);
         while let Some(index) = self.stack.pop() {
-            let prev: usize = *(self.stack.last().unwrap_or(&index));
             let mut state = self.state[index].clone();
             if state.finished {
                 continue;
             }
             match &self.tree.nodes[index] {
-                Constant(value) => {
-                    state.value = *value;
-                    state.visited = 1;
+                Constant(..) | Symbol(..) => {
+                    state.visited += 1;
                     state.finished = true;
                 }
-                Symbol(_) => todo!(),
-                Add(lhs, rhs) => {
+                Add(lhs, rhs)
+                | Subtract(lhs, rhs)
+                | Multiply(lhs, rhs)
+                | Divide(lhs, rhs)
+                | Pow(lhs, rhs)
+                | Min(lhs, rhs)
+                | Max(lhs, rhs) => {
                     if state.visited < 2 {
                         state.visited += 1;
+                        self.stack.push(index);
+                        self.stack.push(*lhs);
+                        self.stack.push(*rhs);
                     } else {
-                        state.value = self.state[*lhs].value + self.state[*rhs].value;
                         state.finished = true;
                     }
                 }
-                Subtract(lhs, rhs) => {
-                    if state.visited < 2 {
+                Negate(x) | Sqrt(x) | Abs(x) | Sin(x) | Cos(x) | Tan(x) | Log(x) | Exp(x) => {
+                    if state.visited < 1 {
                         state.visited += 1;
+                        self.stack.push(index);
+                        self.stack.push(*x);
                     } else {
-                        state.value = self.state[*lhs].value - self.state[*rhs].value;
                         state.finished = true;
                     }
                 }
-                Multiply(_, _) => todo!(),
-                Divide(_, _) => todo!(),
-                Pow(_, _) => todo!(),
-                Min(_, _) => todo!(),
-                Max(_, _) => todo!(),
-                Negate(_) => todo!(),
-                Sqrt(_) => todo!(),
-                Abs(_) => todo!(),
-                Sin(_) => todo!(),
-                Cos(_) => todo!(),
-                Tan(_) => todo!(),
-                Log(_) => todo!(),
-                Exp(_) => todo!(),
+            }
+            if state.finished {
+                state.value = match &self.tree.nodes[index] {
+                    Constant(value) => *value,
+                    Symbol(label) => {
+                        if let Some(value) = vars.get(label) {
+                            *value
+                        } else {
+                            return Err(EvaluationError::VariableNotFound);
+                        }
+                    }
+                    Add(lhs, rhs) => self.state[*lhs].value + self.state[*rhs].value,
+                    Subtract(lhs, rhs) => self.state[*lhs].value - self.state[*rhs].value,
+                    Multiply(lhs, rhs) => self.state[*lhs].value * self.state[*rhs].value,
+                    Divide(lhs, rhs) => self.state[*lhs].value / self.state[*rhs].value,
+                    Pow(lhs, rhs) => self.state[*lhs].value.powf(self.state[*rhs].value),
+                    Min(lhs, rhs) => f64::min(self.state[*lhs].value, self.state[*rhs].value),
+                    Max(lhs, rhs) => f64::max(self.state[*lhs].value, self.state[*rhs].value),
+                    Negate(x) => -self.state[*x].value,
+                    Sqrt(x) => f64::sqrt(self.state[*x].value),
+                    Abs(x) => f64::abs(self.state[*x].value),
+                    Sin(x) => f64::sin(self.state[*x].value),
+                    Cos(x) => f64::cos(self.state[*x].value),
+                    Tan(x) => f64::tan(self.state[*x].value),
+                    Log(x) => f64::log(self.state[*x].value, std::f64::consts::E),
+                    Exp(x) => f64::exp(self.state[*x].value),
+                }
             }
             self.state[index] = state;
         }
