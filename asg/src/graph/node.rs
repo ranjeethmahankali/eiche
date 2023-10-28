@@ -2,7 +2,7 @@
 pub enum Node {
     // Leaf types
     Constant(f64),
-    Symbol(String),
+    Symbol(char),
     // Binary operations
     Add(usize, usize),
     Subtract(usize, usize),
@@ -72,25 +72,33 @@ impl Tree {
         return self;
     }
 
-    fn offset_root_indices(left: &Tree, right: &Tree) -> (usize, usize) {
+    fn merge_offsets(left: &Tree, right: &Tree) -> (usize, usize) {
         let li = left.nodes.len() - 1;
         let ri = li + right.nodes.len();
         (li, ri)
     }
 }
 
-// macro_rules! binary_op {
-//     (&name, $lhs, $rhs, $op) => {
+macro_rules! binary_op {
+    ($lhs: ident, $rhs: ident, $op: ident) => {{
+        let (left, right) = Tree::merge_offsets(&$lhs, &$rhs);
+        $lhs.merge($rhs, $op(left, right))
+    }};
+}
 
-//     };
-// }
+macro_rules! unary_op {
+    ($input: ident, $op: ident) => {{
+        let idx = $input.nodes.len() - 1;
+        $input.nodes.push($op(idx));
+        return $input;
+    }};
+}
 
 impl core::ops::Add<Tree> for Tree {
     type Output = Tree;
 
     fn add(self, rhs: Tree) -> Tree {
-        let (left, right) = Tree::offset_root_indices(&self, &rhs);
-        self.merge(rhs, Add(left, right))
+        binary_op!(self, rhs, Add)
     }
 }
 
@@ -98,8 +106,7 @@ impl core::ops::Sub<Tree> for Tree {
     type Output = Tree;
 
     fn sub(self, rhs: Tree) -> Self::Output {
-        let (left, right) = Tree::offset_root_indices(&self, &rhs);
-        self.merge(rhs, Subtract(left, right))
+        binary_op!(self, rhs, Subtract)
     }
 }
 
@@ -107,8 +114,7 @@ impl core::ops::Mul<Tree> for Tree {
     type Output = Tree;
 
     fn mul(self, rhs: Tree) -> Tree {
-        let (left, right) = Tree::offset_root_indices(&self, &rhs);
-        self.merge(rhs, Multiply(left, right))
+        binary_op!(self, rhs, Multiply)
     }
 }
 
@@ -116,89 +122,93 @@ impl core::ops::Div<Tree> for Tree {
     type Output = Tree;
 
     fn div(self, rhs: Tree) -> Self::Output {
-        let (left, right) = Tree::offset_root_indices(&self, &rhs);
-        self.merge(rhs, Divide(left, right))
+        binary_op!(self, rhs, Divide)
     }
 }
 
 pub fn pow(base: Tree, exponent: Tree) -> Tree {
-    let (left, right) = Tree::offset_root_indices(&base, &exponent);
-    base.merge(exponent, Pow(left, right))
+    binary_op!(base, exponent, Pow)
 }
 
 pub fn min(lhs: Tree, rhs: Tree) -> Tree {
-    let (left, right) = Tree::offset_root_indices(&lhs, &rhs);
-    lhs.merge(rhs, Min(left, right))
+    binary_op!(lhs, rhs, Min)
 }
 
 pub fn max(lhs: Tree, rhs: Tree) -> Tree {
-    let (left, right) = Tree::offset_root_indices(&lhs, &rhs);
-    lhs.merge(rhs, Max(left, right))
+    binary_op!(lhs, rhs, Max)
 }
 
 impl core::ops::Neg for Tree {
     type Output = Tree;
 
     fn neg(mut self) -> Self::Output {
-        let idx = self.nodes.len() - 1;
-        self.nodes.push(Negate(idx));
-        return self;
+        unary_op!(self, Negate)
     }
 }
 
-pub fn sqrt(mut op: Tree) -> Tree {
-    let idx = op.nodes.len() - 1;
-    op.nodes.push(Sqrt(idx));
-    return op;
+pub fn sqrt(mut x: Tree) -> Tree {
+    unary_op!(x, Sqrt)
+}
+
+pub fn abs(mut x: Tree) -> Tree {
+    unary_op!(x, Abs)
+}
+
+pub fn sin(mut x: Tree) -> Tree {
+    unary_op!(x, Sin)
+}
+
+pub fn cos(mut x: Tree) -> Tree {
+    unary_op!(x, Cos)
+}
+
+pub fn tan(mut x: Tree) -> Tree {
+    unary_op!(x, Tan)
+}
+
+pub fn log(mut x: Tree) -> Tree {
+    unary_op!(x, Log)
+}
+
+pub fn exp(mut x: Tree) -> Tree {
+    unary_op!(x, Exp)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Node::*, Tree};
 
-    fn symbol(label: &str) -> Tree {
-        return Symbol(label.into()).into();
+    fn symbol(label: char) -> Tree {
+        return Symbol(label).into();
     }
 
     #[test]
     fn add() {
-        let sum = symbol("x") + symbol("y");
-        assert_eq!(
-            sum.nodes,
-            vec![Symbol("x".into()), Symbol("y".into()), Add(0, 1)]
-        );
+        let sum = symbol('x') + symbol('y');
+        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Add(0, 1)]);
     }
 
     #[test]
     fn multiply() {
-        let sum = symbol("x") * symbol("y");
-        assert_eq!(
-            sum.nodes,
-            vec![Symbol("x".into()), Symbol("y".into()), Multiply(0, 1)]
-        );
+        let sum = symbol('x') * symbol('y');
+        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Multiply(0, 1)]);
     }
 
     #[test]
     fn subtract() {
-        let sum = symbol("x") - symbol("y");
-        assert_eq!(
-            sum.nodes,
-            vec![Symbol("x".into()), Symbol("y".into()), Subtract(0, 1)]
-        );
+        let sum = symbol('x') - symbol('y');
+        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Subtract(0, 1)]);
     }
 
     #[test]
     fn divide() {
-        let sum = symbol("x") / symbol("y");
-        assert_eq!(
-            sum.nodes,
-            vec![Symbol("x".into()), Symbol("y".into()), Divide(0, 1)]
-        );
+        let sum = symbol('x') / symbol('y');
+        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Divide(0, 1)]);
     }
 
     #[test]
     fn negate() {
-        let neg = -symbol("x");
-        assert_eq!(neg.nodes, vec![Symbol("x".into()), Negate(0)]);
+        let neg = -symbol('x');
+        assert_eq!(neg.nodes, vec![Symbol('x'), Negate(0)]);
     }
 }
