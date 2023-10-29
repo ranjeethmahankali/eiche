@@ -1,12 +1,18 @@
 #[derive(Debug, PartialEq)]
+/// Node types that an abstract syntax tree can be composed of.
 pub enum Node {
-    // Leaf types
+    /// Constant node containing it's value.
     Constant(f64),
+    /// Symbol with a `char` label.
     Symbol(char),
     // Binary operations
+    /// Represents addition. Contains indices of the operand nodes.
     Add(usize, usize),
+    /// Represents subtraction. Contains indices of the operand nodes.
     Subtract(usize, usize),
+    /// Represents multiplication. Contains indices of the operand nodes.
     Multiply(usize, usize),
+    /// Represents Division. Contains indices of the operand nodes.
     Divide(usize, usize),
     Pow(usize, usize),
     Min(usize, usize),
@@ -52,6 +58,7 @@ impl From<char> for Tree {
     }
 }
 
+/// Represents an abstract syntax tree.
 pub struct Tree {
     nodes: Vec<Node>,
 }
@@ -240,6 +247,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    /// Write the `value` into the `index`-th register. The existing
+    /// value is overwritten.
     fn write(&mut self, index: usize, value: f64) {
         self.regs[index] = Some(value);
     }
