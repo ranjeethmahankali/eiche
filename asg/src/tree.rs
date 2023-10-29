@@ -70,7 +70,7 @@ impl Tree {
     }
 
     fn merge(mut self, other: Tree, op: Node) -> Tree {
-        let offset: usize = other.nodes.len();
+        let offset: usize = self.nodes.len();
         self.nodes
             .reserve(self.nodes.len() + other.nodes.len() + 1usize);
         self.nodes.extend(other.nodes.iter().map(|node| match node {
@@ -198,16 +198,16 @@ pub fn exp(mut x: Tree) -> Tree {
     unary_op!(x, Exp)
 }
 
+#[derive(Debug)]
 pub enum EvaluationError {
-    VariableNotFound,
+    VariableNotFound(char),
     Unknown,
 }
 
 #[derive(Clone)]
 struct NodeState {
-    value: f64,
+    value: Option<f64>,
     visited: usize,
-    finished: bool,
 }
 
 pub struct Evaluator<'a> {
@@ -216,17 +216,14 @@ pub struct Evaluator<'a> {
     stack: Vec<usize>,
 }
 
-use std::collections::HashMap;
-
 impl<'a> Evaluator<'a> {
     pub fn new(tree: &'a Tree) -> Evaluator {
         Evaluator {
             tree,
             state: vec![
                 NodeState {
-                    value: 0.,
+                    value: None,
                     visited: 0,
-                    finished: false
                 };
                 tree.nodes.len()
             ],
@@ -234,17 +231,89 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    pub fn run(&mut self, vars: &HashMap<char, f64>) -> Result<f64, EvaluationError> {
+    pub fn set_var(&mut self, label: char, val: f64) {
+        for i in 0..self.tree.nodes.len() {
+            match &self.tree.nodes[i] {
+                Symbol(l) if *l == label => {
+                    if let Some(state) = self.state.get_mut(i) {
+                        state.value = Some(val);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn value(&self, index: usize) -> Option<f64> {
+        self.state[index].value
+    }
+
+    fn calc_binary(&self, lhs: usize, rhs: usize, op: &Node) -> Option<f64> {
+        let lval = self.value(lhs)?;
+        let rval = self.value(rhs)?;
+        match op {
+            Add(..) => Some(lval + rval),
+            Subtract(..) => Some(lval - rval),
+            Multiply(..) => Some(lval * rval),
+            Divide(..) => Some(lval / rval),
+            Pow(..) => Some(lval.powf(rval)),
+            Min(..) => Some(f64::min(lval, rval)),
+            Max(..) => Some(f64::max(lval, rval)),
+            _ => None,
+        }
+    }
+
+    fn calc_unary(&self, input: usize, op: &Node) -> Option<f64> {
+        let val = self.value(input)?;
+        match op {
+            Negate(_) => Some(-val),
+            Sqrt(_) => Some(f64::sqrt(val)),
+            Abs(_) => Some(f64::abs(val)),
+            Sin(_) => Some(f64::sin(val)),
+            Cos(_) => Some(f64::cos(val)),
+            Tan(_) => Some(f64::tan(val)),
+            Log(_) => Some(f64::log(val, std::f64::consts::E)),
+            Exp(_) => Some(f64::exp(val)),
+            _ => None,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.stack.clear(); // Clear the stack.
+                            // Reset the value for non symbols.
+        for i in 0..self.state.len() {
+            let prev = self.state[i].value;
+            self.state[i] = NodeState {
+                value: {
+                    if let Symbol(_) = &self.tree.nodes[i] {
+                        prev
+                    } else {
+                        None
+                    }
+                },
+                visited: 0,
+            };
+        }
+    }
+
+    pub fn run(&mut self) -> Result<f64, EvaluationError> {
+        self.stack.clear();
         self.stack.push(self.tree.nodes.len() - 1);
         while let Some(index) = self.stack.pop() {
             let mut state = self.state[index].clone();
-            if state.finished {
+            if state.value.is_some() {
                 continue;
             }
-            match &self.tree.nodes[index] {
-                Constant(..) | Symbol(..) => {
+            let node = &self.tree.nodes[index];
+            match node {
+                Constant(val) => {
                     state.visited += 1;
-                    state.finished = true;
+                    state.value = Some(*val);
+                }
+                Symbol(label) => {
+                    if state.value.is_none() {
+                        return Err(EvaluationError::VariableNotFound(*label));
+                    }
                 }
                 Add(lhs, rhs)
                 | Subtract(lhs, rhs)
@@ -259,7 +328,7 @@ impl<'a> Evaluator<'a> {
                         self.stack.push(*lhs);
                         self.stack.push(*rhs);
                     } else {
-                        state.finished = true;
+                        state.value = self.calc_binary(*lhs, *rhs, node);
                     }
                 }
                 Negate(x) | Sqrt(x) | Abs(x) | Sin(x) | Cos(x) | Tan(x) | Log(x) | Exp(x) => {
@@ -268,43 +337,24 @@ impl<'a> Evaluator<'a> {
                         self.stack.push(index);
                         self.stack.push(*x);
                     } else {
-                        state.finished = true;
+                        state.value = self.calc_unary(*x, node);
                     }
-                }
-            }
-            if state.finished {
-                state.value = match &self.tree.nodes[index] {
-                    Constant(value) => *value,
-                    Symbol(label) => {
-                        if let Some(value) = vars.get(label) {
-                            *value
-                        } else {
-                            return Err(EvaluationError::VariableNotFound);
-                        }
-                    }
-                    Add(lhs, rhs) => self.state[*lhs].value + self.state[*rhs].value,
-                    Subtract(lhs, rhs) => self.state[*lhs].value - self.state[*rhs].value,
-                    Multiply(lhs, rhs) => self.state[*lhs].value * self.state[*rhs].value,
-                    Divide(lhs, rhs) => self.state[*lhs].value / self.state[*rhs].value,
-                    Pow(lhs, rhs) => self.state[*lhs].value.powf(self.state[*rhs].value),
-                    Min(lhs, rhs) => f64::min(self.state[*lhs].value, self.state[*rhs].value),
-                    Max(lhs, rhs) => f64::max(self.state[*lhs].value, self.state[*rhs].value),
-                    Negate(x) => -self.state[*x].value,
-                    Sqrt(x) => f64::sqrt(self.state[*x].value),
-                    Abs(x) => f64::abs(self.state[*x].value),
-                    Sin(x) => f64::sin(self.state[*x].value),
-                    Cos(x) => f64::cos(self.state[*x].value),
-                    Tan(x) => f64::tan(self.state[*x].value),
-                    Log(x) => f64::log(self.state[*x].value, std::f64::consts::E),
-                    Exp(x) => f64::exp(self.state[*x].value),
                 }
             }
             self.state[index] = state;
         }
-        match self.state.last() {
-            Some(state) => Ok(state.value),
-            None => Err(EvaluationError::Unknown),
-        }
+        let output = {
+            if let Some(state) = self.state.last() {
+                match state.value {
+                    Some(num) => Ok(num),
+                    None => Err(EvaluationError::Unknown),
+                }
+            } else {
+                Err(EvaluationError::Unknown)
+            }
+        };
+        self.reset();
+        return output;
     }
 }
 
