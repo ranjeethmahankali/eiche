@@ -1,31 +1,35 @@
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum UnaryOp {
+    Negate,
+    Sqrt,
+    Abs,
+    Sin,
+    Cos,
+    Tan,
+    Log,
+    Exp,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Pow,
+    Min,
+    Max,
+}
+
+use BinaryOp::*;
+use UnaryOp::*;
+
 #[derive(Debug, PartialEq)]
-/// Node types that an abstract syntax tree can be composed of.
 pub enum Node {
-    /// Constant node containing it's value.
     Constant(f64),
-    /// Symbol with a `char` label.
     Symbol(char),
-    // Binary operations
-    /// Represents addition. Contains indices of the operand nodes.
-    Add(usize, usize),
-    /// Represents subtraction. Contains indices of the operand nodes.
-    Subtract(usize, usize),
-    /// Represents multiplication. Contains indices of the operand nodes.
-    Multiply(usize, usize),
-    /// Represents Division. Contains indices of the operand nodes.
-    Divide(usize, usize),
-    Pow(usize, usize),
-    Min(usize, usize),
-    Max(usize, usize),
-    // Unary operations
-    Negate(usize),
-    Sqrt(usize),
-    Abs(usize),
-    Sin(usize),
-    Cos(usize),
-    Tan(usize),
-    Log(usize),
-    Exp(usize),
+    Unary(UnaryOp, usize),
+    Binary(BinaryOp, usize, usize),
 }
 
 /// Represents an abstract syntax tree.
@@ -50,12 +54,16 @@ impl Tree {
             .expect("This Tree is empty! This should never have happened!")
     }
 
+    pub fn root_index(&self) -> usize {
+        self.len() - 1
+    }
+
     pub fn depth_first_traverse<F, T, E>(&self, mut visitor: F) -> Result<T, E>
     where
         F: FnMut(usize, Option<usize>) -> Result<T, E>,
         T: Default,
     {
-        let mut stack: Vec<(usize, Option<usize>)> = vec![(self.len() - 1, None)];
+        let mut stack: Vec<(usize, Option<usize>)> = vec![(self.root_index(), None)];
         while !stack.is_empty() {
             let (index, parent) = stack
                 .pop()
@@ -63,77 +71,62 @@ impl Tree {
             match self.node(index) {
                 Constant(_) => {} // Do nothing.
                 Symbol(_) => {}   // Do nothing.
-                Add(lhs, rhs)
-                | Subtract(lhs, rhs)
-                | Multiply(lhs, rhs)
-                | Divide(lhs, rhs)
-                | Pow(lhs, rhs)
-                | Min(lhs, rhs)
-                | Max(lhs, rhs) => {
+                Unary(_, input) => stack.push((*input, Some(index))),
+                Binary(_, lhs, rhs) => {
                     stack.push((*rhs, Some(index)));
                     stack.push((*lhs, Some(index)));
                 }
-                Negate(input) | Sqrt(input) | Abs(input) | Sin(input) | Cos(input) | Tan(input)
-                | Log(input) | Exp(input) => stack.push((*input, Some(index))),
             }
             visitor(index, parent)?;
         }
         return Result::<T, E>::Ok(T::default());
     }
 
+    // pub fn fold_constants(mut self) -> Tree {
+    //     todo!();
+    //     // return self;
+    // }
+
+    // pub fn prune(mut self) -> Tree {
+    //     todo!();
+    //     // return self;
+    // }
+
+    // pub fn deduplicate(mut self) -> Tree {
+    //     todo!();
+    //     // return self;
+    // }
+
     pub fn node(&self, index: usize) -> &Node {
         &self.nodes[index]
     }
 
-    fn merge(mut self, other: Tree, op: Node) -> Tree {
+    fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
         let offset: usize = self.nodes.len();
         self.nodes
             .reserve(self.nodes.len() + other.nodes.len() + 1usize);
         self.nodes.extend(other.nodes.iter().map(|node| match node {
             Constant(value) => Constant(*value),
             Symbol(label) => Symbol(label.clone()),
-            Add(l, r) => Add(*l + offset, *r + offset),
-            Subtract(l, r) => Subtract(*l + offset, *r + offset),
-            Multiply(l, r) => Multiply(*l + offset, *r + offset),
-            Divide(l, r) => Divide(*l + offset, *r + offset),
-            Pow(l, r) => Pow(*l + offset, *r + offset),
-            Min(l, r) => Min(*l + offset, *r + offset),
-            Max(l, r) => Max(*l + offset, *r + offset),
-            Negate(x) => Negate(*x + offset),
-            Sqrt(x) => Sqrt(*x + offset),
-            Abs(x) => Abs(*x + offset),
-            Sin(x) => Sin(*x + offset),
-            Cos(x) => Cos(*x + offset),
-            Tan(x) => Tan(*x + offset),
-            Log(x) => Log(*x + offset),
-            Exp(x) => Exp(*x + offset),
+            Unary(op, input) => Unary(*op, *input + offset),
+            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
         }));
-        self.nodes.push(op);
+        self.nodes
+            .push(Binary(op, offset - 1, self.nodes.len() - 1));
         return self;
     }
-}
 
-macro_rules! binary_op {
-    ($lhs: ident, $rhs: ident, $op: ident) => {{
-        let left = $lhs.len() - 1;
-        let right = left + $rhs.len();
-        $lhs.merge($rhs, $op(left, right))
-    }};
-}
-
-macro_rules! unary_op {
-    ($input: ident, $op: ident) => {{
-        let idx = $input.nodes.len() - 1;
-        $input.nodes.push($op(idx));
-        return $input;
-    }};
+    fn unary_op(mut self, op: UnaryOp) -> Tree {
+        self.nodes.push(Unary(op, self.root_index()));
+        return self;
+    }
 }
 
 impl core::ops::Add<Tree> for Tree {
     type Output = Tree;
 
     fn add(self, rhs: Tree) -> Tree {
-        binary_op!(self, rhs, Add)
+        self.binary_op(rhs, Add)
     }
 }
 
@@ -141,7 +134,7 @@ impl core::ops::Sub<Tree> for Tree {
     type Output = Tree;
 
     fn sub(self, rhs: Tree) -> Self::Output {
-        binary_op!(self, rhs, Subtract)
+        self.binary_op(rhs, Subtract)
     }
 }
 
@@ -149,7 +142,7 @@ impl core::ops::Mul<Tree> for Tree {
     type Output = Tree;
 
     fn mul(self, rhs: Tree) -> Tree {
-        binary_op!(self, rhs, Multiply)
+        self.binary_op(rhs, Multiply)
     }
 }
 
@@ -157,56 +150,56 @@ impl core::ops::Div<Tree> for Tree {
     type Output = Tree;
 
     fn div(self, rhs: Tree) -> Self::Output {
-        binary_op!(self, rhs, Divide)
+        self.binary_op(rhs, Divide)
     }
 }
 
 pub fn pow(base: Tree, exponent: Tree) -> Tree {
-    binary_op!(base, exponent, Pow)
+    base.binary_op(exponent, Pow)
 }
 
 pub fn min(lhs: Tree, rhs: Tree) -> Tree {
-    binary_op!(lhs, rhs, Min)
+    lhs.binary_op(rhs, Min)
 }
 
 pub fn max(lhs: Tree, rhs: Tree) -> Tree {
-    binary_op!(lhs, rhs, Max)
+    lhs.binary_op(rhs, Max)
 }
 
 impl core::ops::Neg for Tree {
     type Output = Tree;
 
-    fn neg(mut self) -> Self::Output {
-        unary_op!(self, Negate)
+    fn neg(self) -> Self::Output {
+        self.unary_op(Negate)
     }
 }
 
-pub fn sqrt(mut x: Tree) -> Tree {
-    unary_op!(x, Sqrt)
+pub fn sqrt(x: Tree) -> Tree {
+    x.unary_op(Sqrt)
 }
 
-pub fn abs(mut x: Tree) -> Tree {
-    unary_op!(x, Abs)
+pub fn abs(x: Tree) -> Tree {
+    x.unary_op(Abs)
 }
 
-pub fn sin(mut x: Tree) -> Tree {
-    unary_op!(x, Sin)
+pub fn sin(x: Tree) -> Tree {
+    x.unary_op(Sin)
 }
 
-pub fn cos(mut x: Tree) -> Tree {
-    unary_op!(x, Cos)
+pub fn cos(x: Tree) -> Tree {
+    x.unary_op(Cos)
 }
 
-pub fn tan(mut x: Tree) -> Tree {
-    unary_op!(x, Tan)
+pub fn tan(x: Tree) -> Tree {
+    x.unary_op(Tan)
 }
 
-pub fn log(mut x: Tree) -> Tree {
-    unary_op!(x, Log)
+pub fn log(x: Tree) -> Tree {
+    x.unary_op(Log)
 }
 
-pub fn exp(mut x: Tree) -> Tree {
-    unary_op!(x, Exp)
+pub fn exp(x: Tree) -> Tree {
+    x.unary_op(Exp)
 }
 
 #[derive(Debug)]
@@ -265,43 +258,54 @@ impl<'a> Evaluator<'a> {
         for idx in 0..self.tree.nodes.len() {
             self.write(
                 idx,
-                match self.tree.nodes[idx] {
-                    Constant(val) => val,
+                match &self.tree.nodes[idx] {
+                    Constant(val) => *val,
                     Symbol(label) => match &self.regs[idx] {
-                        None => return Err(EvaluationError::VariableNotFound(label)),
+                        None => return Err(EvaluationError::VariableNotFound(*label)),
                         Some(val) => *val,
                     },
-                    Add(lhs, rhs) => self.read(lhs)? + self.read(rhs)?,
-                    Subtract(lhs, rhs) => self.read(lhs)? - self.read(rhs)?,
-                    Multiply(lhs, rhs) => self.read(lhs)? * self.read(rhs)?,
-                    Divide(lhs, rhs) => self.read(lhs)? / self.read(rhs)?,
-                    Pow(lhs, rhs) => f64::powf(self.read(lhs)?, self.read(rhs)?),
-                    Min(lhs, rhs) => f64::min(self.read(lhs)?, self.read(rhs)?),
-                    Max(lhs, rhs) => f64::max(self.read(lhs)?, self.read(rhs)?),
-                    Negate(i) => -self.read(i)?,
-                    Sqrt(i) => f64::sqrt(self.read(i)?),
-                    Abs(i) => f64::abs(self.read(i)?),
-                    Sin(i) => f64::sin(self.read(i)?),
-                    Cos(i) => f64::cos(self.read(i)?),
-                    Tan(i) => f64::tan(self.read(i)?),
-                    Log(i) => f64::log(self.read(i)?, std::f64::consts::E),
-                    Exp(i) => f64::exp(self.read(i)?),
+                    Binary(op, lhs, rhs) => {
+                        let a = self.read(*lhs)?;
+                        let b = self.read(*rhs)?;
+                        match op {
+                            Add => a + b,
+                            Subtract => a - b,
+                            Multiply => a * b,
+                            Divide => a / b,
+                            Pow => f64::powf(a, b),
+                            Min => f64::min(a, b),
+                            Max => f64::max(a, b),
+                        }
+                    }
+                    Unary(op, input) => {
+                        let x = self.read(*input)?;
+                        match op {
+                            Negate => -x,
+                            Sqrt => f64::sqrt(x),
+                            Abs => f64::abs(x),
+                            Sin => f64::sin(x),
+                            Cos => f64::cos(x),
+                            Tan => f64::tan(x),
+                            Log => f64::log(x, std::f64::consts::E),
+                            Exp => f64::exp(x),
+                        }
+                    }
                 },
             );
         }
-        return self.read(self.regs.len() - 1);
+        return self.read(self.tree.root_index());
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Node::*, Tree};
+    use super::{BinaryOp::*, Node::*, Tree, UnaryOp::*};
     #[test]
     fn add() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x + y;
-        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Add(0, 1)]);
+        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
     }
 
     #[test]
@@ -309,7 +313,10 @@ mod tests {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x * y;
-        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Multiply(0, 1)]);
+        assert_eq!(
+            sum.nodes,
+            vec![Symbol('x'), Symbol('y'), Binary(Multiply, 0, 1)]
+        );
     }
 
     #[test]
@@ -317,7 +324,10 @@ mod tests {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x - y;
-        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Subtract(0, 1)]);
+        assert_eq!(
+            sum.nodes,
+            vec![Symbol('x'), Symbol('y'), Binary(Subtract, 0, 1)]
+        );
     }
 
     #[test]
@@ -325,13 +335,16 @@ mod tests {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x / y;
-        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Divide(0, 1)]);
+        assert_eq!(
+            sum.nodes,
+            vec![Symbol('x'), Symbol('y'), Binary(Divide, 0, 1)]
+        );
     }
 
     #[test]
     fn negate() {
         let x: Tree = 'x'.into();
         let neg = -x;
-        assert_eq!(neg.nodes, vec![Symbol('x'), Negate(0)]);
+        assert_eq!(neg.nodes, vec![Symbol('x'), Unary(Negate, 0)]);
     }
 }
