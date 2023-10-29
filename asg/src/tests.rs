@@ -86,8 +86,13 @@ mod tests {
         }
     }
 
-    fn eval_test<F>(tree: Tree, expectedfn: F, vardata: &[(char, f64, f64)], samples_per_var: usize)
-    where
+    fn eval_test<F>(
+        tree: Tree,
+        expectedfn: F,
+        vardata: &[(char, f64, f64)],
+        samples_per_var: usize,
+        epsilon: f64,
+    ) where
         F: Fn(&[f64]) -> Option<f64>,
     {
         use rand::Rng;
@@ -107,17 +112,21 @@ mod tests {
                 continue;
             }
             // We set all the variables. Run the test.
-            println!("vars: {:?}", sample);
             assert!(
                 f64::abs(
-                    dbg!(eval.run().expect("Unable to compute the actual value."))
-                        - dbg!(expectedfn(&sample[..]).expect("Unable to compute expected value."))
-                ) < 1e-12
+                    eval.run().expect("Unable to compute the actual value.")
+                        - expectedfn(&sample[..]).expect("Unable to compute expected value.")
+                ) <= epsilon
             );
+            // Clean up the index stack.
             sample.pop();
-            if indices[vari] == samples_per_var {
+            let mut vari = vari;
+            while indices[vari] == samples_per_var && vari > 0 {
                 if let Some(_) = sample.pop() {
                     indices[vari] = 0;
+                    vari -= 1;
+                } else {
+                    assert!(false); // To ensure the logic of this test is correct.
                 }
             }
         }
@@ -125,10 +134,12 @@ mod tests {
 
     #[test]
     fn sum_test() {
-        let xtree: Tree = 'x'.into();
-        let ytree: Tree = 'y'.into();
         eval_test(
-            xtree + ytree,
+            {
+                let xtree: Tree = 'x'.into();
+                let ytree: Tree = 'y'.into();
+                xtree + ytree
+            },
             |vars: &[f64]| {
                 if let [x, y] = vars[..] {
                     Some(x + y)
@@ -138,6 +149,7 @@ mod tests {
             },
             &[('x', -5., 5.), ('y', -5., 5.)],
             10,
+            0.,
         );
     }
 
@@ -157,6 +169,62 @@ mod tests {
             },
             &[('x', -2.5, 2.5)],
             100,
+            0.,
+        );
+
+        eval_test(
+            {
+                let s1 = {
+                    let x: Tree = 'x'.into();
+                    let y: Tree = 'y'.into();
+                    let z: Tree = 'z'.into();
+                    sqrt(
+                        pow(x - 2.0.into(), 2.0.into())
+                            + pow(y - 3.0.into(), 2.0.into())
+                            + pow(z - 4.0.into(), 2.0.into()),
+                    ) - 2.75.into()
+                };
+                let s2 = {
+                    let x: Tree = 'x'.into();
+                    let y: Tree = 'y'.into();
+                    let z: Tree = 'z'.into();
+                    sqrt(
+                        pow(x + 2.0.into(), 2.0.into())
+                            + pow(y - 3.0.into(), 2.0.into())
+                            + pow(z - 4.0.into(), 2.0.into()),
+                    ) - 4.0.into()
+                };
+                let s3 = {
+                    let x: Tree = 'x'.into();
+                    let y: Tree = 'y'.into();
+                    let z: Tree = 'z'.into();
+                    sqrt(
+                        pow(x + 2.0.into(), 2.0.into())
+                            + pow(y + 3.0.into(), 2.0.into())
+                            + pow(z - 4.0.into(), 2.0.into()),
+                    ) - 5.25.into()
+                };
+                max(min(s1, s2), s3)
+            },
+            |vars: &[f64]| {
+                if let [x, y, z] = vars[..] {
+                    let s1 = f64::sqrt(
+                        f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
+                    ) - 2.75;
+                    let s2 = f64::sqrt(
+                        f64::powf(x + 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
+                    ) - 4.;
+                    let s3 = f64::sqrt(
+                        f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
+                    ) - 5.25;
+                    Some(f64::max(f64::min(s1, s2), s3))
+                } else {
+                    None
+                }
+            },
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            0.,
         );
     }
 }
