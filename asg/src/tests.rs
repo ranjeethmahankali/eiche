@@ -227,4 +227,108 @@ mod tests {
             0.,
         );
     }
+
+    #[test]
+    fn tree_string_formatting() {
+        let tree = {
+            let s1 = {
+                let x: Tree = 'x'.into();
+                let y: Tree = 'y'.into();
+                let z: Tree = 'z'.into();
+                sqrt(
+                    pow(x - 2.0.into(), 2.0.into())
+                        + pow(y - 3.0.into(), 2.0.into())
+                        + pow(z - 4.0.into(), 2.0.into()),
+                ) - 2.75.into()
+            };
+            let s2 = {
+                let x: Tree = 'x'.into();
+                let y: Tree = 'y'.into();
+                let z: Tree = 'z'.into();
+                sqrt(
+                    pow(x + 2.0.into(), 2.0.into())
+                        + pow(y - 3.0.into(), 2.0.into())
+                        + pow(z - 4.0.into(), 2.0.into()),
+                ) - 4.0.into()
+            };
+            let s3 = {
+                let x: Tree = 'x'.into();
+                let y: Tree = 'y'.into();
+                let z: Tree = 'z'.into();
+                sqrt(
+                    pow(x + 2.0.into(), 2.0.into())
+                        + pow(y + 3.0.into(), 2.0.into())
+                        + pow(z - 4.0.into(), 2.0.into()),
+                ) - 5.25.into()
+            };
+            max(min(s1, s2), s3)
+        };
+        assert_eq!(
+            format!("{}", tree).trim(),
+            "
+[61] Max(40, 60)
+ ├── [40] Min(19, 39)
+ │    ├── [19] Subtract(17, 18)
+ │    │    ├── [17] Sqrt(16)
+ │    │    │    ├── [16] Add(10, 15)
+ │    │    │    │    ├── [10] Add(4, 9)
+ │    │    │    │    │    ├── [4] Pow(2, 3)
+ │    │    │    │    │    │    ├── [2] Subtract(0, 1)
+ │    │    │    │    │    │    │    ├── [0] Symbol(x)
+ │    │    │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    │    │    ├── [3] Constant(2)
+ │    │    │    │    │    ├── [9] Pow(7, 8)
+ │    │    │    │    │    │    ├── [7] Subtract(5, 6)
+ │    │    │    │    │    │    │    ├── [5] Symbol(y)
+ │    │    │    │    │    │    │    ├── [6] Constant(3)
+ │    │    │    │    │    │    ├── [8] Constant(2)
+ │    │    │    │    ├── [15] Pow(13, 14)
+ │    │    │    │    │    ├── [13] Subtract(11, 12)
+ │    │    │    │    │    │    ├── [11] Symbol(z)
+ │    │    │    │    │    │    ├── [12] Constant(4)
+ │    │    │    │    │    ├── [14] Constant(2)
+ │    │    ├── [18] Constant(2.75)
+ │    ├── [39] Subtract(37, 38)
+ │    │    ├── [37] Sqrt(36)
+ │    │    │    ├── [36] Add(30, 35)
+ │    │    │    │    ├── [30] Add(24, 29)
+ │    │    │    │    │    ├── [24] Pow(22, 23)
+ │    │    │    │    │    │    ├── [22] Add(20, 21)
+ │    │    │    │    │    │    │    ├── [20] Symbol(x)
+ │    │    │    │    │    │    │    ├── [21] Constant(2)
+ │    │    │    │    │    │    ├── [23] Constant(2)
+ │    │    │    │    │    ├── [29] Pow(27, 28)
+ │    │    │    │    │    │    ├── [27] Subtract(25, 26)
+ │    │    │    │    │    │    │    ├── [25] Symbol(y)
+ │    │    │    │    │    │    │    ├── [26] Constant(3)
+ │    │    │    │    │    │    ├── [28] Constant(2)
+ │    │    │    │    ├── [35] Pow(33, 34)
+ │    │    │    │    │    ├── [33] Subtract(31, 32)
+ │    │    │    │    │    │    ├── [31] Symbol(z)
+ │    │    │    │    │    │    ├── [32] Constant(4)
+ │    │    │    │    │    ├── [34] Constant(2)
+ │    │    ├── [38] Constant(4)
+ ├── [60] Subtract(58, 59)
+ │    ├── [58] Sqrt(57)
+ │    │    ├── [57] Add(51, 56)
+ │    │    │    ├── [51] Add(45, 50)
+ │    │    │    │    ├── [45] Pow(43, 44)
+ │    │    │    │    │    ├── [43] Add(41, 42)
+ │    │    │    │    │    │    ├── [41] Symbol(x)
+ │    │    │    │    │    │    ├── [42] Constant(2)
+ │    │    │    │    │    ├── [44] Constant(2)
+ │    │    │    │    ├── [50] Pow(48, 49)
+ │    │    │    │    │    ├── [48] Add(46, 47)
+ │    │    │    │    │    │    ├── [46] Symbol(y)
+ │    │    │    │    │    │    ├── [47] Constant(3)
+ │    │    │    │    │    ├── [49] Constant(2)
+ │    │    │    ├── [56] Pow(54, 55)
+ │    │    │    │    ├── [54] Subtract(52, 53)
+ │    │    │    │    │    ├── [52] Symbol(z)
+ │    │    │    │    │    ├── [53] Constant(4)
+ │    │    │    │    ├── [55] Constant(2)
+ │    ├── [59] Constant(5.25)"
+                .trim()
+        );
+    }
 }

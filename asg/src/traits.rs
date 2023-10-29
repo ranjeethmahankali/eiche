@@ -50,8 +50,19 @@ impl std::fmt::Display for Tree {
                     }
                 })?;
             }
-            writeln!(f, "[{}] {:?}", index, self.node(index))
+            writeln!(f, "[{}] {}", index, self.node(index))
         })?;
         write!(f, "\n")
+    }
+}
+
+impl std::fmt::Display for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Constant(value) => write!(f, "Constant({})", value),
+            Symbol(label) => write!(f, "Symbol({})", label),
+            Unary(op, input) => write!(f, "{:?}({})", op, input),
+            Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
+        }
     }
 }
