@@ -28,36 +28,6 @@ pub enum Node {
     Exp(usize),
 }
 
-impl Into<Tree> for Node {
-    fn into(self) -> Tree {
-        Tree::new(self)
-    }
-}
-
-impl From<f64> for Tree {
-    fn from(value: f64) -> Self {
-        return Constant(value).into();
-    }
-}
-
-impl From<f64> for Node {
-    fn from(value: f64) -> Self {
-        return Constant(value);
-    }
-}
-
-impl From<char> for Node {
-    fn from(value: char) -> Self {
-        return Symbol(value);
-    }
-}
-
-impl From<char> for Tree {
-    fn from(c: char) -> Self {
-        return Symbol(c).into();
-    }
-}
-
 /// Represents an abstract syntax tree.
 pub struct Tree {
     nodes: Vec<Node>,
@@ -70,10 +40,49 @@ impl Tree {
         Tree { nodes: vec![node] }
     }
 
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub fn root(&self) -> &Node {
         self.nodes
             .last()
             .expect("This Tree is empty! This should never have happened!")
+    }
+
+    pub fn depth_first_traverse<F, T, E>(&self, mut visitor: F) -> Result<T, E>
+    where
+        F: FnMut(usize, Option<usize>) -> Result<T, E>,
+        T: Default,
+    {
+        let mut stack: Vec<(usize, Option<usize>)> = vec![(self.len() - 1, None)];
+        while !stack.is_empty() {
+            let (index, parent) = stack
+                .pop()
+                .expect("Something went wrong in the depth first traversal!");
+            match self.node(index) {
+                Constant(_) => {} // Do nothing.
+                Symbol(_) => {}   // Do nothing.
+                Add(lhs, rhs)
+                | Subtract(lhs, rhs)
+                | Multiply(lhs, rhs)
+                | Divide(lhs, rhs)
+                | Pow(lhs, rhs)
+                | Min(lhs, rhs)
+                | Max(lhs, rhs) => {
+                    stack.push((*rhs, Some(index)));
+                    stack.push((*lhs, Some(index)));
+                }
+                Negate(input) | Sqrt(input) | Abs(input) | Sin(input) | Cos(input) | Tan(input)
+                | Log(input) | Exp(input) => stack.push((*input, Some(index))),
+            }
+            visitor(index, parent)?;
+        }
+        return Result::<T, E>::Ok(T::default());
+    }
+
+    pub fn node(&self, index: usize) -> &Node {
+        &self.nodes[index]
     }
 
     fn merge(mut self, other: Tree, op: Node) -> Tree {
@@ -102,17 +111,12 @@ impl Tree {
         self.nodes.push(op);
         return self;
     }
-
-    fn merge_offsets(left: &Tree, right: &Tree) -> (usize, usize) {
-        let li = left.nodes.len() - 1;
-        let ri = li + right.nodes.len();
-        (li, ri)
-    }
 }
 
 macro_rules! binary_op {
     ($lhs: ident, $rhs: ident, $op: ident) => {{
-        let (left, right) = Tree::merge_offsets(&$lhs, &$rhs);
+        let left = $lhs.len() - 1;
+        let right = left + $rhs.len();
         $lhs.merge($rhs, $op(left, right))
     }};
 }
