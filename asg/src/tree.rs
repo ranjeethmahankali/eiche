@@ -69,6 +69,8 @@ pub struct Tree {
 
 use Node::*;
 
+use crate::helper::eq_recursive;
+
 impl PartialEq for Tree {
     fn eq(&self, other: &Self) -> bool {
         self.nodes == other.nodes
@@ -228,7 +230,17 @@ impl Tree {
     }
 
     pub fn deduplicate(self) -> Tree {
-        let _hashes = self.node_hashes();
+        use std::collections::hash_map::HashMap;
+        let hashes = self.node_hashes();
+        let mut revmap: HashMap<u64, usize> = HashMap::new();
+        for i in 0..hashes.len() {
+            let h = hashes[i];
+            let entry = revmap.entry(h).or_insert(i);
+            if *entry != i && eq_recursive(&self.nodes, *entry, i) {
+                // The entry-th node should be replaced with i-th node.
+                todo!();
+            }
+        }
         todo!();
     }
 

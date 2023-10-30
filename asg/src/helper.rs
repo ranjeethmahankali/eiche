@@ -67,11 +67,11 @@ impl std::fmt::Display for Node {
     }
 }
 
-pub fn eq_recursive(left: &[Node], right: &[Node], li: usize, ri: usize) -> bool {
+pub fn eq_recursive(nodes: &[Node], li: usize, ri: usize) -> bool {
     let mut stack: Vec<(usize, usize)> = vec![(li, ri)];
     while !stack.is_empty() {
         let (a, b) = stack.pop().expect("This should never happen!");
-        if !(match (left[a], right[b]) {
+        if !(match (nodes[a], nodes[b]) {
             (Constant(v1), Constant(v2)) => v1 == v2,
             (Symbol(c1), Symbol(c2)) => c1 == c2,
             (Unary(op1, input1), Unary(op2, input2)) => {
