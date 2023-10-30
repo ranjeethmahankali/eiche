@@ -21,10 +21,39 @@ pub enum BinaryOp {
     Max,
 }
 
+impl UnaryOp {
+    pub fn apply(&self, value: f64) -> f64 {
+        match self {
+            Negate => -value,
+            Sqrt => f64::sqrt(value),
+            Abs => f64::abs(value),
+            Sin => f64::sin(value),
+            Cos => f64::cos(value),
+            Tan => f64::tan(value),
+            Log => f64::log(value, std::f64::consts::E),
+            Exp => f64::exp(value),
+        }
+    }
+}
+
+impl BinaryOp {
+    pub fn apply(&self, lhs: f64, rhs: f64) -> f64 {
+        match self {
+            Add => lhs + rhs,
+            Subtract => lhs - rhs,
+            Multiply => lhs * rhs,
+            Divide => lhs / rhs,
+            Pow => f64::powf(lhs, rhs),
+            Min => f64::min(lhs, rhs),
+            Max => f64::max(lhs, rhs),
+        }
+    }
+}
+
 use BinaryOp::*;
 use UnaryOp::*;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
     Constant(f64),
     Symbol(char),
@@ -33,11 +62,18 @@ pub enum Node {
 }
 
 /// Represents an abstract syntax tree.
+#[derive(Debug)]
 pub struct Tree {
     nodes: Vec<Node>,
 }
 
 use Node::*;
+
+impl PartialEq for Tree {
+    fn eq(&self, other: &Self) -> bool {
+        self.nodes == other.nodes
+    }
+}
 
 impl Tree {
     pub fn new(node: Node) -> Tree {
@@ -82,15 +118,82 @@ impl Tree {
         return Result::<T, E>::Ok(T::default());
     }
 
-    // pub fn fold_constants(mut self) -> Tree {
-    //     todo!();
-    //     // return self;
-    // }
+    pub fn fold_constants(mut self) -> Tree {
+        for index in 0..self.len() {
+            let constval = match self.nodes[index] {
+                Constant(_) => None,
+                Symbol(_) => None,
+                Unary(op, input) => {
+                    if let Constant(value) = self.nodes[input] {
+                        Some(op.apply(value))
+                    } else {
+                        None
+                    }
+                }
+                Binary(op, lhs, rhs) => {
+                    if let (Constant(a), Constant(b)) = (&self.nodes[lhs], &self.nodes[rhs]) {
+                        Some(op.apply(*a, *b))
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(value) = constval {
+                self.nodes[index] = Constant(value);
+            }
+        }
+        return self.prune();
+    }
 
-    // pub fn prune(mut self) -> Tree {
-    //     todo!();
-    //     // return self;
-    // }
+    pub fn prune(mut self) -> Tree {
+        const ERROR: &str = "Unreachable code path: Tree pruning failed.";
+        // Use a boxed slice for correctness as it cannot be resized later by accident.
+        let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
+        let mut count = 0usize;
+        self.depth_first_traverse(|index, _parent| -> Result<(), ()> {
+            flags[index] = (true, 1usize);
+            count += 1usize;
+            return Ok(());
+        })
+        .expect(ERROR);
+        let indices = {
+            // Do a prefix scan to to get the actual indices.
+            let mut sum = 0usize;
+            for pair in flags.iter_mut() {
+                let (keep, i) = *pair;
+                let copy = sum;
+                sum += i;
+                *pair = (keep, copy);
+            }
+            flags
+        };
+        for i in 0..indices.len() {
+            let node = self.nodes.get_mut(i).expect(ERROR);
+            match node {
+                Constant(_) => {} // Do nothing.
+                Symbol(_) => {}   // Do nothing.
+                Unary(_, input) => {
+                    *input = indices[*input].1;
+                }
+                Binary(_, lhs, rhs) => {
+                    *lhs = indices[*lhs].1;
+                    *rhs = indices[*rhs].1;
+                }
+            }
+        }
+        self.nodes = self
+            .nodes
+            .iter()
+            .zip(indices.iter())
+            .filter(|(_node, (keep, _index))| {
+                return *keep;
+            })
+            .map(|(&node, (_keep, _index))| {
+                return node;
+            })
+            .collect();
+        return self;
+    }
 
     // pub fn deduplicate(mut self) -> Tree {
     //     todo!();
@@ -255,7 +358,7 @@ impl<'a> Evaluator<'a> {
     /// error. `Variablenotfound(label)` error means the variable
     /// matching `label` hasn't been assigned a value using `set_var`.
     pub fn run(&mut self) -> Result<f64, EvaluationError> {
-        for idx in 0..self.tree.nodes.len() {
+        for idx in 0..self.tree.len() {
             self.write(
                 idx,
                 match &self.tree.nodes[idx] {
@@ -264,32 +367,8 @@ impl<'a> Evaluator<'a> {
                         None => return Err(EvaluationError::VariableNotFound(*label)),
                         Some(val) => *val,
                     },
-                    Binary(op, lhs, rhs) => {
-                        let a = self.read(*lhs)?;
-                        let b = self.read(*rhs)?;
-                        match op {
-                            Add => a + b,
-                            Subtract => a - b,
-                            Multiply => a * b,
-                            Divide => a / b,
-                            Pow => f64::powf(a, b),
-                            Min => f64::min(a, b),
-                            Max => f64::max(a, b),
-                        }
-                    }
-                    Unary(op, input) => {
-                        let x = self.read(*input)?;
-                        match op {
-                            Negate => -x,
-                            Sqrt => f64::sqrt(x),
-                            Abs => f64::abs(x),
-                            Sin => f64::sin(x),
-                            Cos => f64::cos(x),
-                            Tan => f64::tan(x),
-                            Log => f64::log(x, std::f64::consts::E),
-                            Exp => f64::exp(x),
-                        }
-                    }
+                    Binary(op, lhs, rhs) => op.apply(self.read(*lhs)?, self.read(*rhs)?),
+                    Unary(op, input) => op.apply(self.read(*input)?),
                 },
             );
         }

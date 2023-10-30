@@ -331,4 +331,55 @@ mod tests {
                 .trim()
         );
     }
+
+    #[test]
+    fn constant_folding() {
+        // Basic multiplication.
+        let tree = {
+            let a: Tree = 2.0.into();
+            let b: Tree = 3.0.into();
+            a * b
+        };
+        let tree = tree.fold_constants();
+        assert_eq!(tree.len(), 1usize);
+        assert_eq!(tree.root(), &Constant(2. * 3.));
+        // More complicated tree.
+        let tree = {
+            let numerator: Tree = {
+                let x: Tree = 'x'.into();
+                let prod: Tree = {
+                    let two: Tree = 2.0.into();
+                    let three: Tree = 3.0.into();
+                    two * three
+                };
+                x + prod
+            };
+            let denom: Tree = {
+                let x: Tree = 'x'.into();
+                let frac: Tree = {
+                    let two: Tree = 2.0.into();
+                    let five: Tree = 5.0.into();
+                    let three: Tree = 3.0.into();
+                    let nine: Tree = 9.0.into();
+                    two / min(five, max(three, nine - 5.0.into()))
+                };
+                log(x + frac)
+            };
+            numerator / denom
+        };
+        let expected: Tree = {
+            let numerator = {
+                let x: Tree = 'x'.into();
+                x + 6.0.into()
+            };
+            let denom = {
+                let x: Tree = 'x'.into();
+                log(x + 0.5.into())
+            };
+            numerator / denom
+        };
+        assert!(tree.len() > expected.len());
+        let tree = tree.fold_constants();
+        assert_eq!(tree, expected);
+    }
 }
