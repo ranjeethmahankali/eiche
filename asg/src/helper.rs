@@ -34,7 +34,7 @@ impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "\n")?;
         let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        self.depth_first_traverse(|index, parent| {
+        self.traverse_depth(|index, parent| {
             const BRANCH: &str = " ├── ";
             const BYPASS: &str = " │   ";
             if let Some(pi) = parent {
@@ -65,4 +65,28 @@ impl std::fmt::Display for Node {
             Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
         }
     }
+}
+
+pub fn eq_recursive(left: &[Node], right: &[Node], li: usize, ri: usize) -> bool {
+    let mut stack: Vec<(usize, usize)> = vec![(li, ri)];
+    while !stack.is_empty() {
+        let (a, b) = stack.pop().expect("This should never happen!");
+        if !(match (left[a], right[b]) {
+            (Constant(v1), Constant(v2)) => v1 == v2,
+            (Symbol(c1), Symbol(c2)) => c1 == c2,
+            (Unary(op1, input1), Unary(op2, input2)) => {
+                stack.push((input1, input2));
+                op1 == op2
+            }
+            (Binary(op1, lhs1, rhs1), Binary(op2, lhs2, rhs2)) => {
+                stack.push((usize::min(lhs1, rhs1), usize::min(lhs2, rhs2)));
+                stack.push((usize::max(lhs1, rhs1), usize::max(lhs2, rhs2)));
+                op1 == op2
+            }
+            _ => false,
+        }) {
+            return false;
+        }
+    }
+    return true;
 }

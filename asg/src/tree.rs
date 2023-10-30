@@ -1,4 +1,4 @@
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum UnaryOp {
     Negate,
     Sqrt,
@@ -10,7 +10,7 @@ pub enum UnaryOp {
     Exp,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -94,7 +94,7 @@ impl Tree {
         self.len() - 1
     }
 
-    pub fn depth_first_traverse<F, T, E>(&self, mut visitor: F) -> Result<T, E>
+    pub fn traverse_depth<F, T, E>(&self, mut visitor: F) -> Result<T, E>
     where
         F: FnMut(usize, Option<usize>) -> Result<T, E>,
         T: Default,
@@ -150,7 +150,7 @@ impl Tree {
         // Use a boxed slice for correctness as it cannot be resized later by accident.
         let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
         let mut count = 0usize;
-        self.depth_first_traverse(|index, _parent| -> Result<(), ()> {
+        self.traverse_depth(|index, _parent| -> Result<(), ()> {
             flags[index] = (true, 1usize);
             count += 1usize;
             return Ok(());
@@ -195,10 +195,42 @@ impl Tree {
         return self;
     }
 
-    // pub fn deduplicate(mut self) -> Tree {
-    //     todo!();
-    //     // return self;
-    // }
+    fn node_hashes(&self) -> Box<[u64]> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        // Using a boxed slice to avoid accidental resizing later.
+        let mut hashes: Box<[u64]> = vec![0; self.len()].into_boxed_slice();
+        for index in 0..self.len() {
+            let hash: u64 = match self.nodes[index] {
+                Constant(value) => value.to_bits(),
+                Symbol(label) => {
+                    let mut s: DefaultHasher = Default::default();
+                    label.hash(&mut s);
+                    s.finish()
+                }
+                Unary(op, input) => {
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
+                    hashes[input].hash(&mut s);
+                    s.finish()
+                }
+                Binary(op, lhs, rhs) => {
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
+                    hashes[lhs].hash(&mut s);
+                    hashes[rhs].hash(&mut s);
+                    s.finish()
+                }
+            };
+            hashes[index] = hash;
+        }
+        return hashes;
+    }
+
+    pub fn deduplicate(self) -> Tree {
+        let _hashes = self.node_hashes();
+        todo!();
+    }
 
     pub fn node(&self, index: usize) -> &Node {
         &self.nodes[index]
