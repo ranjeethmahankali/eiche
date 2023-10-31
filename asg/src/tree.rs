@@ -96,16 +96,29 @@ impl Tree {
         self.len() - 1
     }
 
-    pub fn traverse_depth<F, T, E>(&self, mut visitor: F) -> Result<T, E>
+    pub fn node(&self, index: usize) -> &Node {
+        &self.nodes[index]
+    }
+
+    /// Traverses the tree depth first and calls the `visitor` closure
+    /// with the tuple `(index, parent)` with the indices of the node
+    /// being visited and the parent from which the traversal
+    /// occurred. If `unique` is set to true, then nodes that are
+    /// already visited will not be visited again.
+    pub fn traverse_depth<F, T, E>(&self, mut visitor: F, unique: bool) -> Result<T, E>
     where
         F: FnMut(usize, Option<usize>) -> Result<T, E>,
         T: Default,
     {
         let mut stack: Vec<(usize, Option<usize>)> = vec![(self.root_index(), None)];
+        let mut visited: Box<[bool]> = vec![false; self.len()].into_boxed_slice();
         while !stack.is_empty() {
             let (index, parent) = stack
                 .pop()
                 .expect("Something went wrong in the depth first traversal!");
+            if unique && visited[index] {
+                continue;
+            }
             match self.node(index) {
                 Constant(_) => {} // Do nothing.
                 Symbol(_) => {}   // Do nothing.
@@ -116,6 +129,7 @@ impl Tree {
                 }
             }
             visitor(index, parent)?;
+            visited[index] = true;
         }
         return Result::<T, E>::Ok(T::default());
     }
@@ -153,11 +167,14 @@ impl Tree {
             // Use a boxed slice for correctness as it cannot be resized later by accident.
             let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
             let mut count = 0usize;
-            self.traverse_depth(|index, _parent| -> Result<(), ()> {
-                flags[index] = (true, 1usize);
-                count += 1usize;
-                return Ok(());
-            })
+            self.traverse_depth(
+                |index, _parent| -> Result<(), ()> {
+                    flags[index] = (true, 1usize);
+                    count += 1usize;
+                    return Ok(());
+                },
+                true,
+            )
             .expect(ERROR);
             // Do a prefix scan to to get the actual indices.
             let mut sum = 0usize;
@@ -257,10 +274,6 @@ impl Tree {
             }
         }
         return self.prune();
-    }
-
-    pub fn node(&self, index: usize) -> &Node {
-        &self.nodes[index]
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
