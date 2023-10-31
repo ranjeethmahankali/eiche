@@ -100,6 +100,10 @@ impl Tree {
         &self.nodes[index]
     }
 
+    pub fn nodes(&self) -> &[Node] {
+        &self.nodes
+    }
+
     /// Traverses the tree depth first and calls the `visitor` closure
     /// with the tuple `(index, parent)` with the indices of the node
     /// being visited and the parent from which the traversal

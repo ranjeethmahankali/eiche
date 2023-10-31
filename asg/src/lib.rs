@@ -1,4 +1,6 @@
 pub mod tree;
 
-pub mod helper;
+mod graph;
+mod helper;
+
 mod tests;

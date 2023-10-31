@@ -570,4 +570,11 @@ mod tests {
             0.,
         );
     }
+
+    #[test]
+    fn simplification_1() {
+        let _tree: Tree = min(sqrt('x'.into()), sqrt('y'.into()));
+        let _expected: Tree = sqrt(min('x'.into(), 'y'.into()));
+        todo!();
+    }
 }
