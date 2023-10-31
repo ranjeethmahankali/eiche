@@ -149,16 +149,16 @@ impl Tree {
 
     pub fn prune(mut self) -> Tree {
         const ERROR: &str = "Unreachable code path: Tree pruning failed.";
-        // Use a boxed slice for correctness as it cannot be resized later by accident.
-        let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
-        let mut count = 0usize;
-        self.traverse_depth(|index, _parent| -> Result<(), ()> {
-            flags[index] = (true, 1usize);
-            count += 1usize;
-            return Ok(());
-        })
-        .expect(ERROR);
         let indices = {
+            // Use a boxed slice for correctness as it cannot be resized later by accident.
+            let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
+            let mut count = 0usize;
+            self.traverse_depth(|index, _parent| -> Result<(), ()> {
+                flags[index] = (true, 1usize);
+                count += 1usize;
+                return Ok(());
+            })
+            .expect(ERROR);
             // Do a prefix scan to to get the actual indices.
             let mut sum = 0usize;
             for pair in flags.iter_mut() {
