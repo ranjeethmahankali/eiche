@@ -62,7 +62,7 @@ pub enum Node {
 }
 
 /// Represents an abstract syntax tree.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tree {
     nodes: Vec<Node>,
 }

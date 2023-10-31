@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn deduplication_1() {
-        let maketree = || -> Tree {
+        let tree: Tree = {
             let s1 = {
                 let x: Tree = 'x'.into();
                 let y: Tree = 'y'.into();
@@ -485,8 +485,7 @@ mod tests {
             };
             max(min(s1, s2), s3)
         };
-        let tree = maketree();
-        let nodup = maketree().deduplicate();
+        let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
@@ -513,11 +512,9 @@ mod tests {
 
     #[test]
     fn deduplication_2() {
-        let maketree = || -> Tree {
-            pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into())
-        };
-        let tree = maketree();
-        let nodup = maketree().deduplicate();
+        let tree: Tree =
+            { pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()) };
+        let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
@@ -542,7 +539,7 @@ mod tests {
 
     #[test]
     fn deduplication_3() {
-        let maketree = || -> Tree {
+        let tree: Tree = {
             (pow(sin('x'.into()), 2.0.into())
                 + pow(cos('x'.into()), 2.0.into())
                 + ((cos('x'.into()) * sin('x'.into())) * 2.0.into()))
@@ -550,8 +547,7 @@ mod tests {
                     + pow(cos('y'.into()), 2.0.into())
                     + ((cos('y'.into()) * sin('y'.into())) * 2.0.into()))
         };
-        let tree = maketree();
-        let nodup = maketree().deduplicate();
+        let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
