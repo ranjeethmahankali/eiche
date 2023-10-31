@@ -104,38 +104,8 @@ impl Tree {
         &self.nodes
     }
 
-    /// Traverses the tree depth first and calls the `visitor` closure
-    /// with the tuple `(index, parent)` with the indices of the node
-    /// being visited and the parent from which the traversal
-    /// occurred. If `unique` is set to true, then nodes that are
-    /// already visited will not be visited again.
-    pub fn traverse_depth<F, T, E>(&self, mut visitor: F, unique: bool) -> Result<T, E>
-    where
-        F: FnMut(usize, Option<usize>) -> Result<T, E>,
-        T: Default,
-    {
-        let mut stack: Vec<(usize, Option<usize>)> = vec![(self.root_index(), None)];
-        let mut visited: Box<[bool]> = vec![false; self.len()].into_boxed_slice();
-        while !stack.is_empty() {
-            let (index, parent) = stack
-                .pop()
-                .expect("Something went wrong in the depth first traversal!");
-            if unique && visited[index] {
-                continue;
-            }
-            match self.node(index) {
-                Constant(_) => {} // Do nothing.
-                Symbol(_) => {}   // Do nothing.
-                Unary(_, input) => stack.push((*input, Some(index))),
-                Binary(_, lhs, rhs) => {
-                    stack.push((*rhs, Some(index)));
-                    stack.push((*lhs, Some(index)));
-                }
-            }
-            visitor(index, parent)?;
-            visited[index] = true;
-        }
-        return Result::<T, E>::Ok(T::default());
+    pub fn iter_depth(&self, unique: bool) -> DepthIterator {
+        DepthIterator::from(&self, unique)
     }
 
     pub fn fold_constants(mut self) -> Tree {
@@ -166,20 +136,12 @@ impl Tree {
     }
 
     pub fn prune(mut self) -> Tree {
-        const ERROR: &str = "Unreachable code path: Tree pruning failed.";
         let indices = {
             // Use a boxed slice for correctness as it cannot be resized later by accident.
             let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
-            let mut count = 0usize;
-            self.traverse_depth(
-                |index, _parent| -> Result<(), ()> {
-                    flags[index] = (true, 1usize);
-                    count += 1usize;
-                    return Ok(());
-                },
-                true,
-            )
-            .expect(ERROR);
+            for (index, _parent) in self.iter_depth(true) {
+                flags[index] = (true, 1usize);
+            }
             // Do a prefix scan to to get the actual indices.
             let mut sum = 0usize;
             for pair in flags.iter_mut() {
@@ -191,7 +153,10 @@ impl Tree {
             flags
         };
         for i in 0..indices.len() {
-            let node = self.nodes.get_mut(i).expect(ERROR);
+            let node = self
+                .nodes
+                .get_mut(i)
+                .expect("Unreachable code path: Tree pruning failed.");
             match node {
                 Constant(_) => {} // Do nothing.
                 Symbol(_) => {}   // Do nothing.
@@ -379,6 +344,54 @@ pub fn log(x: Tree) -> Tree {
 
 pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
+}
+
+pub struct DepthIterator<'a> {
+    unique: bool,
+    tree: &'a Tree,
+    stack: Vec<(usize, Option<usize>)>,
+    visited: Box<[bool]>,
+}
+
+impl<'a> DepthIterator<'a> {
+    fn from(tree: &Tree, unique: bool) -> DepthIterator {
+        let mut iter = DepthIterator {
+            unique,
+            tree,
+            stack: Vec::with_capacity(tree.len()),
+            visited: vec![false; tree.len()].into_boxed_slice(),
+        };
+        iter.stack.push((tree.root_index(), None));
+        return iter;
+    }
+}
+
+impl<'a> Iterator for DepthIterator<'a> {
+    type Item = (usize, Option<usize>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (index, parent) = {
+            // Pop the stack until we find a node we didn't already visit.
+            let (mut i, mut p) = self.stack.pop()?;
+            while self.unique && self.visited[i] {
+                (i, p) = self.stack.pop()?;
+            }
+            (i, p)
+        };
+        match self.tree.node(index) {
+            Constant(_) => {}
+            Symbol(_) => {}
+            Unary(_op, input) => {
+                self.stack.push((*input, Some(index)));
+            }
+            Binary(_op, lhs, rhs) => {
+                self.stack.push((*rhs, Some(index)));
+                self.stack.push((*lhs, Some(index)));
+            }
+        }
+        self.visited[index] = true;
+        return Some((index, parent));
+    }
 }
 
 #[derive(Debug)]

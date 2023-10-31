@@ -32,29 +32,26 @@ impl From<char> for Tree {
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const BRANCH: &str = " ├── ";
+        const BYPASS: &str = " │   ";
         write!(f, "\n")?;
         let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        self.traverse_depth(
-            |index, parent| {
-                const BRANCH: &str = " ├── ";
-                const BYPASS: &str = " │   ";
-                if let Some(pi) = parent {
-                    depths[index] = depths[pi] + 1;
-                }
-                let depth = depths[index];
-                for d in 0..depth {
-                    write!(f, "{}", {
-                        if d < depth - 1 {
-                            BYPASS
-                        } else {
-                            BRANCH
-                        }
-                    })?;
-                }
-                writeln!(f, "[{}] {}", index, self.node(index))
-            },
-            false,
-        )?;
+        for (index, parent) in self.iter_depth(false) {
+            if let Some(pi) = parent {
+                depths[index] = depths[pi] + 1;
+            }
+            let depth = depths[index];
+            for d in 0..depth {
+                write!(f, "{}", {
+                    if d < depth - 1 {
+                        BYPASS
+                    } else {
+                        BRANCH
+                    }
+                })?;
+            }
+            writeln!(f, "[{}] {}", index, self.node(index))?;
+        }
         write!(f, "\n")
     }
 }

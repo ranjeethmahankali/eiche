@@ -1,5 +1,4 @@
 #[cfg(test)]
-
 mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
