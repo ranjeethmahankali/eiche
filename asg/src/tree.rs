@@ -62,7 +62,7 @@ pub enum Node {
 }
 
 /// Represents an abstract syntax tree.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
     nodes: Vec<Node>,
 }
@@ -71,15 +71,13 @@ use Node::*;
 
 use crate::helper::eq_recursive;
 
-impl PartialEq for Tree {
-    fn eq(&self, other: &Self) -> bool {
-        self.nodes == other.nodes
-    }
-}
-
 impl Tree {
     pub fn new(node: Node) -> Tree {
         Tree { nodes: vec![node] }
+    }
+
+    pub fn from(nodes: Vec<Node>) -> Tree {
+        Tree { nodes }
     }
 
     pub fn len(&self) -> usize {
@@ -104,8 +102,8 @@ impl Tree {
         &self.nodes
     }
 
-    pub fn iter_depth(&self, unique: bool) -> DepthIterator {
-        DepthIterator::from(&self, unique)
+    pub fn iter_depth(&self, unique: bool) -> TreeDepthIterator {
+        TreeDepthIterator::from(&self, unique)
     }
 
     pub fn fold_constants(mut self) -> Tree {
@@ -346,16 +344,16 @@ pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
-pub struct DepthIterator<'a> {
+pub struct TreeDepthIterator<'a> {
     unique: bool,
     tree: &'a Tree,
     stack: Vec<(usize, Option<usize>)>,
     visited: Box<[bool]>,
 }
 
-impl<'a> DepthIterator<'a> {
-    fn from(tree: &Tree, unique: bool) -> DepthIterator {
-        let mut iter = DepthIterator {
+impl<'a> TreeDepthIterator<'a> {
+    fn from(tree: &Tree, unique: bool) -> TreeDepthIterator {
+        let mut iter = TreeDepthIterator {
             unique,
             tree,
             stack: Vec::with_capacity(tree.len()),
@@ -366,7 +364,7 @@ impl<'a> DepthIterator<'a> {
     }
 }
 
-impl<'a> Iterator for DepthIterator<'a> {
+impl<'a> Iterator for TreeDepthIterator<'a> {
     type Item = (usize, Option<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {

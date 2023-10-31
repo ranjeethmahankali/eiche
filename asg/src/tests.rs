@@ -486,6 +486,7 @@ mod tests {
         };
         let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 32);
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
@@ -515,6 +516,7 @@ mod tests {
             { pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()) };
         let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 10);
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
@@ -548,6 +550,7 @@ mod tests {
         };
         let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 20);
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
@@ -570,10 +573,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn simplification_1() {
-        let _tree: Tree = min(sqrt('x'.into()), sqrt('y'.into()));
-        let _expected: Tree = sqrt(min('x'.into(), 'y'.into()));
-        todo!();
-    }
+    // #[test]
+    // fn simplification_1() {
+    //     let _tree: Tree = min(sqrt('x'.into()), sqrt('y'.into()));
+    //     let _expected: Tree = sqrt(min('x'.into(), 'y'.into()));
+    //     todo!();
+    // }
 }
