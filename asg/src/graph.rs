@@ -1,20 +1,19 @@
 use crate::tree::{Node, Node::*, Tree};
 
-struct HalfEdge {
+struct OutgoingEdge {
     vertex: usize,
     next: Option<usize>,
 }
 
 struct Vertex {
     node: Node,
-    down: Option<usize>,
-    up: Option<usize>,
+    outgoing: Option<usize>,
 }
 
 struct Graph {
     root_index: usize,
     vertices: Vec<Vertex>,
-    halfedges: Vec<HalfEdge>,
+    halfedges: Vec<OutgoingEdge>,
 }
 
 impl Graph {
@@ -24,10 +23,9 @@ impl Graph {
             vertices: tree
                 .nodes()
                 .iter()
-                .map(|n| Vertex {
-                    node: n.clone(),
-                    down: None,
-                    up: None,
+                .map(|&node| Vertex {
+                    node,
+                    outgoing: None,
                 })
                 .collect(),
             halfedges: Vec::with_capacity(
@@ -44,54 +42,38 @@ impl Graph {
         };
         for (index, maybe_parent) in tree.iter_depth(true) {
             if let Some(parent) = maybe_parent {
-                graph.add_edge(parent, index);
+                graph.add_incoming(parent, index);
             }
         }
         return graph;
     }
 
-    fn add_halfedge(&mut self, vertex: usize) -> usize {
-        let index = self.halfedges.len();
-        self.halfedges.push(HalfEdge { vertex, next: None });
-        return index;
+    fn add_incoming(&mut self, parent: usize, child: usize) {
+        self.vertices[child].outgoing = Some({
+            let prev = self.vertices[child].outgoing;
+            let index = self.halfedges.len();
+            self.halfedges.push(OutgoingEdge {
+                vertex: parent,
+                next: prev,
+            });
+            index
+        });
     }
 
-    fn add_edge(&mut self, parent: usize, child: usize) {
-        // Add halfedge going parent to child.
-        match self.vertices[parent].down {
-            Some(he) => {
-                let mut he = he;
-                while let Some(next) = self.halfedges[he].next {
-                    he = next;
-                }
-                self.halfedges[he].next = Some(self.add_halfedge(child));
-            }
-            None => {
-                self.vertices[parent].down = Some(self.add_halfedge(child));
-            }
-        };
-        // Add halfedge from child to parent.
-        match self.vertices[child].up {
-            Some(he) => {
-                let mut he = he;
-                while let Some(next) = self.halfedges[he].next {
-                    he = next;
-                }
-                self.halfedges[he].next = Some(self.add_halfedge(parent));
-            }
-            None => {
-                self.vertices[parent].up = Some(self.add_halfedge(parent));
-            }
-        };
-    }
-
-    pub fn iter_depth(&self) -> GraphDepthIterator {
-        GraphDepthIterator::from(&self)
+    pub fn iter_depth(&self, mirrored: bool) -> GraphDepthIterator {
+        GraphDepthIterator::from(&self, mirrored)
     }
 
     pub fn to_tree(&self) -> Result<Tree, GraphConversionError> {
         let indices = {
-            let mut out: Vec<usize> = self.iter_depth().collect();
+            // We'll use the mirrored depth first iterator because
+            // we'll later reverse the whole vector. This will produce
+            // a node order consistent with the original tree that was
+            // used to create this graph. Either way the tree should
+            // be computationally equivalent, this is just a minor
+            // detail to produce the same tree for round trip
+            // conversions.
+            let mut out: Vec<usize> = self.iter_depth(true).collect();
             out.reverse();
             out.into_boxed_slice()
         };
@@ -109,25 +91,8 @@ impl Graph {
                 nodes.push(match vertex.node {
                     Constant(val) => Constant(val),
                     Symbol(label) => Symbol(label),
-                    Unary(op, _) => {
-                        if let Some(he) = vertex.down {
-                            Unary(op, map[self.halfedges[he].vertex])
-                        } else {
-                            return Err(GraphConversionError);
-                        }
-                    }
-                    Binary(op, _, _) => {
-                        if let Some(he) = vertex.down {
-                            let lhs = map[self.halfedges[he].vertex];
-                            if let Some(he2) = self.halfedges[he].next {
-                                Binary(op, lhs, map[self.halfedges[he2].vertex])
-                            } else {
-                                return Err(GraphConversionError);
-                            }
-                        } else {
-                            return Err(GraphConversionError);
-                        }
-                    }
+                    Unary(op, input) => Unary(op, map[input]),
+                    Binary(op, lhs, rhs) => Binary(op, map[lhs], map[rhs]),
                 })
             }
             nodes
@@ -139,14 +104,16 @@ impl Graph {
 struct GraphConversionError;
 
 struct GraphDepthIterator<'a> {
+    mirrored: bool,
     graph: &'a Graph,
     stack: Vec<usize>,
     visited: Box<[bool]>,
 }
 
 impl<'a> GraphDepthIterator<'a> {
-    fn from(graph: &Graph) -> GraphDepthIterator {
+    fn from(graph: &Graph, mirrored: bool) -> GraphDepthIterator {
         let mut iter = GraphDepthIterator {
+            mirrored,
             graph,
             stack: Vec::with_capacity(graph.vertices.len()),
             visited: vec![false; graph.vertices.len()].into_boxed_slice(),
@@ -167,17 +134,20 @@ impl<'a> Iterator for GraphDepthIterator<'a> {
             }
             vindex
         };
-        let vertex = &self.graph.vertices[vindex];
-        match vertex.down {
-            Some(he) => {
-                self.stack.push(self.graph.halfedges[he].vertex);
-                let mut he = he;
-                while let Some(next) = self.graph.halfedges[he].next {
-                    he = next;
-                    self.stack.push(self.graph.halfedges[he].vertex);
+        match &self.graph.vertices[vindex].node {
+            Constant(_) | Symbol(_) => {} // Do nothing.
+            Unary(_op, input) => {
+                self.stack.push(*input);
+            }
+            Binary(_op, lhs, rhs) => {
+                if self.mirrored {
+                    self.stack.push(*lhs);
+                    self.stack.push(*rhs);
+                } else {
+                    self.stack.push(*rhs);
+                    self.stack.push(*lhs);
                 }
             }
-            None => {}
         }
         return Some(vindex);
     }
@@ -204,7 +174,20 @@ mod tests {
 
     #[test]
     fn round_trip_conversion() {
-        let trees = vec![min(sqrt('x'.into()), sqrt('y'.into()))];
+        let trees = vec![
+            {
+                let x: Tree = 'x'.into();
+                x + 'y'.into()
+            },
+            min(sqrt('x'.into()), sqrt('y'.into())),
+            (pow(sin('x'.into()), 2.0.into())
+                + pow(cos('x'.into()), 2.0.into())
+                + ((cos('x'.into()) * sin('x'.into())) * 2.0.into()))
+                / (pow(sin('y'.into()), 2.0.into())
+                    + pow(cos('y'.into()), 2.0.into())
+                    + ((cos('y'.into()) * sin('y'.into())) * 2.0.into())),
+            pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()),
+        ];
         for i in 0..trees.len() {
             println!("Checking round trip conversion for tree {}...", i);
             let converted = Graph::from(&trees[i])
