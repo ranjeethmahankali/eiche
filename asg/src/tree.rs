@@ -76,10 +76,6 @@ impl Tree {
         Tree { nodes: vec![node] }
     }
 
-    pub fn from(nodes: Vec<Node>) -> Tree {
-        Tree { nodes }
-    }
-
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
@@ -90,16 +86,12 @@ impl Tree {
             .expect("This Tree is empty! This should never have happened!")
     }
 
-    pub fn root_index(&self) -> usize {
+    fn root_index(&self) -> usize {
         self.len() - 1
     }
 
     pub fn node(&self, index: usize) -> &Node {
         &self.nodes[index]
-    }
-
-    pub fn nodes(&self) -> &[Node] {
-        &self.nodes
     }
 
     pub fn iter_depth(&self, unique: bool) -> TreeDepthIterator {
