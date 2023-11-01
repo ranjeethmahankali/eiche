@@ -94,8 +94,8 @@ impl Tree {
         &self.nodes[index]
     }
 
-    pub fn iter_depth(&self, unique: bool) -> TreeDepthIterator {
-        TreeDepthIterator::from(&self, unique)
+    pub fn iter_depth(&self, unique: bool) -> DepthIterator {
+        DepthIterator::from(&self, unique)
     }
 
     pub fn fold_constants(mut self) -> Tree {
@@ -336,27 +336,35 @@ pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
-pub struct TreeDepthIterator<'a> {
+pub struct DepthIterator<'a> {
     unique: bool,
-    tree: &'a Tree,
+    nodes: &'a Vec<Node>,
     stack: Vec<(usize, Option<usize>)>,
-    visited: Box<[bool]>,
+    visited: Vec<bool>,
 }
 
-impl<'a> TreeDepthIterator<'a> {
-    fn from(tree: &Tree, unique: bool) -> TreeDepthIterator {
-        let mut iter = TreeDepthIterator {
+impl<'a> DepthIterator<'a> {
+    pub fn from(tree: &Tree, unique: bool) -> DepthIterator {
+        let mut iter = DepthIterator {
             unique,
-            tree,
+            nodes: &tree.nodes,
             stack: Vec::with_capacity(tree.len()),
-            visited: vec![false; tree.len()].into_boxed_slice(),
+            visited: vec![false; tree.len()],
         };
         iter.stack.push((tree.root_index(), None));
         return iter;
     }
+
+    pub fn init(&mut self, tree: &'a Tree) {
+        self.nodes = &tree.nodes;
+        self.stack.clear();
+        self.stack.reserve(tree.len());
+        self.visited.clear();
+        self.visited.resize(tree.len(), false);
+    }
 }
 
-impl<'a> Iterator for TreeDepthIterator<'a> {
+impl<'a> Iterator for DepthIterator<'a> {
     type Item = (usize, Option<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -368,7 +376,7 @@ impl<'a> Iterator for TreeDepthIterator<'a> {
             }
             (i, p)
         };
-        match self.tree.node(index) {
+        match &self.nodes[index] {
             Constant(_) => {}
             Symbol(_) => {}
             Unary(_op, input) => {
