@@ -94,6 +94,10 @@ impl Tree {
         &self.nodes[index]
     }
 
+    pub fn nodes(&self) -> &Vec<Node> {
+        &self.nodes
+    }
+
     pub fn fold_constants(mut self) -> Tree {
         for index in 0..self.len() {
             let constval = match self.nodes[index] {
@@ -351,15 +355,16 @@ impl<'a> TraverseDepth<'a> {
         return iter;
     }
 
-    pub fn init(&mut self, tree: &'a Tree) {
-        self.nodes = &tree.nodes;
+    pub fn init(&mut self, nodes: &'a Vec<Node>) {
+        self.nodes = &nodes;
         self.stack.clear();
-        self.stack.reserve(tree.len());
+        self.stack.reserve(nodes.len());
         self.visited.clear();
-        self.visited.resize(tree.len(), false);
+        self.visited.resize(nodes.len(), false);
     }
 
     pub fn iter(&'a mut self) -> DepthIterator<'a> {
+        self.init(self.nodes);
         DepthIterator { traverse: self }
     }
 }
