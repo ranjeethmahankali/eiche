@@ -32,11 +32,11 @@ impl From<char> for Tree {
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const BRANCH: &str = " ├── ";
+        const BYPASS: &str = " │   ";
         write!(f, "\n")?;
         let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        self.traverse_depth(|index, parent| {
-            const BRANCH: &str = " ├── ";
-            const BYPASS: &str = " │   ";
+        for (index, parent) in self.iter_depth(false) {
             if let Some(pi) = parent {
                 depths[index] = depths[pi] + 1;
             }
@@ -50,8 +50,8 @@ impl std::fmt::Display for Tree {
                     }
                 })?;
             }
-            writeln!(f, "[{}] {}", index, self.node(index))
-        })?;
+            writeln!(f, "[{}] {}", index, self.node(index))?;
+        }
         write!(f, "\n")
     }
 }
@@ -71,6 +71,9 @@ pub fn eq_recursive(nodes: &[Node], li: usize, ri: usize) -> bool {
     let mut stack: Vec<(usize, usize)> = vec![(li, ri)];
     while !stack.is_empty() {
         let (a, b) = stack.pop().expect("This should never happen!");
+        if a == b {
+            continue;
+        }
         if !(match (nodes[a], nodes[b]) {
             (Constant(v1), Constant(v2)) => v1 == v2,
             (Symbol(c1), Symbol(c2)) => c1 == c2,

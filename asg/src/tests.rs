@@ -1,5 +1,4 @@
 #[cfg(test)]
-
 mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -329,6 +328,74 @@ mod tests {
  │    ├── [59] Constant(5.25)"
                 .trim()
         );
+        let tree = tree.deduplicate();
+        assert_eq!(
+            format!("{}", tree).trim(),
+            "
+[31] Max(23, 30)
+ ├── [23] Min(16, 22)
+ │    ├── [16] Subtract(14, 15)
+ │    │    ├── [14] Sqrt(13)
+ │    │    │    ├── [13] Add(8, 12)
+ │    │    │    │    ├── [8] Add(3, 7)
+ │    │    │    │    │    ├── [3] Pow(2, 1)
+ │    │    │    │    │    │    ├── [2] Subtract(0, 1)
+ │    │    │    │    │    │    │    ├── [0] Symbol(x)
+ │    │    │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    │    ├── [7] Pow(6, 1)
+ │    │    │    │    │    │    ├── [6] Subtract(4, 5)
+ │    │    │    │    │    │    │    ├── [4] Symbol(y)
+ │    │    │    │    │    │    │    ├── [5] Constant(3)
+ │    │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    ├── [12] Pow(11, 1)
+ │    │    │    │    │    ├── [11] Subtract(9, 10)
+ │    │    │    │    │    │    ├── [9] Symbol(z)
+ │    │    │    │    │    │    ├── [10] Constant(4)
+ │    │    │    │    │    ├── [1] Constant(2)
+ │    │    ├── [15] Constant(2.75)
+ │    ├── [22] Subtract(21, 10)
+ │    │    ├── [21] Sqrt(20)
+ │    │    │    ├── [20] Add(19, 12)
+ │    │    │    │    ├── [19] Add(18, 7)
+ │    │    │    │    │    ├── [18] Pow(17, 1)
+ │    │    │    │    │    │    ├── [17] Add(0, 1)
+ │    │    │    │    │    │    │    ├── [0] Symbol(x)
+ │    │    │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    │    ├── [7] Pow(6, 1)
+ │    │    │    │    │    │    ├── [6] Subtract(4, 5)
+ │    │    │    │    │    │    │    ├── [4] Symbol(y)
+ │    │    │    │    │    │    │    ├── [5] Constant(3)
+ │    │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    ├── [12] Pow(11, 1)
+ │    │    │    │    │    ├── [11] Subtract(9, 10)
+ │    │    │    │    │    │    ├── [9] Symbol(z)
+ │    │    │    │    │    │    ├── [10] Constant(4)
+ │    │    │    │    │    ├── [1] Constant(2)
+ │    │    ├── [10] Constant(4)
+ ├── [30] Subtract(28, 29)
+ │    ├── [28] Sqrt(27)
+ │    │    ├── [27] Add(26, 12)
+ │    │    │    ├── [26] Add(18, 25)
+ │    │    │    │    ├── [18] Pow(17, 1)
+ │    │    │    │    │    ├── [17] Add(0, 1)
+ │    │    │    │    │    │    ├── [0] Symbol(x)
+ │    │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    │    ├── [25] Pow(24, 1)
+ │    │    │    │    │    ├── [24] Add(4, 5)
+ │    │    │    │    │    │    ├── [4] Symbol(y)
+ │    │    │    │    │    │    ├── [5] Constant(3)
+ │    │    │    │    │    ├── [1] Constant(2)
+ │    │    │    ├── [12] Pow(11, 1)
+ │    │    │    │    ├── [11] Subtract(9, 10)
+ │    │    │    │    │    ├── [9] Symbol(z)
+ │    │    │    │    │    ├── [10] Constant(4)
+ │    │    │    │    ├── [1] Constant(2)
+ │    ├── [29] Constant(5.25)"
+                .trim()
+        );
     }
 
     #[test]
@@ -384,7 +451,7 @@ mod tests {
 
     #[test]
     fn deduplication_1() {
-        let maketree = || -> Tree {
+        let tree: Tree = {
             let s1 = {
                 let x: Tree = 'x'.into();
                 let y: Tree = 'y'.into();
@@ -417,9 +484,9 @@ mod tests {
             };
             max(min(s1, s2), s3)
         };
-        let tree = maketree();
-        let nodup = maketree().deduplicate();
+        let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 32);
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
@@ -445,12 +512,11 @@ mod tests {
 
     #[test]
     fn deduplication_2() {
-        let maketree = || -> Tree {
-            pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into())
-        };
-        let tree = maketree();
-        let nodup = maketree().deduplicate();
+        let tree: Tree =
+            { pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()) };
+        let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 10);
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
@@ -474,7 +540,7 @@ mod tests {
 
     #[test]
     fn deduplication_3() {
-        let maketree = || -> Tree {
+        let tree: Tree = {
             (pow(sin('x'.into()), 2.0.into())
                 + pow(cos('x'.into()), 2.0.into())
                 + ((cos('x'.into()) * sin('x'.into())) * 2.0.into()))
@@ -482,9 +548,9 @@ mod tests {
                     + pow(cos('y'.into()), 2.0.into())
                     + ((cos('y'.into()) * sin('y'.into())) * 2.0.into()))
         };
-        let tree = maketree();
-        let nodup = maketree().deduplicate();
+        let nodup = tree.clone().deduplicate();
         assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 20);
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
@@ -506,4 +572,11 @@ mod tests {
             0.,
         );
     }
+
+    // #[test]
+    // fn simplification_1() {
+    //     let _tree: Tree = min(sqrt('x'.into()), sqrt('y'.into()));
+    //     let _expected: Tree = sqrt(min('x'.into(), 'y'.into()));
+    //     todo!();
+    // }
 }

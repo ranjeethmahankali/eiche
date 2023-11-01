@@ -1,4 +1,5 @@
 pub mod tree;
 
-pub mod helper;
+mod helper;
+
 mod tests;
