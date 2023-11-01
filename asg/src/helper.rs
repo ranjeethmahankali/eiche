@@ -1,4 +1,4 @@
-use crate::tree::{Node, Node::*, Tree};
+use crate::tree::{Node, Node::*, TraverseDepth, Tree};
 
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
@@ -36,7 +36,7 @@ impl std::fmt::Display for Tree {
         const BYPASS: &str = " │   ";
         write!(f, "\n")?;
         let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        for (index, parent) in self.iter_depth(false) {
+        for (index, parent) in TraverseDepth::from(self, false).iter() {
             if let Some(pi) = parent {
                 depths[index] = depths[pi] + 1;
             }

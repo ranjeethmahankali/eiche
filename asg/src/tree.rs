@@ -94,10 +94,6 @@ impl Tree {
         &self.nodes[index]
     }
 
-    pub fn iter_depth(&self, unique: bool) -> DepthIterator {
-        DepthIterator::from(&self, unique)
-    }
-
     pub fn fold_constants(mut self) -> Tree {
         for index in 0..self.len() {
             let constval = match self.nodes[index] {
@@ -129,7 +125,7 @@ impl Tree {
         let indices = {
             // Use a boxed slice for correctness as it cannot be resized later by accident.
             let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
-            for (index, _parent) in self.iter_depth(true) {
+            for (index, _parent) in TraverseDepth::from(&self, true).iter() {
                 flags[index] = (true, 1usize);
             }
             // Do a prefix scan to to get the actual indices.
@@ -336,16 +332,16 @@ pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
-pub struct DepthIterator<'a> {
+pub struct TraverseDepth<'a> {
     unique: bool,
     nodes: &'a Vec<Node>,
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
 }
 
-impl<'a> DepthIterator<'a> {
-    pub fn from(tree: &Tree, unique: bool) -> DepthIterator {
-        let mut iter = DepthIterator {
+impl<'a> TraverseDepth<'a> {
+    pub fn from(tree: &Tree, unique: bool) -> TraverseDepth {
+        let mut iter = TraverseDepth {
             unique,
             nodes: &tree.nodes,
             stack: Vec::with_capacity(tree.len()),
@@ -362,6 +358,14 @@ impl<'a> DepthIterator<'a> {
         self.visited.clear();
         self.visited.resize(tree.len(), false);
     }
+
+    pub fn iter(&'a mut self) -> DepthIterator<'a> {
+        DepthIterator { traverse: self }
+    }
+}
+
+pub struct DepthIterator<'a> {
+    traverse: &'a mut TraverseDepth<'a>,
 }
 
 impl<'a> Iterator for DepthIterator<'a> {
@@ -370,24 +374,24 @@ impl<'a> Iterator for DepthIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let (index, parent) = {
             // Pop the stack until we find a node we didn't already visit.
-            let (mut i, mut p) = self.stack.pop()?;
-            while self.unique && self.visited[i] {
-                (i, p) = self.stack.pop()?;
+            let (mut i, mut p) = self.traverse.stack.pop()?;
+            while self.traverse.unique && self.traverse.visited[i] {
+                (i, p) = self.traverse.stack.pop()?;
             }
             (i, p)
         };
-        match &self.nodes[index] {
+        match &self.traverse.nodes[index] {
             Constant(_) => {}
             Symbol(_) => {}
             Unary(_op, input) => {
-                self.stack.push((*input, Some(index)));
+                self.traverse.stack.push((*input, Some(index)));
             }
             Binary(_op, lhs, rhs) => {
-                self.stack.push((*rhs, Some(index)));
-                self.stack.push((*lhs, Some(index)));
+                self.traverse.stack.push((*rhs, Some(index)));
+                self.traverse.stack.push((*lhs, Some(index)));
             }
         }
-        self.visited[index] = true;
+        self.traverse.visited[index] = true;
         return Some((index, parent));
     }
 }
