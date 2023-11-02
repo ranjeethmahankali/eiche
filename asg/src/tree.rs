@@ -69,7 +69,7 @@ pub struct Tree {
 
 use Node::*;
 
-use crate::helper::eq_recursive;
+use crate::helper::{eq_recursive, DepthWalker, Trimmer};
 
 #[derive(Debug)]
 pub enum InvalidTree {
@@ -81,16 +81,21 @@ impl Tree {
         Tree { nodes: vec![node] }
     }
 
-    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, InvalidTree> {
-        if !(0..nodes.len()).all(|i| match &nodes[i] {
+    fn validate(nodes: &Vec<Node>) -> bool {
+        (0..nodes.len()).all(|i| match &nodes[i] {
             Constant(_) | Symbol(_) => true,
             Unary(_op, input) => input < &i,
             Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
-        }) {
-            return Err(InvalidTree::WrongNodeOrder);
-        }
+        })
         // Maybe add more checks later.
-        Ok(Tree { nodes })
+    }
+
+    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, InvalidTree> {
+        if Self::validate(&nodes) {
+            Ok(Tree { nodes })
+        } else {
+            Err(InvalidTree::WrongNodeOrder)
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -103,7 +108,7 @@ impl Tree {
             .expect("This Tree is empty! This should never have happened!")
     }
 
-    fn root_index(&self) -> usize {
+    pub fn root_index(&self) -> usize {
         self.len() - 1
     }
 
@@ -143,51 +148,13 @@ impl Tree {
     }
 
     pub fn prune(mut self) -> Tree {
-        let indices = {
-            // Use a boxed slice for correctness as it cannot be resized later by accident.
-            let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
-            let mut traverse = DepthWalker::new();
-            for (index, _parent) in traverse.walk_tree(&self, true, false) {
-                flags[index] = (true, 1usize);
-            }
-            // Do a prefix scan to to get the actual indices.
-            let mut sum = 0usize;
-            for pair in flags.iter_mut() {
-                let (keep, i) = *pair;
-                let copy = sum;
-                sum += i;
-                *pair = (keep, copy);
-            }
-            flags
-        };
-        for i in 0..indices.len() {
-            let node = self
-                .nodes
-                .get_mut(i)
-                .expect("Unreachable code path: Tree pruning failed.");
-            match node {
-                Constant(_) => {} // Do nothing.
-                Symbol(_) => {}   // Do nothing.
-                Unary(_, input) => {
-                    *input = indices[*input].1;
-                }
-                Binary(_, lhs, rhs) => {
-                    *lhs = indices[*lhs].1;
-                    *rhs = indices[*rhs].1;
-                }
-            }
+        let mut walker = DepthWalker::new();
+        let mut trimmer = Trimmer::new();
+        let root_index = self.root_index();
+        self.nodes = trimmer.trim(self.nodes, root_index, &mut walker);
+        if !Self::validate(&self.nodes) {
+            panic!("Something broke in the depth first traversal or trimming. This should never have happened!");
         }
-        self.nodes = self
-            .nodes
-            .iter()
-            .zip(indices.iter())
-            .filter(|(_node, (keep, _index))| {
-                return *keep;
-            })
-            .map(|(&node, (_keep, _index))| {
-                return node;
-            })
-            .collect();
         return self;
     }
 
@@ -352,92 +319,6 @@ pub fn log(x: Tree) -> Tree {
 
 pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
-}
-
-pub struct DepthWalker {
-    stack: Vec<(usize, Option<usize>)>,
-    visited: Vec<bool>,
-}
-
-impl DepthWalker {
-    pub fn new() -> DepthWalker {
-        DepthWalker {
-            stack: vec![],
-            visited: vec![],
-        }
-    }
-
-    pub fn walk_tree<'a>(
-        &'a mut self,
-        tree: &'a Tree,
-        unique: bool,
-        mirrored: bool,
-    ) -> DepthIterator<'a> {
-        self.walk_nodes(&tree.nodes, tree.root_index(), unique, mirrored)
-    }
-
-    pub fn walk_nodes<'a>(
-        &'a mut self,
-        nodes: &'a Vec<Node>,
-        root_index: usize,
-        unique: bool,
-        mirrored: bool,
-    ) -> DepthIterator<'a> {
-        // Prep the stack.
-        self.stack.clear();
-        self.stack.reserve(nodes.len());
-        self.stack.push((root_index, None));
-        // Reset the visited flags.
-        self.visited.clear();
-        self.visited.resize(nodes.len(), false);
-        // Create the iterator.
-        DepthIterator {
-            unique,
-            mirrored,
-            traverse: self,
-            nodes: &nodes,
-        }
-    }
-}
-
-pub struct DepthIterator<'a> {
-    unique: bool,
-    mirrored: bool,
-    traverse: &'a mut DepthWalker,
-    nodes: &'a Vec<Node>,
-}
-
-impl<'a> Iterator for DepthIterator<'a> {
-    type Item = (usize, Option<usize>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (index, parent) = {
-            // Pop the stack until we find a node we didn't already visit.
-            let (mut i, mut p) = self.traverse.stack.pop()?;
-            while self.unique && self.traverse.visited[i] {
-                (i, p) = self.traverse.stack.pop()?;
-            }
-            (i, p)
-        };
-        // Push the children on to the stack.
-        match &self.nodes[index] {
-            Constant(_) | Symbol(_) => {}
-            Unary(_op, input) => {
-                self.traverse.stack.push((*input, Some(index)));
-            }
-            Binary(_op, lhs, rhs) => {
-                if self.mirrored {
-                    self.traverse.stack.push((*lhs, Some(index)));
-                    self.traverse.stack.push((*rhs, Some(index)));
-                } else {
-                    self.traverse.stack.push((*rhs, Some(index)));
-                    self.traverse.stack.push((*lhs, Some(index)));
-                }
-            }
-        }
-        self.traverse.visited[index] = true;
-        return Some((index, parent));
-    }
 }
 
 #[derive(Debug)]

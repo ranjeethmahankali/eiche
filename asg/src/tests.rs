@@ -3,6 +3,7 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
+    use crate::helper::DepthWalker;
     use crate::tree::Node::*;
     use crate::tree::*;
 

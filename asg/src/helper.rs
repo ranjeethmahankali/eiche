@@ -1,4 +1,4 @@
-use crate::tree::{Node, Node::*, DepthWalker, Tree};
+use crate::tree::{Node, Node::*, Tree};
 
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
@@ -93,4 +93,151 @@ pub fn eq_recursive(nodes: &[Node], li: usize, ri: usize) -> bool {
         }
     }
     return true;
+}
+
+pub struct DepthWalker {
+    stack: Vec<(usize, Option<usize>)>,
+    visited: Vec<bool>,
+}
+
+impl DepthWalker {
+    pub fn new() -> DepthWalker {
+        DepthWalker {
+            stack: vec![],
+            visited: vec![],
+        }
+    }
+
+    pub fn walk_tree<'a>(
+        &'a mut self,
+        tree: &'a Tree,
+        unique: bool,
+        mirrored: bool,
+    ) -> DepthIterator<'a> {
+        self.walk_nodes(&tree.nodes(), tree.root_index(), unique, mirrored)
+    }
+
+    pub fn walk_nodes<'a>(
+        &'a mut self,
+        nodes: &'a Vec<Node>,
+        root_index: usize,
+        unique: bool,
+        mirrored: bool,
+    ) -> DepthIterator<'a> {
+        // Prep the stack.
+        self.stack.clear();
+        self.stack.reserve(nodes.len());
+        self.stack.push((root_index, None));
+        // Reset the visited flags.
+        self.visited.clear();
+        self.visited.resize(nodes.len(), false);
+        // Create the iterator.
+        DepthIterator {
+            unique,
+            mirrored,
+            traverse: self,
+            nodes: &nodes,
+        }
+    }
+}
+
+pub struct DepthIterator<'a> {
+    unique: bool,
+    mirrored: bool,
+    traverse: &'a mut DepthWalker,
+    nodes: &'a Vec<Node>,
+}
+
+impl<'a> Iterator for DepthIterator<'a> {
+    type Item = (usize, Option<usize>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (index, parent) = {
+            // Pop the stack until we find a node we didn't already visit.
+            let (mut i, mut p) = self.traverse.stack.pop()?;
+            while self.unique && self.traverse.visited[i] {
+                (i, p) = self.traverse.stack.pop()?;
+            }
+            (i, p)
+        };
+        // Push the children on to the stack.
+        match &self.nodes[index] {
+            Constant(_) | Symbol(_) => {}
+            Unary(_op, input) => {
+                self.traverse.stack.push((*input, Some(index)));
+            }
+            Binary(_op, lhs, rhs) => {
+                if self.mirrored {
+                    self.traverse.stack.push((*lhs, Some(index)));
+                    self.traverse.stack.push((*rhs, Some(index)));
+                } else {
+                    self.traverse.stack.push((*rhs, Some(index)));
+                    self.traverse.stack.push((*lhs, Some(index)));
+                }
+            }
+        }
+        self.traverse.visited[index] = true;
+        return Some((index, parent));
+    }
+}
+
+pub struct Trimmer {
+    indices: Vec<(bool, usize)>,
+    trimmed: Vec<Node>,
+}
+
+impl Trimmer {
+    pub fn new() -> Trimmer {
+        Trimmer {
+            indices: vec![],
+            trimmed: vec![],
+        }
+    }
+
+    pub fn trim(
+        &mut self,
+        mut nodes: Vec<Node>,
+        root_index: usize,
+        walker: &mut DepthWalker,
+    ) -> Vec<Node> {
+        self.indices.clear();
+        self.indices.resize(nodes.len(), (false, 0));
+        // Mark used nodes.
+        walker
+            .walk_nodes(&nodes, root_index, true, false)
+            .for_each(|(index, _parent)| {
+                self.indices[index] = (true, 1usize);
+            });
+        // Do exclusive scan.
+        let mut sum = 0usize;
+        for pair in self.indices.iter_mut() {
+            let (keep, i) = *pair;
+            let copy = sum;
+            sum += i;
+            *pair = (keep, copy);
+        }
+        // Filter, update and copy nodes.
+        self.trimmed.reserve(nodes.len());
+        self.trimmed.extend(
+            (0..self.indices.len())
+                .zip(nodes.iter())
+                .filter(|(i, _node)| {
+                    let (keep, _index) = self.indices[*i];
+                    return keep;
+                })
+                .map(|(_i, node)| {
+                    match node {
+                        // Update the indices of this node's inputs.
+                        Constant(val) => Constant(*val),
+                        Symbol(label) => Symbol(*label),
+                        Unary(op, input) => Unary(*op, self.indices[*input].1),
+                        Binary(op, lhs, rhs) => {
+                            Binary(*op, self.indices[*lhs].1, self.indices[*rhs].1)
+                        }
+                    }
+                }),
+        );
+        std::mem::swap(&mut self.trimmed, &mut nodes);
+        return nodes;
+    }
 }
