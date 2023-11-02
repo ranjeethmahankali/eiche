@@ -129,7 +129,8 @@ impl Tree {
         let indices = {
             // Use a boxed slice for correctness as it cannot be resized later by accident.
             let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
-            for (index, _parent) in TraverseDepth::from(&self, true).iter() {
+            let mut traverse = TraverseDepth::new();
+            for (index, _parent) in traverse.iter(&self, true, false) {
                 flags[index] = (true, 1usize);
             }
             // Do a prefix scan to to get the actual indices.
@@ -336,40 +337,25 @@ pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
-pub struct TraverseDepth<'a> {
-    unique: bool,
-    root_index: usize,
-    nodes: &'a Vec<Node>,
+pub struct TraverseDepth {
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
 }
 
-impl<'a> TraverseDepth<'a> {
-    pub fn from(tree: &Tree, unique: bool) -> TraverseDepth {
-        let mut iter = TraverseDepth {
-            unique,
-            nodes: &tree.nodes,
-            root_index: tree.root_index(),
-            stack: Vec::with_capacity(tree.len()),
-            visited: vec![false; tree.len()],
-        };
-        iter.stack.push((tree.root_index(), None));
-        return iter;
+impl TraverseDepth {
+    pub fn new() -> TraverseDepth {
+        TraverseDepth {
+            stack: vec![],
+            visited: vec![],
+        }
     }
 
-    fn reset(&mut self) {
-        // Prep the stack.
-        self.stack.clear();
-        self.stack.push((self.root_index, None));
-        // Reset the visited flags.
-        self.visited.clear();
-        self.visited.resize(self.nodes.len(), false);
-    }
-
-    pub fn init(&mut self, tree: &'a Tree, unique: bool) {
-        self.unique = unique;
-        self.root_index = tree.root_index();
-        self.nodes = &tree.nodes;
+    pub fn iter<'a>(
+        &'a mut self,
+        tree: &'a Tree,
+        unique: bool,
+        mirrored: bool,
+    ) -> DepthIterator<'a> {
         // Prep the stack.
         self.stack.clear();
         self.stack.reserve(tree.len());
@@ -377,47 +363,48 @@ impl<'a> TraverseDepth<'a> {
         // Reset the visited flags.
         self.visited.clear();
         self.visited.resize(tree.len(), false);
-    }
-
-    pub fn iter<'b>(&'b mut self) -> DepthIterator<'b, 'a> {
-        self.reset();
-        DepthIterator { traverse: self }
+        // Create the iterator.
+        DepthIterator {
+            unique,
+            mirrored,
+            traverse: self,
+            nodes: &tree.nodes,
+        }
     }
 }
 
-pub struct DepthIterator<'b, 'a>
-where
-    // This constraint means 'a should be at least as long as or
-    // longer than 'b. This ensures the TraverseDepth instance and the
-    // buffers inside it (and the tree whose reference it holds)
-    // remain alive for at least as long as, or longer than the
-    // referenec held in this instance.
-    'a: 'b,
-{
-    traverse: &'b mut TraverseDepth<'a>,
+pub struct DepthIterator<'a> {
+    unique: bool,
+    mirrored: bool,
+    traverse: &'a mut TraverseDepth,
+    nodes: &'a Vec<Node>,
 }
 
-impl<'b, 'a> Iterator for DepthIterator<'b, 'a> {
+impl<'a> Iterator for DepthIterator<'a> {
     type Item = (usize, Option<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let (index, parent) = {
             // Pop the stack until we find a node we didn't already visit.
             let (mut i, mut p) = self.traverse.stack.pop()?;
-            while self.traverse.unique && self.traverse.visited[i] {
+            while self.unique && self.traverse.visited[i] {
                 (i, p) = self.traverse.stack.pop()?;
             }
             (i, p)
         };
-        match &self.traverse.nodes[index] {
-            Constant(_) => {}
-            Symbol(_) => {}
+        match &self.nodes[index] {
+            Constant(_) | Symbol(_) => {}
             Unary(_op, input) => {
                 self.traverse.stack.push((*input, Some(index)));
             }
             Binary(_op, lhs, rhs) => {
-                self.traverse.stack.push((*rhs, Some(index)));
-                self.traverse.stack.push((*lhs, Some(index)));
+                if self.mirrored {
+                    self.traverse.stack.push((*lhs, Some(index)));
+                    self.traverse.stack.push((*rhs, Some(index)));
+                } else {
+                    self.traverse.stack.push((*rhs, Some(index)));
+                    self.traverse.stack.push((*lhs, Some(index)));
+                }
             }
         }
         self.traverse.visited[index] = true;

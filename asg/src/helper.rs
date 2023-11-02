@@ -36,7 +36,8 @@ impl std::fmt::Display for Tree {
         const BYPASS: &str = " │   ";
         write!(f, "\n")?;
         let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        for (index, parent) in TraverseDepth::from(self, false).iter() {
+        let mut traverse = TraverseDepth::new();
+        for (index, parent) in traverse.iter(self, false, false) {
             if let Some(pi) = parent {
                 depths[index] = depths[pi] + 1;
             }
