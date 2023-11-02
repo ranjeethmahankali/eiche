@@ -338,6 +338,7 @@ pub fn exp(x: Tree) -> Tree {
 
 pub struct TraverseDepth<'a> {
     unique: bool,
+    root_index: usize,
     nodes: &'a Vec<Node>,
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
@@ -348,6 +349,7 @@ impl<'a> TraverseDepth<'a> {
         let mut iter = TraverseDepth {
             unique,
             nodes: &tree.nodes,
+            root_index: tree.root_index(),
             stack: Vec::with_capacity(tree.len()),
             visited: vec![false; tree.len()],
         };
@@ -355,25 +357,47 @@ impl<'a> TraverseDepth<'a> {
         return iter;
     }
 
-    pub fn init(&mut self, nodes: &'a Vec<Node>) {
-        self.nodes = &nodes;
+    fn reset(&mut self) {
+        // Prep the stack.
         self.stack.clear();
-        self.stack.reserve(nodes.len());
+        self.stack.push((self.root_index, None));
+        // Reset the visited flags.
         self.visited.clear();
-        self.visited.resize(nodes.len(), false);
+        self.visited.resize(self.nodes.len(), false);
     }
 
-    pub fn iter(&'a mut self) -> DepthIterator<'a> {
-        self.init(self.nodes);
+    pub fn init(&mut self, tree: &'a Tree, unique: bool) {
+        self.unique = unique;
+        self.root_index = tree.root_index();
+        self.nodes = &tree.nodes;
+        // Prep the stack.
+        self.stack.clear();
+        self.stack.reserve(tree.len());
+        self.stack.push((tree.root_index(), None));
+        // Reset the visited flags.
+        self.visited.clear();
+        self.visited.resize(tree.len(), false);
+    }
+
+    pub fn iter<'b>(&'b mut self) -> DepthIterator<'b, 'a> {
+        self.reset();
         DepthIterator { traverse: self }
     }
 }
 
-pub struct DepthIterator<'a> {
-    traverse: &'a mut TraverseDepth<'a>,
+pub struct DepthIterator<'b, 'a>
+where
+    // This constraint means 'a should be at least as long as or
+    // longer than 'b. This ensures the TraverseDepth instance and the
+    // buffers inside it (and the tree whose reference it holds)
+    // remain alive for at least as long as, or longer than the
+    // referenec held in this instance.
+    'a: 'b,
+{
+    traverse: &'b mut TraverseDepth<'a>,
 }
 
-impl<'a> Iterator for DepthIterator<'a> {
+impl<'b, 'a> Iterator for DepthIterator<'b, 'a> {
     type Item = (usize, Option<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
