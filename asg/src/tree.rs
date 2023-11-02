@@ -146,8 +146,8 @@ impl Tree {
         let indices = {
             // Use a boxed slice for correctness as it cannot be resized later by accident.
             let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
-            let mut traverse = TraverseDepth::new();
-            for (index, _parent) in traverse.iter(&self, true, false) {
+            let mut traverse = DepthWalker::new();
+            for (index, _parent) in traverse.walk_tree(&self, true, false) {
                 flags[index] = (true, 1usize);
             }
             // Do a prefix scan to to get the actual indices.
@@ -354,38 +354,48 @@ pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
-pub struct TraverseDepth {
+pub struct DepthWalker {
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
 }
 
-impl TraverseDepth {
-    pub fn new() -> TraverseDepth {
-        TraverseDepth {
+impl DepthWalker {
+    pub fn new() -> DepthWalker {
+        DepthWalker {
             stack: vec![],
             visited: vec![],
         }
     }
 
-    pub fn iter<'a>(
+    pub fn walk_tree<'a>(
         &'a mut self,
         tree: &'a Tree,
         unique: bool,
         mirrored: bool,
     ) -> DepthIterator<'a> {
+        self.walk_nodes(&tree.nodes, tree.root_index(), unique, mirrored)
+    }
+
+    pub fn walk_nodes<'a>(
+        &'a mut self,
+        nodes: &'a Vec<Node>,
+        root_index: usize,
+        unique: bool,
+        mirrored: bool,
+    ) -> DepthIterator<'a> {
         // Prep the stack.
         self.stack.clear();
-        self.stack.reserve(tree.len());
-        self.stack.push((tree.root_index(), None));
+        self.stack.reserve(nodes.len());
+        self.stack.push((root_index, None));
         // Reset the visited flags.
         self.visited.clear();
-        self.visited.resize(tree.len(), false);
+        self.visited.resize(nodes.len(), false);
         // Create the iterator.
         DepthIterator {
             unique,
             mirrored,
             traverse: self,
-            nodes: &tree.nodes,
+            nodes: &nodes,
         }
     }
 }
@@ -393,7 +403,7 @@ impl TraverseDepth {
 pub struct DepthIterator<'a> {
     unique: bool,
     mirrored: bool,
-    traverse: &'a mut TraverseDepth,
+    traverse: &'a mut DepthWalker,
     nodes: &'a Vec<Node>,
 }
 

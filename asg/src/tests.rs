@@ -575,16 +575,16 @@ mod tests {
 
     #[test]
     fn depth_traverse() {
-        let mut traverse = TraverseDepth::new();
+        let mut traverse = DepthWalker::new();
         {
             let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
             // Make sure two successive traversal yield the same nodes.
             let a: Vec<_> = traverse
-                .iter(&tree, true, false)
+                .walk_tree(&tree, true, false)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             let b: Vec<_> = traverse
-                .iter(&tree, true, false)
+                .walk_tree(&tree, true, false)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
@@ -593,12 +593,12 @@ mod tests {
             // Make sure the same TraverseDepth can be used on multiple trees.
             let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
             let a: Vec<_> = traverse
-                .iter(&tree, true, false)
+                .walk_tree(&tree, true, false)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             let tree2 = tree.clone();
             let b: Vec<_> = traverse
-                .iter(&tree2, true, false)
+                .walk_tree(&tree2, true, false)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
@@ -611,10 +611,13 @@ mod tests {
                 x + y
             };
             let normal: Vec<_> = traverse
-                .iter(&tree, true, false)
+                .walk_tree(&tree, true, false)
                 .map(|(i, p)| (i, p))
                 .collect();
-            let mirror: Vec<_> = traverse.iter(&tree, true, true).map(|elem| elem).collect();
+            let mirror: Vec<_> = traverse
+                .walk_tree(&tree, true, true)
+                .map(|elem| elem)
+                .collect();
             assert_eq!(normal.len(), 3);
             assert_eq!(mirror.len(), 3);
             assert_ne!(normal, mirror);

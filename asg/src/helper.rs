@@ -1,4 +1,4 @@
-use crate::tree::{Node, Node::*, TraverseDepth, Tree};
+use crate::tree::{Node, Node::*, DepthWalker, Tree};
 
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
@@ -36,8 +36,8 @@ impl std::fmt::Display for Tree {
         const BYPASS: &str = " │   ";
         write!(f, "\n")?;
         let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        let mut traverse = TraverseDepth::new();
-        for (index, parent) in traverse.iter(self, false, false) {
+        let mut traverse = DepthWalker::new();
+        for (index, parent) in traverse.walk_tree(self, false, false) {
             if let Some(pi) = parent {
                 depths[index] = depths[pi] + 1;
             }
