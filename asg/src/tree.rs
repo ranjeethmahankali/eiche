@@ -71,9 +71,26 @@ use Node::*;
 
 use crate::helper::eq_recursive;
 
+#[derive(Debug)]
+pub enum InvalidTree {
+    WrongNodeOrder,
+}
+
 impl Tree {
     pub fn new(node: Node) -> Tree {
         Tree { nodes: vec![node] }
+    }
+
+    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, InvalidTree> {
+        if !(0..nodes.len()).all(|i| match &nodes[i] {
+            Constant(_) | Symbol(_) => true,
+            Unary(_op, input) => input < &i,
+            Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
+        }) {
+            return Err(InvalidTree::WrongNodeOrder);
+        }
+        // Maybe add more checks later.
+        Ok(Tree { nodes })
     }
 
     pub fn len(&self) -> usize {
@@ -392,6 +409,7 @@ impl<'a> Iterator for DepthIterator<'a> {
             }
             (i, p)
         };
+        // Push the children on to the stack.
         match &self.nodes[index] {
             Constant(_) | Symbol(_) => {}
             Unary(_op, input) => {
