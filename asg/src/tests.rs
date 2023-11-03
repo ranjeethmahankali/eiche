@@ -576,15 +576,15 @@ mod tests {
 
     #[test]
     fn depth_traverse() {
-        let mut traverse = DepthWalker::new();
+        let mut walker = DepthWalker::new();
         {
             let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
             // Make sure two successive traversal yield the same nodes.
-            let a: Vec<_> = traverse
+            let a: Vec<_> = walker
                 .walk_tree(&tree, true, false)
                 .map(|(index, parent)| (index, parent))
                 .collect();
-            let b: Vec<_> = traverse
+            let b: Vec<_> = walker
                 .walk_tree(&tree, true, false)
                 .map(|(index, parent)| (index, parent))
                 .collect();
@@ -593,12 +593,12 @@ mod tests {
         {
             // Make sure the same TraverseDepth can be used on multiple trees.
             let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
-            let a: Vec<_> = traverse
+            let a: Vec<_> = walker
                 .walk_tree(&tree, true, false)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             let tree2 = tree.clone();
-            let b: Vec<_> = traverse
+            let b: Vec<_> = walker
                 .walk_tree(&tree2, true, false)
                 .map(|(index, parent)| (index, parent))
                 .collect();
@@ -611,11 +611,11 @@ mod tests {
                 let y: Tree = 'y'.into();
                 x + y
             };
-            let normal: Vec<_> = traverse
+            let normal: Vec<_> = walker
                 .walk_tree(&tree, true, false)
                 .map(|(i, p)| (i, p))
                 .collect();
-            let mirror: Vec<_> = traverse
+            let mirror: Vec<_> = walker
                 .walk_tree(&tree, true, true)
                 .map(|elem| elem)
                 .collect();

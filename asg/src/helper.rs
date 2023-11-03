@@ -36,8 +36,8 @@ impl std::fmt::Display for Tree {
         const BYPASS: &str = " │   ";
         write!(f, "\n")?;
         let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        let mut traverse = DepthWalker::new();
-        for (index, parent) in traverse.walk_tree(self, false, false) {
+        let mut walker = DepthWalker::new();
+        for (index, parent) in walker.walk_tree(self, false, false) {
             if let Some(pi) = parent {
                 depths[index] = depths[pi] + 1;
             }
@@ -135,7 +135,7 @@ impl DepthWalker {
         DepthIterator {
             unique,
             mirrored,
-            traverse: self,
+            walker: self,
             nodes: &nodes,
         }
     }
@@ -144,7 +144,7 @@ impl DepthWalker {
 pub struct DepthIterator<'a> {
     unique: bool,
     mirrored: bool,
-    traverse: &'a mut DepthWalker,
+    walker: &'a mut DepthWalker,
     nodes: &'a Vec<Node>,
 }
 
@@ -154,9 +154,9 @@ impl<'a> Iterator for DepthIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let (index, parent) = {
             // Pop the stack until we find a node we didn't already visit.
-            let (mut i, mut p) = self.traverse.stack.pop()?;
-            while self.unique && self.traverse.visited[i] {
-                (i, p) = self.traverse.stack.pop()?;
+            let (mut i, mut p) = self.walker.stack.pop()?;
+            while self.unique && self.walker.visited[i] {
+                (i, p) = self.walker.stack.pop()?;
             }
             (i, p)
         };
@@ -164,19 +164,19 @@ impl<'a> Iterator for DepthIterator<'a> {
         match &self.nodes[index] {
             Constant(_) | Symbol(_) => {}
             Unary(_op, input) => {
-                self.traverse.stack.push((*input, Some(index)));
+                self.walker.stack.push((*input, Some(index)));
             }
             Binary(_op, lhs, rhs) => {
                 if self.mirrored {
-                    self.traverse.stack.push((*lhs, Some(index)));
-                    self.traverse.stack.push((*rhs, Some(index)));
+                    self.walker.stack.push((*lhs, Some(index)));
+                    self.walker.stack.push((*rhs, Some(index)));
                 } else {
-                    self.traverse.stack.push((*rhs, Some(index)));
-                    self.traverse.stack.push((*lhs, Some(index)));
+                    self.walker.stack.push((*rhs, Some(index)));
+                    self.walker.stack.push((*lhs, Some(index)));
                 }
             }
         }
-        self.traverse.visited[index] = true;
+        self.walker.visited[index] = true;
         return Some((index, parent));
     }
 }
