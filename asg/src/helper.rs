@@ -86,6 +86,19 @@ impl BinaryOp {
             Max => 6,
         }
     }
+
+    pub fn is_commutative(&self) -> bool {
+        use BinaryOp::*;
+        match self {
+            Add => true,
+            Subtract => false,
+            Multiply => true,
+            Divide => false,
+            Pow => false,
+            Min => true,
+            Max => true,
+        }
+    }
 }
 
 impl std::fmt::Display for Node {
@@ -137,8 +150,8 @@ pub fn eq_recursive(
     {
         use crate::helper::NodeOrdering::*;
         // Zip the depth first iterators and compare.
-        let mut iter1 = walker1.walk_nodes(&nodes, li, false, Sorted);
-        let mut iter2 = walker2.walk_nodes(&nodes, ri, false, Sorted);
+        let mut iter1 = walker1.walk_nodes(&nodes, li, false, Deterministic);
+        let mut iter2 = walker2.walk_nodes(&nodes, ri, false, Deterministic);
         loop {
             let (left, right) = (iter1.next(), iter2.next());
             match (left, right) {
@@ -178,7 +191,7 @@ pub struct DepthWalker {
 
 pub enum NodeOrdering {
     Original,
-    Sorted,
+    Deterministic,
 }
 
 impl DepthWalker {
@@ -232,21 +245,32 @@ pub struct DepthIterator<'a> {
 }
 
 impl<'a> DepthIterator<'a> {
-    fn sort_children(&self, children: &mut [usize]) {
+    fn sort_children(&self, parent: &Node, children: &mut [usize]) {
         use std::cmp::Ordering;
         use NodeOrdering::*;
-        match &self.ordering {
-            Original => {} // Do nothing.
-            Sorted => children.sort_by(|a, b| match self.nodes[*a].partial_cmp(&self.nodes[*b]) {
-                Some(ord) => ord,
-                // Assuming the only time we return None is with two
-                // constant nodes with Nan's in them. This seems like
-                // a harmless edge case for now. Specially given we
-                // don't allow the construction of trees with Nan
-                // constant nodes.
-                None => Ordering::Equal,
-            }),
-        };
+        if children.len() < 2 {
+            // Nothing to sort.
+            return;
+        }
+        match parent {
+            // Nothing to do when number children is 1 or less.
+            Constant(_) | Symbol(_) | Unary(_, _) => {}
+            Binary(op, _, _) => {
+                if let Deterministic = self.ordering {
+                    if op.is_commutative() {
+                        children.sort_by(|a, b| match self.nodes[*a].partial_cmp(&self.nodes[*b]) {
+                            Some(ord) => ord,
+                            // Assuming the only time we return None is with two
+                            // constant nodes with Nan's in them. This seems like
+                            // a harmless edge case for now. Specially given we
+                            // don't allow the construction of trees with Nan
+                            // constant nodes.
+                            None => Ordering::Equal,
+                        })
+                    }
+                }
+            }
+        }
     }
 
     pub fn skip_children(&mut self) {
@@ -269,7 +293,8 @@ impl<'a> Iterator for DepthIterator<'a> {
             (i, p)
         };
         // Push the children on to the stack.
-        match &self.nodes[index] {
+        let node = &self.nodes[index];
+        match node {
             Constant(_) | Symbol(_) => {
                 self.last_pushed = 0;
             }
@@ -281,7 +306,7 @@ impl<'a> Iterator for DepthIterator<'a> {
                 // Pushing them rhs first because last in first out.
                 let mut children = [*rhs, *lhs];
                 // Sort according to the requested ordering.
-                self.sort_children(&mut children);
+                self.sort_children(node, &mut children);
                 for child in children {
                     self.walker.stack.push((child, Some(index)));
                 }
