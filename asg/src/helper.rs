@@ -37,7 +37,7 @@ impl std::fmt::Display for Tree {
         write!(f, "\n")?;
         let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
         let mut walker = DepthWalker::new();
-        for (index, parent) in walker.walk_tree(self, false, false) {
+        for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
             if let Some(pi) = parent {
                 depths[index] = depths[pi] + 1;
             }
@@ -68,36 +68,53 @@ impl std::fmt::Display for Node {
     }
 }
 
-pub fn eq_recursive(nodes: &[Node], li: usize, ri: usize) -> bool {
-    let mut stack: Vec<(usize, usize)> = vec![(li, ri)];
-    while !stack.is_empty() {
-        let (a, b) = stack.pop().expect("This should never happen!");
-        if a == b {
-            continue;
-        }
-        if !(match (nodes[a], nodes[b]) {
-            (Constant(v1), Constant(v2)) => v1 == v2,
-            (Symbol(c1), Symbol(c2)) => c1 == c2,
-            (Unary(op1, input1), Unary(op2, input2)) => {
-                stack.push((input1, input2));
-                op1 == op2
-            }
-            (Binary(op1, lhs1, rhs1), Binary(op2, lhs2, rhs2)) => {
-                stack.push((usize::min(lhs1, rhs1), usize::min(lhs2, rhs2)));
-                stack.push((usize::max(lhs1, rhs1), usize::max(lhs2, rhs2)));
-                op1 == op2
-            }
-            _ => false,
-        }) {
-            return false;
-        }
+pub fn eq_recursive(
+    nodes: &[Node],
+    li: usize,
+    ri: usize,
+    walker1: &mut DepthWalker,
+    walker2: &mut DepthWalker,
+) -> bool {
+    {
+        use crate::helper::NodeOrdering::*;
+        use itertools::EitherOrBoth::*;
+        use itertools::Itertools;
+        // Zip the depth first iterators and compare.
+        walker1
+            .walk_nodes(&nodes, li, true, Ascending)
+            .zip_longest(walker2.walk_nodes(&nodes, ri, true, Ascending))
+            .all(|pair| match pair {
+                Both((i1, p1), (i2, p2)) => {
+                    if i1 == i2 && p1 == p2 {
+                        true
+                    } else {
+                        match (nodes[i1], nodes[i2]) {
+                            (Constant(v1), Constant(v2)) => v1 == v2,
+                            (Symbol(c1), Symbol(c2)) => c1 == c2,
+                            (Unary(op1, _input1), Unary(op2, _input2)) => op1 == op2,
+                            (Binary(op1, _lhs1, _rhs1), Binary(op2, _lhs2, _rhs2)) => op1 == op2,
+                            _ => false,
+                        }
+                    }
+                }
+                // This means one iterator is longer than the other.
+                // They're not equal.
+                Left(_) | Right(_) => {
+                    println!("Iterator mismatch!");
+                    false
+                }
+            })
     }
-    return true;
 }
 
 pub struct DepthWalker {
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
+}
+
+pub enum NodeOrdering {
+    Original,
+    Ascending,
 }
 
 impl DepthWalker {
@@ -112,17 +129,17 @@ impl DepthWalker {
         &'a mut self,
         tree: &'a Tree,
         unique: bool,
-        mirrored: bool,
+        ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
-        self.walk_nodes(&tree.nodes(), tree.root_index(), unique, mirrored)
+        self.walk_nodes(&tree.nodes(), tree.root_index(), unique, ordering)
     }
 
     pub fn walk_nodes<'a>(
         &'a mut self,
-        nodes: &'a Vec<Node>,
+        nodes: &'a [Node],
         root_index: usize,
         unique: bool,
-        mirrored: bool,
+        ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
         // Prep the stack.
         self.stack.clear();
@@ -134,7 +151,7 @@ impl DepthWalker {
         // Create the iterator.
         DepthIterator {
             unique,
-            mirrored,
+            ordering,
             walker: self,
             nodes: &nodes,
         }
@@ -143,9 +160,19 @@ impl DepthWalker {
 
 pub struct DepthIterator<'a> {
     unique: bool,
-    mirrored: bool,
+    ordering: NodeOrdering,
     walker: &'a mut DepthWalker,
-    nodes: &'a Vec<Node>,
+    nodes: &'a [Node],
+}
+
+impl<'a> DepthIterator<'a> {
+    fn sort_children(&self, children: &mut [usize]) {
+        use NodeOrdering::*;
+        match &self.ordering {
+            Original => {} // Do nothing.
+            Ascending => children.sort(),
+        };
+    }
 }
 
 impl<'a> Iterator for DepthIterator<'a> {
@@ -167,12 +194,12 @@ impl<'a> Iterator for DepthIterator<'a> {
                 self.walker.stack.push((*input, Some(index)));
             }
             Binary(_op, lhs, rhs) => {
-                if self.mirrored {
-                    self.walker.stack.push((*lhs, Some(index)));
-                    self.walker.stack.push((*rhs, Some(index)));
-                } else {
-                    self.walker.stack.push((*rhs, Some(index)));
-                    self.walker.stack.push((*lhs, Some(index)));
+                // Pushing them rhs first because last in first out.
+                let mut children = [*rhs, *lhs];
+                // Sort according to the requested ordering.
+                self.sort_children(&mut children);
+                for child in children {
+                    self.walker.stack.push((child, Some(index)));
                 }
             }
         }
@@ -204,7 +231,7 @@ impl Trimmer {
         self.indices.resize(nodes.len(), (false, 0));
         // Mark used nodes.
         walker
-            .walk_nodes(&nodes, root_index, true, false)
+            .walk_nodes(&nodes, root_index, true, NodeOrdering::Original)
             .for_each(|(index, _parent)| {
                 self.indices[index] = (true, 1usize);
             });

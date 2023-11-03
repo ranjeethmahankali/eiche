@@ -192,13 +192,16 @@ impl Tree {
 
     pub fn deduplicate(mut self) -> Tree {
         use std::collections::hash_map::HashMap;
+
+        let mut walker1 = DepthWalker::new();
+        let mut walker2 = DepthWalker::new();
         let hashes = self.node_hashes();
         let mut revmap: HashMap<u64, usize> = HashMap::new();
         let mut indices: Box<[usize]> = (0..self.len()).collect();
         for i in 0..hashes.len() {
             let h = hashes[i];
             let entry = revmap.entry(h).or_insert(i);
-            if *entry != i && eq_recursive(&self.nodes, *entry, i) {
+            if *entry != i && eq_recursive(&self.nodes, *entry, i, &mut walker1, &mut walker2) {
                 // The i-th node should be replaced with entry-th node.
                 indices[i] = *entry;
             }

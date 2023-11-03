@@ -3,7 +3,7 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
-    use crate::helper::DepthWalker;
+    use crate::helper::*;
     use crate::tree::Node::*;
     use crate::tree::*;
 
@@ -581,11 +581,11 @@ mod tests {
             let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
             // Make sure two successive traversal yield the same nodes.
             let a: Vec<_> = walker
-                .walk_tree(&tree, true, false)
+                .walk_tree(&tree, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             let b: Vec<_> = walker
-                .walk_tree(&tree, true, false)
+                .walk_tree(&tree, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
@@ -594,36 +594,15 @@ mod tests {
             // Make sure the same TraverseDepth can be used on multiple trees.
             let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
             let a: Vec<_> = walker
-                .walk_tree(&tree, true, false)
+                .walk_tree(&tree, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             let tree2 = tree.clone();
             let b: Vec<_> = walker
-                .walk_tree(&tree2, true, false)
+                .walk_tree(&tree2, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
-        }
-        {
-            // Check the mirrored traversal.
-            let tree = {
-                let x: Tree = 'x'.into();
-                let y: Tree = 'y'.into();
-                x + y
-            };
-            let normal: Vec<_> = walker
-                .walk_tree(&tree, true, false)
-                .map(|(i, p)| (i, p))
-                .collect();
-            let mirror: Vec<_> = walker
-                .walk_tree(&tree, true, true)
-                .map(|elem| elem)
-                .collect();
-            assert_eq!(normal.len(), 3);
-            assert_eq!(mirror.len(), 3);
-            assert_ne!(normal, mirror);
-            let mirror = vec![mirror[0], mirror[2], mirror[1]];
-            assert_eq!(normal, mirror);
         }
     }
 
@@ -657,5 +636,30 @@ mod tests {
             ]),
             Err(InvalidTree::WrongNodeOrder)
         ));
+    }
+
+    #[test]
+    fn recursive_compare() {
+        use BinaryOp::*;
+        let nodes = vec![
+            Symbol('x'),       // 0
+            Symbol('y'),       // 1
+            Binary(Add, 0, 1), // 2
+            Symbol('x'),       // 3
+            Symbol('y'),       // 4
+            Binary(Add, 3, 4), // 5
+            Constant(2.),      // 6
+            Binary(Pow, 5, 6), // 7
+        ];
+        let left = Tree::from_nodes(nodes.clone());
+        match left {
+            Ok(tree) => {
+                assert_eq!(tree.len(), nodes.len());
+            }
+            Err(_) => assert!(false),
+        };
+        let mut walker1 = DepthWalker::new();
+        let mut walker2 = DepthWalker::new();
+        assert!(eq_recursive(&nodes, 2, 5, &mut walker1, &mut walker2));
     }
 }
