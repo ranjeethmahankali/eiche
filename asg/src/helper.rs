@@ -1,4 +1,4 @@
-use crate::tree::{Node, Node::*, Tree};
+use crate::tree::{BinaryOp, Node, Node::*, Tree, UnaryOp};
 
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
@@ -57,6 +57,37 @@ impl std::fmt::Display for Tree {
     }
 }
 
+impl UnaryOp {
+    pub fn index(&self) -> u8 {
+        use UnaryOp::*;
+        match self {
+            Negate => 0,
+            Sqrt => 1,
+            Abs => 2,
+            Sin => 3,
+            Cos => 4,
+            Tan => 5,
+            Log => 6,
+            Exp => 7,
+        }
+    }
+}
+
+impl BinaryOp {
+    pub fn index(&self) -> u8 {
+        use BinaryOp::*;
+        match self {
+            Add => 0,
+            Subtract => 1,
+            Multiply => 2,
+            Divide => 3,
+            Pow => 4,
+            Min => 5,
+            Max => 6,
+        }
+    }
+}
+
 impl std::fmt::Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -64,6 +95,34 @@ impl std::fmt::Display for Node {
             Symbol(label) => write!(f, "Symbol({})", label),
             Unary(op, input) => write!(f, "{:?}({})", op, input),
             Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
+        }
+    }
+}
+
+impl PartialOrd for Node {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering::*;
+        match (self, other) {
+            // Constant
+            (Constant(a), Constant(b)) => a.partial_cmp(b),
+            (Constant(_), Symbol(_)) => Some(Less),
+            (Constant(_), Unary(_, _)) => Some(Less),
+            (Constant(_), Binary(_, _, _)) => Some(Less),
+            // Symbol
+            (Symbol(_), Constant(_)) => Some(Greater),
+            (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
+            (Symbol(_), Unary(_, _)) => Some(Less),
+            (Symbol(_), Binary(_, _, _)) => Some(Less),
+            // Unary
+            (Unary(_, _), Constant(_)) => Some(Greater),
+            (Unary(_, _), Symbol(_)) => Some(Greater),
+            (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
+            (Unary(_, _), Binary(_, _, _)) => Some(Less),
+            // Binary
+            (Binary(_, _, _), Constant(_)) => Some(Greater),
+            (Binary(_, _, _), Symbol(_)) => Some(Greater),
+            (Binary(_, _, _), Unary(_, _)) => Some(Greater),
+            (Binary(op1, _, _), Binary(op2, _, _)) => Some(op1.index().cmp(&op2.index())),
         }
     }
 }
@@ -174,10 +233,19 @@ pub struct DepthIterator<'a> {
 
 impl<'a> DepthIterator<'a> {
     fn sort_children(&self, children: &mut [usize]) {
+        use std::cmp::Ordering;
         use NodeOrdering::*;
         match &self.ordering {
             Original => {} // Do nothing.
-            Sorted => children.sort(),
+            Sorted => children.sort_by(|a, b| match self.nodes[*a].partial_cmp(&self.nodes[*b]) {
+                Some(ord) => ord,
+                // Assuming the only time we return None is with two
+                // constant nodes with Nan's in them. This seems like
+                // a harmless edge case for now. Specially given we
+                // don't allow the construction of trees with Nan
+                // constant nodes.
+                None => Ordering::Equal,
+            }),
         };
     }
 
