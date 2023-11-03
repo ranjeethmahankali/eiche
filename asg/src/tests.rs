@@ -642,8 +642,8 @@ mod tests {
     fn recursive_compare() {
         use BinaryOp::*;
         let nodes = vec![
-            Symbol('x'),            // 0
-            Symbol('y'),            // 1
+            Symbol('y'),            // 0
+            Symbol('x'),            // 1
             Binary(Add, 0, 1),      // 2
             Symbol('x'),            // 3
             Symbol('y'),            // 4

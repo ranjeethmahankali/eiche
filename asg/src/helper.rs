@@ -78,8 +78,8 @@ pub fn eq_recursive(
     {
         use crate::helper::NodeOrdering::*;
         // Zip the depth first iterators and compare.
-        let mut iter1 = walker1.walk_nodes(&nodes, li, false, Ascending);
-        let mut iter2 = walker2.walk_nodes(&nodes, ri, false, Ascending);
+        let mut iter1 = walker1.walk_nodes(&nodes, li, false, Sorted);
+        let mut iter2 = walker2.walk_nodes(&nodes, ri, false, Sorted);
         loop {
             let (left, right) = (iter1.next(), iter2.next());
             match (left, right) {
@@ -119,7 +119,7 @@ pub struct DepthWalker {
 
 pub enum NodeOrdering {
     Original,
-    Ascending,
+    Sorted,
 }
 
 impl DepthWalker {
@@ -177,7 +177,7 @@ impl<'a> DepthIterator<'a> {
         use NodeOrdering::*;
         match &self.ordering {
             Original => {} // Do nothing.
-            Ascending => children.sort(),
+            Sorted => children.sort(),
         };
     }
 
