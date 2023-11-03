@@ -3,6 +3,7 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
+    use crate::helper::*;
     use crate::tree::Node::*;
     use crate::tree::*;
 
@@ -573,10 +574,142 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn simplification_1() {
-    //     let _tree: Tree = min(sqrt('x'.into()), sqrt('y'.into()));
-    //     let _expected: Tree = sqrt(min('x'.into(), 'y'.into()));
-    //     todo!();
-    // }
+    #[test]
+    fn depth_traverse() {
+        let mut walker = DepthWalker::new();
+        {
+            let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
+            // Make sure two successive traversal yield the same nodes.
+            let a: Vec<_> = walker
+                .walk_tree(&tree, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            let b: Vec<_> = walker
+                .walk_tree(&tree, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            assert_eq!(a, b);
+        }
+        {
+            // Make sure the same TraverseDepth can be used on multiple trees.
+            let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
+            let a: Vec<_> = walker
+                .walk_tree(&tree, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            let tree2 = tree.clone();
+            let b: Vec<_> = walker
+                .walk_tree(&tree2, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn tree_from_nodes() {
+        use BinaryOp::*;
+        use UnaryOp::*;
+        // Nodes in order.
+        match Tree::from_nodes(vec![
+            Symbol('x'),            // 0
+            Constant(2.245),        // 1
+            Binary(Add, 0, 1),      // 2
+            Symbol('y'),            // 3
+            Unary(Sqrt, 3),         // 4
+            Binary(Multiply, 2, 4), // 5
+        ]) {
+            Ok(tree) => {
+                assert_eq!(tree.len(), 6);
+            }
+            Err(_) => assert!(false),
+        };
+        // Nodes out of order.
+        assert!(matches!(
+            Tree::from_nodes(vec![
+                Symbol('x'),            // 0
+                Binary(Add, 0, 1),      // 1
+                Constant(2.245),        // 2
+                Binary(Multiply, 2, 4), // 3
+                Symbol('y'),            // 4
+                Unary(Sqrt, 3),         // 5
+            ]),
+            Err(InvalidTree::WrongNodeOrder)
+        ));
+    }
+
+    #[test]
+    fn recursive_compare() {
+        use BinaryOp::*;
+        {
+            // Check if 'Add' node with mirrored inputs is compared
+            // correctly.
+            let mut nodes = vec![
+                Symbol('y'),            // 0
+                Symbol('x'),            // 1
+                Binary(Add, 0, 1),      // 2
+                Symbol('x'),            // 3
+                Symbol('y'),            // 4
+                Binary(Add, 3, 4),      // 5
+                Binary(Add, 5, 2),      // 6
+                Binary(Add, 2, 2),      // 7
+                Binary(Multiply, 6, 7), // 8
+            ];
+            let mut walker1 = DepthWalker::new();
+            let mut walker2 = DepthWalker::new();
+            fn check_tree(nodes: &Vec<Node>) {
+                let tree = Tree::from_nodes(nodes.clone());
+                match tree {
+                    Ok(tree) => {
+                        assert_eq!(tree.len(), nodes.len());
+                    }
+                    Err(_) => assert!(false),
+                };
+            }
+            check_tree(&nodes);
+            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            // Try more mirroring
+            nodes[6] = Binary(Add, 2, 5);
+            check_tree(&nodes);
+            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            // Multiply node with mirrored inputs.
+            nodes[2] = Binary(Multiply, 0, 1);
+            nodes[5] = Binary(Multiply, 3, 4);
+            check_tree(&nodes);
+            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            // Min node with mirrored inputs.
+            nodes[2] = Binary(Min, 0, 1);
+            nodes[5] = Binary(Min, 3, 4);
+            check_tree(&nodes);
+            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            // Max node with mirrored inputs.
+            nodes[2] = Binary(Max, 0, 1);
+            nodes[5] = Binary(Max, 3, 4);
+            check_tree(&nodes);
+            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            // Subtract node with mirrored inputs.
+            nodes[2] = Binary(Subtract, 0, 1);
+            nodes[5] = Binary(Subtract, 3, 4);
+            check_tree(&nodes);
+            assert!(!equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
+            assert!(!equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            // Divide node with mirrored inputs.
+            nodes[2] = Binary(Divide, 0, 1);
+            nodes[5] = Binary(Divide, 3, 4);
+            check_tree(&nodes);
+            assert!(!equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
+            assert!(!equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            // Pow node with mirrored inputs.
+            nodes[2] = Binary(Pow, 0, 1);
+            nodes[5] = Binary(Pow, 3, 4);
+            check_tree(&nodes);
+            assert!(!equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
+            assert!(!equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+        }
+    }
 }

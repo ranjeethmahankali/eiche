@@ -69,11 +69,33 @@ pub struct Tree {
 
 use Node::*;
 
-use crate::helper::eq_recursive;
+use crate::helper::{equivalent, DepthWalker, Trimmer};
+
+#[derive(Debug)]
+pub enum InvalidTree {
+    WrongNodeOrder,
+}
 
 impl Tree {
     pub fn new(node: Node) -> Tree {
         Tree { nodes: vec![node] }
+    }
+
+    fn validate(nodes: &Vec<Node>) -> bool {
+        (0..nodes.len()).all(|i| match &nodes[i] {
+            Constant(_) | Symbol(_) => true,
+            Unary(_op, input) => input < &i,
+            Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
+        })
+        // Maybe add more checks later.
+    }
+
+    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, InvalidTree> {
+        if Self::validate(&nodes) {
+            Ok(Tree { nodes })
+        } else {
+            Err(InvalidTree::WrongNodeOrder)
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -86,7 +108,7 @@ impl Tree {
             .expect("This Tree is empty! This should never have happened!")
     }
 
-    fn root_index(&self) -> usize {
+    pub fn root_index(&self) -> usize {
         self.len() - 1
     }
 
@@ -94,8 +116,8 @@ impl Tree {
         &self.nodes[index]
     }
 
-    pub fn iter_depth(&self, unique: bool) -> TreeDepthIterator {
-        TreeDepthIterator::from(&self, unique)
+    pub fn nodes(&self) -> &Vec<Node> {
+        &self.nodes
     }
 
     pub fn fold_constants(mut self) -> Tree {
@@ -126,50 +148,13 @@ impl Tree {
     }
 
     pub fn prune(mut self) -> Tree {
-        let indices = {
-            // Use a boxed slice for correctness as it cannot be resized later by accident.
-            let mut flags: Box<[(bool, usize)]> = vec![(false, 0); self.len()].into_boxed_slice();
-            for (index, _parent) in self.iter_depth(true) {
-                flags[index] = (true, 1usize);
-            }
-            // Do a prefix scan to to get the actual indices.
-            let mut sum = 0usize;
-            for pair in flags.iter_mut() {
-                let (keep, i) = *pair;
-                let copy = sum;
-                sum += i;
-                *pair = (keep, copy);
-            }
-            flags
-        };
-        for i in 0..indices.len() {
-            let node = self
-                .nodes
-                .get_mut(i)
-                .expect("Unreachable code path: Tree pruning failed.");
-            match node {
-                Constant(_) => {} // Do nothing.
-                Symbol(_) => {}   // Do nothing.
-                Unary(_, input) => {
-                    *input = indices[*input].1;
-                }
-                Binary(_, lhs, rhs) => {
-                    *lhs = indices[*lhs].1;
-                    *rhs = indices[*rhs].1;
-                }
-            }
+        let mut walker = DepthWalker::new();
+        let mut trimmer = Trimmer::new();
+        let root_index = self.root_index();
+        self.nodes = trimmer.trim(self.nodes, root_index, &mut walker);
+        if !Self::validate(&self.nodes) {
+            panic!("Something broke in the depth first traversal or trimming. This should never have happened!");
         }
-        self.nodes = self
-            .nodes
-            .iter()
-            .zip(indices.iter())
-            .filter(|(_node, (keep, _index))| {
-                return *keep;
-            })
-            .map(|(&node, (_keep, _index))| {
-                return node;
-            })
-            .collect();
         return self;
     }
 
@@ -207,13 +192,16 @@ impl Tree {
 
     pub fn deduplicate(mut self) -> Tree {
         use std::collections::hash_map::HashMap;
+
+        let mut walker1 = DepthWalker::new();
+        let mut walker2 = DepthWalker::new();
         let hashes = self.node_hashes();
         let mut revmap: HashMap<u64, usize> = HashMap::new();
         let mut indices: Box<[usize]> = (0..self.len()).collect();
         for i in 0..hashes.len() {
             let h = hashes[i];
             let entry = revmap.entry(h).or_insert(i);
-            if *entry != i && eq_recursive(&self.nodes, *entry, i) {
+            if *entry != i && equivalent(*entry, i, &self.nodes, &mut walker1, &mut walker2) {
                 // The i-th node should be replaced with entry-th node.
                 indices[i] = *entry;
             }
@@ -334,54 +322,6 @@ pub fn log(x: Tree) -> Tree {
 
 pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
-}
-
-pub struct TreeDepthIterator<'a> {
-    unique: bool,
-    tree: &'a Tree,
-    stack: Vec<(usize, Option<usize>)>,
-    visited: Box<[bool]>,
-}
-
-impl<'a> TreeDepthIterator<'a> {
-    fn from(tree: &Tree, unique: bool) -> TreeDepthIterator {
-        let mut iter = TreeDepthIterator {
-            unique,
-            tree,
-            stack: Vec::with_capacity(tree.len()),
-            visited: vec![false; tree.len()].into_boxed_slice(),
-        };
-        iter.stack.push((tree.root_index(), None));
-        return iter;
-    }
-}
-
-impl<'a> Iterator for TreeDepthIterator<'a> {
-    type Item = (usize, Option<usize>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (index, parent) = {
-            // Pop the stack until we find a node we didn't already visit.
-            let (mut i, mut p) = self.stack.pop()?;
-            while self.unique && self.visited[i] {
-                (i, p) = self.stack.pop()?;
-            }
-            (i, p)
-        };
-        match self.tree.node(index) {
-            Constant(_) => {}
-            Symbol(_) => {}
-            Unary(_op, input) => {
-                self.stack.push((*input, Some(index)));
-            }
-            Binary(_op, lhs, rhs) => {
-                self.stack.push((*rhs, Some(index)));
-                self.stack.push((*lhs, Some(index)));
-            }
-        }
-        self.visited[index] = true;
-        return Some((index, parent));
-    }
 }
 
 #[derive(Debug)]
