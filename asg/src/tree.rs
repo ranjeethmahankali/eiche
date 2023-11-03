@@ -69,7 +69,7 @@ pub struct Tree {
 
 use Node::*;
 
-use crate::helper::{eq_recursive, DepthWalker, Trimmer};
+use crate::helper::{equivalent, DepthWalker, Trimmer};
 
 #[derive(Debug)]
 pub enum InvalidTree {
@@ -201,7 +201,7 @@ impl Tree {
         for i in 0..hashes.len() {
             let h = hashes[i];
             let entry = revmap.entry(h).or_insert(i);
-            if *entry != i && eq_recursive(&self.nodes, *entry, i, &mut walker1, &mut walker2) {
+            if *entry != i && equivalent(*entry, i, &self.nodes, &mut walker1, &mut walker2) {
                 // The i-th node should be replaced with entry-th node.
                 indices[i] = *entry;
             }

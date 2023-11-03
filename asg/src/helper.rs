@@ -58,6 +58,7 @@ impl std::fmt::Display for Tree {
 }
 
 impl UnaryOp {
+    /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use UnaryOp::*;
         match self {
@@ -74,6 +75,7 @@ impl UnaryOp {
 }
 
 impl BinaryOp {
+    /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use BinaryOp::*;
         match self {
@@ -140,18 +142,32 @@ impl PartialOrd for Node {
     }
 }
 
-pub fn eq_recursive(
+/// Check if the nodes at indices `left` and `right` are
+/// equivalent.
+///
+/// Two nodes need not share the same input needs to be
+/// equivalent. They just need to represent the same mathematical
+/// expression. For example, two distinct constant nodes with the
+/// holding the same value are equivalent. Two nodes of the same type
+/// with equivalent inputs are considered equivalent. For binary nodes
+/// with commutative operations, checking the equivalence of the
+/// inputs is done in an order agnostic way.
+///
+/// This implementation avoids recursion by using `walker1` and
+/// `walker2` are used to traverse the tree depth wise and perform the
+/// comparison.
+pub fn equivalent(
+    left: usize,
+    right: usize,
     nodes: &[Node],
-    li: usize,
-    ri: usize,
     walker1: &mut DepthWalker,
     walker2: &mut DepthWalker,
 ) -> bool {
     {
         use crate::helper::NodeOrdering::*;
         // Zip the depth first iterators and compare.
-        let mut iter1 = walker1.walk_nodes(&nodes, li, false, Deterministic);
-        let mut iter2 = walker2.walk_nodes(&nodes, ri, false, Deterministic);
+        let mut iter1 = walker1.walk_nodes(&nodes, left, false, Deterministic);
+        let mut iter2 = walker2.walk_nodes(&nodes, right, false, Deterministic);
         loop {
             let (left, right) = (iter1.next(), iter2.next());
             match (left, right) {
@@ -260,11 +276,14 @@ impl<'a> DepthIterator<'a> {
                     if op.is_commutative() {
                         children.sort_by(|a, b| match self.nodes[*a].partial_cmp(&self.nodes[*b]) {
                             Some(ord) => ord,
-                            // Assuming the only time we return None is with two
-                            // constant nodes with Nan's in them. This seems like
-                            // a harmless edge case for now. Specially given we
-                            // don't allow the construction of trees with Nan
-                            // constant nodes.
+                            // This is tied to the PartialOrd
+                            // implementation for Node. Assuming the
+                            // only time we return None is with two
+                            // constant nodes with Nan's in them. This
+                            // seems like a harmless edge case for
+                            // now. Specially given we don't allow the
+                            // construction of trees with Nan constant
+                            // nodes.
                             None => Ordering::Equal,
                         })
                     }
@@ -303,7 +322,7 @@ impl<'a> Iterator for DepthIterator<'a> {
                 self.last_pushed = 1;
             }
             Binary(_op, lhs, rhs) => {
-                // Pushing them rhs first because last in first out.
+                // Pushing rhs first because last in first out.
                 let mut children = [*rhs, *lhs];
                 // Sort according to the requested ordering.
                 self.sort_children(node, &mut children);
