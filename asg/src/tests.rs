@@ -642,14 +642,15 @@ mod tests {
     fn recursive_compare() {
         use BinaryOp::*;
         let nodes = vec![
-            Symbol('x'),       // 0
-            Symbol('y'),       // 1
-            Binary(Add, 0, 1), // 2
-            Symbol('x'),       // 3
-            Symbol('y'),       // 4
-            Binary(Add, 3, 4), // 5
-            Constant(2.),      // 6
-            Binary(Pow, 5, 6), // 7
+            Symbol('x'),            // 0
+            Symbol('y'),            // 1
+            Binary(Add, 0, 1),      // 2
+            Symbol('x'),            // 3
+            Symbol('y'),            // 4
+            Binary(Add, 3, 4),      // 5
+            Binary(Add, 5, 2),      // 6
+            Binary(Add, 2, 2),      // 7
+            Binary(Multiply, 6, 7), // 8
         ];
         let left = Tree::from_nodes(nodes.clone());
         match left {
@@ -661,5 +662,6 @@ mod tests {
         let mut walker1 = DepthWalker::new();
         let mut walker2 = DepthWalker::new();
         assert!(eq_recursive(&nodes, 2, 5, &mut walker1, &mut walker2));
+        assert!(eq_recursive(&nodes, 6, 7, &mut walker1, &mut walker2));
     }
 }

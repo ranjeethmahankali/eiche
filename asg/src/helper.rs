@@ -77,33 +77,38 @@ pub fn eq_recursive(
 ) -> bool {
     {
         use crate::helper::NodeOrdering::*;
-        use itertools::EitherOrBoth::*;
-        use itertools::Itertools;
         // Zip the depth first iterators and compare.
-        walker1
-            .walk_nodes(&nodes, li, true, Ascending)
-            .zip_longest(walker2.walk_nodes(&nodes, ri, true, Ascending))
-            .all(|pair| match pair {
-                Both((i1, p1), (i2, p2)) => {
-                    if i1 == i2 && p1 == p2 {
-                        true
-                    } else {
-                        match (nodes[i1], nodes[i2]) {
-                            (Constant(v1), Constant(v2)) => v1 == v2,
-                            (Symbol(c1), Symbol(c2)) => c1 == c2,
-                            (Unary(op1, _input1), Unary(op2, _input2)) => op1 == op2,
-                            (Binary(op1, _lhs1, _rhs1), Binary(op2, _lhs2, _rhs2)) => op1 == op2,
-                            _ => false,
-                        }
+        let mut iter1 = walker1.walk_nodes(&nodes, li, false, Ascending);
+        let mut iter2 = walker2.walk_nodes(&nodes, ri, false, Ascending);
+        loop {
+            let (left, right) = (iter1.next(), iter2.next());
+            match (left, right) {
+                (None, None) => {
+                    // Both iterators ended.
+                    return true;
+                }
+                (None, Some(_)) | (Some(_), None) => {
+                    // One of the iterators ended prematurely.
+                    return false;
+                }
+                (Some((i1, _p1)), Some((i2, _p2))) => {
+                    if i1 == i2 {
+                        iter1.skip_children();
+                        iter2.skip_children();
+                        continue;
+                    }
+                    if !match (nodes[i1], nodes[i2]) {
+                        (Constant(v1), Constant(v2)) => v1 == v2,
+                        (Symbol(c1), Symbol(c2)) => c1 == c2,
+                        (Unary(op1, _input1), Unary(op2, _input2)) => op1 == op2,
+                        (Binary(op1, _lhs1, _rhs1), Binary(op2, _lhs2, _rhs2)) => op1 == op2,
+                        _ => false,
+                    } {
+                        return false;
                     }
                 }
-                // This means one iterator is longer than the other.
-                // They're not equal.
-                Left(_) | Right(_) => {
-                    println!("Iterator mismatch!");
-                    false
-                }
-            })
+            }
+        }
     }
 }
 
@@ -154,6 +159,7 @@ impl DepthWalker {
             ordering,
             walker: self,
             nodes: &nodes,
+            last_pushed: 0,
         }
     }
 }
@@ -161,6 +167,7 @@ impl DepthWalker {
 pub struct DepthIterator<'a> {
     unique: bool,
     ordering: NodeOrdering,
+    last_pushed: usize,
     walker: &'a mut DepthWalker,
     nodes: &'a [Node],
 }
@@ -172,6 +179,12 @@ impl<'a> DepthIterator<'a> {
             Original => {} // Do nothing.
             Ascending => children.sort(),
         };
+    }
+
+    pub fn skip_children(&mut self) {
+        for _ in 0..self.last_pushed {
+            self.walker.stack.pop();
+        }
     }
 }
 
@@ -189,9 +202,12 @@ impl<'a> Iterator for DepthIterator<'a> {
         };
         // Push the children on to the stack.
         match &self.nodes[index] {
-            Constant(_) | Symbol(_) => {}
+            Constant(_) | Symbol(_) => {
+                self.last_pushed = 0;
+            }
             Unary(_op, input) => {
                 self.walker.stack.push((*input, Some(index)));
+                self.last_pushed = 1;
             }
             Binary(_op, lhs, rhs) => {
                 // Pushing them rhs first because last in first out.
@@ -201,6 +217,7 @@ impl<'a> Iterator for DepthIterator<'a> {
                 for child in children {
                     self.walker.stack.push((child, Some(index)));
                 }
+                self.last_pushed = children.len();
             }
         }
         self.walker.visited[index] = true;
