@@ -32,26 +32,77 @@ impl From<char> for Tree {
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const BRANCH: &str = " ├── ";
-        const BYPASS: &str = " │   ";
-        write!(f, "\n")?;
-        let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        let mut walker = DepthWalker::new();
-        for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
-            if let Some(pi) = parent {
-                depths[index] = depths[pi] + 1;
-            }
-            let depth = depths[index];
-            for d in 0..depth {
-                write!(f, "{}", {
-                    if d < depth - 1 {
-                        BYPASS
-                    } else {
-                        BRANCH
+        #[derive(Debug)]
+        enum Token {
+            Branch,
+            Pass,
+            Turn,
+            Gap,
+            Newline,
+            Data(usize),
+        }
+        use Token::*;
+        // Walk the tree and collect tokens.
+        let tokens = {
+            // First pass of collecting tokens with no branching.
+            let (mut tokens, line_data) = {
+                let mut tokens: Vec<Token> = Vec::with_capacity(self.len()); // Likely need more memory.
+                let mut walker = DepthWalker::new();
+                let mut node_depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
+                let mut line_data: Vec<(usize, usize)> = Vec::with_capacity(tokens.capacity());
+                for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
+                    if let Some(pi) = parent {
+                        node_depths[index] = node_depths[pi] + 1;
                     }
-                })?;
+                    line_data.push((node_depths[index], tokens.len())); // Remember where this line starts.
+                    for _ in 0..node_depths[index] {
+                        tokens.push(Gap);
+                    }
+                    tokens.push(Data(index));
+                    tokens.push(Newline);
+                }
+                (tokens, line_data)
+            };
+            // Use the line_data to insert branching tokens.
+            for (li, (depth, start)) in (0..line_data.len()).zip(line_data.iter()) {
+                if *depth > 0 {
+                    tokens[start + *depth - 1] = Turn;
+                    // Iterate over the lines bofore and insert
+                    // branches and by passes as necessary.
+                    for pli in (1..li).rev() {
+                        let (_, pstart) = line_data[pli];
+                        let ti = pstart + *depth - 1;
+                        tokens[ti] = match &tokens[ti] {
+                            Branch | Pass | Data(_) => {
+                                break;
+                            }
+                            Turn => Branch,
+                            Gap => Pass,
+                            Newline => {
+                                panic!("Unreachable code path: Failed to format tree to a string");
+                            }
+                        };
+                    }
+                }
             }
-            writeln!(f, "[{}] {}", index, self.node(index))?;
+            tokens
+        };
+
+        const BRANCH: &str = " ├── ";
+        const PASS: &str = " │   ";
+        const TURN: &str = " └── ";
+        const GAP: &str = "     ";
+        write!(f, "\n")?;
+        // Write the tokens.
+        for token in tokens.iter() {
+            match token {
+                Branch => write!(f, "{}", BRANCH)?,
+                Pass => write!(f, "{}", PASS)?,
+                Turn => write!(f, "{}", TURN)?,
+                Gap => write!(f, "{}", GAP)?,
+                Newline => write!(f, "\n")?,
+                Data(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
+            };
         }
         write!(f, "\n")
     }
