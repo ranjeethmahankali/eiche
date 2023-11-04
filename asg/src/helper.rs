@@ -407,6 +407,11 @@ impl Trimmer {
         }
     }
 
+    /// The given `nodes` are walked depth-first using the `walker`
+    /// and nodes that are not visited are filtered out. The filtered
+    /// `nodes` are returned. You can minimize the number of
+    /// allocations performed by using the same trimmer multiple
+    /// times.
     pub fn trim(
         &mut self,
         mut nodes: Vec<Node>,
@@ -459,6 +464,9 @@ impl Trimmer {
     }
 }
 
+/// Compute the results of operations on constants and fold those into
+/// constant nodes. The unused nodes after folding are not
+/// trimmed. Use a trimmer for that.
 pub fn fold_constants(nodes: &mut Vec<Node>) {
     for index in 0..nodes.len() {
         let constval = match nodes[index] {
