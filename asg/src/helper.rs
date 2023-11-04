@@ -32,26 +32,74 @@ impl From<char> for Tree {
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const BRANCH: &str = " ├── ";
-        const BYPASS: &str = " │   ";
-        write!(f, "\n")?;
-        let mut depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-        let mut walker = DepthWalker::new();
-        for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
-            if let Some(pi) = parent {
-                depths[index] = depths[pi] + 1;
-            }
-            let depth = depths[index];
-            for d in 0..depth {
-                write!(f, "{}", {
-                    if d < depth - 1 {
-                        BYPASS
-                    } else {
-                        BRANCH
+        #[derive(Debug)]
+        enum Token {
+            Branch,
+            Pass,
+            Turn,
+            Gap,
+            Newline,
+            Data(usize),
+        }
+        use Token::*;
+        // Walk the tree and collect tokens.
+        let tokens = {
+            // First pass of collecting tokens with no branching.
+            let mut tokens = {
+                let mut tokens: Vec<Token> = Vec::with_capacity(self.len()); // Likely need more memory.
+                let mut walker = DepthWalker::new();
+                let mut node_depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
+                for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
+                    if let Some(pi) = parent {
+                        node_depths[index] = node_depths[pi] + 1;
                     }
-                })?;
+                    let depth = node_depths[index];
+                    if depth > 0 {
+                        for _ in 0..(depth - 1) {
+                            tokens.push(Gap);
+                        }
+                        tokens.push(Turn);
+                    }
+                    tokens.push(Data(index));
+                    tokens.push(Newline);
+                }
+                tokens
+            };
+            // Insert branching tokens where necessary.
+            let mut line_start: usize = 0;
+            for i in 0..tokens.len() {
+                match tokens[i] {
+                    Branch | Pass | Gap | Data(_) => {} // Do nothing.
+                    Newline => line_start = i,
+                    Turn => {
+                        let offset = i - line_start;
+                        for li in (0..line_start).rev() {
+                            if let Newline = tokens[li] {
+                                let ti = li + offset;
+                                tokens[ti] = match &tokens[ti] {
+                                    Branch | Pass | Data(_) => break,
+                                    Turn => Branch,
+                                    Gap => Pass,
+                                    Newline => panic!("FATAL: Failed to convert tree to a string"),
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            writeln!(f, "[{}] {}", index, self.node(index))?;
+            tokens
+        };
+        // Write all the tokens out.
+        write!(f, "\n")?;
+        for token in tokens.iter() {
+            match token {
+                Branch => write!(f, " ├── ")?,
+                Pass => write!(f, " │   ")?,
+                Turn => write!(f, " └── ")?,
+                Gap => write!(f, "     ")?,
+                Newline => write!(f, "\n")?,
+                Data(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
+            };
         }
         write!(f, "\n")
     }
@@ -115,6 +163,9 @@ impl std::fmt::Display for Node {
 }
 
 impl PartialOrd for Node {
+    /// This implementation only accounts for the node, its type and
+    /// the data heal inside the node. It DOES NOT take into account
+    /// the children of the node when comparing two nodes.
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering::*;
         match (self, other) {
