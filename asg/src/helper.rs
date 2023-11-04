@@ -341,6 +341,9 @@ impl<'a> DepthIterator<'a> {
         }
     }
 
+    /// Skip the children of the current node. The whole subtree from
+    /// the current node will be skipped, unless used as inputs by
+    /// some other node.
     pub fn skip_children(&mut self) {
         for _ in 0..self.last_pushed {
             self.walker.stack.pop();
