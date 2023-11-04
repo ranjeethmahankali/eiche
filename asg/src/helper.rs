@@ -281,9 +281,7 @@ impl<'a> DepthIterator<'a> {
                             // only time we return None is with two
                             // constant nodes with Nan's in them. This
                             // seems like a harmless edge case for
-                            // now. Specially given we don't allow the
-                            // construction of trees with Nan constant
-                            // nodes.
+                            // now.
                             None => Ordering::Equal,
                         })
                     }
