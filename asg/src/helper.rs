@@ -323,18 +323,23 @@ impl<'a> DepthIterator<'a> {
             // Nothing to do when number children is 1 or less.
             Constant(_) | Symbol(_) | Unary(_, _) => {}
             Binary(op, _, _) => {
-                if let Deterministic = self.ordering {
-                    if op.is_commutative() {
-                        children.sort_by(|a, b| match self.nodes[*a].partial_cmp(&self.nodes[*b]) {
-                            Some(ord) => ord,
-                            // This is tied to the PartialOrd
-                            // implementation for Node. Assuming the
-                            // only time we return None is with two
-                            // constant nodes with Nan's in them. This
-                            // seems like a harmless edge case for
-                            // now.
-                            None => Ordering::Equal,
-                        })
+                match self.ordering {
+                    Original => {} // Do nothing.
+                    Deterministic => {
+                        if op.is_commutative() {
+                            children.sort_by(|a, b| {
+                                match self.nodes[*a].partial_cmp(&self.nodes[*b]) {
+                                    Some(ord) => ord,
+                                    // This is tied to the PartialOrd
+                                    // implementation for Node. Assuming the
+                                    // only time we return None is with two
+                                    // constant nodes with Nan's in them. This
+                                    // seems like a harmless edge case for
+                                    // now.
+                                    None => Ordering::Equal,
+                                }
+                            });
+                        }
                     }
                 }
             }
@@ -390,7 +395,7 @@ impl<'a> Iterator for DepthIterator<'a> {
 }
 
 pub struct Trimmer {
-    indices: Vec<(bool, usize)>,
+    indices: Vec<Option<usize>>,
     trimmed: Vec<Node>,
 }
 
@@ -409,39 +414,43 @@ impl Trimmer {
         walker: &mut DepthWalker,
     ) -> Vec<Node> {
         self.indices.clear();
-        self.indices.resize(nodes.len(), (false, 0));
+        self.indices.resize(nodes.len(), None);
         // Mark used nodes.
         walker
             .walk_nodes(&nodes, root_index, true, NodeOrdering::Original)
             .for_each(|(index, _parent)| {
-                self.indices[index] = (true, 1usize);
+                self.indices[index] = Some(1_usize);
             });
-        // Do exclusive scan.
-        let mut sum = 0usize;
-        for pair in self.indices.iter_mut() {
-            let (keep, i) = *pair;
-            let copy = sum;
-            sum += i;
-            *pair = (keep, copy);
+        {
+            // Do exclusive scan.
+            let mut sum = 0usize;
+            for index in self.indices.iter_mut() {
+                if let Some(i) = index {
+                    let copy = sum;
+                    sum += *i;
+                    *index = Some(copy);
+                }
+            }
         }
         // Filter, update and copy nodes.
+        const ERROR: &str = "FATAL: Unable to prune the tree correctly.";
+        self.trimmed.clear();
         self.trimmed.reserve(nodes.len());
         self.trimmed.extend(
             (0..self.indices.len())
                 .zip(nodes.iter())
-                .filter(|(i, _node)| {
-                    let (keep, _index) = self.indices[*i];
-                    return keep;
-                })
+                .filter(|(i, _node)| self.indices[*i].is_some())
                 .map(|(_i, node)| {
                     match node {
                         // Update the indices of this node's inputs.
                         Constant(val) => Constant(*val),
                         Symbol(label) => Symbol(*label),
-                        Unary(op, input) => Unary(*op, self.indices[*input].1),
-                        Binary(op, lhs, rhs) => {
-                            Binary(*op, self.indices[*lhs].1, self.indices[*rhs].1)
-                        }
+                        Unary(op, input) => Unary(*op, self.indices[*input].expect(ERROR)),
+                        Binary(op, lhs, rhs) => Binary(
+                            *op,
+                            self.indices[*lhs].expect(ERROR),
+                            self.indices[*rhs].expect(ERROR),
+                        ),
                     }
                 }),
         );
