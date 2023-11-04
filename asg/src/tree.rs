@@ -22,6 +22,7 @@ pub enum BinaryOp {
 }
 
 impl UnaryOp {
+    /// Compute the result of the operation on `value`.
     pub fn apply(&self, value: f64) -> f64 {
         match self {
             Negate => -value,
@@ -37,6 +38,7 @@ impl UnaryOp {
 }
 
 impl BinaryOp {
+    /// Compute the result of the operation on `lhs` and `rhs`.
     pub fn apply(&self, lhs: f64, rhs: f64) -> f64 {
         match self {
             Add => lhs + rhs,
@@ -69,7 +71,7 @@ pub struct Tree {
 
 use Node::*;
 
-use crate::helper::{equivalent, DepthWalker, Trimmer};
+use crate::helper::{equivalent, fold_constants, DepthWalker, Trimmer};
 
 #[derive(Debug)]
 pub enum InvalidTree {
@@ -98,6 +100,7 @@ impl Tree {
         }
     }
 
+    /// The number of nodes in this tree.
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
@@ -121,29 +124,7 @@ impl Tree {
     }
 
     pub fn fold_constants(mut self) -> Tree {
-        for index in 0..self.len() {
-            let constval = match self.nodes[index] {
-                Constant(_) => None,
-                Symbol(_) => None,
-                Unary(op, input) => {
-                    if let Constant(value) = self.nodes[input] {
-                        Some(op.apply(value))
-                    } else {
-                        None
-                    }
-                }
-                Binary(op, lhs, rhs) => {
-                    if let (Constant(a), Constant(b)) = (&self.nodes[lhs], &self.nodes[rhs]) {
-                        Some(op.apply(*a, *b))
-                    } else {
-                        None
-                    }
-                }
-            };
-            if let Some(value) = constval {
-                self.nodes[index] = Constant(value);
-            }
-        }
+        fold_constants(&mut self.nodes);
         return self.prune();
     }
 

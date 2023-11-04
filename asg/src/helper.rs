@@ -449,3 +449,29 @@ impl Trimmer {
         return nodes;
     }
 }
+
+pub fn fold_constants(nodes: &mut Vec<Node>) {
+    for index in 0..nodes.len() {
+        let constval = match nodes[index] {
+            Constant(_) => None,
+            Symbol(_) => None,
+            Unary(op, input) => {
+                if let Constant(value) = nodes[input] {
+                    Some(op.apply(value))
+                } else {
+                    None
+                }
+            }
+            Binary(op, lhs, rhs) => {
+                if let (Constant(a), Constant(b)) = (&nodes[lhs], &nodes[rhs]) {
+                    Some(op.apply(*a, *b))
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(value) = constval {
+            nodes[index] = Constant(value);
+        }
+    }
+}
