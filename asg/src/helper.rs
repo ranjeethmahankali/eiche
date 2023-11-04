@@ -45,61 +45,60 @@ impl std::fmt::Display for Tree {
         // Walk the tree and collect tokens.
         let tokens = {
             // First pass of collecting tokens with no branching.
-            let (mut tokens, line_data) = {
+            let mut tokens = {
                 let mut tokens: Vec<Token> = Vec::with_capacity(self.len()); // Likely need more memory.
                 let mut walker = DepthWalker::new();
                 let mut node_depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-                let mut line_data: Vec<(usize, usize)> = Vec::with_capacity(tokens.capacity());
                 for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
                     if let Some(pi) = parent {
                         node_depths[index] = node_depths[pi] + 1;
                     }
-                    line_data.push((node_depths[index], tokens.len())); // Remember where this line starts.
-                    for _ in 0..node_depths[index] {
-                        tokens.push(Gap);
+                    let depth = node_depths[index];
+                    if depth > 0 {
+                        for _ in 0..(depth - 1) {
+                            tokens.push(Gap);
+                        }
+                        tokens.push(Turn);
                     }
                     tokens.push(Data(index));
                     tokens.push(Newline);
                 }
-                (tokens, line_data)
+                tokens
             };
-            // Use the line_data to insert branching tokens.
-            for (li, (depth, start)) in (0..line_data.len()).zip(line_data.iter()) {
-                if *depth > 0 {
-                    tokens[start + *depth - 1] = Turn;
-                    // Iterate over the lines bofore and insert
-                    // branches and by passes as necessary.
-                    for pli in (1..li).rev() {
-                        let (_, pstart) = line_data[pli];
-                        let ti = pstart + *depth - 1;
-                        tokens[ti] = match &tokens[ti] {
-                            Branch | Pass | Data(_) => {
-                                break;
+            // Insert branching tokens where necessary.
+            let mut line_start: usize = 0;
+            for i in 0..tokens.len() {
+                match tokens[i] {
+                    Branch | Pass | Gap | Data(_) => {} // Do nothing.
+                    Newline => line_start = i,
+                    Turn => {
+                        let offset = i - line_start;
+                        for li in (0..line_start).rev() {
+                            if let Newline = tokens[li] {
+                                let ti = li + offset;
+                                tokens[ti] = match &tokens[ti] {
+                                    Branch | Pass | Data(_) => {
+                                        break;
+                                    }
+                                    Turn => Branch,
+                                    Gap => Pass,
+                                    Newline => panic!("FATAL: Failed to format tree to a string"),
+                                }
                             }
-                            Turn => Branch,
-                            Gap => Pass,
-                            Newline => {
-                                panic!("Unreachable code path: Failed to format tree to a string");
-                            }
-                        };
+                        }
                     }
                 }
             }
             tokens
         };
-
-        const BRANCH: &str = " ├── ";
-        const PASS: &str = " │   ";
-        const TURN: &str = " └── ";
-        const GAP: &str = "     ";
+        // Write all the tokens out.
         write!(f, "\n")?;
-        // Write the tokens.
         for token in tokens.iter() {
             match token {
-                Branch => write!(f, "{}", BRANCH)?,
-                Pass => write!(f, "{}", PASS)?,
-                Turn => write!(f, "{}", TURN)?,
-                Gap => write!(f, "{}", GAP)?,
+                Branch => write!(f, " ├── ")?,
+                Pass => write!(f, " │   ")?,
+                Turn => write!(f, " └── ")?,
+                Gap => write!(f, "     ")?,
                 Newline => write!(f, "\n")?,
                 Data(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
             };
