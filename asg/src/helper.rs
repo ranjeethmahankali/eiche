@@ -77,12 +77,10 @@ impl std::fmt::Display for Tree {
                             if let Newline = tokens[li] {
                                 let ti = li + offset;
                                 tokens[ti] = match &tokens[ti] {
-                                    Branch | Pass | Data(_) => {
-                                        break;
-                                    }
+                                    Branch | Pass | Data(_) => break,
                                     Turn => Branch,
                                     Gap => Pass,
-                                    Newline => panic!("FATAL: Failed to format tree to a string"),
+                                    Newline => panic!("FATAL: Failed to convert tree to a string"),
                                 }
                             }
                         }
@@ -165,6 +163,9 @@ impl std::fmt::Display for Node {
 }
 
 impl PartialOrd for Node {
+    /// This implementation only accounts for the node, its type and
+    /// the data heal inside the node. It DOES NOT take into account
+    /// the children of the node when comparing two nodes.
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering::*;
         match (self, other) {
