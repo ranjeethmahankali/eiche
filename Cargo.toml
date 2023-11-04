@@ -1,0 +1,8 @@
+[workspace]
+
+# I was asked to specify the resolver by Cargo via a warning and a
+# suggestion. I don't know what it means.
+resolver = "2"
+members = [
+        "asg",
+]
