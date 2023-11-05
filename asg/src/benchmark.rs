@@ -2,7 +2,7 @@ use asg::tree::Tree;
 use criterion::{criterion_group, criterion_main, Criterion};
 
 fn make_large_tree() -> Tree {
-    use asg::{deftree, parser::tree_parse};
+    use asg::{deftree, parser::parse_tree};
     deftree!(
         (min
          (- (log (+

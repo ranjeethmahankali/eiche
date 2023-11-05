@@ -5,7 +5,7 @@ mod tests {
 
     use crate::tree::Node::*;
     use crate::tree::*;
-    use crate::{deftree, helper::*, parser::tree_parse};
+    use crate::{deftree, helper::*, parser::parse_tree};
 
     #[test]
     fn constant() {

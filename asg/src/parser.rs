@@ -129,165 +129,160 @@ pub enum LispParseError {
     Unknown,
 }
 
-pub mod tree_parse {
-    use super::*;
-    use crate::tree::{
+use crate::{
+    template::Template,
+    tree::{
         BinaryOp::*,
         Node::{self, *},
         Tree,
         UnaryOp::*,
+    },
+};
+
+fn push_node(node: Node, nodes: &mut Vec<Node>) -> usize {
+    let i = nodes.len();
+    nodes.push(node);
+    return i;
+}
+
+fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, LispParseError> {
+    lazy_static! {
+        static ref FLT_REGEX: Regex =
+            Regex::new("^\\d+\\.*\\d*$").expect("Failed to initialize regex for floats.");
+        static ref SYM_REGEX: Regex =
+            Regex::new("^[a-zA-Z]$").expect("Failed to initialize regex for numbers.");
     };
-
-    fn push_node(node: Node, nodes: &mut Vec<Node>) -> usize {
-        let i = nodes.len();
-        nodes.push(node);
-        return i;
-    }
-
-    fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, LispParseError> {
-        lazy_static! {
-            static ref FLT_REGEX: Regex =
-                Regex::new("^\\d+\\.*\\d*$").expect("Failed to initialize regex for floats.");
-            static ref SYM_REGEX: Regex =
-                Regex::new("^[a-zA-Z]$").expect("Failed to initialize regex for numbers.");
-        };
-        if FLT_REGEX.is_match(atom) {
-            return Ok(Done(push_node(
-                Constant(atom.parse::<f32>().ok().ok_or(LispParseError::Float)?),
-                nodes,
-            )));
-        }
-        if SYM_REGEX.is_match(atom) {
-            return Ok(Done(push_node(
-                Symbol(atom.chars().nth(0).ok_or(LispParseError::Symbol)?),
-                nodes,
-            )));
-        }
-        return Ok(Todo(atom));
-    }
-
-    fn parse_unary(op: &str, input: usize, nodes: &mut Vec<Node>) -> Result<usize, LispParseError> {
-        Ok(push_node(
-            Unary(
-                match op {
-                    "-" => Negate,
-                    "sqrt" => Sqrt,
-                    "abs" => Abs,
-                    "sin" => Sin,
-                    "cos" => Cos,
-                    "tan" => Tan,
-                    "log" => Log,
-                    "exp" => Exp,
-                    _ => return Err(LispParseError::InvalidToken(op.to_string())),
-                },
-                input,
-            ),
+    if FLT_REGEX.is_match(atom) {
+        return Ok(Done(push_node(
+            Constant(atom.parse::<f32>().ok().ok_or(LispParseError::Float)?),
             nodes,
-        ))
+        )));
     }
-
-    fn parse_binary(
-        op: &str,
-        lhs: usize,
-        rhs: usize,
-        nodes: &mut Vec<Node>,
-    ) -> Result<usize, LispParseError> {
-        Ok(push_node(
-            Binary(
-                match op {
-                    "+" => Add,
-                    "-" => Subtract,
-                    "*" => Multiply,
-                    "/" => Divide,
-                    "pow" => Pow,
-                    "min" => Min,
-                    "max" => Max,
-                    _ => return Err(LispParseError::InvalidToken(op.to_string())),
-                },
-                lhs,
-                rhs,
-            ),
+    if SYM_REGEX.is_match(atom) {
+        return Ok(Done(push_node(
+            Symbol(atom.chars().nth(0).ok_or(LispParseError::Symbol)?),
             nodes,
-        ))
+        )));
     }
+    return Ok(Todo(atom));
+}
 
-    fn parse_expression<'a>(
-        expr: &[Parsed<'a>],
-        nodes: &mut Vec<Node>,
-    ) -> Result<usize, LispParseError> {
-        match expr.len() {
-            0 => Err(LispParseError::TooFewTokens),
-            1 => match &expr[0] {
-                Done(i) => Ok(*i),
-                // Expression of length cannot be a todo item.
-                Todo(token) => Err(LispParseError::InvalidToken(token.to_string())),
+fn parse_unary(op: &str, input: usize, nodes: &mut Vec<Node>) -> Result<usize, LispParseError> {
+    Ok(push_node(
+        Unary(
+            match op {
+                "-" => Negate,
+                "sqrt" => Sqrt,
+                "abs" => Abs,
+                "sin" => Sin,
+                "cos" => Cos,
+                "tan" => Tan,
+                "log" => Log,
+                "exp" => Exp,
+                _ => return Err(LispParseError::InvalidToken(op.to_string())),
             },
-            2 => match (&expr[0], &expr[1]) {
-                (Todo(op), Done(input)) => Ok(parse_unary(op, *input, nodes)?),
-                // Anything that's not a valid unary op.
-                _ => Err(LispParseError::MalformedExpression),
+            input,
+        ),
+        nodes,
+    ))
+}
+
+fn parse_binary(
+    op: &str,
+    lhs: usize,
+    rhs: usize,
+    nodes: &mut Vec<Node>,
+) -> Result<usize, LispParseError> {
+    Ok(push_node(
+        Binary(
+            match op {
+                "+" => Add,
+                "-" => Subtract,
+                "*" => Multiply,
+                "/" => Divide,
+                "pow" => Pow,
+                "min" => Min,
+                "max" => Max,
+                _ => return Err(LispParseError::InvalidToken(op.to_string())),
             },
-            3 => match (&expr[0], &expr[1], &expr[2]) {
-                (Todo(op), Done(lhs), Done(rhs)) => Ok(parse_binary(op, *lhs, *rhs, nodes)?),
-                // Anything that's not a valid binary op.
-                _ => Err(LispParseError::MalformedExpression),
-            },
-            _ => Err(LispParseError::TooManyTokens),
-        }
+            lhs,
+            rhs,
+        ),
+        nodes,
+    ))
+}
+
+fn parse_expression<'a>(
+    expr: &[Parsed<'a>],
+    nodes: &mut Vec<Node>,
+) -> Result<usize, LispParseError> {
+    match expr.len() {
+        0 => Err(LispParseError::TooFewTokens),
+        1 => match &expr[0] {
+            Done(i) => Ok(*i),
+            // Expression of length cannot be a todo item.
+            Todo(token) => Err(LispParseError::InvalidToken(token.to_string())),
+        },
+        2 => match (&expr[0], &expr[1]) {
+            (Todo(op), Done(input)) => Ok(parse_unary(op, *input, nodes)?),
+            // Anything that's not a valid unary op.
+            _ => Err(LispParseError::MalformedExpression),
+        },
+        3 => match (&expr[0], &expr[1], &expr[2]) {
+            (Todo(op), Done(lhs), Done(rhs)) => Ok(parse_binary(op, *lhs, *rhs, nodes)?),
+            // Anything that's not a valid binary op.
+            _ => Err(LispParseError::MalformedExpression),
+        },
+        _ => Err(LispParseError::TooManyTokens),
     }
+}
 
-    pub fn parse(lisp: &str) -> Result<Tree, LispParseError> {
-        // First pass to collect statistics.
-        let (nodecount, maxdepth) = count_nodes(&lisp);
-        // Allocate memory according to collected statistics.
-        let mut nodes: Vec<Node> = Vec::with_capacity(nodecount);
-        let mut parens: Vec<usize> = Vec::with_capacity(maxdepth);
-        let mut stack: Vec<Parsed> = Vec::with_capacity(maxdepth + 4);
-        for token in Tokenizer::from(&lisp) {
-            match token {
-                Open => parens.push(stack.len()),
-                Atom(token) => stack.push(parse_atom(token, &mut nodes)?),
-                Close => {
-                    let last = parens.pop().ok_or(LispParseError::MalformedParentheses)?;
-                    let parsed = parse_expression(&stack[last..], &mut nodes)?;
-                    stack.truncate(last);
-                    stack.push(Done(parsed));
-                }
+pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
+    // First pass to collect statistics.
+    let (nodecount, maxdepth) = count_nodes(&lisp);
+    // Allocate memory according to collected statistics.
+    let mut nodes: Vec<Node> = Vec::with_capacity(nodecount);
+    let mut parens: Vec<usize> = Vec::with_capacity(maxdepth);
+    let mut stack: Vec<Parsed> = Vec::with_capacity(maxdepth + 4);
+    for token in Tokenizer::from(&lisp) {
+        match token {
+            Open => parens.push(stack.len()),
+            Atom(token) => stack.push(parse_atom(token, &mut nodes)?),
+            Close => {
+                let last = parens.pop().ok_or(LispParseError::MalformedParentheses)?;
+                let parsed = parse_expression(&stack[last..], &mut nodes)?;
+                stack.truncate(last);
+                stack.push(Done(parsed));
             }
         }
-        if stack.len() == 1 {
-            if let Done(index) = stack.remove(0) {
-                if index == nodes.len() - 1 {
-                    return Ok(Tree::from_nodes(nodes)
-                        .ok()
-                        .ok_or(LispParseError::Unknown)?);
-                }
+    }
+    if stack.len() == 1 {
+        if let Done(index) = stack.remove(0) {
+            if index == nodes.len() - 1 {
+                return Ok(Tree::from_nodes(nodes)
+                    .ok()
+                    .ok_or(LispParseError::Unknown)?);
             }
         }
-        return Err(LispParseError::Unknown);
     }
+    return Err(LispParseError::Unknown);
 }
 
 #[macro_export]
 macro_rules! deftree {
     ($($exp:tt) *) => {
-        tree_parse::parse(stringify!($($exp) *))
+        parse_tree(stringify!($($exp) *))
     };
 }
 
-mod template_parse {
-    use super::*;
-    use crate::template::Template;
-
-    pub fn parse(lisp: &str) -> Template {
-        todo!();
-    }
+pub fn parse_template(lisp: &str) -> Template {
+    todo!();
 }
 
 #[macro_export]
 macro_rules! deftemplate {
     ($($exp:tt) *) => {
-        template_parse::parse(stringify!($($exp) *))
+        parse_template(stringify!($($exp) *))
     };
 }
 
@@ -306,14 +301,73 @@ mod tests {
 
     #[test]
     pub fn basic_template_parse() {
-        let template = deftemplate!(
-            (:left (+ (* _k _a) (* _k _b))
-             :right (* _k (+ _a _b)))
+        let distribution = deftemplate!(
+            (:ping (+ (* k a) (* k b))
+             :pong (* k (+ a b)))
         );
 
-        let template2 = deftemplate!(
-            (:left (min (sqrt _a) (sqrt _b))
-             (sqrt (min _a _b)))
+        let min_sqrt = deftemplate!(
+            (:ping (min (sqrt a) (sqrt b))
+             :pong (sqrt (min a b)))
+        );
+
+        let rearrange_div = deftemplate!(
+            (:ping (* (/ a b) (/ x y))
+             :pong (* (/ a y) (/ x b)))
+        );
+
+        let cancel_div = deftemplate!(
+            (:ping (/ a a)
+             :pong 1.0)
+        );
+
+        let distribute_pow = deftemplate!(
+            (:ping (pow (/ a b) 2.)
+             :pong (/ (pow a 2.) (pow b 2.)))
+        );
+
+        let square_sqrt = deftemplate!(
+            (:ping (pow (sqrt a) 2.)
+             :pong a)
+        );
+
+        let sqrt_square = deftemplate!(
+            (:ping (sqrt (pow a 2.))
+             :pong a)
+        );
+
+        let add_fractions = deftemplate!(
+            (:ping (+ (/ a d) (/ b d))
+             :pong (/ (+ a b) d))
+        );
+
+        // Identity operations
+
+        let add_0 = deftemplate!(
+            (:ping (+ x 0.)
+             :pong x)
+        );
+
+        let sub_0 = deftemplate!(
+          (:ping (- x 0) :pong x)
+        );
+
+        let mul_1 = deftemplate!(
+          (:ping (* x 1.) :pong x)
+        );
+
+        let pow_1 = deftemplate!(
+            (:ping (pow x 1.) :pong x)
+        );
+
+        // Others
+
+        let mul_0 = deftemplate!(
+            (:ping (* x 0.) :pong 0.)
+        );
+
+        let pow_0 = deftemplate!(
+            (:ping (pow x 0.) :pong 1.)
         );
     }
 }

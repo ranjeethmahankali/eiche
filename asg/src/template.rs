@@ -1,13 +1,5 @@
-use crate::tree::{BinaryOp, UnaryOp};
-
-pub enum TNode {
-    Constant(f32),
-    Symbol(char),
-    Placeholder(char),
-    Unary(UnaryOp, usize, usize),
-    Binary(BinaryOp, usize, usize),
-}
+use crate::tree::{BinaryOp, Node, UnaryOp};
 
 pub struct Template {
-    nodes: Vec<TNode>,
+    nodes: Vec<Node>,
 }
