@@ -71,7 +71,10 @@ pub struct Tree {
 
 use Node::*;
 
-use crate::helper::{equivalent, fold_constants, DepthWalker, Trimmer};
+use crate::{
+    helper::{equivalent, fold_constants, DepthWalker, Trimmer},
+    parser::{parse_lisp, LispParseError},
+};
 
 #[derive(Debug)]
 pub enum InvalidTree {
@@ -98,6 +101,10 @@ impl Tree {
         } else {
             Err(InvalidTree::WrongNodeOrder)
         }
+    }
+
+    pub fn from_lisp(lisp: String) -> Result<Tree, LispParseError> {
+        parse_lisp(lisp)
     }
 
     /// The number of nodes in this tree.
