@@ -9,18 +9,18 @@ mod tests {
 
     #[test]
     fn constant() {
-        let x: Tree = std::f64::consts::PI.into();
-        assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f64::consts::PI));
+        let x: Tree = std::f32::consts::PI.into();
+        assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f32::consts::PI));
         let mut eval = Evaluator::new(&x);
         match eval.run() {
-            Ok(val) => assert_eq!(val, std::f64::consts::PI),
+            Ok(val) => assert_eq!(val, std::f32::consts::PI),
             _ => assert!(false),
         }
     }
 
     #[test]
     fn pythagoras() {
-        const TRIPLETS: [(f64, f64, f64); 6] = [
+        const TRIPLETS: [(f32, f32, f32); 6] = [
             (3., 4., 5.),
             (5., 12., 13.),
             (8., 15., 17.),
@@ -44,7 +44,7 @@ mod tests {
         let y: Tree = 'y'.into();
         let h = sqrt(pow(x, 2.0.into()) + pow(y, 2.0.into()));
         let mut eval = Evaluator::new(&h);
-        const TRIPLETS: [(f64, f64, f64); 6] = [
+        const TRIPLETS: [(f32, f32, f32); 6] = [
             (3., 4., 5.),
             (5., 12., 13.),
             (8., 15., 17.),
@@ -65,16 +65,16 @@ mod tests {
     #[test]
     fn trig_identity() {
         use rand::Rng;
-        const PI_2: f64 = 2.0 * std::f64::consts::TAU;
+        const PI_2: f32 = 2.0 * std::f32::consts::TAU;
 
         let sum: Tree = pow(sin('x'.into()), 2.0.into()) + pow(cos('x'.into()), 2.0.into());
         let mut eval = Evaluator::new(&sum);
         let mut rng = rand::thread_rng();
         for _ in 0..100 {
-            let x: f64 = PI_2 * rng.gen::<f64>();
+            let x: f32 = PI_2 * rng.gen::<f32>();
             eval.set_var('x', x);
             match eval.run() {
-                Ok(val) => assert!(f64::abs(val - 1.) < 1e-14),
+                Ok(val) => assert!(f32::abs(val - 1.) < 1e-14),
                 _ => assert!(false),
             }
         }
@@ -83,22 +83,22 @@ mod tests {
     fn eval_test<F>(
         tree: Tree,
         mut expectedfn: F,
-        vardata: &[(char, f64, f64)],
+        vardata: &[(char, f32, f32)],
         samples_per_var: usize,
-        epsilon: f64,
+        epsilon: f32,
     ) where
-        F: FnMut(&[f64]) -> Option<f64>,
+        F: FnMut(&[f32]) -> Option<f32>,
     {
         use rand::Rng;
         let mut eval = Evaluator::new(&tree);
         let nvars = vardata.len();
         let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f64>::with_capacity(nvars);
+        let mut sample = Vec::<f32>::with_capacity(nvars);
         let mut rng = StdRng::seed_from_u64(42);
         while indices[0] <= samples_per_var {
             let vari = sample.len();
             let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f64>() * (upper - lower);
+            let value = lower + rng.gen::<f32>() * (upper - lower);
             sample.push(value);
             eval.set_var(label, value);
             indices[vari] += 1;
@@ -106,7 +106,7 @@ mod tests {
                 continue;
             }
             // We set all the variables. Run the test.
-            let error = f64::abs(
+            let error = f32::abs(
                 eval.run().expect("Unable to compute the actual value.")
                     - expectedfn(&sample[..]).expect("Unable to compute expected value."),
             );
@@ -133,7 +133,7 @@ mod tests {
                 let ytree: Tree = 'y'.into();
                 xtree + ytree
             },
-            |vars: &[f64]| {
+            |vars: &[f32]| {
                 if let [x, y] = vars[..] {
                     Some(x + y)
                 } else {
@@ -150,11 +150,11 @@ mod tests {
     fn evaluate_trees() {
         eval_test(
             pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()),
-            |vars: &[f64]| {
+            |vars: &[f32]| {
                 if let [x] = vars[..] {
                     Some(
-                        f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
-                            / (f64::cos(x) + 2.),
+                        f32::powf(f32::log(f32::sin(x) + 2., std::f32::consts::E), 3.)
+                            / (f32::cos(x) + 2.),
                     )
                 } else {
                     None
@@ -199,18 +199,18 @@ mod tests {
                 };
                 max(min(s1, s2), s3)
             },
-            |vars: &[f64]| {
+            |vars: &[f32]| {
                 if let [x, y, z] = vars[..] {
-                    let s1 = f64::sqrt(
-                        f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
+                    let s1 = f32::sqrt(
+                        f32::powf(x - 2., 2.) + f32::powf(y - 3., 2.) + f32::powf(z - 4., 2.),
                     ) - 2.75;
-                    let s2 = f64::sqrt(
-                        f64::powf(x + 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
+                    let s2 = f32::sqrt(
+                        f32::powf(x + 2., 2.) + f32::powf(y - 3., 2.) + f32::powf(z - 4., 2.),
                     ) - 4.;
-                    let s3 = f64::sqrt(
-                        f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
+                    let s3 = f32::sqrt(
+                        f32::powf(x + 2., 2.) + f32::powf(y + 3., 2.) + f32::powf(z - 4., 2.),
                     ) - 5.25;
-                    Some(f64::max(f64::min(s1, s2), s3))
+                    Some(f32::max(f32::min(s1, s2), s3))
                 } else {
                     None
                 }
@@ -485,7 +485,7 @@ mod tests {
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
-            move |vars: &[f64]| -> Option<f64> {
+            move |vars: &[f32]| -> Option<f32> {
                 if let [x, y, z] = vars[..] {
                     eval.set_var('x', x);
                     eval.set_var('y', y);
@@ -515,7 +515,7 @@ mod tests {
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
-            move |vars: &[f64]| -> Option<f64> {
+            move |vars: &[f32]| -> Option<f32> {
                 if let [x] = vars[..] {
                     eval.set_var('x', x);
                     let result = eval.run();
@@ -549,7 +549,7 @@ mod tests {
         let mut eval: Evaluator = Evaluator::new(&tree);
         eval_test(
             nodup,
-            move |vars: &[f64]| -> Option<f64> {
+            move |vars: &[f32]| -> Option<f32> {
                 if let [x, y] = vars[..] {
                     eval.set_var('x', x);
                     eval.set_var('y', y);

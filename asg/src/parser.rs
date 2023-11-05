@@ -160,7 +160,7 @@ pub mod tree_parse {
         };
         if FLT_REGEX.is_match(atom) {
             return Ok(Done(push_node(
-                Constant(atom.parse::<f64>().ok().ok_or(LispParseError::Float)?),
+                Constant(atom.parse::<f32>().ok().ok_or(LispParseError::Float)?),
                 nodes,
             )));
         }
