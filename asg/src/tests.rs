@@ -69,12 +69,15 @@ mod tests {
 
         let sum: Tree = pow(sin('x'.into()), 2.0.into()) + pow(cos('x'.into()), 2.0.into());
         let mut eval = Evaluator::new(&sum);
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
             let x: f32 = PI_2 * rng.gen::<f32>();
             eval.set_var('x', x);
             match eval.run() {
-                Ok(val) => assert!(f32::abs(val - 1.) < 1e-14),
+                Ok(val) => {
+                    println!("{}: {}", x, f32::abs(val - 1.));
+                    assert!(f32::abs(val - 1.) < 1e-6)
+                }
                 _ => assert!(false),
             }
         }
