@@ -1,5 +1,5 @@
+pub mod parser;
 pub mod tree;
 
 mod helper;
-mod parser;
 mod tests;

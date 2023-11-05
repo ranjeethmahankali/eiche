@@ -11,7 +11,7 @@ use std::str::CharIndices;
 #[macro_export]
 macro_rules! deftree {
     ($($exp:tt) *) => {
-        crate::parser::parse_lisp(stringify!($($exp) *).to_string())
+        parse_lisp(stringify!($($exp) *).to_string())
     };
 }
 
@@ -243,6 +243,7 @@ pub fn parse_lisp(lisp: String) -> Result<Tree, LispParseError> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn deftree_macro() {
