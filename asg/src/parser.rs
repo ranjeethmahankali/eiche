@@ -1,4 +1,9 @@
-use crate::tree::{abs, cos, exp, log, max, min, pow, sin, sqrt, tan, Node::*, Tree};
+use crate::tree::{
+    BinaryOp::*,
+    Node::{self, *},
+    Tree,
+    UnaryOp::*,
+};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::str::CharIndices;
@@ -86,7 +91,7 @@ impl<'a> Iterator for Tokenizer<'a> {
 
 #[derive(Debug)]
 enum Parsed<'a> {
-    Done(Tree),
+    Done(usize),
     Todo(&'a str),
 }
 
@@ -105,7 +110,13 @@ pub enum LispParseError {
     Unknown,
 }
 
-fn parse_atom<'a>(atom: &'a str) -> Result<Parsed<'a>, LispParseError> {
+fn push_node(node: Node, nodes: &mut Vec<Node>) -> usize {
+    let i = nodes.len();
+    nodes.push(node);
+    return i;
+}
+
+fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, LispParseError> {
     lazy_static! {
         static ref FLT_REGEX: Regex =
             Regex::new("^\\d+\\.*\\d*$").expect("Failed to initialize regex for floats.");
@@ -113,60 +124,83 @@ fn parse_atom<'a>(atom: &'a str) -> Result<Parsed<'a>, LispParseError> {
             Regex::new("^[a-zA-Z]$").expect("Failed to initialize regex for numbers.");
     };
     if FLT_REGEX.is_match(atom) {
-        return Ok(Done(Tree::new(Constant(
-            atom.parse::<f64>().ok().ok_or(LispParseError::Float)?,
-        ))));
+        return Ok(Done(push_node(
+            Constant(atom.parse::<f64>().ok().ok_or(LispParseError::Float)?),
+            nodes,
+        )));
     }
     if SYM_REGEX.is_match(atom) {
-        return Ok(Done(Tree::new(Symbol(
-            atom.chars().nth(0).ok_or(LispParseError::Symbol)?,
-        ))));
+        return Ok(Done(push_node(
+            Symbol(atom.chars().nth(0).ok_or(LispParseError::Symbol)?),
+            nodes,
+        )));
     }
     return Ok(Todo(atom));
 }
 
-fn parse_unary(op: &str, tree: Tree) -> Result<Tree, LispParseError> {
-    match op {
-        "-" => Ok(-tree),
-        "sqrt" => Ok(sqrt(tree)),
-        "abs" => Ok(abs(tree)),
-        "sin" => Ok(sin(tree)),
-        "cos" => Ok(cos(tree)),
-        "tan" => Ok(tan(tree)),
-        "log" => Ok(log(tree)),
-        "exp" => Ok(exp(tree)),
-        _ => Err(LispParseError::Unary),
-    }
+fn parse_unary(op: &str, input: usize, nodes: &mut Vec<Node>) -> Result<usize, LispParseError> {
+    Ok(push_node(
+        Unary(
+            match op {
+                "-" => Negate,
+                "sqrt" => Sqrt,
+                "abs" => Abs,
+                "sin" => Sin,
+                "cos" => Cos,
+                "tan" => Tan,
+                "log" => Log,
+                "exp" => Exp,
+                _ => return Err(LispParseError::Unary),
+            },
+            input,
+        ),
+        nodes,
+    ))
 }
 
-fn parse_binary(op: &str, lhs: Tree, rhs: Tree) -> Result<Tree, LispParseError> {
-    match op {
-        "+" => Ok(lhs + rhs),
-        "-" => Ok(lhs - rhs),
-        "*" => Ok(lhs * rhs),
-        "/" => Ok(lhs / rhs),
-        "pow" => Ok(pow(lhs, rhs)),
-        "min" => Ok(min(lhs, rhs)),
-        "max" => Ok(max(lhs, rhs)),
-        _ => Err(LispParseError::Binary),
-    }
+fn parse_binary(
+    op: &str,
+    lhs: usize,
+    rhs: usize,
+    nodes: &mut Vec<Node>,
+) -> Result<usize, LispParseError> {
+    Ok(push_node(
+        Binary(
+            match op {
+                "+" => Add,
+                "-" => Subtract,
+                "*" => Multiply,
+                "/" => Divide,
+                "pow" => Pow,
+                "min" => Min,
+                "max" => Max,
+                _ => return Err(LispParseError::Binary),
+            },
+            lhs,
+            rhs,
+        ),
+        nodes,
+    ))
 }
 
-fn parse_expression<'a>(expr: &mut Vec<Parsed<'a>>) -> Result<Tree, LispParseError> {
+fn parse_expression<'a>(
+    expr: &mut Vec<Parsed<'a>>,
+    nodes: &mut Vec<Node>,
+) -> Result<usize, LispParseError> {
     match expr.len() {
         0 => Err(LispParseError::TooFewTokens),
         1 => match expr.remove(0) {
-            Done(tree) => Ok(tree),
+            Done(i) => Ok(i),
             // Expression of length cannot be a todo item.
             Todo(token) => Err(LispParseError::InvalidToken(token.to_string())),
         },
         2 => match (expr.remove(1), expr.remove(0)) {
-            (Done(tree), Todo(op)) => Ok(parse_unary(op, tree)?),
+            (Done(input), Todo(op)) => Ok(parse_unary(op, input, nodes)?),
             // Anything that's not a valid unary op.
             _ => Err(LispParseError::Unary),
         },
         3 => match (expr.remove(2), expr.remove(1), expr.remove(0)) {
-            (Done(rhs), Done(lhs), Todo(op)) => Ok(parse_binary(op, lhs, rhs)?),
+            (Done(rhs), Done(lhs), Todo(op)) => Ok(parse_binary(op, lhs, rhs, nodes)?),
             // Anything that's not a valid binary op.
             _ => Err(LispParseError::Binary),
         },
@@ -175,13 +209,14 @@ fn parse_expression<'a>(expr: &mut Vec<Parsed<'a>>) -> Result<Tree, LispParseErr
 }
 
 pub fn parse_lisp(lisp: String) -> Result<Tree, LispParseError> {
+    let mut nodes: Vec<Node> = Vec::new();
     let mut parens: Vec<usize> = Vec::new();
     let mut stack: Vec<Parsed> = Vec::new();
     let mut toparse: Vec<Parsed> = Vec::with_capacity(4);
     for token in Tokenizer::from(&lisp) {
         match token {
             Open => parens.push(stack.len()),
-            Atom(token) => stack.push(parse_atom(token)?),
+            Atom(token) => stack.push(parse_atom(token, &mut nodes)?),
             Close => {
                 toparse.clear();
                 // Drain everything from the most recent Open paren
@@ -190,13 +225,17 @@ pub fn parse_lisp(lisp: String) -> Result<Tree, LispParseError> {
                 toparse.extend(
                     stack.drain(parens.pop().ok_or(LispParseError::MalformedParentheses)?..),
                 );
-                stack.push(Done(parse_expression(&mut toparse)?));
+                stack.push(Done(parse_expression(&mut toparse, &mut nodes)?));
             }
         }
     }
     if stack.len() == 1 {
-        if let Done(tree) = stack.remove(0) {
-            return Ok(tree);
+        if let Done(index) = stack.remove(0) {
+            if index == nodes.len() - 1 {
+                return Ok(Tree::from_nodes(nodes)
+                    .ok()
+                    .ok_or(LispParseError::Unknown)?);
+            }
         }
     }
     return Err(LispParseError::Unknown);
