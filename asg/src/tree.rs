@@ -22,6 +22,7 @@ pub enum BinaryOp {
 }
 
 impl UnaryOp {
+    /// Compute the result of the operation on `value`.
     pub fn apply(&self, value: f64) -> f64 {
         match self {
             Negate => -value,
@@ -37,6 +38,7 @@ impl UnaryOp {
 }
 
 impl BinaryOp {
+    /// Compute the result of the operation on `lhs` and `rhs`.
     pub fn apply(&self, lhs: f64, rhs: f64) -> f64 {
         match self {
             Add => lhs + rhs,
@@ -49,9 +51,6 @@ impl BinaryOp {
         }
     }
 }
-
-use BinaryOp::*;
-use UnaryOp::*;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
@@ -67,9 +66,13 @@ pub struct Tree {
     nodes: Vec<Node>,
 }
 
+use crate::{
+    helper::{equivalent, fold_constants, DepthWalker, Trimmer},
+    parser::{parse_lisp, LispParseError},
+};
+use BinaryOp::*;
 use Node::*;
-
-use crate::helper::{equivalent, DepthWalker, Trimmer};
+use UnaryOp::*;
 
 #[derive(Debug)]
 pub enum InvalidTree {
@@ -98,6 +101,11 @@ impl Tree {
         }
     }
 
+    pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
+        parse_lisp(lisp)
+    }
+
+    /// The number of nodes in this tree.
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
@@ -121,33 +129,7 @@ impl Tree {
     }
 
     pub fn fold_constants(mut self) -> Tree {
-        for index in 0..self.len() {
-            let constval = match self.nodes[index] {
-                Constant(_) => None,
-                Symbol(_) => None,
-                Unary(op, input) => {
-                    if let Constant(value) = self.nodes[input] {
-                        Some(op.apply(value))
-                    } else {
-                        None
-                    }
-                }
-                Binary(op, lhs, rhs) => {
-                    if let (Constant(a), Constant(b)) = (&self.nodes[lhs], &self.nodes[rhs]) {
-                        Some(op.apply(*a, *b))
-                    } else {
-                        None
-                    }
-                }
-            };
-            if let Some(value) = constval {
-                self.nodes[index] = Constant(value);
-            }
-        }
-        return self.prune();
-    }
-
-    pub fn prune(mut self) -> Tree {
+        fold_constants(&mut self.nodes);
         let mut walker = DepthWalker::new();
         let mut trimmer = Trimmer::new();
         let root_index = self.root_index();
@@ -192,21 +174,27 @@ impl Tree {
 
     pub fn deduplicate(mut self) -> Tree {
         use std::collections::hash_map::HashMap;
-
+        // Compute new indices after deduplication.
         let mut walker1 = DepthWalker::new();
-        let mut walker2 = DepthWalker::new();
-        let hashes = self.node_hashes();
-        let mut revmap: HashMap<u64, usize> = HashMap::new();
-        let mut indices: Box<[usize]> = (0..self.len()).collect();
-        for i in 0..hashes.len() {
-            let h = hashes[i];
-            let entry = revmap.entry(h).or_insert(i);
-            if *entry != i && equivalent(*entry, i, &self.nodes, &mut walker1, &mut walker2) {
-                // The i-th node should be replaced with entry-th node.
-                indices[i] = *entry;
+        let indices = {
+            let mut indices: Box<[usize]> = (0..self.len()).collect();
+            // Compute hashes to find potential duplicates.
+            let hashes = self.node_hashes();
+            // Map hashes to node indices.
+            let mut revmap: HashMap<u64, usize> = HashMap::new();
+            // These walkers are for checking the equivalence of the
+            // nodes with the same hash.
+            let mut walker2 = DepthWalker::new();
+            for i in 0..hashes.len() {
+                let h = hashes[i];
+                let entry = revmap.entry(h).or_insert(i);
+                if *entry != i && equivalent(*entry, i, &self.nodes, &mut walker1, &mut walker2) {
+                    // The i-th node should be replaced with entry-th node.
+                    indices[i] = *entry;
+                }
             }
-        }
-        let indices = indices; // Disallow mutation from here.
+            indices
+        };
         for node in self.nodes.iter_mut() {
             match node {
                 Constant(_) => {}
@@ -220,7 +208,15 @@ impl Tree {
                 }
             }
         }
-        return self.prune();
+        {
+            let mut trimmer = Trimmer::new();
+            let root_index = self.root_index();
+            self.nodes = trimmer.trim(self.nodes, root_index, &mut walker1);
+            if !Self::validate(&self.nodes) {
+                panic!("Something broke in the depth first traversal or trimming. This should never have happened!");
+            }
+        }
+        return self;
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
