@@ -63,7 +63,6 @@ impl<'a> Iterator for Tokenizer<'a> {
                         let token = Some(Atom(&self.lisp[self.last..i]));
                         self.last = i + 1;
                         return token;
-                        // tokens.push(Atom(&lisp[last..i]));
                     } else {
                         self.last = i + 1;
                         return Some(Close);
@@ -178,18 +177,19 @@ fn parse_expression<'a>(expr: &mut Vec<Parsed<'a>>) -> Result<Tree, LispParseErr
 pub fn parse_lisp(lisp: String) -> Result<Tree, LispParseError> {
     let mut parens: Vec<usize> = Vec::new();
     let mut stack: Vec<Parsed> = Vec::new();
-    let mut toparse: Vec<Parsed> = Vec::new();
+    let mut toparse: Vec<Parsed> = Vec::with_capacity(4);
     for token in Tokenizer::from(&lisp) {
         match token {
             Open => parens.push(stack.len()),
-            Atom(slice) => {
-                let tree = parse_atom(slice)?;
-                stack.push(tree);
-            }
+            Atom(token) => stack.push(parse_atom(token)?),
             Close => {
-                let last = parens.pop().ok_or(LispParseError::MalformedParentheses)?;
                 toparse.clear();
-                toparse.extend(stack.drain(last..));
+                // Drain everything from the most recent Open paren
+                // till the end into toparse to get parsed into a
+                // tree.
+                toparse.extend(
+                    stack.drain(parens.pop().ok_or(LispParseError::MalformedParentheses)?..),
+                );
                 stack.push(Done(parse_expression(&mut toparse)?));
             }
         }
@@ -211,6 +211,7 @@ mod tests {
             (- (sqrt (+ (* x x) (* y y))) 5.0)
         )
         .expect("Unable to parse tree from lisp");
+        assert_eq!(sphere.len(), 10);
         assert_eq!(
             format!("{}", sphere).trim(),
             "

@@ -409,9 +409,8 @@ impl Trimmer {
 
     /// The given `nodes` are walked depth-first using the `walker`
     /// and nodes that are not visited are filtered out. The filtered
-    /// `nodes` are returned. You can minimize the number of
-    /// allocations performed by using the same trimmer multiple
-    /// times.
+    /// `nodes` are returned. You can minimize allocations by using
+    /// the same trimmer multiple times.
     pub fn trim(
         &mut self,
         mut nodes: Vec<Node>,

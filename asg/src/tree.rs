@@ -52,9 +52,6 @@ impl BinaryOp {
     }
 }
 
-use BinaryOp::*;
-use UnaryOp::*;
-
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
     Constant(f64),
@@ -69,12 +66,13 @@ pub struct Tree {
     nodes: Vec<Node>,
 }
 
-use Node::*;
-
 use crate::{
     helper::{equivalent, fold_constants, DepthWalker, Trimmer},
     parser::{parse_lisp, LispParseError},
 };
+use BinaryOp::*;
+use Node::*;
+use UnaryOp::*;
 
 #[derive(Debug)]
 pub enum InvalidTree {
@@ -132,10 +130,6 @@ impl Tree {
 
     pub fn fold_constants(mut self) -> Tree {
         fold_constants(&mut self.nodes);
-        return self.prune();
-    }
-
-    pub fn prune(mut self) -> Tree {
         let mut walker = DepthWalker::new();
         let mut trimmer = Trimmer::new();
         let root_index = self.root_index();
@@ -181,6 +175,7 @@ impl Tree {
     pub fn deduplicate(mut self) -> Tree {
         use std::collections::hash_map::HashMap;
         // Compute new indices after deduplication.
+        let mut walker1 = DepthWalker::new();
         let indices = {
             let mut indices: Box<[usize]> = (0..self.len()).collect();
             // Compute hashes to find potential duplicates.
@@ -189,7 +184,6 @@ impl Tree {
             let mut revmap: HashMap<u64, usize> = HashMap::new();
             // These walkers are for checking the equivalence of the
             // nodes with the same hash.
-            let mut walker1 = DepthWalker::new();
             let mut walker2 = DepthWalker::new();
             for i in 0..hashes.len() {
                 let h = hashes[i];
@@ -214,7 +208,15 @@ impl Tree {
                 }
             }
         }
-        return self.prune();
+        {
+            let mut trimmer = Trimmer::new();
+            let root_index = self.root_index();
+            self.nodes = trimmer.trim(self.nodes, root_index, &mut walker1);
+            if !Self::validate(&self.nodes) {
+                panic!("Something broke in the depth first traversal or trimming. This should never have happened!");
+            }
+        }
+        return self;
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
