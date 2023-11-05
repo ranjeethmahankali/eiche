@@ -67,7 +67,7 @@ pub struct Tree {
 }
 
 use crate::{
-    helper::{equivalent, fold_constants, DepthWalker, Trimmer},
+    helper::{equivalent, fold_constants, DepthWalker, Pruner},
     parser::{parse_lisp, LispParseError},
 };
 use BinaryOp::*;
@@ -75,8 +75,11 @@ use Node::*;
 use UnaryOp::*;
 
 #[derive(Debug)]
-pub enum InvalidTree {
+pub enum TreeError {
     WrongNodeOrder,
+    ConstantFoldingFailed,
+    EmptyTree,
+    PruningFailed,
 }
 
 impl Tree {
@@ -84,21 +87,22 @@ impl Tree {
         Tree { nodes: vec![node] }
     }
 
-    fn validate(nodes: &Vec<Node>) -> bool {
-        (0..nodes.len()).all(|i| match &nodes[i] {
+    fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
+        if !(0..nodes.len()).all(|i| match &nodes[i] {
             Constant(_) | Symbol(_) => true,
             Unary(_op, input) => input < &i,
             Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
-        })
+        }) {
+            return Err(TreeError::WrongNodeOrder);
+        }
         // Maybe add more checks later.
+        return Ok(nodes);
     }
 
-    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, InvalidTree> {
-        if Self::validate(&nodes) {
-            Ok(Tree { nodes })
-        } else {
-            Err(InvalidTree::WrongNodeOrder)
-        }
+    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, TreeError> {
+        Ok(Tree {
+            nodes: Self::validate(nodes)?,
+        })
     }
 
     pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
@@ -110,10 +114,8 @@ impl Tree {
         self.nodes.len()
     }
 
-    pub fn root(&self) -> &Node {
-        self.nodes
-            .last()
-            .expect("This Tree is empty! This should never have happened!")
+    pub fn root(&self) -> Result<&Node, TreeError> {
+        self.nodes.last().ok_or(TreeError::EmptyTree)
     }
 
     pub fn root_index(&self) -> usize {
@@ -128,16 +130,13 @@ impl Tree {
         &self.nodes
     }
 
-    pub fn fold_constants(mut self) -> Tree {
-        fold_constants(&mut self.nodes);
+    pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
         let mut walker = DepthWalker::new();
-        let mut trimmer = Trimmer::new();
+        let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        self.nodes = trimmer.trim(self.nodes, root_index, &mut walker);
-        if !Self::validate(&self.nodes) {
-            panic!("Something broke in the depth first traversal or trimming. This should never have happened!");
-        }
-        return self;
+        self.nodes =
+            Self::validate(pruner.prune(fold_constants(self.nodes), root_index, &mut walker)?)?;
+        return Ok(self);
     }
 
     fn node_hashes(&self) -> Box<[u64]> {
@@ -172,7 +171,7 @@ impl Tree {
         return hashes;
     }
 
-    pub fn deduplicate(mut self) -> Tree {
+    pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
         use std::collections::hash_map::HashMap;
         // Compute new indices after deduplication.
         let mut walker1 = DepthWalker::new();
@@ -209,14 +208,11 @@ impl Tree {
             }
         }
         {
-            let mut trimmer = Trimmer::new();
+            let mut pruner = Pruner::new();
             let root_index = self.root_index();
-            self.nodes = trimmer.trim(self.nodes, root_index, &mut walker1);
-            if !Self::validate(&self.nodes) {
-                panic!("Something broke in the depth first traversal or trimming. This should never have happened!");
-            }
+            self.nodes = Self::validate(pruner.prune(self.nodes, root_index, &mut walker1)?)?;
         }
-        return self;
+        return Ok(self);
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {

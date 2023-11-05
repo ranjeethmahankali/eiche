@@ -9,15 +9,11 @@ mod tests {
 
     #[test]
     fn constant() {
-        let pi: f64 = 3.14;
-        let x: Tree = pi.into();
-        match x.root() {
-            Constant(val) if *val == pi => (),
-            _ => assert!(false),
-        }
+        let x: Tree = std::f64::consts::PI.into();
+        assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f64::consts::PI));
         let mut eval = Evaluator::new(&x);
         match eval.run() {
-            Ok(val) => assert_eq!(val, pi),
+            Ok(val) => assert_eq!(val, std::f64::consts::PI),
             _ => assert!(false),
         }
     }
@@ -327,7 +323,7 @@ mod tests {
       └── [59] Constant(5.25)"
                 .trim()
         );
-        let tree = tree.deduplicate();
+        let tree = tree.deduplicate().unwrap();
         assert_eq!(
             format!("{}", tree).trim(),
             "
@@ -405,9 +401,9 @@ mod tests {
             let b: Tree = 3.0.into();
             a * b
         };
-        let tree = tree.fold_constants();
+        let tree = tree.fold_constants().unwrap();
         assert_eq!(tree.len(), 1usize);
-        assert_eq!(tree.root(), &Constant(2. * 3.));
+        assert!(matches!(tree.root(), Ok(Constant(val)) if *val == 2.* 3.));
         // More complicated tree.
         let tree = {
             let numerator: Tree = {
@@ -444,7 +440,7 @@ mod tests {
             numerator / denom
         };
         assert!(tree.len() > expected.len());
-        let tree = tree.fold_constants();
+        let tree = tree.fold_constants().unwrap();
         assert_eq!(tree, expected);
     }
 
@@ -483,7 +479,7 @@ mod tests {
             };
             max(min(s1, s2), s3)
         };
-        let nodup = tree.clone().deduplicate();
+        let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 32);
         let mut eval: Evaluator = Evaluator::new(&tree);
@@ -513,7 +509,7 @@ mod tests {
     fn deduplication_2() {
         let tree: Tree =
             { pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()) };
-        let nodup = tree.clone().deduplicate();
+        let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 10);
         let mut eval: Evaluator = Evaluator::new(&tree);
@@ -547,7 +543,7 @@ mod tests {
                     + pow(cos('y'.into()), 2.0.into())
                     + ((cos('y'.into()) * sin('y'.into())) * 2.0.into()))
         };
-        let nodup = tree.clone().deduplicate();
+        let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 20);
         let mut eval: Evaluator = Evaluator::new(&tree);
@@ -632,7 +628,7 @@ mod tests {
                 Symbol('y'),            // 4
                 Unary(Sqrt, 3),         // 5
             ]),
-            Err(InvalidTree::WrongNodeOrder)
+            Err(TreeError::WrongNodeOrder)
         ));
     }
 
