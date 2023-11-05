@@ -126,6 +126,7 @@ pub enum LispParseError {
     TooFewTokens,
     TooManyTokens,
     MalformedParentheses,
+    MalformedTemplate,
     Unknown,
 }
 
@@ -147,10 +148,9 @@ fn push_node(node: Node, nodes: &mut Vec<Node>) -> usize {
 
 fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, LispParseError> {
     lazy_static! {
-        static ref FLT_REGEX: Regex =
-            Regex::new("^\\d+\\.*\\d*$").expect("Failed to initialize regex for floats.");
-        static ref SYM_REGEX: Regex =
-            Regex::new("^[a-zA-Z]$").expect("Failed to initialize regex for numbers.");
+        // These are run in unit tests, so it is safe to unwrap these.
+        static ref FLT_REGEX: Regex = Regex::new("^\\d+\\.*\\d*$").unwrap();
+        static ref SYM_REGEX: Regex = Regex::new("^[a-zA-Z]$").unwrap();
     };
     if FLT_REGEX.is_match(atom) {
         return Ok(Done(push_node(
@@ -237,7 +237,7 @@ fn parse_expression<'a>(
     }
 }
 
-pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
+fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
     // First pass to collect statistics.
     let (nodecount, maxdepth) = count_nodes(&lisp);
     // Allocate memory according to collected statistics.
@@ -259,13 +259,17 @@ pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
     if stack.len() == 1 {
         if let Done(index) = stack.remove(0) {
             if index == nodes.len() - 1 {
-                return Ok(Tree::from_nodes(nodes)
-                    .ok()
-                    .ok_or(LispParseError::Unknown)?);
+                return Ok(nodes);
             }
         }
     }
     return Err(LispParseError::Unknown);
+}
+
+pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
+    Ok(Tree::from_nodes(parse_nodes(&lisp)?)
+        .ok()
+        .ok_or(LispParseError::Unknown)?)
 }
 
 #[macro_export]
@@ -275,8 +279,28 @@ macro_rules! deftree {
     };
 }
 
-pub fn parse_template(lisp: &str) -> Template {
-    todo!();
+pub fn parse_template(lisp: &str) -> Result<Template, LispParseError> {
+    lazy_static! {
+        // These are run in unit tests, so it is safe to unwrap these.
+        static ref TEMPLATE_REGEX: Regex =
+            Regex::new("^\\s*\\(:ping\\s*(.*)\\s+:pong\\s*(.*)\\)\\s*$").unwrap();
+    };
+    let (ping, pong) = {
+        let captures = TEMPLATE_REGEX
+            .captures(lisp)
+            .ok_or(LispParseError::MalformedTemplate)?;
+        (
+            captures
+                .get(1)
+                .ok_or(LispParseError::MalformedTemplate)?
+                .as_str(),
+            captures
+                .get(2)
+                .ok_or(LispParseError::MalformedTemplate)?
+                .as_str(),
+        )
+    };
+    Ok(Template::from(parse_nodes(ping)?, parse_nodes(pong)?))
 }
 
 #[macro_export]
