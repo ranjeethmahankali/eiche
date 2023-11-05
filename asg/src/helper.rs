@@ -1,4 +1,4 @@
-use crate::tree::{BinaryOp, Node, Node::*, Tree, UnaryOp};
+use crate::tree::{BinaryOp, Node, Node::*, Tree, TreeError, UnaryOp};
 
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
@@ -6,14 +6,14 @@ impl Into<Tree> for Node {
     }
 }
 
-impl From<f64> for Tree {
-    fn from(value: f64) -> Self {
+impl From<f32> for Tree {
+    fn from(value: f32) -> Self {
         return Constant(value).into();
     }
 }
 
-impl From<f64> for Node {
-    fn from(value: f64) -> Self {
+impl From<f32> for Node {
+    fn from(value: f32) -> Self {
         return Constant(value);
     }
 }
@@ -394,29 +394,29 @@ impl<'a> Iterator for DepthIterator<'a> {
     }
 }
 
-pub struct Trimmer {
+pub struct Pruner {
     indices: Vec<Option<usize>>,
-    trimmed: Vec<Node>,
+    pruned: Vec<Node>,
 }
 
-impl Trimmer {
-    pub fn new() -> Trimmer {
-        Trimmer {
+impl Pruner {
+    pub fn new() -> Pruner {
+        Pruner {
             indices: vec![],
-            trimmed: vec![],
+            pruned: vec![],
         }
     }
 
     /// The given `nodes` are walked depth-first using the `walker`
     /// and nodes that are not visited are filtered out. The filtered
     /// `nodes` are returned. You can minimize allocations by using
-    /// the same trimmer multiple times.
-    pub fn trim(
+    /// the same pruner multiple times.
+    pub fn prune(
         &mut self,
         mut nodes: Vec<Node>,
         root_index: usize,
         walker: &mut DepthWalker,
-    ) -> Vec<Node> {
+    ) -> Result<Vec<Node>, TreeError> {
         self.indices.clear();
         self.indices.resize(nodes.len(), None);
         // Mark used nodes.
@@ -437,36 +437,36 @@ impl Trimmer {
             }
         }
         // Filter, update and copy nodes.
-        const ERROR: &str = "FATAL: Unable to prune the tree correctly.";
-        self.trimmed.clear();
-        self.trimmed.reserve(nodes.len());
-        self.trimmed.extend(
-            (0..self.indices.len())
-                .zip(nodes.iter())
-                .filter(|(i, _node)| self.indices[*i].is_some())
-                .map(|(_i, node)| {
-                    match node {
-                        // Update the indices of this node's inputs.
-                        Constant(val) => Constant(*val),
-                        Symbol(label) => Symbol(*label),
-                        Unary(op, input) => Unary(*op, self.indices[*input].expect(ERROR)),
-                        Binary(op, lhs, rhs) => Binary(
-                            *op,
-                            self.indices[*lhs].expect(ERROR),
-                            self.indices[*rhs].expect(ERROR),
-                        ),
-                    }
-                }),
-        );
-        std::mem::swap(&mut self.trimmed, &mut nodes);
-        return nodes;
+        self.pruned.clear();
+        self.pruned.reserve(nodes.len());
+        for node in (0..self.indices.len())
+            .zip(nodes.iter())
+            .filter(|(i, _node)| self.indices[*i].is_some())
+            .map(|(_i, node)| node)
+        {
+            self.pruned.push(match node {
+                // Update the indices of this node's inputs.
+                Constant(val) => Constant(*val),
+                Symbol(label) => Symbol(*label),
+                Unary(op, input) => {
+                    Unary(*op, self.indices[*input].ok_or(TreeError::PruningFailed)?)
+                }
+                Binary(op, lhs, rhs) => Binary(
+                    *op,
+                    self.indices[*lhs].ok_or(TreeError::PruningFailed)?,
+                    self.indices[*rhs].ok_or(TreeError::PruningFailed)?,
+                ),
+            });
+        }
+        std::mem::swap(&mut self.pruned, &mut nodes);
+        return Ok(nodes);
     }
 }
 
 /// Compute the results of operations on constants and fold those into
 /// constant nodes. The unused nodes after folding are not
-/// trimmed. Use a trimmer for that.
-pub fn fold_constants(nodes: &mut Vec<Node>) {
+/// pruned. Use a pruner for that.
+pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
     for index in 0..nodes.len() {
         let constval = match nodes[index] {
             Constant(_) => None,
@@ -490,4 +490,5 @@ pub fn fold_constants(nodes: &mut Vec<Node>) {
             nodes[index] = Constant(value);
         }
     }
+    return nodes;
 }

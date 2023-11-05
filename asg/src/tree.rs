@@ -23,38 +23,38 @@ pub enum BinaryOp {
 
 impl UnaryOp {
     /// Compute the result of the operation on `value`.
-    pub fn apply(&self, value: f64) -> f64 {
+    pub fn apply(&self, value: f32) -> f32 {
         match self {
             Negate => -value,
-            Sqrt => f64::sqrt(value),
-            Abs => f64::abs(value),
-            Sin => f64::sin(value),
-            Cos => f64::cos(value),
-            Tan => f64::tan(value),
-            Log => f64::log(value, std::f64::consts::E),
-            Exp => f64::exp(value),
+            Sqrt => f32::sqrt(value),
+            Abs => f32::abs(value),
+            Sin => f32::sin(value),
+            Cos => f32::cos(value),
+            Tan => f32::tan(value),
+            Log => f32::log(value, std::f32::consts::E),
+            Exp => f32::exp(value),
         }
     }
 }
 
 impl BinaryOp {
     /// Compute the result of the operation on `lhs` and `rhs`.
-    pub fn apply(&self, lhs: f64, rhs: f64) -> f64 {
+    pub fn apply(&self, lhs: f32, rhs: f32) -> f32 {
         match self {
             Add => lhs + rhs,
             Subtract => lhs - rhs,
             Multiply => lhs * rhs,
             Divide => lhs / rhs,
-            Pow => f64::powf(lhs, rhs),
-            Min => f64::min(lhs, rhs),
-            Max => f64::max(lhs, rhs),
+            Pow => f32::powf(lhs, rhs),
+            Min => f32::min(lhs, rhs),
+            Max => f32::max(lhs, rhs),
         }
     }
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
-    Constant(f64),
+    Constant(f32),
     Symbol(char),
     Unary(UnaryOp, usize),
     Binary(BinaryOp, usize, usize),
@@ -67,16 +67,19 @@ pub struct Tree {
 }
 
 use crate::{
-    helper::{equivalent, fold_constants, DepthWalker, Trimmer},
-    parser::{parse_lisp, LispParseError},
+    helper::{equivalent, fold_constants, DepthWalker, Pruner},
+    parser::{tree_parse, LispParseError},
 };
 use BinaryOp::*;
 use Node::*;
 use UnaryOp::*;
 
 #[derive(Debug)]
-pub enum InvalidTree {
+pub enum TreeError {
     WrongNodeOrder,
+    ConstantFoldingFailed,
+    EmptyTree,
+    PruningFailed,
 }
 
 impl Tree {
@@ -84,25 +87,26 @@ impl Tree {
         Tree { nodes: vec![node] }
     }
 
-    fn validate(nodes: &Vec<Node>) -> bool {
-        (0..nodes.len()).all(|i| match &nodes[i] {
+    fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
+        if !(0..nodes.len()).all(|i| match &nodes[i] {
             Constant(_) | Symbol(_) => true,
             Unary(_op, input) => input < &i,
             Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
-        })
+        }) {
+            return Err(TreeError::WrongNodeOrder);
+        }
         // Maybe add more checks later.
+        return Ok(nodes);
     }
 
-    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, InvalidTree> {
-        if Self::validate(&nodes) {
-            Ok(Tree { nodes })
-        } else {
-            Err(InvalidTree::WrongNodeOrder)
-        }
+    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, TreeError> {
+        Ok(Tree {
+            nodes: Self::validate(nodes)?,
+        })
     }
 
     pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
-        parse_lisp(lisp)
+        tree_parse::parse(lisp)
     }
 
     /// The number of nodes in this tree.
@@ -110,10 +114,8 @@ impl Tree {
         self.nodes.len()
     }
 
-    pub fn root(&self) -> &Node {
-        self.nodes
-            .last()
-            .expect("This Tree is empty! This should never have happened!")
+    pub fn root(&self) -> Result<&Node, TreeError> {
+        self.nodes.last().ok_or(TreeError::EmptyTree)
     }
 
     pub fn root_index(&self) -> usize {
@@ -128,16 +130,13 @@ impl Tree {
         &self.nodes
     }
 
-    pub fn fold_constants(mut self) -> Tree {
-        fold_constants(&mut self.nodes);
+    pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
         let mut walker = DepthWalker::new();
-        let mut trimmer = Trimmer::new();
+        let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        self.nodes = trimmer.trim(self.nodes, root_index, &mut walker);
-        if !Self::validate(&self.nodes) {
-            panic!("Something broke in the depth first traversal or trimming. This should never have happened!");
-        }
-        return self;
+        self.nodes =
+            Self::validate(pruner.prune(fold_constants(self.nodes), root_index, &mut walker)?)?;
+        return Ok(self);
     }
 
     fn node_hashes(&self) -> Box<[u64]> {
@@ -147,7 +146,7 @@ impl Tree {
         let mut hashes: Box<[u64]> = vec![0; self.len()].into_boxed_slice();
         for index in 0..self.len() {
             let hash: u64 = match self.nodes[index] {
-                Constant(value) => value.to_bits(),
+                Constant(value) => value.to_bits().into(),
                 Symbol(label) => {
                     let mut s: DefaultHasher = Default::default();
                     label.hash(&mut s);
@@ -172,7 +171,7 @@ impl Tree {
         return hashes;
     }
 
-    pub fn deduplicate(mut self) -> Tree {
+    pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
         use std::collections::hash_map::HashMap;
         // Compute new indices after deduplication.
         let mut walker1 = DepthWalker::new();
@@ -209,14 +208,11 @@ impl Tree {
             }
         }
         {
-            let mut trimmer = Trimmer::new();
+            let mut pruner = Pruner::new();
             let root_index = self.root_index();
-            self.nodes = trimmer.trim(self.nodes, root_index, &mut walker1);
-            if !Self::validate(&self.nodes) {
-                panic!("Something broke in the depth first traversal or trimming. This should never have happened!");
-            }
+            self.nodes = Self::validate(pruner.prune(self.nodes, root_index, &mut walker1)?)?;
         }
-        return self;
+        return Ok(self);
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
@@ -328,7 +324,7 @@ pub enum EvaluationError {
 
 pub struct Evaluator<'a> {
     tree: &'a Tree,
-    regs: Box<[Option<f64>]>,
+    regs: Box<[Option<f32>]>,
 }
 
 impl<'a> Evaluator<'a> {
@@ -342,7 +338,7 @@ impl<'a> Evaluator<'a> {
     /// Set all symbols in the evaluator matching `label` to
     /// `value`. This `value` will be used for all future evaluations,
     /// unless this function is called again with a different `value`.
-    pub fn set_var(&mut self, label: char, value: f64) {
+    pub fn set_var(&mut self, label: char, value: f32) {
         for (node, reg) in self.tree.nodes.iter().zip(self.regs.iter_mut()) {
             match node {
                 Symbol(l) if *l == label => {
@@ -355,7 +351,7 @@ impl<'a> Evaluator<'a> {
 
     /// Read the value from the `index`-th register. Returns an error
     /// if the register doesn't contain a value.
-    fn read(&self, index: usize) -> Result<f64, EvaluationError> {
+    fn read(&self, index: usize) -> Result<f32, EvaluationError> {
         match self.regs[index] {
             Some(val) => Ok(val),
             None => Err(EvaluationError::UninitializedValueRead),
@@ -364,7 +360,7 @@ impl<'a> Evaluator<'a> {
 
     /// Write the `value` into the `index`-th register. The existing
     /// value is overwritten.
-    fn write(&mut self, index: usize, value: f64) {
+    fn write(&mut self, index: usize, value: f32) {
         self.regs[index] = Some(value);
     }
 
@@ -372,7 +368,7 @@ impl<'a> Evaluator<'a> {
     /// contain the output value, or an
     /// error. `Variablenotfound(label)` error means the variable
     /// matching `label` hasn't been assigned a value using `set_var`.
-    pub fn run(&mut self) -> Result<f64, EvaluationError> {
+    pub fn run(&mut self) -> Result<f32, EvaluationError> {
         for idx in 0..self.tree.len() {
             self.write(
                 idx,
