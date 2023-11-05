@@ -101,7 +101,7 @@ impl Tree {
         }
     }
 
-    pub fn from_lisp(lisp: String) -> Result<Tree, LispParseError> {
+    pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
         parse_lisp(lisp)
     }
 
