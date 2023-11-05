@@ -128,8 +128,7 @@ use Parsed::*;
 pub enum LispParseError {
     Float,
     Symbol,
-    Unary,
-    Binary,
+    MalformedExpression,
     InvalidToken(String),
     TooFewTokens,
     TooManyTokens,
@@ -186,7 +185,7 @@ pub mod tree_parse {
                     "tan" => Tan,
                     "log" => Log,
                     "exp" => Exp,
-                    _ => return Err(LispParseError::Unary),
+                    _ => return Err(LispParseError::InvalidToken(op.to_string())),
                 },
                 input,
             ),
@@ -210,7 +209,7 @@ pub mod tree_parse {
                     "pow" => Pow,
                     "min" => Min,
                     "max" => Max,
-                    _ => return Err(LispParseError::Binary),
+                    _ => return Err(LispParseError::InvalidToken(op.to_string())),
                 },
                 lhs,
                 rhs,
@@ -233,12 +232,12 @@ pub mod tree_parse {
             2 => match (&expr[0], &expr[1]) {
                 (Todo(op), Done(input)) => Ok(parse_unary(op, *input, nodes)?),
                 // Anything that's not a valid unary op.
-                _ => Err(LispParseError::Unary),
+                _ => Err(LispParseError::MalformedExpression),
             },
             3 => match (&expr[0], &expr[1], &expr[2]) {
                 (Todo(op), Done(lhs), Done(rhs)) => Ok(parse_binary(op, *lhs, *rhs, nodes)?),
                 // Anything that's not a valid binary op.
-                _ => Err(LispParseError::Binary),
+                _ => Err(LispParseError::MalformedExpression),
             },
             _ => Err(LispParseError::TooManyTokens),
         }
