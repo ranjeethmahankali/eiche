@@ -11,7 +11,7 @@ use std::str::CharIndices;
 #[macro_export]
 macro_rules! deftree {
     ($($exp:tt) *) => {
-        parse_lisp(stringify!($($exp) *))
+        parse_tree(stringify!($($exp) *))
     };
 }
 
@@ -188,23 +188,23 @@ fn parse_binary(
 }
 
 fn parse_expression<'a>(
-    expr: &mut Vec<Parsed<'a>>,
+    expr: &[Parsed<'a>],
     nodes: &mut Vec<Node>,
 ) -> Result<usize, LispParseError> {
     match expr.len() {
         0 => Err(LispParseError::TooFewTokens),
-        1 => match expr.remove(0) {
-            Done(i) => Ok(i),
+        1 => match &expr[0] {
+            Done(i) => Ok(*i),
             // Expression of length cannot be a todo item.
             Todo(token) => Err(LispParseError::InvalidToken(token.to_string())),
         },
-        2 => match (expr.remove(1), expr.remove(0)) {
-            (Done(input), Todo(op)) => Ok(parse_unary(op, input, nodes)?),
+        2 => match (&expr[1], &expr[0]) {
+            (Done(input), Todo(op)) => Ok(parse_unary(op, *input, nodes)?),
             // Anything that's not a valid unary op.
             _ => Err(LispParseError::Unary),
         },
-        3 => match (expr.remove(2), expr.remove(1), expr.remove(0)) {
-            (Done(rhs), Done(lhs), Todo(op)) => Ok(parse_binary(op, lhs, rhs, nodes)?),
+        3 => match (&expr[2], &expr[1], &expr[0]) {
+            (Done(rhs), Done(lhs), Todo(op)) => Ok(parse_binary(op, *lhs, *rhs, nodes)?),
             // Anything that's not a valid binary op.
             _ => Err(LispParseError::Binary),
         },
@@ -241,27 +241,22 @@ fn count_nodes(lisp: &str) -> (usize, usize) {
     (nodecount, maxdepth)
 }
 
-pub fn parse_lisp(lisp: &str) -> Result<Tree, LispParseError> {
+pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
     // First pass to collect statistics.
     let (nodecount, maxdepth) = count_nodes(&lisp);
     // Allocate memory according to collected statistics.
     let mut nodes: Vec<Node> = Vec::with_capacity(nodecount);
     let mut parens: Vec<usize> = Vec::with_capacity(maxdepth);
     let mut stack: Vec<Parsed> = Vec::with_capacity(maxdepth + 4);
-    let mut toparse: Vec<Parsed> = Vec::with_capacity(4);
     for token in Tokenizer::from(&lisp) {
         match token {
             Open => parens.push(stack.len()),
             Atom(token) => stack.push(parse_atom(token, &mut nodes)?),
             Close => {
-                toparse.clear();
-                // Drain everything from the most recent Open paren
-                // till the end into toparse to get parsed into a
-                // tree.
-                toparse.extend(
-                    stack.drain(parens.pop().ok_or(LispParseError::MalformedParentheses)?..),
-                );
-                stack.push(Done(parse_expression(&mut toparse, &mut nodes)?));
+                let last = parens.pop().ok_or(LispParseError::MalformedParentheses)?;
+                let parsed = parse_expression(&stack[last..], &mut nodes)?;
+                stack.truncate(last);
+                stack.push(Done(parsed));
             }
         }
     }
@@ -282,7 +277,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn node_counts() {
+    fn node_counting() {
         let (nodes, depth) = count_nodes(stringify!(
             (- (sqrt (+ (pow x 2.) (pow y 2.))) 5.0)
         ));
@@ -291,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_tree() {
+    fn tree_parsing() {
         let tree = deftree!(
             (- (sqrt (+ (pow x 2.) (pow y 2.))) 6.0)
         )

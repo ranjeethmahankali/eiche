@@ -68,7 +68,7 @@ pub struct Tree {
 
 use crate::{
     helper::{equivalent, fold_constants, DepthWalker, Pruner},
-    parser::{parse_lisp, LispParseError},
+    parser::{parse_tree, LispParseError},
 };
 use BinaryOp::*;
 use Node::*;
@@ -106,7 +106,7 @@ impl Tree {
     }
 
     pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
-        parse_lisp(lisp)
+        parse_tree(lisp)
     }
 
     /// The number of nodes in this tree.
