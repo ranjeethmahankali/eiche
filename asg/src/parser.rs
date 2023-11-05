@@ -2,13 +2,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::str::CharIndices;
 
-#[macro_export]
-macro_rules! deftree {
-    ($($exp:tt) *) => {
-        tree_parse::parse(stringify!($($exp) *))
-    };
-}
-
 #[derive(Debug, Copy, Clone)]
 enum Token<'a> {
     Open,
@@ -275,6 +268,29 @@ pub mod tree_parse {
     }
 }
 
+#[macro_export]
+macro_rules! deftree {
+    ($($exp:tt) *) => {
+        tree_parse::parse(stringify!($($exp) *))
+    };
+}
+
+mod template_parse {
+    use super::*;
+    use crate::template::Template;
+
+    pub fn parse(lisp: &str) -> Template {
+        todo!();
+    }
+}
+
+#[macro_export]
+macro_rules! deftemplate {
+    ($($exp:tt) *) => {
+        template_parse::parse(stringify!($($exp) *))
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,5 +302,18 @@ mod tests {
         ));
         assert_eq!(nodes, 10);
         assert_eq!(depth, 4);
+    }
+
+    #[test]
+    pub fn basic_template_parse() {
+        let template = deftemplate!(
+            (:left (+ (* _k _a) (* _k _b))
+             :right (* _k (+ _a _b)))
+        );
+
+        let template2 = deftemplate!(
+            (:left (min (sqrt _a) (sqrt _b))
+             (sqrt (min _a _b)))
+        );
     }
 }
