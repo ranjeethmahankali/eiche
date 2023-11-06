@@ -116,7 +116,16 @@ lazy_static! {
         deftemplate!(
             (_ping (pow x 0.) _pong 1.)
         ).unwrap(),
-
+        // Min and max simplifications from:
+        // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
+        deftemplate!( // Min
+            (_ping (min a b)
+             _pong (/ (+ (+ a b) (abs (- b a))) 2.))
+        ).unwrap(),
+        deftemplate!( // Max
+            (_ping (min a b)
+             _pong (/ (- (+ a b) (abs (- b a))) 2.))
+        ).unwrap(),
     ]);
 }
 
@@ -129,6 +138,6 @@ mod tests {
         // Just to make sure all the templates are valid and load
         // correctly.
         assert!(!TEMPLATES.is_empty());
-        assert!(TEMPLATES.len() >= 32);
+        assert!(TEMPLATES.len() >= 36);
     }
 }
