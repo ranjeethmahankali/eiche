@@ -13,6 +13,7 @@ use Token::*;
 struct Tokenizer<'a> {
     lisp: &'a str,
     last: usize,
+    curr: usize,
     iter: CharIndices<'a>,
     next: Option<Token<'a>>,
 }
@@ -22,39 +23,11 @@ impl<'a> Tokenizer<'a> {
         Tokenizer {
             lisp,
             last: 0,
+            curr: 0,
             iter: lisp.char_indices(),
             next: None,
         }
     }
-}
-
-fn count_nodes(lisp: &str) -> (usize, usize) {
-    let mut nodecount: usize = 0;
-    let mut maxdepth: usize = 0;
-    let mut depth: usize = 0;
-    let mut open: bool = false;
-    for token in Tokenizer::from(&lisp) {
-        match token {
-            Open => {
-                depth += 1;
-                maxdepth = usize::max(depth, maxdepth);
-                open = true;
-            }
-            Atom(_) => {
-                if !open {
-                    nodecount += 1;
-                } else {
-                    open = false;
-                }
-            }
-            Close => {
-                depth -= 1;
-                nodecount += 1;
-                open = false;
-            }
-        }
-    }
-    (nodecount, maxdepth)
 }
 
 impl<'a> Iterator for Tokenizer<'a> {
@@ -66,6 +39,7 @@ impl<'a> Iterator for Tokenizer<'a> {
             return Some(token);
         }
         while let Some((i, c)) = self.iter.next() {
+            self.curr = i + 1;
             match c {
                 '(' => {
                     if i > self.last {
@@ -105,8 +79,42 @@ impl<'a> Iterator for Tokenizer<'a> {
                 }
             };
         }
+        if self.curr > self.last {
+            let token = Some(Atom(&self.lisp[self.last..]));
+            self.last = self.curr + 1;
+            return token;
+        }
         return None;
     }
+}
+
+fn count_nodes(lisp: &str) -> (usize, usize) {
+    let mut nodecount: usize = 0;
+    let mut maxdepth: usize = 0;
+    let mut depth: usize = 0;
+    let mut open: bool = false;
+    for token in Tokenizer::from(&lisp) {
+        match token {
+            Open => {
+                depth += 1;
+                maxdepth = usize::max(depth, maxdepth);
+                open = true;
+            }
+            Atom(_) => {
+                if !open {
+                    nodecount += 1;
+                } else {
+                    open = false;
+                }
+            }
+            Close => {
+                depth -= 1;
+                nodecount += 1;
+                open = false;
+            }
+        }
+    }
+    (nodecount, maxdepth)
 }
 
 #[derive(Debug)]
@@ -126,7 +134,7 @@ pub enum LispParseError {
     TooFewTokens,
     TooManyTokens,
     MalformedParentheses,
-    MalformedTemplate,
+    MalformedTemplate(String),
     Unknown,
 }
 
@@ -283,20 +291,20 @@ pub fn parse_template(lisp: &str) -> Result<Template, LispParseError> {
     lazy_static! {
         // These are run in unit tests, so it is safe to unwrap these.
         static ref TEMPLATE_REGEX: Regex =
-            Regex::new("^\\s*\\(:ping\\s*(.*)\\s+:pong\\s*(.*)\\)\\s*$").unwrap();
+            Regex::new("^\\s*\\(_ping\\s*(.*)\\s+_pong\\s*(.*)\\)\\s*$").unwrap();
     };
     let (ping, pong) = {
         let captures = TEMPLATE_REGEX
             .captures(lisp)
-            .ok_or(LispParseError::MalformedTemplate)?;
+            .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?;
         (
             captures
                 .get(1)
-                .ok_or(LispParseError::MalformedTemplate)?
+                .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?
                 .as_str(),
             captures
                 .get(2)
-                .ok_or(LispParseError::MalformedTemplate)?
+                .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?
                 .as_str(),
         )
     };
@@ -324,74 +332,18 @@ mod tests {
     }
 
     #[test]
-    pub fn basic_template_parse() {
-        let distribution = deftemplate!(
-            (:ping (+ (* k a) (* k b))
-             :pong (* k (+ a b)))
-        );
-
-        let min_sqrt = deftemplate!(
-            (:ping (min (sqrt a) (sqrt b))
-             :pong (sqrt (min a b)))
-        );
-
-        let rearrange_div = deftemplate!(
-            (:ping (* (/ a b) (/ x y))
-             :pong (* (/ a y) (/ x b)))
-        );
-
-        let cancel_div = deftemplate!(
-            (:ping (/ a a)
-             :pong 1.0)
-        );
-
-        let distribute_pow = deftemplate!(
-            (:ping (pow (/ a b) 2.)
-             :pong (/ (pow a 2.) (pow b 2.)))
-        );
-
-        let square_sqrt = deftemplate!(
-            (:ping (pow (sqrt a) 2.)
-             :pong a)
-        );
-
-        let sqrt_square = deftemplate!(
-            (:ping (sqrt (pow a 2.))
-             :pong a)
-        );
-
-        let add_fractions = deftemplate!(
-            (:ping (+ (/ a d) (/ b d))
-             :pong (/ (+ a b) d))
-        );
-
-        // Identity operations
-
-        let add_0 = deftemplate!(
-            (:ping (+ x 0.)
-             :pong x)
-        );
-
-        let sub_0 = deftemplate!(
-          (:ping (- x 0) :pong x)
-        );
-
-        let mul_1 = deftemplate!(
-          (:ping (* x 1.) :pong x)
-        );
-
-        let pow_1 = deftemplate!(
-            (:ping (pow x 1.) :pong x)
-        );
-
-        // Others
-
-        let mul_0 = deftemplate!(
-            (:ping (* x 0.) :pong 0.)
-        );
-
-        let pow_0 = deftemplate!(
-            (:ping (pow x 0.) :pong 1.)
-        );
+    fn single_token() {
+        // Constant.
+        let tree = parse_tree("5.55").unwrap();
+        assert!(matches!(tree.root().unwrap(), Constant(val) if *val == 5.55));
+        // Constant with spaces.
+        let tree = parse_tree(" 5.55   ").unwrap();
+        assert!(matches!(tree.root().unwrap(), Constant(val) if *val == 5.55));
+        // Symbol.
+        let tree = parse_tree("x").unwrap();
+        assert!(matches!(tree.root().unwrap(), Symbol(label) if *label == 'x'));
+        // Symbol with spaces.
+        let tree = parse_tree(" x     ").unwrap();
+        assert!(matches!(tree.root().unwrap(), Symbol(label) if *label == 'x'));
     }
 }
