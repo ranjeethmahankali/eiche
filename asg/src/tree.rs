@@ -68,7 +68,7 @@ pub struct Tree {
 
 use crate::{
     helper::{equivalent, fold_constants, DepthWalker, Pruner},
-    parser::{tree_parse, LispParseError},
+    parser::{parse_tree, LispParseError},
 };
 use BinaryOp::*;
 use Node::*;
@@ -87,7 +87,7 @@ impl Tree {
         Tree { nodes: vec![node] }
     }
 
-    fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
+    pub fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
         if !(0..nodes.len()).all(|i| match &nodes[i] {
             Constant(_) | Symbol(_) => true,
             Unary(_op, input) => input < &i,
@@ -106,7 +106,7 @@ impl Tree {
     }
 
     pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
-        tree_parse::parse(lisp)
+        parse_tree(lisp)
     }
 
     /// The number of nodes in this tree.

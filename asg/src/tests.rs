@@ -5,7 +5,9 @@ mod tests {
 
     use crate::tree::Node::*;
     use crate::tree::*;
-    use crate::{deftree, helper::*, parser::tree_parse};
+    use crate::{deftree, helper::*, parser::parse_tree};
+
+    const EPSILON: f32 = 1e-6;
 
     #[test]
     fn constant() {
@@ -76,7 +78,7 @@ mod tests {
             match eval.run() {
                 Ok(val) => {
                     println!("{}: {}", x, f32::abs(val - 1.));
-                    assert!(f32::abs(val - 1.) < 1e-6)
+                    assert!(f32::abs(val - 1.) < EPSILON)
                 }
                 _ => assert!(false),
             }
@@ -88,7 +90,6 @@ mod tests {
         mut expectedfn: F,
         vardata: &[(char, f32, f32)],
         samples_per_var: usize,
-        epsilon: f32,
     ) where
         F: FnMut(&[f32]) -> Option<f32>,
     {
@@ -113,7 +114,7 @@ mod tests {
                 eval.run().expect("Unable to compute the actual value.")
                     - expectedfn(&sample[..]).expect("Unable to compute expected value."),
             );
-            assert!(error <= epsilon);
+            assert!(error <= EPSILON);
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -145,7 +146,6 @@ mod tests {
             },
             &[('x', -5., 5.), ('y', -5., 5.)],
             10,
-            0.,
         );
     }
 
@@ -165,7 +165,6 @@ mod tests {
             },
             &[('x', -2.5, 2.5)],
             100,
-            0.,
         );
 
         eval_test(
@@ -220,7 +219,6 @@ mod tests {
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
-            0.,
         );
     }
 
@@ -504,7 +502,6 @@ mod tests {
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
-            0.,
         );
     }
 
@@ -532,7 +529,6 @@ mod tests {
             },
             &[('x', -10., 10.)],
             20,
-            0.,
         );
     }
 
@@ -567,7 +563,6 @@ mod tests {
             },
             &[('x', -10., 10.), ('y', -9., 10.)],
             20,
-            0.,
         );
     }
 

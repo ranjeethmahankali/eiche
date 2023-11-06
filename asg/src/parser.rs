@@ -2,13 +2,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::str::CharIndices;
 
-#[macro_export]
-macro_rules! deftree {
-    ($($exp:tt) *) => {
-        tree_parse::parse(stringify!($($exp) *))
-    };
-}
-
 #[derive(Debug, Copy, Clone)]
 enum Token<'a> {
     Open,
@@ -20,6 +13,7 @@ use Token::*;
 struct Tokenizer<'a> {
     lisp: &'a str,
     last: usize,
+    curr: usize,
     iter: CharIndices<'a>,
     next: Option<Token<'a>>,
 }
@@ -29,39 +23,11 @@ impl<'a> Tokenizer<'a> {
         Tokenizer {
             lisp,
             last: 0,
+            curr: 0,
             iter: lisp.char_indices(),
             next: None,
         }
     }
-}
-
-fn count_nodes(lisp: &str) -> (usize, usize) {
-    let mut nodecount: usize = 0;
-    let mut maxdepth: usize = 0;
-    let mut depth: usize = 0;
-    let mut open: bool = false;
-    for token in Tokenizer::from(&lisp) {
-        match token {
-            Open => {
-                depth += 1;
-                maxdepth = usize::max(depth, maxdepth);
-                open = true;
-            }
-            Atom(_) => {
-                if !open {
-                    nodecount += 1;
-                } else {
-                    open = false;
-                }
-            }
-            Close => {
-                depth -= 1;
-                nodecount += 1;
-                open = false;
-            }
-        }
-    }
-    (nodecount, maxdepth)
 }
 
 impl<'a> Iterator for Tokenizer<'a> {
@@ -73,6 +39,7 @@ impl<'a> Iterator for Tokenizer<'a> {
             return Some(token);
         }
         while let Some((i, c)) = self.iter.next() {
+            self.curr = i + 1;
             match c {
                 '(' => {
                     if i > self.last {
@@ -112,8 +79,42 @@ impl<'a> Iterator for Tokenizer<'a> {
                 }
             };
         }
+        if self.curr > self.last {
+            let token = Some(Atom(&self.lisp[self.last..]));
+            self.last = self.curr + 1;
+            return token;
+        }
         return None;
     }
+}
+
+fn count_nodes(lisp: &str) -> (usize, usize) {
+    let mut nodecount: usize = 0;
+    let mut maxdepth: usize = 0;
+    let mut depth: usize = 0;
+    let mut open: bool = false;
+    for token in Tokenizer::from(&lisp) {
+        match token {
+            Open => {
+                depth += 1;
+                maxdepth = usize::max(depth, maxdepth);
+                open = true;
+            }
+            Atom(_) => {
+                if !open {
+                    nodecount += 1;
+                } else {
+                    open = false;
+                }
+            }
+            Close => {
+                depth -= 1;
+                nodecount += 1;
+                open = false;
+            }
+        }
+    }
+    (nodecount, maxdepth)
 }
 
 #[derive(Debug)]
@@ -133,146 +134,190 @@ pub enum LispParseError {
     TooFewTokens,
     TooManyTokens,
     MalformedParentheses,
+    MalformedTemplate(String),
     Unknown,
 }
 
-pub mod tree_parse {
-    use super::*;
-    use crate::tree::{
+use crate::{
+    template::Template,
+    tree::{
         BinaryOp::*,
         Node::{self, *},
         Tree,
         UnaryOp::*,
+    },
+};
+
+fn push_node(node: Node, nodes: &mut Vec<Node>) -> usize {
+    let i = nodes.len();
+    nodes.push(node);
+    return i;
+}
+
+fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, LispParseError> {
+    lazy_static! {
+        // These are run in unit tests, so it is safe to unwrap these.
+        static ref FLT_REGEX: Regex = Regex::new("^\\d+\\.*\\d*$").unwrap();
+        static ref SYM_REGEX: Regex = Regex::new("^[a-zA-Z]$").unwrap();
     };
-
-    fn push_node(node: Node, nodes: &mut Vec<Node>) -> usize {
-        let i = nodes.len();
-        nodes.push(node);
-        return i;
-    }
-
-    fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, LispParseError> {
-        lazy_static! {
-            static ref FLT_REGEX: Regex =
-                Regex::new("^\\d+\\.*\\d*$").expect("Failed to initialize regex for floats.");
-            static ref SYM_REGEX: Regex =
-                Regex::new("^[a-zA-Z]$").expect("Failed to initialize regex for numbers.");
-        };
-        if FLT_REGEX.is_match(atom) {
-            return Ok(Done(push_node(
-                Constant(atom.parse::<f32>().ok().ok_or(LispParseError::Float)?),
-                nodes,
-            )));
-        }
-        if SYM_REGEX.is_match(atom) {
-            return Ok(Done(push_node(
-                Symbol(atom.chars().nth(0).ok_or(LispParseError::Symbol)?),
-                nodes,
-            )));
-        }
-        return Ok(Todo(atom));
-    }
-
-    fn parse_unary(op: &str, input: usize, nodes: &mut Vec<Node>) -> Result<usize, LispParseError> {
-        Ok(push_node(
-            Unary(
-                match op {
-                    "-" => Negate,
-                    "sqrt" => Sqrt,
-                    "abs" => Abs,
-                    "sin" => Sin,
-                    "cos" => Cos,
-                    "tan" => Tan,
-                    "log" => Log,
-                    "exp" => Exp,
-                    _ => return Err(LispParseError::InvalidToken(op.to_string())),
-                },
-                input,
-            ),
+    if FLT_REGEX.is_match(atom) {
+        return Ok(Done(push_node(
+            Constant(atom.parse::<f32>().ok().ok_or(LispParseError::Float)?),
             nodes,
-        ))
+        )));
     }
-
-    fn parse_binary(
-        op: &str,
-        lhs: usize,
-        rhs: usize,
-        nodes: &mut Vec<Node>,
-    ) -> Result<usize, LispParseError> {
-        Ok(push_node(
-            Binary(
-                match op {
-                    "+" => Add,
-                    "-" => Subtract,
-                    "*" => Multiply,
-                    "/" => Divide,
-                    "pow" => Pow,
-                    "min" => Min,
-                    "max" => Max,
-                    _ => return Err(LispParseError::InvalidToken(op.to_string())),
-                },
-                lhs,
-                rhs,
-            ),
+    if SYM_REGEX.is_match(atom) {
+        return Ok(Done(push_node(
+            Symbol(atom.chars().nth(0).ok_or(LispParseError::Symbol)?),
             nodes,
-        ))
+        )));
     }
+    return Ok(Todo(atom));
+}
 
-    fn parse_expression<'a>(
-        expr: &[Parsed<'a>],
-        nodes: &mut Vec<Node>,
-    ) -> Result<usize, LispParseError> {
-        match expr.len() {
-            0 => Err(LispParseError::TooFewTokens),
-            1 => match &expr[0] {
-                Done(i) => Ok(*i),
-                // Expression of length cannot be a todo item.
-                Todo(token) => Err(LispParseError::InvalidToken(token.to_string())),
+fn parse_unary(op: &str, input: usize, nodes: &mut Vec<Node>) -> Result<usize, LispParseError> {
+    Ok(push_node(
+        Unary(
+            match op {
+                "-" => Negate,
+                "sqrt" => Sqrt,
+                "abs" => Abs,
+                "sin" => Sin,
+                "cos" => Cos,
+                "tan" => Tan,
+                "log" => Log,
+                "exp" => Exp,
+                _ => return Err(LispParseError::InvalidToken(op.to_string())),
             },
-            2 => match (&expr[0], &expr[1]) {
-                (Todo(op), Done(input)) => Ok(parse_unary(op, *input, nodes)?),
-                // Anything that's not a valid unary op.
-                _ => Err(LispParseError::MalformedExpression),
+            input,
+        ),
+        nodes,
+    ))
+}
+
+fn parse_binary(
+    op: &str,
+    lhs: usize,
+    rhs: usize,
+    nodes: &mut Vec<Node>,
+) -> Result<usize, LispParseError> {
+    Ok(push_node(
+        Binary(
+            match op {
+                "+" => Add,
+                "-" => Subtract,
+                "*" => Multiply,
+                "/" => Divide,
+                "pow" => Pow,
+                "min" => Min,
+                "max" => Max,
+                _ => return Err(LispParseError::InvalidToken(op.to_string())),
             },
-            3 => match (&expr[0], &expr[1], &expr[2]) {
-                (Todo(op), Done(lhs), Done(rhs)) => Ok(parse_binary(op, *lhs, *rhs, nodes)?),
-                // Anything that's not a valid binary op.
-                _ => Err(LispParseError::MalformedExpression),
-            },
-            _ => Err(LispParseError::TooManyTokens),
-        }
+            lhs,
+            rhs,
+        ),
+        nodes,
+    ))
+}
+
+fn parse_expression<'a>(
+    expr: &[Parsed<'a>],
+    nodes: &mut Vec<Node>,
+) -> Result<usize, LispParseError> {
+    match expr.len() {
+        0 => Err(LispParseError::TooFewTokens),
+        1 => match &expr[0] {
+            Done(i) => Ok(*i),
+            // Expression of length cannot be a todo item.
+            Todo(token) => Err(LispParseError::InvalidToken(token.to_string())),
+        },
+        2 => match (&expr[0], &expr[1]) {
+            (Todo(op), Done(input)) => Ok(parse_unary(op, *input, nodes)?),
+            // Anything that's not a valid unary op.
+            _ => Err(LispParseError::MalformedExpression),
+        },
+        3 => match (&expr[0], &expr[1], &expr[2]) {
+            (Todo(op), Done(lhs), Done(rhs)) => Ok(parse_binary(op, *lhs, *rhs, nodes)?),
+            // Anything that's not a valid binary op.
+            _ => Err(LispParseError::MalformedExpression),
+        },
+        _ => Err(LispParseError::TooManyTokens),
     }
+}
 
-    pub fn parse(lisp: &str) -> Result<Tree, LispParseError> {
-        // First pass to collect statistics.
-        let (nodecount, maxdepth) = count_nodes(&lisp);
-        // Allocate memory according to collected statistics.
-        let mut nodes: Vec<Node> = Vec::with_capacity(nodecount);
-        let mut parens: Vec<usize> = Vec::with_capacity(maxdepth);
-        let mut stack: Vec<Parsed> = Vec::with_capacity(maxdepth + 4);
-        for token in Tokenizer::from(&lisp) {
-            match token {
-                Open => parens.push(stack.len()),
-                Atom(token) => stack.push(parse_atom(token, &mut nodes)?),
-                Close => {
-                    let last = parens.pop().ok_or(LispParseError::MalformedParentheses)?;
-                    let parsed = parse_expression(&stack[last..], &mut nodes)?;
-                    stack.truncate(last);
-                    stack.push(Done(parsed));
-                }
+fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
+    // First pass to collect statistics.
+    let (nodecount, maxdepth) = count_nodes(&lisp);
+    // Allocate memory according to collected statistics.
+    let mut nodes: Vec<Node> = Vec::with_capacity(nodecount);
+    let mut parens: Vec<usize> = Vec::with_capacity(maxdepth);
+    let mut stack: Vec<Parsed> = Vec::with_capacity(maxdepth + 4);
+    for token in Tokenizer::from(&lisp) {
+        match token {
+            Open => parens.push(stack.len()),
+            Atom(token) => stack.push(parse_atom(token, &mut nodes)?),
+            Close => {
+                let last = parens.pop().ok_or(LispParseError::MalformedParentheses)?;
+                let parsed = parse_expression(&stack[last..], &mut nodes)?;
+                stack.truncate(last);
+                stack.push(Done(parsed));
             }
         }
-        if stack.len() == 1 {
-            if let Done(index) = stack.remove(0) {
-                if index == nodes.len() - 1 {
-                    return Ok(Tree::from_nodes(nodes)
-                        .ok()
-                        .ok_or(LispParseError::Unknown)?);
-                }
+    }
+    if stack.len() == 1 {
+        if let Done(index) = stack.remove(0) {
+            if index == nodes.len() - 1 {
+                return Ok(nodes);
             }
         }
-        return Err(LispParseError::Unknown);
     }
+    return Err(LispParseError::Unknown);
+}
+
+pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
+    Ok(Tree::from_nodes(parse_nodes(&lisp)?)
+        .ok()
+        .ok_or(LispParseError::Unknown)?)
+}
+
+#[macro_export]
+macro_rules! deftree {
+    ($($exp:tt) *) => {
+        parse_tree(stringify!($($exp) *))
+    };
+}
+
+pub fn parse_template(lisp: &str) -> Result<Template, LispParseError> {
+    lazy_static! {
+        // These are run in unit tests, so it is safe to unwrap these.
+        static ref TEMPLATE_REGEX: Regex =
+            Regex::new("^\\s*\\(_ping\\s*(.*)\\s+_pong\\s*(.*)\\)\\s*$").unwrap();
+    };
+    let (ping, pong) = {
+        let captures = TEMPLATE_REGEX
+            .captures(lisp)
+            .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?;
+        (
+            captures
+                .get(1)
+                .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?
+                .as_str(),
+            captures
+                .get(2)
+                .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?
+                .as_str(),
+        )
+    };
+    Template::from(parse_nodes(ping)?, parse_nodes(pong)?)
+        .ok()
+        .ok_or(LispParseError::Unknown)
+}
+
+#[macro_export]
+macro_rules! deftemplate {
+    ($($exp:tt) *) => {
+        parse_template(stringify!($($exp) *))
+    };
 }
 
 #[cfg(test)]
@@ -286,5 +331,21 @@ mod tests {
         ));
         assert_eq!(nodes, 10);
         assert_eq!(depth, 4);
+    }
+
+    #[test]
+    fn single_token() {
+        // Constant.
+        let tree = parse_tree("5.55").unwrap();
+        assert!(matches!(tree.root().unwrap(), Constant(val) if *val == 5.55));
+        // Constant with spaces.
+        let tree = parse_tree(" 5.55   ").unwrap();
+        assert!(matches!(tree.root().unwrap(), Constant(val) if *val == 5.55));
+        // Symbol.
+        let tree = parse_tree("x").unwrap();
+        assert!(matches!(tree.root().unwrap(), Symbol(label) if *label == 'x'));
+        // Symbol with spaces.
+        let tree = parse_tree(" x     ").unwrap();
+        assert!(matches!(tree.root().unwrap(), Symbol(label) if *label == 'x'));
     }
 }
