@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use crate::{
     deftemplate,
     parser::parse_template,
-    tree::{BinaryOp, Node, Tree, TreeError, UnaryOp},
+    tree::{Node, Tree, TreeError},
 };
 
 pub struct Template {
@@ -18,10 +18,22 @@ impl Template {
             pong: Tree::validate(pong)?,
         })
     }
+
+    pub fn mirror_templates(mut templates: Vec<Template>) -> Vec<Template> {
+        let num = templates.len();
+        for i in 0..num {
+            let t = &templates[i];
+            templates.push(Template {
+                ping: t.pong.clone(),
+                pong: t.ping.clone(),
+            });
+        }
+        return templates;
+    }
 }
 
 lazy_static! {
-    static ref TEMPLATES: Vec<Template> = vec![
+    static ref TEMPLATES: Vec<Template> = Template::mirror_templates(vec![
 
         // Factoring a multiplication out of addition.
         deftemplate!(
@@ -104,7 +116,8 @@ lazy_static! {
         deftemplate!(
             (_ping (pow x 0.) _pong 1.)
         ).unwrap(),
-    ];
+
+    ]);
 }
 
 #[cfg(test)]
@@ -116,6 +129,6 @@ mod tests {
         // Just to make sure all the templates are valid and load
         // correctly.
         assert!(!TEMPLATES.is_empty());
-        assert!(TEMPLATES.len() >= 16);
+        assert!(TEMPLATES.len() >= 32);
     }
 }
