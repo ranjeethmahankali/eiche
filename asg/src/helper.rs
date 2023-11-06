@@ -6,14 +6,14 @@ impl Into<Tree> for Node {
     }
 }
 
-impl From<f32> for Tree {
-    fn from(value: f32) -> Self {
+impl From<f64> for Tree {
+    fn from(value: f64) -> Self {
         return Constant(value).into();
     }
 }
 
-impl From<f32> for Node {
-    fn from(value: f32) -> Self {
+impl From<f64> for Node {
+    fn from(value: f64) -> Self {
         return Constant(value);
     }
 }

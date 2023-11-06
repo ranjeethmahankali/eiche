@@ -162,7 +162,7 @@ fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, Li
     };
     if FLT_REGEX.is_match(atom) {
         return Ok(Done(push_node(
-            Constant(atom.parse::<f32>().ok().ok_or(LispParseError::Float)?),
+            Constant(atom.parse::<f64>().ok().ok_or(LispParseError::Float)?),
             nodes,
         )));
     }

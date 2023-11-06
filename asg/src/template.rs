@@ -139,5 +139,40 @@ mod tests {
         // correctly.
         assert!(!TEMPLATES.is_empty());
         assert!(TEMPLATES.len() >= 36);
+        // All templates should be mirrored.
+        assert_eq!(TEMPLATES.len() % 2, 0);
+    }
+
+    #[test]
+    fn check_templates() {
+        let filter_symbols = |node: &Node| -> Option<char> {
+            if let Node::Symbol(c) = node {
+                Some(*c)
+            } else {
+                None
+            }
+        };
+        for template in TEMPLATES.iter() {
+            use crate::tests::tests::compare_trees;
+            // Check if valid trees can be made from the templates.
+            let ping = Tree::from_nodes(template.ping.clone()).unwrap();
+            let pong = Tree::from_nodes(template.pong.clone()).unwrap();
+            let vardata: Vec<(char, f64, f64)> = {
+                let mut vars: Vec<_> = ping
+                    .nodes()
+                    .iter()
+                    .chain(pong.nodes().iter())
+                    .filter_map(filter_symbols)
+                    .collect();
+                vars.sort();
+                vars.dedup();
+                vars.iter().map(|c| (*c, -10., 10.)).collect()
+            };
+            println!(
+                "=================\nPing: {:?}\nPong: {:?}\nVariables: {:?}\n===============",
+                ping, pong, vardata
+            );
+            compare_trees(ping, pong, &vardata, 40, 1e-12);
+        }
     }
 }

@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -7,11 +7,10 @@ mod tests {
     use crate::tree::*;
     use crate::{deftree, helper::*, parser::parse_tree};
 
-    const EPSILON: f32 = 1e-6;
-
     /// Helper function to evaluate the tree with randomly sampled
     /// variable values and compare the result to the one returned by
-    /// the `expectedfn` for the same inputs.
+    /// the `expectedfn` for the same inputs. The values must be
+    /// within `eps` of each other.
     ///
     /// Each variable is sampled within the range indicated by the
     /// corresponding entry in `vardata`. Each entry in vardata
@@ -20,21 +19,22 @@ mod tests {
     fn check_tree_eval<F>(
         tree: Tree,
         mut expectedfn: F,
-        vardata: &[(char, f32, f32)],
+        vardata: &[(char, f64, f64)],
         samples_per_var: usize,
+        eps: f64,
     ) where
-        F: FnMut(&[f32]) -> Option<f32>,
+        F: FnMut(&[f64]) -> Option<f64>,
     {
         use rand::Rng;
         let mut eval = Evaluator::new(&tree);
         let nvars = vardata.len();
         let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f32>::with_capacity(nvars);
+        let mut sample = Vec::<f64>::with_capacity(nvars);
         let mut rng = StdRng::seed_from_u64(42);
         while indices[0] <= samples_per_var {
             let vari = sample.len();
             let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f32>() * (upper - lower);
+            let value = lower + rng.gen::<f64>() * (upper - lower);
             sample.push(value);
             eval.set_var(label, value);
             indices[vari] += 1;
@@ -42,11 +42,11 @@ mod tests {
                 continue;
             }
             // We set all the variables. Run the test.
-            let error = f32::abs(
+            let error = f64::abs(
                 eval.run().expect("Unable to compute the actual value.")
                     - expectedfn(&sample[..]).expect("Unable to compute expected value."),
             );
-            assert!(error <= EPSILON);
+            assert!(error <= eps);
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -61,23 +61,24 @@ mod tests {
         }
     }
 
-    fn compare_trees(
+    pub fn compare_trees(
         tree1: Tree,
         tree2: Tree,
-        vardata: &[(char, f32, f32)],
+        vardata: &[(char, f64, f64)],
         samples_per_var: usize,
+        eps: f64,
     ) {
         use rand::Rng;
         let mut eval1 = Evaluator::new(&tree1);
         let mut eval2 = Evaluator::new(&tree2);
         let nvars = vardata.len();
         let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f32>::with_capacity(nvars);
+        let mut sample = Vec::<f64>::with_capacity(nvars);
         let mut rng = StdRng::seed_from_u64(42);
         while indices[0] <= samples_per_var {
             let vari = sample.len();
             let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f32>() * (upper - lower);
+            let value = lower + rng.gen::<f64>() * (upper - lower);
             sample.push(value);
             eval1.set_var(label, value);
             eval2.set_var(label, value);
@@ -87,10 +88,10 @@ mod tests {
             }
             let first = eval1.run().expect("Unable to compute the actual value.");
             let second = eval2.run().expect("Unable to compute expected value.");
-            println!("Comparing: {} | {}", first, second);
+            println!("Vars: {:?} | Comparing: {} | {}", sample, first, second);
             // We set all the variables. Run the test.
-            let error = f32::abs(first - second);
-            assert!(error <= EPSILON);
+            let error = f64::abs(first - second);
+            assert!(error <= eps);
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -107,18 +108,18 @@ mod tests {
 
     #[test]
     fn constant() {
-        let x: Tree = std::f32::consts::PI.into();
-        assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f32::consts::PI));
+        let x: Tree = std::f64::consts::PI.into();
+        assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f64::consts::PI));
         let mut eval = Evaluator::new(&x);
         match eval.run() {
-            Ok(val) => assert_eq!(val, std::f32::consts::PI),
+            Ok(val) => assert_eq!(val, std::f64::consts::PI),
             _ => assert!(false),
         }
     }
 
     #[test]
     fn pythagoras() {
-        const TRIPLETS: [(f32, f32, f32); 6] = [
+        const TRIPLETS: [(f64, f64, f64); 6] = [
             (3., 4., 5.),
             (5., 12., 13.),
             (8., 15., 17.),
@@ -142,7 +143,7 @@ mod tests {
         let y: Tree = 'y'.into();
         let h = sqrt(pow(x, 2.0.into()) + pow(y, 2.0.into()));
         let mut eval = Evaluator::new(&h);
-        const TRIPLETS: [(f32, f32, f32); 6] = [
+        const TRIPLETS: [(f64, f64, f64); 6] = [
             (3., 4., 5.),
             (5., 12., 13.),
             (8., 15., 17.),
@@ -163,18 +164,18 @@ mod tests {
     #[test]
     fn trig_identity() {
         use rand::Rng;
-        const PI_2: f32 = 2.0 * std::f32::consts::TAU;
+        const PI_2: f64 = 2.0 * std::f64::consts::TAU;
 
         let sum: Tree = pow(sin('x'.into()), 2.0.into()) + pow(cos('x'.into()), 2.0.into());
         let mut eval = Evaluator::new(&sum);
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
-            let x: f32 = PI_2 * rng.gen::<f32>();
+            let x: f64 = PI_2 * rng.gen::<f64>();
             eval.set_var('x', x);
             match eval.run() {
                 Ok(val) => {
-                    println!("{}: {}", x, f32::abs(val - 1.));
-                    assert!(f32::abs(val - 1.) < EPSILON)
+                    println!("{}: {}", x, f64::abs(val - 1.));
+                    assert!(f64::abs(val - 1.) < 1e-14)
                 }
                 _ => assert!(false),
             }
@@ -189,7 +190,7 @@ mod tests {
                 let ytree: Tree = 'y'.into();
                 xtree + ytree
             },
-            |vars: &[f32]| {
+            |vars: &[f64]| {
                 if let [x, y] = vars[..] {
                     Some(x + y)
                 } else {
@@ -198,6 +199,7 @@ mod tests {
             },
             &[('x', -5., 5.), ('y', -5., 5.)],
             10,
+            0.,
         );
     }
 
@@ -205,11 +207,11 @@ mod tests {
     fn evaluate_trees() {
         check_tree_eval(
             pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()),
-            |vars: &[f32]| {
+            |vars: &[f64]| {
                 if let [x] = vars[..] {
                     Some(
-                        f32::powf(f32::log(f32::sin(x) + 2., std::f32::consts::E), 3.)
-                            / (f32::cos(x) + 2.),
+                        f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
+                            / (f64::cos(x) + 2.),
                     )
                 } else {
                     None
@@ -217,6 +219,7 @@ mod tests {
             },
             &[('x', -2.5, 2.5)],
             100,
+            0.,
         );
 
         check_tree_eval(
@@ -253,24 +256,25 @@ mod tests {
                 };
                 max(min(s1, s2), s3)
             },
-            |vars: &[f32]| {
+            |vars: &[f64]| {
                 if let [x, y, z] = vars[..] {
-                    let s1 = f32::sqrt(
-                        f32::powf(x - 2., 2.) + f32::powf(y - 3., 2.) + f32::powf(z - 4., 2.),
+                    let s1 = f64::sqrt(
+                        f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
                     ) - 2.75;
-                    let s2 = f32::sqrt(
-                        f32::powf(x + 2., 2.) + f32::powf(y - 3., 2.) + f32::powf(z - 4., 2.),
+                    let s2 = f64::sqrt(
+                        f64::powf(x + 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
                     ) - 4.;
-                    let s3 = f32::sqrt(
-                        f32::powf(x + 2., 2.) + f32::powf(y + 3., 2.) + f32::powf(z - 4., 2.),
+                    let s3 = f64::sqrt(
+                        f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
                     ) - 5.25;
-                    Some(f32::max(f32::min(s1, s2), s3))
+                    Some(f64::max(f64::min(s1, s2), s3))
                 } else {
                     None
                 }
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
+            0.,
         );
     }
 
@@ -540,6 +544,7 @@ mod tests {
             nodup,
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
+            0.,
         );
     }
 
@@ -550,7 +555,7 @@ mod tests {
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 10);
-        compare_trees(tree, nodup, &[('x', -10., 10.)], 400);
+        compare_trees(tree, nodup, &[('x', -10., 10.)], 400, 0.);
     }
 
     #[test]
@@ -566,7 +571,7 @@ mod tests {
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 20);
-        compare_trees(tree, nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20);
+        compare_trees(tree, nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);
     }
 
     #[test]
