@@ -308,7 +308,9 @@ pub fn parse_template(lisp: &str) -> Result<Template, LispParseError> {
                 .as_str(),
         )
     };
-    Ok(Template::from(parse_nodes(ping)?, parse_nodes(pong)?))
+    Template::from(parse_nodes(ping)?, parse_nodes(pong)?)
+        .ok()
+        .ok_or(LispParseError::Unknown)
 }
 
 #[macro_export]

@@ -87,7 +87,7 @@ impl Tree {
         Tree { nodes: vec![node] }
     }
 
-    fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
+    pub fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
         if !(0..nodes.len()).all(|i| match &nodes[i] {
             Constant(_) | Symbol(_) => true,
             Unary(_op, input) => input < &i,

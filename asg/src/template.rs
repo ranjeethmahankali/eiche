@@ -3,12 +3,21 @@ use lazy_static::lazy_static;
 use crate::{
     deftemplate,
     parser::parse_template,
-    tree::{BinaryOp, Node, UnaryOp},
+    tree::{BinaryOp, Node, Tree, TreeError, UnaryOp},
 };
 
 pub struct Template {
     ping: Vec<Node>,
     pong: Vec<Node>,
+}
+
+impl Template {
+    pub fn from(ping: Vec<Node>, pong: Vec<Node>) -> Result<Template, TreeError> {
+        Ok(Template {
+            ping: Tree::validate(ping)?,
+            pong: Tree::validate(pong)?,
+        })
+    }
 }
 
 lazy_static! {
@@ -98,18 +107,15 @@ lazy_static! {
     ];
 }
 
-impl Template {
-    pub fn from(ping: Vec<Node>, pong: Vec<Node>) -> Template {
-        Template { ping, pong }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn load_templates() {
+        // Just to make sure all the templates are valid and load
+        // correctly.
         assert!(!TEMPLATES.is_empty());
+        assert!(TEMPLATES.len() >= 16);
     }
 }
