@@ -9,6 +9,102 @@ mod tests {
 
     const EPSILON: f32 = 1e-6;
 
+    /// Helper function to evaluate the tree with randomly sampled
+    /// variable values and compare the result to the one returned by
+    /// the `expectedfn` for the same inputs.
+    ///
+    /// Each variable is sampled within the range indicated by the
+    /// corresponding entry in `vardata`. Each entry in vardata
+    /// consists of the label of the symbol / variable, lower bound
+    /// and upper bound.
+    fn check_tree_eval<F>(
+        tree: Tree,
+        mut expectedfn: F,
+        vardata: &[(char, f32, f32)],
+        samples_per_var: usize,
+    ) where
+        F: FnMut(&[f32]) -> Option<f32>,
+    {
+        use rand::Rng;
+        let mut eval = Evaluator::new(&tree);
+        let nvars = vardata.len();
+        let mut indices = vec![0usize; nvars];
+        let mut sample = Vec::<f32>::with_capacity(nvars);
+        let mut rng = StdRng::seed_from_u64(42);
+        while indices[0] <= samples_per_var {
+            let vari = sample.len();
+            let (label, lower, upper) = vardata[vari];
+            let value = lower + rng.gen::<f32>() * (upper - lower);
+            sample.push(value);
+            eval.set_var(label, value);
+            indices[vari] += 1;
+            if vari < nvars - 1 {
+                continue;
+            }
+            // We set all the variables. Run the test.
+            let error = f32::abs(
+                eval.run().expect("Unable to compute the actual value.")
+                    - expectedfn(&sample[..]).expect("Unable to compute expected value."),
+            );
+            assert!(error <= EPSILON);
+            // Clean up the index stack.
+            sample.pop();
+            let mut vari = vari;
+            while indices[vari] == samples_per_var && vari > 0 {
+                if let Some(_) = sample.pop() {
+                    indices[vari] = 0;
+                    vari -= 1;
+                } else {
+                    assert!(false); // To ensure the logic of this test is correct.
+                }
+            }
+        }
+    }
+
+    fn compare_trees(
+        tree1: Tree,
+        tree2: Tree,
+        vardata: &[(char, f32, f32)],
+        samples_per_var: usize,
+    ) {
+        use rand::Rng;
+        let mut eval1 = Evaluator::new(&tree1);
+        let mut eval2 = Evaluator::new(&tree2);
+        let nvars = vardata.len();
+        let mut indices = vec![0usize; nvars];
+        let mut sample = Vec::<f32>::with_capacity(nvars);
+        let mut rng = StdRng::seed_from_u64(42);
+        while indices[0] <= samples_per_var {
+            let vari = sample.len();
+            let (label, lower, upper) = vardata[vari];
+            let value = lower + rng.gen::<f32>() * (upper - lower);
+            sample.push(value);
+            eval1.set_var(label, value);
+            eval2.set_var(label, value);
+            indices[vari] += 1;
+            if vari < nvars - 1 {
+                continue;
+            }
+            let first = eval1.run().expect("Unable to compute the actual value.");
+            let second = eval2.run().expect("Unable to compute expected value.");
+            println!("Comparing: {} | {}", first, second);
+            // We set all the variables. Run the test.
+            let error = f32::abs(first - second);
+            assert!(error <= EPSILON);
+            // Clean up the index stack.
+            sample.pop();
+            let mut vari = vari;
+            while indices[vari] == samples_per_var && vari > 0 {
+                if let Some(_) = sample.pop() {
+                    indices[vari] = 0;
+                    vari -= 1;
+                } else {
+                    assert!(false); // To ensure the logic of this test is correct.
+                }
+            }
+        }
+    }
+
     #[test]
     fn constant() {
         let x: Tree = std::f32::consts::PI.into();
@@ -85,53 +181,9 @@ mod tests {
         }
     }
 
-    fn eval_test<F>(
-        tree: Tree,
-        mut expectedfn: F,
-        vardata: &[(char, f32, f32)],
-        samples_per_var: usize,
-    ) where
-        F: FnMut(&[f32]) -> Option<f32>,
-    {
-        use rand::Rng;
-        let mut eval = Evaluator::new(&tree);
-        let nvars = vardata.len();
-        let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f32>::with_capacity(nvars);
-        let mut rng = StdRng::seed_from_u64(42);
-        while indices[0] <= samples_per_var {
-            let vari = sample.len();
-            let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f32>() * (upper - lower);
-            sample.push(value);
-            eval.set_var(label, value);
-            indices[vari] += 1;
-            if vari < nvars - 1 {
-                continue;
-            }
-            // We set all the variables. Run the test.
-            let error = f32::abs(
-                eval.run().expect("Unable to compute the actual value.")
-                    - expectedfn(&sample[..]).expect("Unable to compute expected value."),
-            );
-            assert!(error <= EPSILON);
-            // Clean up the index stack.
-            sample.pop();
-            let mut vari = vari;
-            while indices[vari] == samples_per_var && vari > 0 {
-                if let Some(_) = sample.pop() {
-                    indices[vari] = 0;
-                    vari -= 1;
-                } else {
-                    assert!(false); // To ensure the logic of this test is correct.
-                }
-            }
-        }
-    }
-
     #[test]
     fn sum_test() {
-        eval_test(
+        check_tree_eval(
             {
                 let xtree: Tree = 'x'.into();
                 let ytree: Tree = 'y'.into();
@@ -151,7 +203,7 @@ mod tests {
 
     #[test]
     fn evaluate_trees() {
-        eval_test(
+        check_tree_eval(
             pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()),
             |vars: &[f32]| {
                 if let [x] = vars[..] {
@@ -167,7 +219,7 @@ mod tests {
             100,
         );
 
-        eval_test(
+        check_tree_eval(
             {
                 let s1 = {
                     let x: Tree = 'x'.into();
@@ -483,23 +535,9 @@ mod tests {
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 32);
-        let mut eval: Evaluator = Evaluator::new(&tree);
-        eval_test(
+        compare_trees(
+            tree,
             nodup,
-            move |vars: &[f32]| -> Option<f32> {
-                if let [x, y, z] = vars[..] {
-                    eval.set_var('x', x);
-                    eval.set_var('y', y);
-                    eval.set_var('z', z);
-                    let result = eval.run();
-                    match result {
-                        Ok(value) => Some(value),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
         );
@@ -512,24 +550,7 @@ mod tests {
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 10);
-        let mut eval: Evaluator = Evaluator::new(&tree);
-        eval_test(
-            nodup,
-            move |vars: &[f32]| -> Option<f32> {
-                if let [x] = vars[..] {
-                    eval.set_var('x', x);
-                    let result = eval.run();
-                    match result {
-                        Ok(value) => Some(value),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            },
-            &[('x', -10., 10.)],
-            20,
-        );
+        compare_trees(tree, nodup, &[('x', -10., 10.)], 400);
     }
 
     #[test]
@@ -545,25 +566,7 @@ mod tests {
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 20);
-        let mut eval: Evaluator = Evaluator::new(&tree);
-        eval_test(
-            nodup,
-            move |vars: &[f32]| -> Option<f32> {
-                if let [x, y] = vars[..] {
-                    eval.set_var('x', x);
-                    eval.set_var('y', y);
-                    let result = eval.run();
-                    match result {
-                        Ok(value) => Some(value),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            },
-            &[('x', -10., 10.), ('y', -9., 10.)],
-            20,
-        );
+        compare_trees(tree, nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20);
     }
 
     #[test]
