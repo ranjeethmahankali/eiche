@@ -6,6 +6,25 @@ pub mod tests {
     use crate::tree::{BinaryOp::*, Evaluator, Node, Node::*, Tree, TreeError, UnaryOp::*};
     use crate::{deftree, helper::*, parsetree};
 
+    macro_rules! assert_float_eq {
+        ($a:expr, $b:expr, $eps:expr) => {{
+            // Make variables to avoid evaluating experssions multiple times.
+            let a = $a;
+            let b = $b;
+            let eps = $eps;
+            let error = f64::abs(a - b);
+            if error > eps {
+                panic!(
+                    "Assertion failed: |({}) - ({})| = {:e} < {:e}",
+                    a, b, error, eps
+                );
+            }
+        }};
+        ($a:expr, $b:expr) => {
+            assert_float_eq!($a, $b, f64::EPSILON)
+        };
+    }
+
     /// Helper function to evaluate the tree with randomly sampled
     /// variable values and compare the result to the one returned by
     /// the `expectedfn` for the same inputs. The values must be
@@ -41,11 +60,11 @@ pub mod tests {
                 continue;
             }
             // We set all the variables. Run the test.
-            let error = f64::abs(
-                eval.run().expect("Unable to compute the actual value.")
-                    - expectedfn(&sample[..]).expect("Unable to compute expected value."),
+            assert_float_eq!(
+                eval.run().expect("Unable to compute the actual value."),
+                expectedfn(&sample[..]).expect("Unable to compute expected value."),
+                eps
             );
-            assert!(error <= eps);
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -85,12 +104,11 @@ pub mod tests {
             if vari < nvars - 1 {
                 continue;
             }
-            let first = eval1.run().expect("Unable to compute the actual value.");
-            let second = eval2.run().expect("Unable to compute expected value.");
-            // println!("Vars: {:?} | Comparing: {} | {}", sample, first, second);
-            // We set all the variables. Run the test.
-            let error = f64::abs(first - second);
-            assert!(error <= eps);
+            assert_float_eq!(
+                eval1.run().expect("Unable to compute the actual value."),
+                eval2.run().expect("Unable to compute expected value."),
+                eps
+            );
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -171,7 +189,7 @@ pub mod tests {
             let x: f64 = PI_2 * rng.gen::<f64>();
             eval.set_var('x', x);
             match eval.run() {
-                Ok(val) => assert!(f64::abs(val - 1.) < 1e-14),
+                Ok(val) => assert_float_eq!(val, 1.),
                 _ => assert!(false),
             }
         }
