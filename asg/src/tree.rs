@@ -371,7 +371,7 @@ macro_rules! deftree {
         $crate::tree::max(deftree!($a), deftree!($b))
     };
     // Symbols.
-    ($a: ident) => {{
+    ($a:ident) => {{
         const LABEL: &str = stringify!($a);
         $crate::const_assert!(
             "Symbols can only have a single character as an identifier.",
