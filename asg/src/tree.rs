@@ -323,6 +323,12 @@ macro_rules! deftree {
     (($($a:tt)*)) => { // Unwrap redundant parens.
         deftree!($($a)*)
     };
+    ({$a:ident}) => { // Unwrap curly braces to variables.
+        $a
+    };
+    ({$($a:tt)*}) => { // More complex expressions.
+        {$($a)*}
+    };
     // Unary ops.
     (- $a:tt) => {
         -deftree!($a)
@@ -741,6 +747,4 @@ mod tests {
             ]
         );
     }
-
-    // End of tests
 }

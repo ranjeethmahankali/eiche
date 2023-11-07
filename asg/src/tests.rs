@@ -117,6 +117,28 @@ pub mod tests {
     }
 
     #[test]
+    fn variable_in_deftree() {
+        let lisp = deftree!(+ 1. (+ (cos x) (pow (cos x) 2.)));
+        let cx = deftree!(cos x);
+        let with_vars = deftree!(+ 1. (+ {cx.clone()} (pow {cx} 2.)));
+        assert_eq!(lisp, with_vars);
+        compare_trees(lisp, with_vars, &[('x', -5., 5.)], 100, 0.);
+
+        use crate::tree::pow;
+        let tree: Tree = deftree!(
+            (+
+             {
+                 let three: Tree = 3.0.into();
+                 three * pow('x'.into(), 2.0.into())
+             }
+             (+ (* 2. x) 1.))
+        );
+        let expected = deftree!(+ (* 3. (pow x 2.)) (+ (* 2. x) 1.));
+        assert_eq!(tree, expected);
+        compare_trees(expected, tree, &[('x', -5., 5.)], 100, 0.);
+    }
+
+    #[test]
     fn pythagoras() {
         const TRIPLETS: [(f64, f64, f64); 6] = [
             (3., 4., 5.),
@@ -142,7 +164,6 @@ pub mod tests {
     fn trig_identity() {
         use rand::Rng;
         const PI_2: f64 = 2.0 * std::f64::consts::TAU;
-
         let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.));
         let mut eval = Evaluator::new(&sum);
         let mut rng = StdRng::seed_from_u64(42);
