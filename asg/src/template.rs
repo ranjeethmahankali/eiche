@@ -1,13 +1,23 @@
 use lazy_static::lazy_static;
 
-use crate::{
-    parsetemplate,
-    tree::{Node, Tree, TreeError},
-};
+use crate::tree::{Node, Tree, TreeError};
 
 pub struct Template {
     ping: Vec<Node>,
     pong: Vec<Node>,
+}
+
+#[macro_export]
+macro_rules! parsetemplate {
+    (($($tt:tt)*)) => {
+        parsetemplate!($($tt)*)
+    };
+    (ping ($($ping:tt) *) pong ($($pong:tt) *)) => {
+        Template::from(
+            $crate::parser::parse_nodes(stringify!(($($ping) *))).unwrap(),
+            $crate::parser::parse_nodes(stringify!(($($pong) *))).unwrap()
+        )
+    };
 }
 
 impl Template {
@@ -36,94 +46,93 @@ lazy_static! {
 
         // Factoring a multiplication out of addition.
         parsetemplate!(
-            (_ping (+ (* k a) (* k b))
-             _pong (* k (+ a b)))
+            ping (+ (* k a) (* k b)) pong (* k (+ a b))
         ).unwrap(),
         // Min of two square-roots.
         parsetemplate!(
-            (_ping (min (sqrt a) (sqrt b))
-             _pong (sqrt (min a b)))
+            ping (min (sqrt a) (sqrt b))
+                pong (sqrt (min a b))
         ).unwrap(),
         // Interchangeable fractions.
         parsetemplate!(
-            (_ping (* (/ a b) (/ x y))
-             _pong (* (/ a y) (/ x b)))
+            ping (* (/ a b) (/ x y))
+                pong (* (/ a y) (/ x b))
         ).unwrap(),
         // Cancelling division.
         parsetemplate!(
-            (_ping (/ a a)
-             _pong 1.0)
+            ping (/ a a)
+                pong (1.0)
         ).unwrap(),
         // Distributing pow over division.
         parsetemplate!(
-            (_ping (pow (/ a b) 2.)
-             _pong (/ (pow a 2.) (pow b 2.)))
+            ping (pow (/ a b) 2.)
+                pong (/ (pow a 2.) (pow b 2.))
         ).unwrap(),
         // Distribute pow over multiplication.
         parsetemplate!(
-            (_ping (pow (* a b) 2.)
-             _pong (* (pow a 2.) (pow b 2.)))
+            ping (pow (* a b) 2.)
+                pong (* (pow a 2.) (pow b 2.))
         ).unwrap(),
         // Square of square-root.
         parsetemplate!(
-            (_ping (pow (sqrt a) 2.)
-             _pong a)
+            ping (pow (sqrt a) 2.)
+                pong (a)
         ).unwrap(),
         // Square root of square.
         parsetemplate!(
-            (_ping (sqrt (pow a 2.))
-             _pong a)
+            ping (sqrt (pow a 2.))
+                pong (a)
         ).unwrap(),
         // Combine exponents.
         parsetemplate!(
-            (_ping (pow (pow a x) y)
-             _pong (pow a (* x y)))
+            ping (pow (pow a x) y)
+                pong (pow a (* x y))
         ).unwrap(),
         // Adding fractions.
         parsetemplate!(
-            (_ping (+ (/ a d) (/ b d))
-             _pong (/ (+ a b) d))
+            ping (+ (/ a d) (/ b d))
+                pong (/ (+ a b) d)
         ).unwrap(),
 
         // ====== Identity operations ======
 
         // Add zero.
         parsetemplate!(
-            (_ping (+ x 0.)
-             _pong x)
+            ping (+ x 0.)
+                pong (x)
         ).unwrap(),
         // Subtract zero.
         parsetemplate!(
-          (_ping (- x 0) _pong x)
+            ping (- x 0) pong (x)
         ).unwrap(),
         // Multiply by 1.
         parsetemplate!(
-          (_ping (* x 1.) _pong x)
+            ping (* x 1.) pong (x)
         ).unwrap(),
         // Raised to the power of 1.
         parsetemplate!(
-            (_ping (pow x 1.) _pong x)
+            ping (pow x 1.) pong (x)
         ).unwrap(),
 
         // ====== Other templates =======
 
         // Multiply by zero.
         parsetemplate!(
-            (_ping (* x 0.) _pong 0.)
+            ping (* x 0.) pong (0.)
         ).unwrap(),
         // Raised to the power of zero.
         parsetemplate!(
-            (_ping (pow x 0.) _pong 1.)
+            ping (pow x 0.) pong (1.)
         ).unwrap(),
         // Min and max simplifications from:
         // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
         parsetemplate!( // Min
-            (_ping (min a b)
-             _pong (/ (+ (+ a b) (abs (- b a))) 2.))
+            ping (min a b)
+                pong (/ (+ (+ a b) (abs (- b a))) 2.)
         ).unwrap(),
         parsetemplate!( // Max
-            (_ping (min a b)
-             _pong (/ (- (+ a b) (abs (- b a))) 2.))
+            ping (min a b)
+                pong (/ (- (+ a b) (abs (- b a))) 2.)
         ).unwrap(),
     ]);
 }
