@@ -138,14 +138,11 @@ pub enum LispParseError {
     Unknown,
 }
 
-use crate::{
-    template::Template,
-    tree::{
-        BinaryOp::*,
-        Node::{self, *},
-        Tree,
-        UnaryOp::*,
-    },
+use crate::tree::{
+    BinaryOp::*,
+    Node::{self, *},
+    Tree,
+    UnaryOp::*,
 };
 
 fn push_node(node: Node, nodes: &mut Vec<Node>) -> usize {
@@ -162,7 +159,7 @@ fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, Li
     };
     if FLT_REGEX.is_match(atom) {
         return Ok(Done(push_node(
-            Constant(atom.parse::<f32>().ok().ok_or(LispParseError::Float)?),
+            Constant(atom.parse::<f64>().ok().ok_or(LispParseError::Float)?),
             nodes,
         )));
     }
@@ -245,7 +242,7 @@ fn parse_expression<'a>(
     }
 }
 
-fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
+pub fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
     // First pass to collect statistics.
     let (nodecount, maxdepth) = count_nodes(&lisp);
     // Allocate memory according to collected statistics.
@@ -281,42 +278,9 @@ pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
 }
 
 #[macro_export]
-macro_rules! deftree {
+macro_rules! parsetree {
     ($($exp:tt) *) => {
-        parse_tree(stringify!($($exp) *))
-    };
-}
-
-pub fn parse_template(lisp: &str) -> Result<Template, LispParseError> {
-    lazy_static! {
-        // These are run in unit tests, so it is safe to unwrap these.
-        static ref TEMPLATE_REGEX: Regex =
-            Regex::new("^\\s*\\(_ping\\s*(.*)\\s+_pong\\s*(.*)\\)\\s*$").unwrap();
-    };
-    let (ping, pong) = {
-        let captures = TEMPLATE_REGEX
-            .captures(lisp)
-            .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?;
-        (
-            captures
-                .get(1)
-                .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?
-                .as_str(),
-            captures
-                .get(2)
-                .ok_or(LispParseError::MalformedTemplate(lisp.to_string()))?
-                .as_str(),
-        )
-    };
-    Template::from(parse_nodes(ping)?, parse_nodes(pong)?)
-        .ok()
-        .ok_or(LispParseError::Unknown)
-}
-
-#[macro_export]
-macro_rules! deftemplate {
-    ($($exp:tt) *) => {
-        parse_template(stringify!($($exp) *))
+        $crate::parser::parse_tree(stringify!($($exp) *))
     };
 }
 

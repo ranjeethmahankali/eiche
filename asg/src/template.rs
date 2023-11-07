@@ -1,134 +1,252 @@
 use lazy_static::lazy_static;
 
-use crate::{
-    deftemplate,
-    parser::parse_template,
-    tree::{Node, Tree, TreeError},
-};
+use crate::tree::{Node, Tree, TreeError};
 
+#[allow(dead_code)]
 pub struct Template {
+    name: &'static str,
     ping: Vec<Node>,
     pong: Vec<Node>,
 }
 
+#[macro_export]
+macro_rules! parsetemplate {
+    (($($tt:tt)*)) => {
+        parsetemplate!($($tt)*)
+    };
+    ($name: ident ping ($($ping:tt) *) pong ($($pong:tt) *)) => {
+        Template::from(
+            stringify!($name),
+            $crate::parser::parse_nodes(stringify!(($($ping) *))).unwrap(),
+            $crate::parser::parse_nodes(stringify!(($($pong) *))).unwrap()
+        )
+    };
+}
+
 impl Template {
-    pub fn from(ping: Vec<Node>, pong: Vec<Node>) -> Result<Template, TreeError> {
+    pub fn from(
+        name: &'static str,
+        ping: Vec<Node>,
+        pong: Vec<Node>,
+    ) -> Result<Template, TreeError> {
         Ok(Template {
+            name,
             ping: Tree::validate(ping)?,
             pong: Tree::validate(pong)?,
         })
     }
-
-    pub fn mirror_templates(mut templates: Vec<Template>) -> Vec<Template> {
-        let num = templates.len();
-        for i in 0..num {
-            let t = &templates[i];
-            templates.push(Template {
-                ping: t.pong.clone(),
-                pong: t.ping.clone(),
-            });
-        }
-        return templates;
-    }
 }
 
 lazy_static! {
-    static ref TEMPLATES: Vec<Template> = Template::mirror_templates(vec![
+    static ref TEMPLATES: Vec<Template> = vec![
 
-        // Factoring a multiplication out of addition.
-        deftemplate!(
-            (_ping (+ (* k a) (* k b))
-             _pong (* k (+ a b)))
+        parsetemplate!(distribute_mul
+                       ping (+ (* k a) (* k b))
+                       pong (* k (+ a b))
         ).unwrap(),
-        // Min of two square-roots.
-        deftemplate!(
-            (_ping (min (sqrt a) (sqrt b))
-             _pong (sqrt (min a b)))
+        parsetemplate!(min_of_sqrt
+                       ping (min (sqrt a) (sqrt b))
+                       pong (sqrt (min a b))
         ).unwrap(),
-        // Interchangeable fractions.
-        deftemplate!(
-            (_ping (* (/ a b) (/ x y))
-             _pong (* (/ a y) (/ x b)))
+        parsetemplate!(rearrange_frac
+                       ping (* (/ a b) (/ x y))
+                       pong (* (/ a y) (/ x b))
         ).unwrap(),
-        // Cancelling division.
-        deftemplate!(
-            (_ping (/ a a)
-             _pong 1.0)
+        parsetemplate!(divide_by_self
+                       ping (/ a a)
+                       pong (1.0)
         ).unwrap(),
-        // Distributing pow over division.
-        deftemplate!(
-            (_ping (pow (/ a b) 2.)
-             _pong (/ (pow a 2.) (pow b 2.)))
+        parsetemplate!(distribute_pow_div
+                       ping (pow (/ a b) k)
+                       pong (/ (pow a k) (pow b k))
         ).unwrap(),
-        // Distribute pow over multiplication.
-        deftemplate!(
-            (_ping (pow (* a b) 2.)
-             _pong (* (pow a 2.) (pow b 2.)))
+        parsetemplate!(distribute_pow_mul
+                       ping (pow (* a b) k)
+                       pong (* (pow a k) (pow b k))
         ).unwrap(),
-        // Square of square-root.
-        deftemplate!(
-            (_ping (pow (sqrt a) 2.)
-             _pong a)
+        parsetemplate!(square_sqrt
+                       ping (pow (sqrt a) 2.)
+                       pong (a)
         ).unwrap(),
-        // Square root of square.
-        deftemplate!(
-            (_ping (sqrt (pow a 2.))
-             _pong a)
+        parsetemplate!(sqrt_square
+                       ping (sqrt (pow a 2.))
+                       pong (abs a)
         ).unwrap(),
-        // Combine exponents.
-        deftemplate!(
-            (_ping (pow (pow a x) y)
-             _pong (pow a (* x y)))
+        parsetemplate!(square_abs
+                       ping (pow (abs x) 2.)
+                       pong (pow x 2.)
         ).unwrap(),
-        // Adding fractions.
-        deftemplate!(
-            (_ping (+ (/ a d) (/ b d))
-             _pong (/ (+ a b) d))
+        parsetemplate!(mul_exponents
+                       ping (pow (pow a x) y)
+                       pong (pow a (* x y))
+        ).unwrap(),
+        parsetemplate!(add_exponents
+                       ping (* (pow a x) (pow a y))
+                       pong (pow a (+ x y))
+        ).unwrap(),
+        parsetemplate!(add_frac
+                       ping (+ (/ a d) (/ b d))
+                       pong (/ (+ a b) d)
         ).unwrap(),
 
         // ====== Identity operations ======
 
-        // Add zero.
-        deftemplate!(
-            (_ping (+ x 0.)
-             _pong x)
+        parsetemplate!(add_zero
+                       ping (+ x 0.)
+                       pong (x)
         ).unwrap(),
-        // Subtract zero.
-        deftemplate!(
-          (_ping (- x 0) _pong x)
+        parsetemplate!(sub_zero
+                       ping (- x 0)
+                       pong (x)
         ).unwrap(),
-        // Multiply by 1.
-        deftemplate!(
-          (_ping (* x 1.) _pong x)
+        parsetemplate!(mul_1
+                       ping (* x 1.)
+                       pong (x)
         ).unwrap(),
-        // Raised to the power of 1.
-        deftemplate!(
-            (_ping (pow x 1.) _pong x)
+        parsetemplate!(pow_1
+                       ping (pow x 1.)
+                       pong (x)
         ).unwrap(),
 
         // ====== Other templates =======
 
-        // Multiply by zero.
-        deftemplate!(
-            (_ping (* x 0.) _pong 0.)
+        parsetemplate!(mul_0
+                       ping (* x 0.)
+                       pong (0.)
         ).unwrap(),
-        // Raised to the power of zero.
-        deftemplate!(
-            (_ping (pow x 0.) _pong 1.)
+        parsetemplate!(pow_0
+                       ping (pow x 0.)
+                       pong (1.)
         ).unwrap(),
-
-    ]);
+        // Min and max simplifications from:
+        // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
+        parsetemplate!(min_expand
+                       ping (min a b)
+                       pong (/ (- (+ a b) (abs (- b a))) 2.)
+        ).unwrap(),
+        parsetemplate!(max_expand
+                       ping (max a b)
+                       pong (/ (+ (+ a b) (abs (- b a))) 2.)
+        ).unwrap(),
+    ];
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn load_templates() {
         // Just to make sure all the templates are valid and load
         // correctly.
         assert!(!TEMPLATES.is_empty());
-        assert!(TEMPLATES.len() >= 32);
+        // Make sure templates have unique names.
+        let mut names: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
+        for t in TEMPLATES.iter() {
+            assert!(names.insert(t.name), "Duplicate template found.");
+        }
+    }
+
+    #[test]
+    fn check_templates() {
+        let mut checked: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
+        let mut check_one = |name: &'static str, vardata: &[(char, f64, f64)], eps: f64| {
+            use crate::tests::tests::compare_trees;
+            // Find template by name.
+            let template = TEMPLATES
+                .iter()
+                .find(|t| t.name == name)
+                .expect(format!("No template found with name: {}", name).as_str());
+            // Check if valid trees can be made from the templates.
+            let ping = Tree::from_nodes(template.ping.clone()).unwrap();
+            let pong = Tree::from_nodes(template.pong.clone()).unwrap();
+            print!("{}   ... ", name);
+            compare_trees(ping, pong, vardata, 20, eps);
+            println!("✔ Passed.");
+            assert!(
+                checked.insert(name),
+                "This template has already been checked. Remove this redundancy."
+            );
+        };
+        // Check each template. This is necessary they need different
+        // vardata and ranges. e.g. You can't use negative values in
+        // sqrt.
+        {
+            check_one(
+                "distribute_mul",
+                &[('k', -10., 10.), ('a', -10., 10.), ('b', -10., 10.)],
+                1e-12,
+            );
+            check_one("min_of_sqrt", &[('a', -10., 10.), ('b', -10., 10.)], 1e-12);
+            check_one(
+                "rearrange_frac",
+                &[
+                    ('a', -10., 10.),
+                    ('b', -10., 10.),
+                    ('x', -10., 10.),
+                    ('y', -10., 10.),
+                ],
+                1e-10,
+            );
+            check_one("divide_by_self", &[('a', -10., 10.)], 1e-12);
+            check_one(
+                "distribute_pow_div",
+                &[('a', 1., 10.), ('b', 1., 10.), ('k', 0.1, 5.)],
+                1e-10,
+            );
+            check_one(
+                "distribute_pow_mul",
+                &[('a', 1., 5.), ('b', 1., 5.), ('k', 0.5, 3.)],
+                1e-10,
+            );
+            check_one("square_sqrt", &[('a', -10., 10.)], 1e-12);
+            check_one("sqrt_square", &[('a', -10., 10.)], 1e-12);
+            check_one("square_abs", &[('x', -10., 10.)], 0.);
+            check_one(
+                "mul_exponents",
+                &[('a', 1., 5.), ('x', 0.5, 3.), ('y', 0.5, 2.)],
+                1e-9,
+            );
+            check_one(
+                "add_exponents",
+                &[('a', 1., 5.), ('x', 0.5, 3.), ('y', 0.5, 2.)],
+                1e-12,
+            );
+            check_one(
+                "add_frac",
+                &[('a', -10., 10.), ('b', -10., 10.), ('d', -10., 10.)],
+                1e-12,
+            );
+        }
+        {
+            // === Identity operations ===
+            check_one("add_zero", &[('x', -10., 10.)], 0.);
+            check_one("sub_zero", &[('x', -10., 10.)], 0.);
+            check_one("mul_1", &[('x', -10., 10.)], 0.);
+            check_one("pow_1", &[('x', -10., 10.)], 0.);
+        }
+        {
+            // === Other templates ===
+            check_one("mul_0", &[('x', -10., 10.)], 0.);
+            check_one("pow_0", &[('x', -10., 10.)], 0.);
+            check_one("min_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
+            check_one("max_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
+        }
+        {
+            // Make sure all templates have been checked.
+            let unchecked = TEMPLATES
+                .iter()
+                .map(|t| t.name)
+                .filter(|name| !checked.contains(name))
+                .collect::<Vec<&str>>()
+                .join("\n");
+            if !unchecked.is_empty() {
+                panic!(
+                    "\nThe following templates have not been tested:\n{}\n",
+                    unchecked
+                );
+            }
+        }
     }
 }

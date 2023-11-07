@@ -1,108 +1,58 @@
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
-    use crate::tree::Node::*;
-    use crate::tree::*;
-    use crate::{deftree, helper::*, parser::parse_tree};
+    use crate::tree::{BinaryOp::*, Evaluator, Node, Node::*, Tree, TreeError, UnaryOp::*};
+    use crate::{deftree, helper::*, parsetree};
 
-    const EPSILON: f32 = 1e-6;
-
-    #[test]
-    fn constant() {
-        let x: Tree = std::f32::consts::PI.into();
-        assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f32::consts::PI));
-        let mut eval = Evaluator::new(&x);
-        match eval.run() {
-            Ok(val) => assert_eq!(val, std::f32::consts::PI),
-            _ => assert!(false),
-        }
-    }
-
-    #[test]
-    fn pythagoras() {
-        const TRIPLETS: [(f32, f32, f32); 6] = [
-            (3., 4., 5.),
-            (5., 12., 13.),
-            (8., 15., 17.),
-            (7., 24., 25.),
-            (20., 21., 29.),
-            (12., 35., 37.),
-        ];
-        for (x, y, expected) in TRIPLETS {
-            let h = sqrt(pow(x.into(), 2.0.into()) + pow(y.into(), 2.0.into()));
-            let mut eval = Evaluator::new(&h);
-            match eval.run() {
-                Ok(val) => assert_eq!(val, expected),
-                _ => assert!(false),
+    macro_rules! assert_float_eq {
+        ($a:expr, $b:expr, $eps:expr) => {{
+            // Make variables to avoid evaluating experssions multiple times.
+            let a = $a;
+            let b = $b;
+            let eps = $eps;
+            let error = f64::abs(a - b);
+            if error > eps {
+                panic!(
+                    "Assertion failed: |({}) - ({})| = {:e} < {:e}",
+                    a, b, error, eps
+                );
             }
-        }
+        }};
+        ($a:expr, $b:expr) => {
+            assert_float_eq!($a, $b, f64::EPSILON)
+        };
     }
 
-    #[test]
-    fn pythagoras_variables() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let h = sqrt(pow(x, 2.0.into()) + pow(y, 2.0.into()));
-        let mut eval = Evaluator::new(&h);
-        const TRIPLETS: [(f32, f32, f32); 6] = [
-            (3., 4., 5.),
-            (5., 12., 13.),
-            (8., 15., 17.),
-            (7., 24., 25.),
-            (20., 21., 29.),
-            (12., 35., 37.),
-        ];
-        for (xval, yval, expected) in TRIPLETS {
-            eval.set_var('x', xval);
-            eval.set_var('y', yval);
-            match eval.run() {
-                Ok(val) => assert_eq!(val, expected),
-                _ => assert!(false),
-            }
-        }
-    }
-
-    #[test]
-    fn trig_identity() {
-        use rand::Rng;
-        const PI_2: f32 = 2.0 * std::f32::consts::TAU;
-
-        let sum: Tree = pow(sin('x'.into()), 2.0.into()) + pow(cos('x'.into()), 2.0.into());
-        let mut eval = Evaluator::new(&sum);
-        let mut rng = StdRng::seed_from_u64(42);
-        for _ in 0..100 {
-            let x: f32 = PI_2 * rng.gen::<f32>();
-            eval.set_var('x', x);
-            match eval.run() {
-                Ok(val) => {
-                    println!("{}: {}", x, f32::abs(val - 1.));
-                    assert!(f32::abs(val - 1.) < EPSILON)
-                }
-                _ => assert!(false),
-            }
-        }
-    }
-
-    fn eval_test<F>(
+    /// Helper function to evaluate the tree with randomly sampled
+    /// variable values and compare the result to the one returned by
+    /// the `expectedfn` for the same inputs. The values must be
+    /// within `eps` of each other.
+    ///
+    /// Each variable is sampled within the range indicated by the
+    /// corresponding entry in `vardata`. Each entry in vardata
+    /// consists of the label of the symbol / variable, lower bound
+    /// and upper bound.
+    fn check_tree_eval<F>(
         tree: Tree,
         mut expectedfn: F,
-        vardata: &[(char, f32, f32)],
+        vardata: &[(char, f64, f64)],
         samples_per_var: usize,
+        eps: f64,
     ) where
-        F: FnMut(&[f32]) -> Option<f32>,
+        F: FnMut(&[f64]) -> Option<f64>,
     {
         use rand::Rng;
         let mut eval = Evaluator::new(&tree);
         let nvars = vardata.len();
         let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f32>::with_capacity(nvars);
+        let mut sample = Vec::<f64>::with_capacity(nvars);
         let mut rng = StdRng::seed_from_u64(42);
         while indices[0] <= samples_per_var {
             let vari = sample.len();
             let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f32>() * (upper - lower);
+            let value = lower + rng.gen::<f64>() * (upper - lower);
             sample.push(value);
             eval.set_var(label, value);
             indices[vari] += 1;
@@ -110,11 +60,55 @@ mod tests {
                 continue;
             }
             // We set all the variables. Run the test.
-            let error = f32::abs(
-                eval.run().expect("Unable to compute the actual value.")
-                    - expectedfn(&sample[..]).expect("Unable to compute expected value."),
+            assert_float_eq!(
+                eval.run().expect("Unable to compute the actual value."),
+                expectedfn(&sample[..]).expect("Unable to compute expected value."),
+                eps
             );
-            assert!(error <= EPSILON);
+            // Clean up the index stack.
+            sample.pop();
+            let mut vari = vari;
+            while indices[vari] == samples_per_var && vari > 0 {
+                if let Some(_) = sample.pop() {
+                    indices[vari] = 0;
+                    vari -= 1;
+                } else {
+                    assert!(false); // To ensure the logic of this test is correct.
+                }
+            }
+        }
+    }
+
+    pub fn compare_trees(
+        tree1: Tree,
+        tree2: Tree,
+        vardata: &[(char, f64, f64)],
+        samples_per_var: usize,
+        eps: f64,
+    ) {
+        use rand::Rng;
+        let mut eval1 = Evaluator::new(&tree1);
+        let mut eval2 = Evaluator::new(&tree2);
+        let nvars = vardata.len();
+        let mut indices = vec![0usize; nvars];
+        let mut sample = Vec::<f64>::with_capacity(nvars);
+        let mut rng = StdRng::seed_from_u64(42);
+        while indices[0] <= samples_per_var {
+            let vari = sample.len();
+            let (label, lower, upper) = vardata[vari];
+            let value = lower + rng.gen::<f64>() * (upper - lower);
+            sample.push(value);
+            eval1.set_var(label, value);
+            eval2.set_var(label, value);
+            indices[vari] += 1;
+            if vari < nvars - 1 {
+                continue;
+            }
+            assert_float_eq!(
+                eval1.run().expect("Unable to compute the actual value."),
+                eval2.run().expect("Unable to compute expected value."),
+                eps
+            );
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -130,14 +124,82 @@ mod tests {
     }
 
     #[test]
+    fn constant() {
+        let x = deftree!(const std::f64::consts::PI);
+        assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f64::consts::PI));
+        let mut eval = Evaluator::new(&x);
+        match eval.run() {
+            Ok(val) => assert_eq!(val, std::f64::consts::PI),
+            _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn variable_in_deftree() {
+        let lisp = deftree!(+ 1. (+ (cos x) (pow (cos x) 2.)));
+        let cx = deftree!(cos x);
+        let with_vars = deftree!(+ 1. (+ {cx.clone()} (pow {cx} 2.)));
+        assert_eq!(lisp, with_vars);
+        compare_trees(lisp, with_vars, &[('x', -5., 5.)], 100, 0.);
+
+        use crate::tree::pow;
+        let tree: Tree = deftree!(
+            (+
+             {
+                 let three: Tree = 3.0.into();
+                 three * pow('x'.into(), 2.0.into())
+             }
+             (+ (* 2. x) 1.))
+        );
+        let expected = deftree!(+ (* 3. (pow x 2.)) (+ (* 2. x) 1.));
+        assert_eq!(tree, expected);
+        compare_trees(expected, tree, &[('x', -5., 5.)], 100, 0.);
+    }
+
+    #[test]
+    fn pythagoras() {
+        const TRIPLETS: [(f64, f64, f64); 6] = [
+            (3., 4., 5.),
+            (5., 12., 13.),
+            (8., 15., 17.),
+            (7., 24., 25.),
+            (20., 21., 29.),
+            (12., 35., 37.),
+        ];
+        let h = deftree!(sqrt (+ (pow x 2.) (pow y 2.)));
+        let mut eval = Evaluator::new(&h);
+        for (x, y, expected) in TRIPLETS {
+            eval.set_var('x', x);
+            eval.set_var('y', y);
+            match eval.run() {
+                Ok(val) => assert_eq!(val, expected),
+                _ => assert!(false),
+            }
+        }
+    }
+
+    #[test]
+    fn trig_identity() {
+        use rand::Rng;
+        const PI_2: f64 = 2.0 * std::f64::consts::TAU;
+        let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.));
+        let mut eval = Evaluator::new(&sum);
+        let mut rng = StdRng::seed_from_u64(42);
+        for _ in 0..100 {
+            let x: f64 = PI_2 * rng.gen::<f64>();
+            eval.set_var('x', x);
+            match eval.run() {
+                Ok(val) => assert_float_eq!(val, 1.),
+                _ => assert!(false),
+            }
+        }
+    }
+
+    #[test]
     fn sum_test() {
-        eval_test(
-            {
-                let xtree: Tree = 'x'.into();
-                let ytree: Tree = 'y'.into();
-                xtree + ytree
-            },
-            |vars: &[f32]| {
+        check_tree_eval(
+            deftree!(+ x y),
+            |vars: &[f64]| {
                 if let [x, y] = vars[..] {
                     Some(x + y)
                 } else {
@@ -146,18 +208,19 @@ mod tests {
             },
             &[('x', -5., 5.), ('y', -5., 5.)],
             10,
+            0.,
         );
     }
 
     #[test]
     fn evaluate_trees() {
-        eval_test(
-            pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()),
-            |vars: &[f32]| {
+        check_tree_eval(
+            deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)),
+            |vars: &[f64]| {
                 if let [x] = vars[..] {
                     Some(
-                        f32::powf(f32::log(f32::sin(x) + 2., std::f32::consts::E), 3.)
-                            / (f32::cos(x) + 2.),
+                        f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
+                            / (f64::cos(x) + 2.),
                     )
                 } else {
                     None
@@ -165,98 +228,45 @@ mod tests {
             },
             &[('x', -2.5, 2.5)],
             100,
+            0.,
         );
-
-        eval_test(
-            {
-                let s1 = {
-                    let x: Tree = 'x'.into();
-                    let y: Tree = 'y'.into();
-                    let z: Tree = 'z'.into();
-                    sqrt(
-                        pow(x - 2.0.into(), 2.0.into())
-                            + pow(y - 3.0.into(), 2.0.into())
-                            + pow(z - 4.0.into(), 2.0.into()),
-                    ) - 2.75.into()
-                };
-                let s2 = {
-                    let x: Tree = 'x'.into();
-                    let y: Tree = 'y'.into();
-                    let z: Tree = 'z'.into();
-                    sqrt(
-                        pow(x + 2.0.into(), 2.0.into())
-                            + pow(y - 3.0.into(), 2.0.into())
-                            + pow(z - 4.0.into(), 2.0.into()),
-                    ) - 4.0.into()
-                };
-                let s3 = {
-                    let x: Tree = 'x'.into();
-                    let y: Tree = 'y'.into();
-                    let z: Tree = 'z'.into();
-                    sqrt(
-                        pow(x + 2.0.into(), 2.0.into())
-                            + pow(y + 3.0.into(), 2.0.into())
-                            + pow(z - 4.0.into(), 2.0.into()),
-                    ) - 5.25.into()
-                };
-                max(min(s1, s2), s3)
-            },
-            |vars: &[f32]| {
+        check_tree_eval(
+            deftree!(
+                (max (min
+                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            ),
+            |vars: &[f64]| {
                 if let [x, y, z] = vars[..] {
-                    let s1 = f32::sqrt(
-                        f32::powf(x - 2., 2.) + f32::powf(y - 3., 2.) + f32::powf(z - 4., 2.),
+                    let s1 = f64::sqrt(
+                        f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
                     ) - 2.75;
-                    let s2 = f32::sqrt(
-                        f32::powf(x + 2., 2.) + f32::powf(y - 3., 2.) + f32::powf(z - 4., 2.),
+                    let s2 = f64::sqrt(
+                        f64::powf(x + 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
                     ) - 4.;
-                    let s3 = f32::sqrt(
-                        f32::powf(x + 2., 2.) + f32::powf(y + 3., 2.) + f32::powf(z - 4., 2.),
+                    let s3 = f64::sqrt(
+                        f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
                     ) - 5.25;
-                    Some(f32::max(f32::min(s1, s2), s3))
+                    Some(f64::max(f64::min(s1, s2), s3))
                 } else {
                     None
                 }
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
+            0.,
         );
     }
 
     #[test]
     fn tree_string_formatting() {
-        let tree = {
-            let s1 = {
-                let x: Tree = 'x'.into();
-                let y: Tree = 'y'.into();
-                let z: Tree = 'z'.into();
-                sqrt(
-                    pow(x - 2.0.into(), 2.0.into())
-                        + pow(y - 3.0.into(), 2.0.into())
-                        + pow(z - 4.0.into(), 2.0.into()),
-                ) - 2.75.into()
-            };
-            let s2 = {
-                let x: Tree = 'x'.into();
-                let y: Tree = 'y'.into();
-                let z: Tree = 'z'.into();
-                sqrt(
-                    pow(x + 2.0.into(), 2.0.into())
-                        + pow(y - 3.0.into(), 2.0.into())
-                        + pow(z - 4.0.into(), 2.0.into()),
-                ) - 4.0.into()
-            };
-            let s3 = {
-                let x: Tree = 'x'.into();
-                let y: Tree = 'y'.into();
-                let z: Tree = 'z'.into();
-                sqrt(
-                    pow(x + 2.0.into(), 2.0.into())
-                        + pow(y + 3.0.into(), 2.0.into())
-                        + pow(z - 4.0.into(), 2.0.into()),
-                ) - 5.25.into()
-            };
-            max(min(s1, s2), s3)
-        };
+        let tree = deftree!(
+            (max (min
+                  (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+             (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+        );
         assert_eq!(
             format!("{}", tree).trim(),
             "
@@ -397,180 +407,69 @@ mod tests {
     #[test]
     fn constant_folding() {
         // Basic multiplication.
-        let tree = {
-            let a: Tree = 2.0.into();
-            let b: Tree = 3.0.into();
-            a * b
-        };
-        let tree = tree.fold_constants().unwrap();
+        let tree = deftree!(* 2. 3.).fold_constants().unwrap();
         assert_eq!(tree.len(), 1usize);
         assert!(matches!(tree.root(), Ok(Constant(val)) if *val == 2.* 3.));
         // More complicated tree.
-        let tree = {
-            let numerator: Tree = {
-                let x: Tree = 'x'.into();
-                let prod: Tree = {
-                    let two: Tree = 2.0.into();
-                    let three: Tree = 3.0.into();
-                    two * three
-                };
-                x + prod
-            };
-            let denom: Tree = {
-                let x: Tree = 'x'.into();
-                let frac: Tree = {
-                    let two: Tree = 2.0.into();
-                    let five: Tree = 5.0.into();
-                    let three: Tree = 3.0.into();
-                    let nine: Tree = 9.0.into();
-                    two / min(five, max(three, nine - 5.0.into()))
-                };
-                log(x + frac)
-            };
-            numerator / denom
-        };
-        let expected: Tree = {
-            let numerator = {
-                let x: Tree = 'x'.into();
-                x + 6.0.into()
-            };
-            let denom = {
-                let x: Tree = 'x'.into();
-                log(x + 0.5.into())
-            };
-            numerator / denom
-        };
+        let tree = deftree!(
+            (/
+             (+ x (* 2. 3.))
+             (log (+ x (/ 2. (min 5. (max 3. (- 9. 5.)))))))
+        );
+        let expected = deftree!(/ (+ x 6.) (log (+ x 0.5)));
         assert!(tree.len() > expected.len());
         let tree = tree.fold_constants().unwrap();
         assert_eq!(tree, expected);
+        compare_trees(tree, expected, &[('x', 0.1, 10.)], 100, 0.);
     }
 
     #[test]
     fn deduplication_1() {
-        let tree: Tree = {
-            let s1 = {
-                let x: Tree = 'x'.into();
-                let y: Tree = 'y'.into();
-                let z: Tree = 'z'.into();
-                sqrt(
-                    pow(x - 2.0.into(), 2.0.into())
-                        + pow(y - 3.0.into(), 2.0.into())
-                        + pow(z - 4.0.into(), 2.0.into()),
-                ) - 2.75.into()
-            };
-            let s2 = {
-                let x: Tree = 'x'.into();
-                let y: Tree = 'y'.into();
-                let z: Tree = 'z'.into();
-                sqrt(
-                    pow(x + 2.0.into(), 2.0.into())
-                        + pow(y - 3.0.into(), 2.0.into())
-                        + pow(z - 4.0.into(), 2.0.into()),
-                ) - 4.0.into()
-            };
-            let s3 = {
-                let x: Tree = 'x'.into();
-                let y: Tree = 'y'.into();
-                let z: Tree = 'z'.into();
-                sqrt(
-                    pow(x + 2.0.into(), 2.0.into())
-                        + pow(y + 3.0.into(), 2.0.into())
-                        + pow(z - 4.0.into(), 2.0.into()),
-                ) - 5.25.into()
-            };
-            max(min(s1, s2), s3)
-        };
+        let tree = deftree!(
+            (max (min
+                  (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+             (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+        );
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 32);
-        let mut eval: Evaluator = Evaluator::new(&tree);
-        eval_test(
+        compare_trees(
+            tree,
             nodup,
-            move |vars: &[f32]| -> Option<f32> {
-                if let [x, y, z] = vars[..] {
-                    eval.set_var('x', x);
-                    eval.set_var('y', y);
-                    eval.set_var('z', z);
-                    let result = eval.run();
-                    match result {
-                        Ok(value) => Some(value),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
+            0.,
         );
     }
 
     #[test]
     fn deduplication_2() {
-        let tree: Tree =
-            { pow(log(sin('x'.into()) + 2.0.into()), 3.0.into()) / (cos('x'.into()) + 2.0.into()) };
+        let tree = deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.));
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 10);
-        let mut eval: Evaluator = Evaluator::new(&tree);
-        eval_test(
-            nodup,
-            move |vars: &[f32]| -> Option<f32> {
-                if let [x] = vars[..] {
-                    eval.set_var('x', x);
-                    let result = eval.run();
-                    match result {
-                        Ok(value) => Some(value),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            },
-            &[('x', -10., 10.)],
-            20,
-        );
+        compare_trees(tree, nodup, &[('x', -10., 10.)], 400, 0.);
     }
 
     #[test]
     fn deduplication_3() {
-        let tree: Tree = {
-            (pow(sin('x'.into()), 2.0.into())
-                + pow(cos('x'.into()), 2.0.into())
-                + ((cos('x'.into()) * sin('x'.into())) * 2.0.into()))
-                / (pow(sin('y'.into()), 2.0.into())
-                    + pow(cos('y'.into()), 2.0.into())
-                    + ((cos('y'.into()) * sin('y'.into())) * 2.0.into()))
-        };
+        let tree = deftree!(
+            (/
+             (+ (pow (sin x) 2.) (+ (pow (cos x) 2.) (* 2. (* (sin x) (cos x)))))
+             (+ (pow (sin y) 2.) (+ (pow (cos y) 2.) (* 2. (* (sin y) (cos y))))))
+        );
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 20);
-        let mut eval: Evaluator = Evaluator::new(&tree);
-        eval_test(
-            nodup,
-            move |vars: &[f32]| -> Option<f32> {
-                if let [x, y] = vars[..] {
-                    eval.set_var('x', x);
-                    eval.set_var('y', y);
-                    let result = eval.run();
-                    match result {
-                        Ok(value) => Some(value),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            },
-            &[('x', -10., 10.), ('y', -9., 10.)],
-            20,
-        );
+        compare_trees(tree, nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);
     }
 
     #[test]
     fn depth_traverse() {
         let mut walker = DepthWalker::new();
         {
-            let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
+            let tree = deftree!(+ (pow x 2.) (pow y 2.));
             // Make sure two successive traversal yield the same nodes.
             let a: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
@@ -584,7 +483,7 @@ mod tests {
         }
         {
             // Make sure the same TraverseDepth can be used on multiple trees.
-            let tree: Tree = pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into());
+            let tree = deftree!(+ (pow x 3.) (pow y 3.));
             let a: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
@@ -600,8 +499,6 @@ mod tests {
 
     #[test]
     fn tree_from_nodes() {
-        use BinaryOp::*;
-        use UnaryOp::*;
         // Nodes in order.
         match Tree::from_nodes(vec![
             Symbol('x'),            // 0
@@ -632,7 +529,6 @@ mod tests {
 
     #[test]
     fn recursive_compare() {
-        use BinaryOp::*;
         {
             // Check if 'Add' node with mirrored inputs is compared
             // correctly.
@@ -707,7 +603,7 @@ mod tests {
 
     #[test]
     fn tree_parsing() {
-        let tree = deftree!(
+        let tree = parsetree!(
             (- (sqrt (+ (pow x 2.) (pow y 2.))) 6.0)
         )
         .unwrap();
@@ -729,7 +625,7 @@ mod tests {
             .trim()
         );
         // Slightly larger tree written over mutliple lines.
-        let tree = deftree!(
+        let tree = parsetree!(
             (min
              (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
              (- (sqrt (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.))) 5.234)
@@ -771,7 +667,7 @@ mod tests {
 
     #[test]
     fn parse_tree_with_comments() {
-        let tree = deftree!(
+        let tree = parsetree!(
             (min /*IMPORTANT: Do not remove this comment.*/
              (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24) // IMPORTANT: Do not remove this comment.
              // IMPORTANT: Do not remove this comment.
@@ -784,7 +680,7 @@ mod tests {
 
     #[test]
     fn parse_large_tree() {
-        let tree = deftree!(
+        let tree = parsetree!(
             (min
              (- (log (+
                       (min

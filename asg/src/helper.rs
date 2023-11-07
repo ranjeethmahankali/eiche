@@ -1,19 +1,26 @@
 use crate::tree::{BinaryOp, Node, Node::*, Tree, TreeError, UnaryOp};
 
+#[macro_export]
+macro_rules! const_assert {
+    ($message: literal, $($tt:tt)*) => {
+        const _: () = assert!($($tt)*, $message);
+    }
+}
+
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
         Tree::new(self)
     }
 }
 
-impl From<f32> for Tree {
-    fn from(value: f32) -> Self {
+impl From<f64> for Tree {
+    fn from(value: f64) -> Self {
         return Constant(value).into();
     }
 }
 
-impl From<f32> for Node {
-    fn from(value: f32) -> Self {
+impl From<f64> for Node {
+    fn from(value: f64) -> Self {
         return Constant(value);
     }
 }
