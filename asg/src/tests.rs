@@ -3,7 +3,7 @@ pub mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
-    use crate::tree::{Node::*, *};
+    use crate::tree::{BinaryOp::*, Evaluator, Node, Node::*, Tree, TreeError, UnaryOp::*};
     use crate::{deftree, helper::*, parsetree};
 
     /// Helper function to evaluate the tree with randomly sampled
@@ -107,7 +107,7 @@ pub mod tests {
 
     #[test]
     fn constant() {
-        let x: Tree = std::f64::consts::PI.into();
+        let x = deftree!(const std::f64::consts::PI);
         assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f64::consts::PI));
         let mut eval = Evaluator::new(&x);
         match eval.run() {
@@ -460,8 +460,6 @@ pub mod tests {
 
     #[test]
     fn tree_from_nodes() {
-        use BinaryOp::*;
-        use UnaryOp::*;
         // Nodes in order.
         match Tree::from_nodes(vec![
             Symbol('x'),            // 0
@@ -492,7 +490,6 @@ pub mod tests {
 
     #[test]
     fn recursive_compare() {
-        use BinaryOp::*;
         {
             // Check if 'Add' node with mirrored inputs is compared
             // correctly.

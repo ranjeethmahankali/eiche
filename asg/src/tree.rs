@@ -328,25 +328,25 @@ macro_rules! deftree {
         -deftree!($a)
     };
     (sqrt $a:tt) => {
-        sqrt(deftree!($a))
+        $crate::tree::sqrt(deftree!($a))
     };
     (abs $a:tt) => {
-        abs(deftree!($a))
+        $crate::tree::abs(deftree!($a))
     };
     (sin $a:tt) => {
-        sin(deftree!($a))
+        $crate::tree::sin(deftree!($a))
     };
     (cos $a:tt) => {
-        cos(deftree!($a))
+        $crate::tree::cos(deftree!($a))
     };
     (tan $a:tt) => {
-        tan(deftree!($a))
+        $crate::tree::tan(deftree!($a))
     };
     (log $a:tt) => {
-        log(deftree!($a))
+        $crate::tree::log(deftree!($a))
     };
     (exp $a:tt) => {
-        exp(deftree!($a))
+        $crate::tree::exp(deftree!($a))
     };
     // Binary ops.
     (+ $a:tt $b:tt) => {
@@ -362,26 +362,29 @@ macro_rules! deftree {
         deftree!($a) / deftree!($b)
     };
     (pow $a:tt $b: tt) => {
-        pow(deftree!($a), deftree!($b))
+        $crate::tree::pow(deftree!($a), deftree!($b))
     };
     (min $a:tt $b: tt) => {
-        min(deftree!($a), deftree!($b))
+        $crate::tree::min(deftree!($a), deftree!($b))
     };
     (max $a:tt $b: tt) => {
-        max(deftree!($a), deftree!($b))
+        $crate::tree::max(deftree!($a), deftree!($b))
     };
     // Symbols.
     ($a: ident) => {{
         const LABEL: &str = stringify!($a);
         $crate::const_assert!(
-            "Symbols can only have a single character as identifiers.",
+            "Symbols can only have a single character as an identifier.",
             LABEL.len() == 1
         );
-        <Node as Into<Tree>>::into(Node::Symbol(LABEL.chars().next().unwrap()))
+        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Symbol(LABEL.chars().next().unwrap()))
     }};
     // Float constants.
+    (const $($tt:tt)*) => {
+        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($($tt)*))
+    };
     ($a:literal) => {
-        <Node as Into<Tree>>::into(Node::Constant($a))
+        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($a))
     };
 }
 
