@@ -323,7 +323,7 @@ macro_rules! deftree {
     (($($a:tt)*)) => { // Unwrap redundant parens.
         deftree!($($a)*)
     };
-    ({$a:ident}) => { // Unwrap curly braces to variables.
+    ({$a:expr}) => { // Unwrap curly braces to variables.
         $a
     };
     ({$($a:tt)*}) => { // More complex expressions.
@@ -386,8 +386,8 @@ macro_rules! deftree {
         <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Symbol(LABEL.chars().next().unwrap()))
     }};
     // Float constants.
-    (const $($tt:tt)*) => {
-        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($($tt)*))
+    (const $tt:expr) => {
+        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($tt))
     };
     ($a:literal) => {
         <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($a))
