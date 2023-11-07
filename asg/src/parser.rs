@@ -281,9 +281,9 @@ pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
 }
 
 #[macro_export]
-macro_rules! deftree {
+macro_rules! parsetree {
     ($($exp:tt) *) => {
-        parse_tree(stringify!($($exp) *))
+        $crate::parser::parse_tree(stringify!($($exp) *))
     };
 }
 
@@ -314,9 +314,9 @@ pub fn parse_template(lisp: &str) -> Result<Template, LispParseError> {
 }
 
 #[macro_export]
-macro_rules! deftemplate {
+macro_rules! parsetemplate {
     ($($exp:tt) *) => {
-        parse_template(stringify!($($exp) *))
+        $crate::parser::parse_template(stringify!($($exp) *))
     };
 }
 

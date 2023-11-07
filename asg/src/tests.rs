@@ -3,9 +3,8 @@ pub mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
-    use crate::tree::Node::*;
-    use crate::tree::*;
-    use crate::{deftree, helper::*, parser::parse_tree};
+    use crate::tree::{Node::*, *};
+    use crate::{helper::*, parsetree};
 
     /// Helper function to evaluate the tree with randomly sampled
     /// variable values and compare the result to the one returned by
@@ -715,7 +714,7 @@ pub mod tests {
 
     #[test]
     fn tree_parsing() {
-        let tree = deftree!(
+        let tree = parsetree!(
             (- (sqrt (+ (pow x 2.) (pow y 2.))) 6.0)
         )
         .unwrap();
@@ -737,7 +736,7 @@ pub mod tests {
             .trim()
         );
         // Slightly larger tree written over mutliple lines.
-        let tree = deftree!(
+        let tree = parsetree!(
             (min
              (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
              (- (sqrt (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.))) 5.234)
@@ -779,7 +778,7 @@ pub mod tests {
 
     #[test]
     fn parse_tree_with_comments() {
-        let tree = deftree!(
+        let tree = parsetree!(
             (min /*IMPORTANT: Do not remove this comment.*/
              (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24) // IMPORTANT: Do not remove this comment.
              // IMPORTANT: Do not remove this comment.
@@ -792,7 +791,7 @@ pub mod tests {
 
     #[test]
     fn parse_large_tree() {
-        let tree = deftree!(
+        let tree = parsetree!(
             (min
              (- (log (+
                       (min
