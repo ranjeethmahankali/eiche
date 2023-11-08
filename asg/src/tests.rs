@@ -141,7 +141,7 @@ pub mod tests {
         let with_vars = deftree!(+ 1. (+ {cx.clone()} (pow {cx} 2.)));
         assert_eq!(lisp, with_vars);
         compare_trees(lisp, with_vars, &[('x', -5., 5.)], 100, 0.);
-
+        // More complex expressions.
         use crate::tree::pow;
         let tree: Tree = deftree!(
             (+
