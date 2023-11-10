@@ -131,6 +131,10 @@ impl Tree {
         &self.nodes
     }
 
+    pub fn to_lisp(&self) -> Result<String, TreeError> {
+        Ok(crate::helper::to_lisp(self.root()?, self.nodes()))
+    }
+
     pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
         let mut walker = DepthWalker::new();
         let mut pruner = Pruner::new();

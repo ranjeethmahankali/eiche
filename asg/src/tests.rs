@@ -1031,4 +1031,13 @@ pub mod tests {
                 .trim()
         );
     }
+
+    #[test]
+    fn tree_to_lisp() {
+        let tree = deftree!(- (sqrt (+ (pow (- x 3.) 2.) (pow (- y 2.4) 2.))) 4.);
+        assert_eq!(
+            tree.to_lisp().unwrap(),
+            "(- (sqrt (+ (pow (- x 3) 2) (pow (- y 2.4) 2))) 4)"
+        );
+    }
 }

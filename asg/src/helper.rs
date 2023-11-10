@@ -499,3 +499,42 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
     }
     return nodes;
 }
+
+pub fn to_lisp(node: &Node, nodes: &Vec<Node>) -> String {
+    match node {
+        Constant(val) => val.to_string(),
+        Symbol(label) => label.to_string(),
+        Unary(op, input) => format!(
+            "({} {})",
+            {
+                match op {
+                    UnaryOp::Negate => "-",
+                    UnaryOp::Sqrt => "sqrt",
+                    UnaryOp::Abs => "abs",
+                    UnaryOp::Sin => "sin",
+                    UnaryOp::Cos => "cos",
+                    UnaryOp::Tan => "tan",
+                    UnaryOp::Log => "log",
+                    UnaryOp::Exp => "exp",
+                }
+            },
+            to_lisp(&nodes[*input], nodes)
+        ),
+        Binary(op, lhs, rhs) => format!(
+            "({} {} {})",
+            {
+                match op {
+                    BinaryOp::Add => "+",
+                    BinaryOp::Subtract => "-",
+                    BinaryOp::Multiply => "*",
+                    BinaryOp::Divide => "/",
+                    BinaryOp::Pow => "pow",
+                    BinaryOp::Min => "min",
+                    BinaryOp::Max => "max",
+                }
+            },
+            to_lisp(&nodes[*lhs], nodes),
+            to_lisp(&nodes[*rhs], nodes)
+        ),
+    }
+}
