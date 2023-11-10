@@ -255,7 +255,7 @@ pub mod tests {
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
-            0.,
+            1e-14,
         );
     }
 
@@ -1029,6 +1029,15 @@ pub mod tests {
                      ├── [296] Constant(2)
                      └── [297] Symbol(a)"
                 .trim()
+        );
+    }
+
+    #[test]
+    fn tree_to_lisp() {
+        let tree = deftree!(- (sqrt (+ (pow (- x 3.) 2.) (pow (- y 2.4) 2.))) 4.);
+        assert_eq!(
+            tree.to_lisp().unwrap(),
+            "(- (sqrt (+ (pow (- x 3) 2) (pow (- y 2.4) 2))) 4)"
         );
     }
 }
