@@ -394,7 +394,7 @@ macro_rules! deftree {
         <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($tt))
     };
     ($a:literal) => {
-        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($a))
+        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($a as f64))
     };
 }
 
