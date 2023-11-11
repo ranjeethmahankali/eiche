@@ -18,6 +18,19 @@ pub fn simplify_tree(tree: Tree) {
     }
 }
 
+// struct MatchIterator<'a> {
+//     template: &'a Template,
+//     resources: &'a Resources,
+// }
+
+// impl<'a> Iterator for MatchIterator<'a> {
+//     type Item = Tree;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         todo!()
+//     }
+// }
+
 struct Resources {
     lwalk: DepthWalker,
     rwalk: DepthWalker,
@@ -43,12 +56,12 @@ impl Template {
         // Clear any previous bindings to start over fresh.
         capture.bindings.clear();
         // Walkers for depth first traversal.
-        let mut left =
-            res.lwalk
-                .walk_tree_from(self.ping(), from, true, NodeOrdering::Deterministic);
+        let mut left = res
+            .lwalk
+            .walk_tree(self.ping(), false, NodeOrdering::Deterministic);
         let mut right = res
             .rwalk
-            .walk_tree_from(tree, from, true, NodeOrdering::Deterministic);
+            .walk_tree_from(tree, from, false, NodeOrdering::Deterministic);
         // Do simultaneous depth first walk on the template and the
         // tree and compare along the way.
         loop {
@@ -81,7 +94,10 @@ impl Template {
 
     fn match_from(&self, index: usize, tree: &Tree, capture: &mut Capture, res: &mut Resources) {
         capture.node_index = None;
-        for i in (index + 1)..tree.len() {
+        if index >= tree.len() {
+            return;
+        }
+        for i in index..tree.len() {
             if self.match_node(i, tree, capture, res) {
                 capture.node_index = Some(i);
                 return;
@@ -95,13 +111,14 @@ impl Template {
 
     fn next_match(&self, tree: &Tree, capture: &mut Capture, res: &mut Resources) {
         match capture.node_index {
-            Some(i) => self.match_from(i, tree, capture, res),
+            Some(i) => self.match_from(i + 1, tree, capture, res),
             None => return,
         }
     }
 }
 
-pub struct Capture {
+#[derive(Debug)]
+struct Capture {
     node_index: Option<usize>,
     bindings: Vec<(char, usize)>,
 }
@@ -136,13 +153,22 @@ impl Capture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deftree;
+    use crate::{deftree, template::get_template_by_name};
 
     #[test]
     fn template_matching() {
-        let templates = get_templates();
+        let template = get_template_by_name("distribute_mul").unwrap();
         let tree = deftree!(* 0.5 (+ (* x 2.5) (* x 1.5)))
             .deduplicate()
             .unwrap();
+        println!("{}", tree);
+        // todo!();
+        let mut capture = Capture::new();
+        let mut resources = Resources::new();
+        assert!(!capture.is_valid());
+        template.first_match(&tree, &mut capture, &mut resources);
+        assert!(capture.is_valid());
+        println!("{:?}", capture);
+        assert!(matches!(capture.node_index, Some(i) if i == 6));
     }
 }
