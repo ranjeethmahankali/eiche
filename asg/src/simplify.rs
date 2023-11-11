@@ -16,8 +16,14 @@ pub fn simplify_tree(tree: Tree) {
     }
 }
 
-fn symbolic_match(li: usize, ltree: &Tree, ri: usize, rtree: &Tree, capture: &mut Capture) -> bool {
-    println!("Matching {:?} with {:?}", ltree.node(li), rtree.node(ri));
+fn symbolic_match(
+    ldofs: &Box<[usize]>,
+    li: usize,
+    ltree: &Tree,
+    ri: usize,
+    rtree: &Tree,
+    capture: &mut Capture,
+) -> bool {
     match (ltree.node(li), rtree.node(ri)) {
         (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
         (Node::Constant(_), _) => return false,
@@ -26,23 +32,34 @@ fn symbolic_match(li: usize, ltree: &Tree, ri: usize, rtree: &Tree, capture: &mu
             if lop != rop {
                 return false;
             } else {
-                return symbolic_match(*input1, ltree, *input2, rtree, capture);
+                return symbolic_match(ldofs, *input1, ltree, *input2, rtree, capture);
             }
         }
         (Node::Unary(_, _), _) => return false,
-        (Node::Binary(lop, lhs1, rhs1), Node::Binary(rop, lhs2, rhs2)) => {
+        (Node::Binary(lop, l1, r1), Node::Binary(rop, l2, r2)) => {
             if lop != rop {
                 return false;
             } else {
+                let (l1, r1, l2, r2) = {
+                    let mut l1 = *l1;
+                    let mut r1 = *r1;
+                    let mut l2 = *l2;
+                    let mut r2 = *r2;
+                    if !lop.is_commutative() && ldofs[l1] > ldofs[r1] {
+                        std::mem::swap(&mut l1, &mut r1);
+                        std::mem::swap(&mut l2, &mut r2);
+                    }
+                    (l1, r1, l2, r2)
+                };
                 let state = capture.binding_state();
-                let ordered = symbolic_match(*lhs1, ltree, *lhs2, rtree, capture)
-                    && symbolic_match(*rhs1, ltree, *rhs2, rtree, capture);
+                let ordered = symbolic_match(ldofs, l1, ltree, l2, rtree, capture)
+                    && symbolic_match(ldofs, r1, ltree, r2, rtree, capture);
                 if !lop.is_commutative() || ordered {
                     return ordered;
                 }
                 capture.restore_bindings(state);
-                return symbolic_match(*lhs1, ltree, *rhs2, rtree, capture)
-                    && symbolic_match(*rhs1, ltree, *lhs2, rtree, capture);
+                return symbolic_match(ldofs, l1, ltree, r2, rtree, capture)
+                    && symbolic_match(ldofs, r1, ltree, l2, rtree, capture);
             }
         }
         (Node::Binary(_, _, _), _) => return false,
@@ -53,7 +70,14 @@ impl Template {
     fn match_node(&self, from: usize, tree: &Tree, capture: &mut Capture) -> bool {
         // Clear any previous bindings to start over fresh.
         capture.bindings.clear();
-        symbolic_match(self.ping().root_index(), self.ping(), from, tree, capture)
+        symbolic_match(
+            &self.dof_ping(),
+            self.ping().root_index(),
+            self.ping(),
+            from,
+            tree,
+            capture,
+        )
     }
 
     fn match_from(&self, index: usize, tree: &Tree, capture: &mut Capture) {
@@ -142,13 +166,13 @@ mod tests {
     #[test]
     fn match_commutative_ops_2() {
         let template = Template::from("test", deftree!(/ (+ a b) a), deftree!(+ 1 (/ b a)));
-        let tree = deftree!(/ (+ p q) q);
+        let tree = deftree!(/ (+ p q) q).deduplicate().unwrap();
         print!("{}{}", template.ping(), tree); // DEBUG
         let mut capture = Capture::new();
         assert!(!capture.is_valid());
         template.first_match(&tree, &mut capture);
         assert!(capture.is_valid());
-        assert!(matches!(capture.node_index, Some(i) if i == 4));
+        assert!(matches!(capture.node_index, Some(i) if i == 3));
     }
 
     #[test]

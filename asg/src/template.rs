@@ -68,6 +68,10 @@ impl Template {
     pub fn ping(&self) -> &Tree {
         &self.ping
     }
+
+    pub fn dof_ping(&self) -> &Box<[usize]> {
+        return &self.dof_ping;
+    }
 }
 
 fn calc_dof(tree: &Tree, root: usize, dofs: &mut Box<[usize]>) {
