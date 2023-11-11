@@ -152,7 +152,7 @@ mod tests {
     use crate::{deftree, template::get_template_by_name};
 
     #[test]
-    fn match_commutative_ops_1() {
+    fn match_with_dofs_1() {
         let template = get_template_by_name("add_zero").unwrap();
         let two: Tree = (-2.0).into();
         let tree = deftree!(+ 0 {two});
@@ -164,15 +164,32 @@ mod tests {
     }
 
     #[test]
-    fn match_commutative_ops_2() {
+    fn match_with_dofs_2() {
         let template = Template::from("test", deftree!(/ (+ a b) a), deftree!(+ 1 (/ b a)));
         let tree = deftree!(/ (+ p q) q).deduplicate().unwrap();
-        print!("{}{}", template.ping(), tree); // DEBUG
         let mut capture = Capture::new();
         assert!(!capture.is_valid());
         template.first_match(&tree, &mut capture);
         assert!(capture.is_valid());
         assert!(matches!(capture.node_index, Some(i) if i == 3));
+    }
+
+    #[test]
+    fn match_with_dofs_3() {
+        let template = Template::from(
+            "test",
+            deftree!(/ (+ (+ a b) (+ c d)) (+ a b)),
+            deftree!(+ 1 (/ (+ c d) (+ a b))),
+        );
+        let tree = deftree!(/ (+ (+ p q) (+ r s)) (+ r s))
+            .deduplicate()
+            .unwrap();
+        print!("{}{}", template.ping(), tree); // DEBUG
+        let mut capture = Capture::new();
+        assert!(!capture.is_valid());
+        template.first_match(&tree, &mut capture);
+        assert!(capture.is_valid());
+        assert!(matches!(capture.node_index, Some(i) if i == 7));
     }
 
     #[test]
