@@ -120,6 +120,10 @@ lazy_static! {
                      ping (pow x 1.)
                      pong (x)
         ),
+        deftemplate!(div_1
+                     ping (/ x 1.)
+                     pong (x)
+        ),
 
         // ====== Other templates =======
 
@@ -259,6 +263,7 @@ mod tests {
             check_one("sub_zero", &[('x', -10., 10.)], 0.);
             check_one("mul_1", &[('x', -10., 10.)], 0.);
             check_one("pow_1", &[('x', -10., 10.)], 0.);
+            check_one("div_1", &[('x', -10., 10.)], 0.);
         }
         {
             // === Other templates ===

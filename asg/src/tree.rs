@@ -166,8 +166,16 @@ impl Tree {
                 Binary(op, lhs, rhs) => {
                     let mut s: DefaultHasher = Default::default();
                     op.hash(&mut s);
-                    hashes[lhs].hash(&mut s);
-                    hashes[rhs].hash(&mut s);
+                    let (hash1, hash2) = {
+                        let mut hash1 = hashes[lhs];
+                        let mut hash2 = hashes[rhs];
+                        if op.is_commutative() && hash1 > hash2 {
+                            std::mem::swap(&mut hash1, &mut hash2);
+                        }
+                        (hash1, hash2)
+                    };
+                    hash1.hash(&mut s);
+                    hash2.hash(&mut s);
                     s.finish()
                 }
             };

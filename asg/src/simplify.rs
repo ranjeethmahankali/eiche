@@ -156,19 +156,99 @@ mod tests {
     use crate::{deftree, template::get_template_by_name};
 
     #[test]
-    fn template_matching() {
-        let template = get_template_by_name("distribute_mul").unwrap();
-        let tree = deftree!(* 0.5 (+ (* x 2.5) (* x 1.5)))
-            .deduplicate()
-            .unwrap();
-        println!("{}", tree);
-        // todo!();
-        let mut capture = Capture::new();
-        let mut resources = Resources::new();
-        assert!(!capture.is_valid());
-        template.first_match(&tree, &mut capture, &mut resources);
-        assert!(capture.is_valid());
-        println!("{:?}", capture);
-        assert!(matches!(capture.node_index, Some(i) if i == 6));
+    fn basic_template_matching() {
+        let mut check_template = {
+            let mut capture = Capture::new();
+            let mut resources = Resources::new();
+            let closure = move |name: &str, tree: Tree, node_index: usize| {
+                capture.node_index = None;
+                capture.bindings.clear();
+                print!("Checking template {} ... ", name);
+                let template = get_template_by_name(name).unwrap();
+                print!("{}{}", template.ping(), tree); // DEBUG
+                assert!(!capture.is_valid());
+                template.first_match(&tree, &mut capture, &mut resources);
+                assert!(capture.is_valid());
+                assert!(matches!(capture.node_index, Some(i) if i == node_index));
+                println!("✔ Passed.");
+            };
+            closure
+        };
+        check_template(
+            "distribute_mul",
+            deftree!(* 0.5 (+ (* x 2.5) (* x 1.5)))
+                .deduplicate()
+                .unwrap(),
+            6,
+        );
+        check_template(
+            "min_of_sqrt",
+            deftree!(+ 2.57 (* 1.23 (min (sqrt 2) (sqrt 3)))),
+            6,
+        );
+        check_template(
+            "rearrange_frac",
+            deftree!(sqrt (log (* (/ x 2) (/ 2 x))))
+                .deduplicate()
+                .unwrap(),
+            4,
+        );
+        check_template(
+            "divide_by_self",
+            deftree!(+ 1 (/ p p)).deduplicate().unwrap(),
+            2,
+        );
+        check_template("distribute_pow_div", deftree!(pow (pow (/ 2 3) 2) 2.5), 4);
+        check_template("distribute_pow_mul", deftree!(pow (pow (* 2 3) 2) 2.5), 4);
+        check_template(
+            "square_sqrt",
+            deftree!(log (+ 1 (exp (pow (sqrt 3.2556) 2)))),
+            4,
+        );
+        check_template(
+            "sqrt_square",
+            deftree!(log (+ 1 (exp (sqrt (pow 3.2345 2.))))),
+            4,
+        );
+        check_template("square_abs", deftree!(log (+ 1 (exp (pow (abs 2) 2.)))), 4);
+        check_template(
+            "mul_exponents",
+            deftree!(log (+ 1 (exp (pow (pow x 3.) 2.)))),
+            5,
+        );
+        check_template(
+            "add_exponents",
+            deftree!(log (+ 1 (exp (* (pow (log x) 2) (pow (log x) 3)))))
+                .deduplicate()
+                .unwrap(),
+            7,
+        );
+        check_template(
+            "add_frac",
+            deftree!(log (+ 1 (exp (+ (/ 2 (sqrt (+ 2 x))) (/ 3 (sqrt (+ x 2)))))))
+                .deduplicate()
+                .unwrap(),
+            8,
+        );
+        check_template(
+            "add_zero",
+            deftree!(log (+ 1 (exp (+ 0 (exp (+ 1 (log p))))))),
+            7,
+        );
+        check_template(
+            "sub_zero",
+            deftree!(log (+ 1 (exp (- (exp (+ 1 (log p))) 0)))),
+            7,
+        );
+        check_template(
+            "mul_1",
+            deftree!(log (+ 1 (exp (* (exp (+ 1 (log p))) 1)))),
+            7,
+        );
+        check_template(
+            "pow_1",
+            deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 1)))),
+            7,
+        );
     }
 }
