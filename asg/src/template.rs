@@ -8,7 +8,7 @@ pub struct Template {
     pong: Vec<Node>,
 }
 
-#[macro_export]
+/// This macro is only meant for use within this module.
 macro_rules! parsetemplate {
     (($($tt:tt)*)) => {
         parsetemplate!($($tt)*)

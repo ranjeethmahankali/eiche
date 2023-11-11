@@ -1,12 +1,5 @@
 use crate::tree::{BinaryOp, Node, Node::*, Tree, TreeError, UnaryOp};
 
-#[macro_export]
-macro_rules! const_assert {
-    ($message: literal, $($tt:tt)*) => {
-        const _: () = assert!($($tt)*, $message);
-    }
-}
-
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
         Tree::new(self)
