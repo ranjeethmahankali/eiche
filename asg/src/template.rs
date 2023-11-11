@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 
-use crate::tree::{Node, Tree};
+use crate::tree::Tree;
 
 #[derive(Clone)]
 pub struct Template {
@@ -36,49 +36,8 @@ impl Template {
         }
     }
 
-    fn match_node(&self, node: &Node, tree: &Tree, capture: &mut Capture) -> bool {
-        todo!();
-    }
-
-    fn match_from(&self, index: usize, tree: &Tree, capture: &mut Capture) {
-        for i in (index + 1)..tree.len() {
-            if self.match_node(tree.node(i), tree, capture) {
-                return;
-            }
-        }
-    }
-
-    pub fn first_match(&self, tree: &Tree, capture: &mut Capture) {
-        self.match_from(0, tree, capture);
-    }
-
-    pub fn next_match(&self, tree: &Tree, capture: &mut Capture) {
-        match capture.node_index {
-            Some(i) => self.match_from(i, tree, capture),
-            None => return,
-        }
-    }
-}
-
-pub struct Capture {
-    node_index: Option<usize>,
-    bindings: Vec<(char, usize)>,
-}
-
-impl Capture {
-    pub fn new() -> Capture {
-        Capture {
-            node_index: None,
-            bindings: vec![],
-        }
-    }
-
-    pub fn is_valid(&self) -> bool {
-        return self.node_index.is_some();
-    }
-
-    pub fn apply(&self, tree: Tree) -> Tree {
-        todo!();
+    pub fn ping(&self) -> &Tree {
+        &self.ping
     }
 }
 

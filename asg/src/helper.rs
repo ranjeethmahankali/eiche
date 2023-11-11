@@ -220,8 +220,7 @@ pub fn equivalent(
         let mut iter1 = walker1.walk_nodes(&nodes, left, false, Deterministic);
         let mut iter2 = walker2.walk_nodes(&nodes, right, false, Deterministic);
         loop {
-            let (left, right) = (iter1.next(), iter2.next());
-            match (left, right) {
+            match (iter1.next(), iter2.next()) {
                 (None, None) => {
                     // Both iterators ended.
                     return true;
@@ -276,6 +275,16 @@ impl DepthWalker {
         ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
         self.walk_nodes(&tree.nodes(), tree.root_index(), unique, ordering)
+    }
+
+    pub fn walk_tree_from<'a>(
+        &'a mut self,
+        tree: &'a Tree,
+        root_index: usize,
+        unique: bool,
+        ordering: NodeOrdering,
+    ) -> DepthIterator<'a> {
+        self.walk_nodes(&tree.nodes(), root_index, unique, ordering)
     }
 
     pub fn walk_nodes<'a>(
