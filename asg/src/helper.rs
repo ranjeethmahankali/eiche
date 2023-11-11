@@ -277,16 +277,6 @@ impl DepthWalker {
         self.walk_nodes(&tree.nodes(), tree.root_index(), unique, ordering)
     }
 
-    pub fn walk_tree_from<'a>(
-        &'a mut self,
-        tree: &'a Tree,
-        root_index: usize,
-        unique: bool,
-        ordering: NodeOrdering,
-    ) -> DepthIterator<'a> {
-        self.walk_nodes(&tree.nodes(), root_index, unique, ordering)
-    }
-
     pub fn walk_nodes<'a>(
         &'a mut self,
         nodes: &'a [Node],

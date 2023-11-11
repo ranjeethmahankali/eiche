@@ -1,117 +1,81 @@
 use crate::{
-    helper::{DepthWalker, NodeOrdering},
     template::{get_templates, Template},
     tree::{Node, Tree},
 };
 
 pub fn simplify_tree(tree: Tree) {
-    let mut resources = Resources::new();
     let templates = get_templates();
     let mut capture = Capture::new();
     let mut candidates: Vec<Tree> = Vec::new();
     for t in templates {
-        t.first_match(&tree, &mut capture, &mut resources);
+        t.first_match(&tree, &mut capture);
         while capture.is_valid() {
             candidates.push(capture.apply(tree.clone()));
-            t.next_match(&tree, &mut capture, &mut resources);
+            t.next_match(&tree, &mut capture);
         }
     }
 }
 
-// struct MatchIterator<'a> {
-//     template: &'a Template,
-//     resources: &'a Resources,
-// }
-
-// impl<'a> Iterator for MatchIterator<'a> {
-//     type Item = Tree;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         todo!()
-//     }
-// }
-
-struct Resources {
-    lwalk: DepthWalker,
-    rwalk: DepthWalker,
-}
-
-impl Resources {
-    pub fn new() -> Resources {
-        Resources {
-            lwalk: DepthWalker::new(),
-            rwalk: DepthWalker::new(),
+fn symbolic_match(li: usize, ltree: &Tree, ri: usize, rtree: &Tree, capture: &mut Capture) -> bool {
+    println!("Matching {:?} with {:?}", ltree.node(li), rtree.node(ri));
+    match (ltree.node(li), rtree.node(ri)) {
+        (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
+        (Node::Constant(_), _) => return false,
+        (Node::Symbol(label), _) => return capture.bind(*label, ri),
+        (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
+            if lop != rop {
+                return false;
+            } else {
+                return symbolic_match(*input1, ltree, *input2, rtree, capture);
+            }
         }
+        (Node::Unary(_, _), _) => return false,
+        (Node::Binary(lop, lhs1, rhs1), Node::Binary(rop, lhs2, rhs2)) => {
+            if lop != rop {
+                return false;
+            } else {
+                let state = capture.binding_state();
+                let ordered = symbolic_match(*lhs1, ltree, *lhs2, rtree, capture)
+                    && symbolic_match(*rhs1, ltree, *rhs2, rtree, capture);
+                if !lop.is_commutative() || ordered {
+                    return ordered;
+                }
+                capture.restore_bindings(state);
+                return symbolic_match(*lhs1, ltree, *rhs2, rtree, capture)
+                    && symbolic_match(*rhs1, ltree, *lhs2, rtree, capture);
+            }
+        }
+        (Node::Binary(_, _, _), _) => return false,
     }
 }
 
 impl Template {
-    fn match_node(
-        &self,
-        from: usize,
-        tree: &Tree,
-        capture: &mut Capture,
-        res: &mut Resources,
-    ) -> bool {
+    fn match_node(&self, from: usize, tree: &Tree, capture: &mut Capture) -> bool {
         // Clear any previous bindings to start over fresh.
         capture.bindings.clear();
-        // Walkers for depth first traversal.
-        let mut left = res
-            .lwalk
-            .walk_tree(self.ping(), false, NodeOrdering::Deterministic);
-        let mut right = res
-            .rwalk
-            .walk_tree_from(tree, from, false, NodeOrdering::Deterministic);
-        // Do simultaneous depth first walk on the template and the
-        // tree and compare along the way.
-        loop {
-            match (left.next(), right.next()) {
-                (None, None) => return true, // Both iterators ended.
-                (None, Some(_)) | (Some(_), None) => return false, // One of the iterators ended prematurely.
-                (Some((li, _p1)), Some((ri, _p2))) => {
-                    if !match (self.ping().nodes()[li], tree.nodes()[ri]) {
-                        (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
-                        (Node::Constant(_), _) => false,
-                        (Node::Symbol(label), _) => {
-                            if capture.bind(label, ri) {
-                                right.skip_children();
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                        (Node::Unary(lop, _), Node::Unary(rop, _)) => lop == rop,
-                        (Node::Unary(_, _), _) => false,
-                        (Node::Binary(lop, _, _), Node::Binary(rop, _, _)) => lop == rop,
-                        (Node::Binary(_, _, _), _) => false,
-                    } {
-                        return false;
-                    }
-                }
-            }
-        }
+        symbolic_match(self.ping().root_index(), self.ping(), from, tree, capture)
     }
 
-    fn match_from(&self, index: usize, tree: &Tree, capture: &mut Capture, res: &mut Resources) {
+    fn match_from(&self, index: usize, tree: &Tree, capture: &mut Capture) {
         capture.node_index = None;
         if index >= tree.len() {
             return;
         }
         for i in index..tree.len() {
-            if self.match_node(i, tree, capture, res) {
+            if self.match_node(i, tree, capture) {
                 capture.node_index = Some(i);
                 return;
             }
         }
     }
 
-    fn first_match(&self, tree: &Tree, capture: &mut Capture, res: &mut Resources) {
-        self.match_from(0, tree, capture, res);
+    fn first_match(&self, tree: &Tree, capture: &mut Capture) {
+        self.match_from(0, tree, capture);
     }
 
-    fn next_match(&self, tree: &Tree, capture: &mut Capture, res: &mut Resources) {
+    fn next_match(&self, tree: &Tree, capture: &mut Capture) {
         match capture.node_index {
-            Some(i) => self.match_from(i + 1, tree, capture, res),
+            Some(i) => self.match_from(i + 1, tree, capture),
             None => return,
         }
     }
@@ -148,6 +112,14 @@ impl Capture {
     pub fn apply(&self, _tree: Tree) -> Tree {
         todo!();
     }
+
+    pub fn binding_state(&self) -> usize {
+        self.bindings.len()
+    }
+
+    pub fn restore_bindings(&mut self, state: usize) {
+        self.bindings.truncate(state);
+    }
 }
 
 #[cfg(test)]
@@ -156,18 +128,40 @@ mod tests {
     use crate::{deftree, template::get_template_by_name};
 
     #[test]
+    fn match_commutative_ops_1() {
+        let template = get_template_by_name("add_zero").unwrap();
+        let two: Tree = (-2.0).into();
+        let tree = deftree!(+ 0 {two});
+        let mut capture = Capture::new();
+        assert!(!capture.is_valid());
+        template.first_match(&tree, &mut capture);
+        assert!(capture.is_valid());
+        assert!(matches!(capture.node_index, Some(i) if i == 2));
+    }
+
+    #[test]
+    fn match_commutative_ops_2() {
+        let template = Template::from("test", deftree!(/ (+ a b) a), deftree!(+ 1 (/ b a)));
+        let tree = deftree!(/ (+ p q) q);
+        print!("{}{}", template.ping(), tree); // DEBUG
+        let mut capture = Capture::new();
+        assert!(!capture.is_valid());
+        template.first_match(&tree, &mut capture);
+        assert!(capture.is_valid());
+        assert!(matches!(capture.node_index, Some(i) if i == 4));
+    }
+
+    #[test]
     fn basic_template_matching() {
         let mut check_template = {
             let mut capture = Capture::new();
-            let mut resources = Resources::new();
             let closure = move |name: &str, tree: Tree, node_index: usize| {
                 capture.node_index = None;
                 capture.bindings.clear();
                 print!("Checking template {} ... ", name);
                 let template = get_template_by_name(name).unwrap();
-                print!("{}{}", template.ping(), tree); // DEBUG
                 assert!(!capture.is_valid());
-                template.first_match(&tree, &mut capture, &mut resources);
+                template.first_match(&tree, &mut capture);
                 assert!(capture.is_valid());
                 assert!(matches!(capture.node_index, Some(i) if i == node_index));
                 println!("✔ Passed.");
