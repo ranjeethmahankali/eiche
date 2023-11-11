@@ -4,7 +4,7 @@ use crate::tree::Tree;
 
 #[derive(Clone)]
 pub struct Template {
-    name: &'static str,
+    name: String,
     ping: Tree,
     pong: Tree,
 }
@@ -24,13 +24,23 @@ macro_rules! deftemplate {
 }
 
 impl Template {
-    pub fn from(name: &'static str, ping: Tree, pong: Tree) -> Template {
-        Template { name, ping, pong }
+    pub fn from(name: &str, ping: Tree, pong: Tree) -> Template {
+        Template {
+            name: name.to_string(),
+            ping,
+            pong,
+        }
     }
 
     pub fn mirrored(&self) -> Template {
         Template {
-            name: self.name,
+            name: {
+                const REV: &str = "rev_";
+                match self.name.strip_prefix(REV) {
+                    Some(stripped) => stripped.to_string(),
+                    None => REV.to_string() + &self.name.to_string(),
+                }
+            },
             ping: self.pong.clone(),
             pong: self.ping.clone(),
         }
@@ -165,7 +175,7 @@ mod tests {
         // Make sure templates have unique names.
         let mut names: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
         for t in TEMPLATES.iter() {
-            assert!(names.insert(t.name), "Duplicate template found.");
+            assert!(names.insert(t.name.as_str()), "Duplicate template found.");
         }
     }
 
@@ -261,7 +271,7 @@ mod tests {
             // Make sure all templates have been checked.
             let unchecked = TEMPLATES
                 .iter()
-                .map(|t| t.name)
+                .map(|t| t.name.as_str())
                 .filter(|name| !checked.contains(name))
                 .collect::<Vec<&str>>()
                 .join("\n");

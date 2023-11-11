@@ -132,3 +132,17 @@ impl Capture {
         todo!();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deftree;
+
+    #[test]
+    fn template_matching() {
+        let templates = get_templates();
+        let tree = deftree!(* 0.5 (+ (* x 2.5) (* x 1.5)))
+            .deduplicate()
+            .unwrap();
+    }
+}
