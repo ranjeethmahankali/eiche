@@ -7,6 +7,8 @@ pub struct Template {
     name: String,
     ping: Tree,
     pong: Tree,
+    dof_ping: Box<[usize]>,
+    dof_pong: Box<[usize]>,
 }
 
 /// This macro is only meant for use within this module.
@@ -25,11 +27,26 @@ macro_rules! deftemplate {
 
 impl Template {
     pub fn from(name: &str, ping: Tree, pong: Tree) -> Template {
-        Template {
+        let pinglen = ping.len();
+        let ponglen = pong.len();
+        let mut template = Template {
             name: name.to_string(),
             ping,
             pong,
-        }
+            dof_ping: vec![0; pinglen].into_boxed_slice(),
+            dof_pong: vec![0; ponglen].into_boxed_slice(),
+        };
+        calc_dof(
+            &template.ping,
+            template.ping.root_index(),
+            &mut template.dof_ping,
+        );
+        calc_dof(
+            &template.pong,
+            template.pong.root_index(),
+            &mut template.dof_pong,
+        );
+        return template;
     }
 
     pub fn mirrored(&self) -> Template {
@@ -43,12 +60,36 @@ impl Template {
             },
             ping: self.pong.clone(),
             pong: self.ping.clone(),
+            dof_ping: self.dof_ping.clone(),
+            dof_pong: self.dof_pong.clone(),
         }
     }
 
     pub fn ping(&self) -> &Tree {
         &self.ping
     }
+}
+
+fn calc_dof(tree: &Tree, root: usize, dofs: &mut Box<[usize]>) {
+    use crate::tree::Node::*;
+    dofs[root] = match tree.node(root) {
+        Constant(_) | Symbol(_) => 0,
+        Unary(_op, input) => {
+            calc_dof(tree, *input, dofs);
+            dofs[*input]
+        }
+        Binary(op, lhs, rhs) => {
+            calc_dof(tree, *lhs, dofs);
+            calc_dof(tree, *rhs, dofs);
+            dofs[*lhs] + dofs[*rhs] + {
+                if op.is_commutative() {
+                    1
+                } else {
+                    0
+                }
+            }
+        }
+    };
 }
 
 lazy_static! {
