@@ -80,8 +80,8 @@ pub mod tests {
     }
 
     pub fn compare_trees(
-        tree1: Tree,
-        tree2: Tree,
+        tree1: &Tree,
+        tree2: &Tree,
         vardata: &[(char, f64, f64)],
         samples_per_var: usize,
         eps: f64,
@@ -140,7 +140,7 @@ pub mod tests {
         let cx = deftree!(cos x);
         let with_vars = deftree!(+ 1. (+ {cx.clone()} (pow {cx} 2.)));
         assert_eq!(lisp, with_vars);
-        compare_trees(lisp, with_vars, &[('x', -5., 5.)], 100, 0.);
+        compare_trees(&lisp, &with_vars, &[('x', -5., 5.)], 100, 0.);
         // More complex expressions.
         use crate::tree::pow;
         let tree: Tree = deftree!(
@@ -153,7 +153,7 @@ pub mod tests {
         );
         let expected = deftree!(+ (* 3. (pow x 2.)) (+ (* 2. x) 1.));
         assert_eq!(tree, expected);
-        compare_trees(expected, tree, &[('x', -5., 5.)], 100, 0.);
+        compare_trees(&expected, &tree, &[('x', -5., 5.)], 100, 0.);
     }
 
     #[test]
@@ -420,7 +420,7 @@ pub mod tests {
         assert!(tree.len() > expected.len());
         let tree = tree.fold_constants().unwrap();
         assert_eq!(tree, expected);
-        compare_trees(tree, expected, &[('x', 0.1, 10.)], 100, 0.);
+        compare_trees(&tree, &expected, &[('x', 0.1, 10.)], 100, 0.);
     }
 
     #[test]
@@ -435,8 +435,8 @@ pub mod tests {
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 32);
         compare_trees(
-            tree,
-            nodup,
+            &tree,
+            &nodup,
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
             0.,
@@ -449,7 +449,7 @@ pub mod tests {
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 10);
-        compare_trees(tree, nodup, &[('x', -10., 10.)], 400, 0.);
+        compare_trees(&tree, &nodup, &[('x', -10., 10.)], 400, 0.);
     }
 
     #[test]
@@ -462,7 +462,7 @@ pub mod tests {
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 20);
-        compare_trees(tree, nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);
+        compare_trees(&tree, &nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);
     }
 
     #[test]

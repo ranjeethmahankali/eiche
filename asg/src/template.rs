@@ -1,39 +1,31 @@
 use lazy_static::lazy_static;
 
-use crate::tree::{Node, Tree, TreeError};
+use crate::tree::{Node, Tree};
 
 #[derive(Clone)]
 pub struct Template {
     name: &'static str,
-    ping: Vec<Node>,
-    pong: Vec<Node>,
+    ping: Tree,
+    pong: Tree,
 }
 
 /// This macro is only meant for use within this module.
-macro_rules! parsetemplate {
-    (($($tt:tt)*)) => {
+macro_rules! deftemplate {
+    (($($tt:tt)*)) => { // Unwrap parens.
         parsetemplate!($($tt)*)
     };
     ($name: ident ping ($($ping:tt) *) pong ($($pong:tt) *)) => {
         Template::from(
             stringify!($name),
-            $crate::parser::parse_nodes(stringify!(($($ping) *))).unwrap(),
-            $crate::parser::parse_nodes(stringify!(($($pong) *))).unwrap()
+            $crate::deftree!(($($ping) *)),
+            $crate::deftree!(($($pong) *))
         )
     };
 }
 
 impl Template {
-    pub fn from(
-        name: &'static str,
-        ping: Vec<Node>,
-        pong: Vec<Node>,
-    ) -> Result<Template, TreeError> {
-        Ok(Template {
-            name,
-            ping: Tree::validate(ping)?,
-            pong: Tree::validate(pong)?,
-        })
+    pub fn from(name: &'static str, ping: Tree, pong: Tree) -> Template {
+        Template { name, ping, pong }
     }
 
     pub fn mirrored(&self) -> Template {
@@ -92,95 +84,94 @@ impl Capture {
 
 lazy_static! {
     static ref TEMPLATES: Vec<Template> = vec![
-
-        parsetemplate!(distribute_mul
+        deftemplate!(distribute_mul
                        ping (+ (* k a) (* k b))
                        pong (* k (+ a b))
-        ).unwrap(),
-        parsetemplate!(min_of_sqrt
+        ),
+        deftemplate!(min_of_sqrt
                        ping (min (sqrt a) (sqrt b))
                        pong (sqrt (min a b))
-        ).unwrap(),
-        parsetemplate!(rearrange_frac
+        ),
+        deftemplate!(rearrange_frac
                        ping (* (/ a b) (/ x y))
                        pong (* (/ a y) (/ x b))
-        ).unwrap(),
-        parsetemplate!(divide_by_self
+        ),
+        deftemplate!(divide_by_self
                        ping (/ a a)
                        pong (1.0)
-        ).unwrap(),
-        parsetemplate!(distribute_pow_div
+        ),
+        deftemplate!(distribute_pow_div
                        ping (pow (/ a b) k)
                        pong (/ (pow a k) (pow b k))
-        ).unwrap(),
-        parsetemplate!(distribute_pow_mul
+        ),
+        deftemplate!(distribute_pow_mul
                        ping (pow (* a b) k)
                        pong (* (pow a k) (pow b k))
-        ).unwrap(),
-        parsetemplate!(square_sqrt
+        ),
+        deftemplate!(square_sqrt
                        ping (pow (sqrt a) 2.)
                        pong (a)
-        ).unwrap(),
-        parsetemplate!(sqrt_square
+        ),
+        deftemplate!(sqrt_square
                        ping (sqrt (pow a 2.))
                        pong (abs a)
-        ).unwrap(),
-        parsetemplate!(square_abs
+        ),
+        deftemplate!(square_abs
                        ping (pow (abs x) 2.)
                        pong (pow x 2.)
-        ).unwrap(),
-        parsetemplate!(mul_exponents
+        ),
+        deftemplate!(mul_exponents
                        ping (pow (pow a x) y)
                        pong (pow a (* x y))
-        ).unwrap(),
-        parsetemplate!(add_exponents
+        ),
+        deftemplate!(add_exponents
                        ping (* (pow a x) (pow a y))
                        pong (pow a (+ x y))
-        ).unwrap(),
-        parsetemplate!(add_frac
+        ),
+        deftemplate!(add_frac
                        ping (+ (/ a d) (/ b d))
                        pong (/ (+ a b) d)
-        ).unwrap(),
+        ),
 
         // ====== Identity operations ======
 
-        parsetemplate!(add_zero
+        deftemplate!(add_zero
                        ping (+ x 0.)
                        pong (x)
-        ).unwrap(),
-        parsetemplate!(sub_zero
+        ),
+        deftemplate!(sub_zero
                        ping (- x 0)
                        pong (x)
-        ).unwrap(),
-        parsetemplate!(mul_1
+        ),
+        deftemplate!(mul_1
                        ping (* x 1.)
                        pong (x)
-        ).unwrap(),
-        parsetemplate!(pow_1
+        ),
+        deftemplate!(pow_1
                        ping (pow x 1.)
                        pong (x)
-        ).unwrap(),
+        ),
 
         // ====== Other templates =======
 
-        parsetemplate!(mul_0
+        deftemplate!(mul_0
                        ping (* x 0.)
                        pong (0.)
-        ).unwrap(),
-        parsetemplate!(pow_0
+        ),
+        deftemplate!(pow_0
                        ping (pow x 0.)
                        pong (1.)
-        ).unwrap(),
+        ),
         // Min and max simplifications from:
         // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
-        parsetemplate!(min_expand
+        deftemplate!(min_expand
                        ping (min a b)
                        pong (/ (- (+ a b) (abs (- b a))) 2.)
-        ).unwrap(),
-        parsetemplate!(max_expand
+        ),
+        deftemplate!(max_expand
                        ping (max a b)
                        pong (/ (+ (+ a b) (abs (- b a))) 2.)
-        ).unwrap(),
+        ),
     ];
 
     static ref MIRRORED_TEMPLATES: Vec<Template> = mirrored(&TEMPLATES);
@@ -224,10 +215,8 @@ mod tests {
                 .find(|t| t.name == name)
                 .expect(format!("No template found with name: {}", name).as_str());
             // Check if valid trees can be made from the templates.
-            let ping = Tree::from_nodes(template.ping.clone()).unwrap();
-            let pong = Tree::from_nodes(template.pong.clone()).unwrap();
             print!("{}   ... ", name);
-            compare_trees(ping, pong, vardata, 20, eps);
+            compare_trees(&template.ping, &template.pong, vardata, 20, eps);
             println!("✔ Passed.");
             assert!(
                 checked.insert(name),

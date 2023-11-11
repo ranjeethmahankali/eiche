@@ -9,7 +9,7 @@ macro_rules! const_assert {
 macro_rules! deftree {
     () => {}; // empty;
     (($($a:tt)*)) => { // Unwrap redundant parens.
-        deftree!($($a)*)
+        $crate::deftree!($($a)*)
     };
     ({$a:expr}) => { // Unwrap curly braces to variables.
         $a
@@ -19,50 +19,50 @@ macro_rules! deftree {
     };
     // Unary ops.
     (- $a:tt) => {
-        -deftree!($a)
+        -$crate::deftree!($a)
     };
     (sqrt $a:tt) => {
-        $crate::tree::sqrt(deftree!($a))
+        $crate::tree::sqrt($crate::deftree!($a))
     };
     (abs $a:tt) => {
-        $crate::tree::abs(deftree!($a))
+        $crate::tree::abs($crate::deftree!($a))
     };
     (sin $a:tt) => {
-        $crate::tree::sin(deftree!($a))
+        $crate::tree::sin($crate::deftree!($a))
     };
     (cos $a:tt) => {
-        $crate::tree::cos(deftree!($a))
+        $crate::tree::cos($crate::deftree!($a))
     };
     (tan $a:tt) => {
-        $crate::tree::tan(deftree!($a))
+        $crate::tree::tan($crate::deftree!($a))
     };
     (log $a:tt) => {
-        $crate::tree::log(deftree!($a))
+        $crate::tree::log($crate::deftree!($a))
     };
     (exp $a:tt) => {
-        $crate::tree::exp(deftree!($a))
+        $crate::tree::exp($crate::deftree!($a))
     };
     // Binary ops.
     (+ $a:tt $b:tt) => {
-        deftree!($a) + deftree!($b)
+        $crate::deftree!($a) + $crate::deftree!($b)
     };
     (- $a:tt $b:tt) => {
-        deftree!($a) - deftree!($b)
+        $crate::deftree!($a) - $crate::deftree!($b)
     };
     (* $a:tt $b:tt) => {
-        deftree!($a) * deftree!($b)
+        $crate::deftree!($a) * $crate::deftree!($b)
     };
     (/ $a:tt $b:tt) => {
-        deftree!($a) / deftree!($b)
+        $crate::deftree!($a) / $crate::deftree!($b)
     };
     (pow $a:tt $b: tt) => {
-        $crate::tree::pow(deftree!($a), deftree!($b))
+        $crate::tree::pow($crate::deftree!($a), $crate::deftree!($b))
     };
     (min $a:tt $b: tt) => {
-        $crate::tree::min(deftree!($a), deftree!($b))
+        $crate::tree::min($crate::deftree!($a), $crate::deftree!($b))
     };
     (max $a:tt $b: tt) => {
-        $crate::tree::max(deftree!($a), deftree!($b))
+        $crate::tree::max($crate::deftree!($a), $crate::deftree!($b))
     };
     // Symbols.
     ($a:ident) => {{
