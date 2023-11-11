@@ -2,6 +2,7 @@ use lazy_static::lazy_static;
 
 use crate::tree::{Node, Tree, TreeError};
 
+#[derive(Clone)]
 pub struct Template {
     name: &'static str,
     ping: Vec<Node>,
@@ -35,13 +36,21 @@ impl Template {
         })
     }
 
-    fn match_node(&self, node: &Node, capture: &mut Capture) -> bool {
+    pub fn mirrored(&self) -> Template {
+        Template {
+            name: self.name,
+            ping: self.pong.clone(),
+            pong: self.ping.clone(),
+        }
+    }
+
+    fn match_node(&self, node: &Node, tree: &Tree, capture: &mut Capture) -> bool {
         todo!();
     }
 
     fn match_from(&self, index: usize, tree: &Tree, capture: &mut Capture) {
         for i in (index + 1)..tree.len() {
-            if self.match_node(tree.node(i), capture) {
+            if self.match_node(tree.node(i), tree, capture) {
                 return;
             }
         }
@@ -173,10 +182,18 @@ lazy_static! {
                        pong (/ (+ (+ a b) (abs (- b a))) 2.)
         ).unwrap(),
     ];
+
+    static ref MIRRORED_TEMPLATES: Vec<Template> = mirrored(&TEMPLATES);
+}
+
+fn mirrored(templates: &Vec<Template>) -> Vec<Template> {
+    let mut out = templates.clone();
+    out.extend(templates.iter().map(|t| t.mirrored()));
+    return out;
 }
 
 pub fn get_templates() -> &'static Vec<Template> {
-    &TEMPLATES
+    &MIRRORED_TEMPLATES
 }
 
 #[cfg(test)]

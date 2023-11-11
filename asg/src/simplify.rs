@@ -15,7 +15,3 @@ pub fn simplify_tree(tree: Tree) {
         }
     }
 }
-
-fn simplify_internal(tree: Tree) {
-    todo!();
-}
