@@ -85,92 +85,98 @@ impl Capture {
 lazy_static! {
     static ref TEMPLATES: Vec<Template> = vec![
         deftemplate!(distribute_mul
-                       ping (+ (* k a) (* k b))
-                       pong (* k (+ a b))
+                     ping (+ (* k a) (* k b))
+                     pong (* k (+ a b))
         ),
         deftemplate!(min_of_sqrt
-                       ping (min (sqrt a) (sqrt b))
-                       pong (sqrt (min a b))
+                     ping (min (sqrt a) (sqrt b))
+                     pong (sqrt (min a b))
         ),
         deftemplate!(rearrange_frac
-                       ping (* (/ a b) (/ x y))
-                       pong (* (/ a y) (/ x b))
+                     ping (* (/ a b) (/ x y))
+                     pong (* (/ a y) (/ x b))
         ),
         deftemplate!(divide_by_self
-                       ping (/ a a)
-                       pong (1.0)
+                     ping (/ a a)
+                     pong (1.0)
         ),
         deftemplate!(distribute_pow_div
-                       ping (pow (/ a b) k)
-                       pong (/ (pow a k) (pow b k))
+                     ping (pow (/ a b) k)
+                     pong (/ (pow a k) (pow b k))
         ),
         deftemplate!(distribute_pow_mul
-                       ping (pow (* a b) k)
-                       pong (* (pow a k) (pow b k))
+                     ping (pow (* a b) k)
+                     pong (* (pow a k) (pow b k))
         ),
         deftemplate!(square_sqrt
-                       ping (pow (sqrt a) 2.)
-                       pong (a)
+                     ping (pow (sqrt a) 2.)
+                     pong (a)
         ),
         deftemplate!(sqrt_square
-                       ping (sqrt (pow a 2.))
-                       pong (abs a)
+                     ping (sqrt (pow a 2.))
+                     pong (abs a)
         ),
         deftemplate!(square_abs
-                       ping (pow (abs x) 2.)
-                       pong (pow x 2.)
+                     ping (pow (abs x) 2.)
+                     pong (pow x 2.)
         ),
         deftemplate!(mul_exponents
-                       ping (pow (pow a x) y)
-                       pong (pow a (* x y))
+                     ping (pow (pow a x) y)
+                     pong (pow a (* x y))
         ),
         deftemplate!(add_exponents
-                       ping (* (pow a x) (pow a y))
-                       pong (pow a (+ x y))
+                     ping (* (pow a x) (pow a y))
+                     pong (pow a (+ x y))
         ),
         deftemplate!(add_frac
-                       ping (+ (/ a d) (/ b d))
-                       pong (/ (+ a b) d)
+                     ping (+ (/ a d) (/ b d))
+                     pong (/ (+ a b) d)
         ),
 
         // ====== Identity operations ======
 
         deftemplate!(add_zero
-                       ping (+ x 0.)
-                       pong (x)
+                     ping (+ x 0.)
+                     pong (x)
         ),
         deftemplate!(sub_zero
-                       ping (- x 0)
-                       pong (x)
+                     ping (- x 0)
+                     pong (x)
         ),
         deftemplate!(mul_1
-                       ping (* x 1.)
-                       pong (x)
+                     ping (* x 1.)
+                     pong (x)
         ),
         deftemplate!(pow_1
-                       ping (pow x 1.)
-                       pong (x)
+                     ping (pow x 1.)
+                     pong (x)
         ),
 
         // ====== Other templates =======
 
         deftemplate!(mul_0
-                       ping (* x 0.)
-                       pong (0.)
+                     ping (* x 0.)
+                     pong (0.)
         ),
         deftemplate!(pow_0
-                       ping (pow x 0.)
-                       pong (1.)
+                     ping (pow x 0.)
+                     pong (1.)
         ),
-        // Min and max simplifications from:
+        // ====== Min and max simplifications ======
+
         // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
         deftemplate!(min_expand
-                       ping (min a b)
-                       pong (/ (- (+ a b) (abs (- b a))) 2.)
+                     ping (min a b)
+                     pong (/ (- (+ a b) (abs (- b a))) 2.)
         ),
         deftemplate!(max_expand
-                       ping (max a b)
-                       pong (/ (+ (+ a b) (abs (- b a))) 2.)
+                     ping (max a b)
+                     pong (/ (+ (+ a b) (abs (- b a))) 2.)
+
+        ),
+        deftemplate!(max_of_sub
+                     ping (min (- a x) (- a y))
+                     pong (- a (max x y))
         ),
     ];
 
@@ -286,6 +292,11 @@ mod tests {
             check_one("pow_0", &[('x', -10., 10.)], 0.);
             check_one("min_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
             check_one("max_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
+            check_one(
+                "max_of_sub",
+                &[('a', -10., 10.), ('x', -10., 10.), ('y', -10., 10.)],
+                1e-14,
+            );
         }
         {
             // Make sure all templates have been checked.
