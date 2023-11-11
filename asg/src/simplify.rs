@@ -11,6 +11,7 @@ pub fn simplify_tree(tree: Tree) {
         t.first_match(&tree, &mut capture);
         while capture.is_valid() {
             candidates.push(capture.apply(tree.clone()));
+            t.next_match(&tree, &mut capture);
         }
     }
 }
