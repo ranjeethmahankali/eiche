@@ -159,7 +159,7 @@ fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, Li
     };
     if FLT_REGEX.is_match(atom) {
         return Ok(Done(push_node(
-            Constant(atom.parse::<f64>().ok().ok_or(LispParseError::Float)?),
+            Constant(atom.parse::<f64>().map_err(|_| LispParseError::Float)?),
             nodes,
         )));
     }
@@ -272,9 +272,7 @@ pub fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
 }
 
 pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
-    Ok(Tree::from_nodes(parse_nodes(&lisp)?)
-        .ok()
-        .ok_or(LispParseError::Unknown)?)
+    Ok(Tree::from_nodes(parse_nodes(&lisp)?).map_err(|_| LispParseError::Unknown)?)
 }
 
 #[cfg(test)]
