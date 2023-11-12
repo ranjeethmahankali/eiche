@@ -34,14 +34,13 @@ impl From<char> for Tree {
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[derive(Debug)]
         enum Token {
             Branch,
             Pass,
             Turn,
             Gap,
             Newline,
-            Data(usize),
+            NodeIndex(usize),
         }
         use Token::*;
         // Walk the tree and collect tokens.
@@ -62,7 +61,7 @@ impl std::fmt::Display for Tree {
                         }
                         tokens.push(Turn);
                     }
-                    tokens.push(Data(index));
+                    tokens.push(NodeIndex(index));
                     tokens.push(Newline);
                 }
                 tokens
@@ -71,7 +70,7 @@ impl std::fmt::Display for Tree {
             let mut line_start: usize = 0;
             for i in 0..tokens.len() {
                 match tokens[i] {
-                    Branch | Pass | Gap | Data(_) => {} // Do nothing.
+                    Branch | Pass | Gap | NodeIndex(_) => {} // Do nothing.
                     Newline => line_start = i,
                     Turn => {
                         let offset = i - line_start;
@@ -79,7 +78,7 @@ impl std::fmt::Display for Tree {
                             if let Newline = tokens[li] {
                                 let ti = li + offset;
                                 tokens[ti] = match &tokens[ti] {
-                                    Branch | Pass | Data(_) => break,
+                                    Branch | Pass | NodeIndex(_) => break,
                                     Turn => Branch,
                                     Gap => Pass,
                                     Newline => panic!("FATAL: Failed to convert tree to a string"),
@@ -100,7 +99,7 @@ impl std::fmt::Display for Tree {
                 Turn => write!(f, " └── ")?,
                 Gap => write!(f, "     ")?,
                 Newline => write!(f, "\n")?,
-                Data(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
+                NodeIndex(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
             };
         }
         write!(f, "\n")
