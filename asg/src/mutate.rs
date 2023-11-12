@@ -214,7 +214,6 @@ mod tests {
         let mut capture = Capture::new();
         capture.node_index = None;
         capture.bindings.clear();
-        print!("Checking template {} ... ", name);
         let template = get_template_by_name(name).unwrap();
         assert!(!capture.is_valid());
         template.first_match(&tree, &mut capture);
@@ -224,7 +223,6 @@ mod tests {
         assert!(capture.is_valid());
         assert!(matches!(capture.node_index, Some(i) if i == node_index));
         check_bindings(&capture, &template, &tree);
-        println!("✔ Passed.");
     }
 
     #[test]
