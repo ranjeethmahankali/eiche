@@ -152,6 +152,20 @@ mod tests {
     use super::*;
     use crate::{deftree, template::get_template_by_name};
 
+    fn check_bindings(capture: &Capture, template: &Template, tree: &Tree) {
+        let left: Vec<_> = {
+            let mut chars: Vec<_> = capture.bindings.iter().map(|(c, _i)| *c).collect();
+            chars.sort();
+            chars.dedup();
+            chars
+        };
+        let right: Vec<_> = template.ping().symbols();
+        assert_eq!(left, right);
+        for (_c, i) in capture.bindings.iter() {
+            assert!(*i < tree.len());
+        }
+    }
+
     #[test]
     fn match_with_dofs_1() {
         let template = get_template_by_name("add_zero").unwrap();
@@ -162,6 +176,7 @@ mod tests {
         template.first_match(&tree, &mut capture);
         assert!(capture.is_valid());
         assert!(matches!(capture.node_index, Some(i) if i == 2));
+        check_bindings(&capture, &template, &tree);
     }
 
     #[test]
@@ -173,6 +188,7 @@ mod tests {
         template.first_match(&tree, &mut capture);
         assert!(capture.is_valid());
         assert!(matches!(capture.node_index, Some(i) if i == 3));
+        check_bindings(&capture, &template, &tree);
     }
 
     #[test]
@@ -191,6 +207,7 @@ mod tests {
         template.first_match(&tree, &mut capture);
         assert!(capture.is_valid());
         assert!(matches!(capture.node_index, Some(i) if i == 7));
+        check_bindings(&capture, &template, &tree);
     }
 
     #[test]
@@ -209,6 +226,7 @@ mod tests {
                 }
                 assert!(capture.is_valid());
                 assert!(matches!(capture.node_index, Some(i) if i == node_index));
+                check_bindings(&capture, &template, &tree);
                 println!("✔ Passed.");
             };
             closure

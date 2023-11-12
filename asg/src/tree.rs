@@ -131,6 +131,23 @@ impl Tree {
         &self.nodes
     }
 
+    pub fn symbols(&self) -> Vec<char> {
+        let mut chars: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                if let Symbol(label) = n {
+                    Some(*label)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        chars.sort();
+        chars.dedup();
+        return chars;
+    }
+
     pub fn to_lisp(&self) -> Result<String, TreeError> {
         Ok(crate::helper::to_lisp(self.root()?, self.nodes()))
     }
