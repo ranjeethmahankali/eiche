@@ -14,6 +14,7 @@ pub fn simplify_tree(tree: Tree) {
             t.next_match(&tree, &mut capture);
         }
     }
+    todo!();
 }
 
 fn symbolic_match(
