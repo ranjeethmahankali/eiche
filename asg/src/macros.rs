@@ -1,3 +1,5 @@
+/// Assert at compile time using this macro. This is similar to
+/// static_assert in C++.
 #[macro_export]
 macro_rules! const_assert {
     ($message: literal, $($tt:tt)*) => {
@@ -5,6 +7,7 @@ macro_rules! const_assert {
     }
 }
 
+/// Construct a tree from the lisp expresion.
 #[macro_export]
 macro_rules! deftree {
     () => {}; // empty;
@@ -82,6 +85,8 @@ macro_rules! deftree {
     };
 }
 
+/// Convert the lisp expression into a string and parse the string
+/// into a tree.
 #[macro_export]
 macro_rules! parsetree {
     ($($exp:tt) *) => {

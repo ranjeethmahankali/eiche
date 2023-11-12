@@ -203,6 +203,9 @@ mod tests {
                 let template = get_template_by_name(name).unwrap();
                 assert!(!capture.is_valid());
                 template.first_match(&tree, &mut capture);
+                if !capture.is_valid() || capture.node_index.unwrap() != node_index {
+                    println!("Template:{}Tree:{}", template.ping(), tree);
+                }
                 assert!(capture.is_valid());
                 assert!(matches!(capture.node_index, Some(i) if i == node_index));
                 println!("✔ Passed.");
@@ -284,6 +287,30 @@ mod tests {
             "pow_1",
             deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 1)))),
             7,
+        );
+        check_template(
+            "div_1",
+            deftree!(log (+ 1 (exp (/ (exp (+ 1 (log p))) 1)))),
+            7,
+        );
+        check_template(
+            "mul_0",
+            deftree!(log (+ 1 (exp (* (exp (+ 1 (log p))) 0)))),
+            7,
+        );
+        check_template(
+            "pow_0",
+            deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 0)))),
+            7,
+        );
+        check_template("min_expand", deftree!(log (+ 1 (exp (min x 2)))), 3);
+        check_template("max_expand", deftree!(log (+ 1 (exp (max x 2)))), 3);
+        check_template(
+            "max_of_sub",
+            deftree!(log (+ 1 (exp (min (- x 2) (- x 3)))))
+                .deduplicate()
+                .unwrap(),
+            6,
         );
     }
 }
