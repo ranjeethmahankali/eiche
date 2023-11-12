@@ -235,8 +235,6 @@ impl Deduplicater {
                     s.finish()
                 }
                 Binary(op, lhs, rhs) => {
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
                     let (hash1, hash2) = {
                         let mut hash1 = self.hashes[lhs];
                         let mut hash2 = self.hashes[rhs];
@@ -245,6 +243,8 @@ impl Deduplicater {
                         }
                         (hash1, hash2)
                     };
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
                     hash1.hash(&mut s);
                     hash2.hash(&mut s);
                     s.finish()
@@ -505,7 +505,7 @@ impl Pruner {
     /// and nodes that are not visited are filtered out. The filtered
     /// `nodes` are returned. You can minimize allocations by using
     /// the same pruner multiple times.
-    pub fn prune(&mut self, mut nodes: Vec<Node>, root_index: usize) -> Vec<Node> {
+    pub fn run(&mut self, mut nodes: Vec<Node>, root_index: usize) -> Vec<Node> {
         self.indices.clear();
         self.indices.resize(nodes.len(), 0);
         // Mark used nodes.

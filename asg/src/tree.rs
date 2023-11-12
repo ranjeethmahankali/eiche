@@ -155,7 +155,7 @@ impl Tree {
     pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        self.nodes = Self::validate(pruner.prune(fold_constants(self.nodes), root_index))?;
+        self.nodes = Self::validate(pruner.run(fold_constants(self.nodes), root_index))?;
         return Ok(self);
     }
 
@@ -163,7 +163,7 @@ impl Tree {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        self.nodes = Self::validate(pruner.prune(dedup.run(self.nodes), root_index))?;
+        self.nodes = Self::validate(pruner.run(dedup.run(self.nodes), root_index))?;
         return Ok(self);
     }
 
