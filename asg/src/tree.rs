@@ -157,7 +157,7 @@ impl Tree {
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
         self.nodes =
-            Self::validate(pruner.prune(fold_constants(self.nodes), root_index, &mut walker)?)?;
+            Self::validate(pruner.prune(fold_constants(self.nodes), root_index, &mut walker))?;
         return Ok(self);
     }
 
@@ -240,7 +240,7 @@ impl Tree {
         {
             let mut pruner = Pruner::new();
             let root_index = self.root_index();
-            self.nodes = Self::validate(pruner.prune(self.nodes, root_index, &mut walker1)?)?;
+            self.nodes = Self::validate(pruner.prune(self.nodes, root_index, &mut walker1))?;
         }
         return Ok(self);
     }

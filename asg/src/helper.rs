@@ -1,4 +1,4 @@
-use crate::tree::{BinaryOp, Node, Node::*, Tree, TreeError, UnaryOp};
+use crate::tree::{BinaryOp, Node, Node::*, Tree, UnaryOp};
 
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
@@ -394,7 +394,7 @@ impl<'a> Iterator for DepthIterator<'a> {
 }
 
 pub struct Pruner {
-    indices: Vec<Option<usize>>,
+    indices: Vec<usize>,
     pruned: Vec<Node>,
 }
 
@@ -415,50 +415,43 @@ impl Pruner {
         mut nodes: Vec<Node>,
         root_index: usize,
         walker: &mut DepthWalker,
-    ) -> Result<Vec<Node>, TreeError> {
+    ) -> Vec<Node> {
         self.indices.clear();
-        self.indices.resize(nodes.len(), None);
+        self.indices.resize(nodes.len(), 0);
         // Mark used nodes.
         walker
             .walk_nodes(&nodes, root_index, true, NodeOrdering::Original)
             .for_each(|(index, _parent)| {
-                self.indices[index] = Some(1_usize);
+                self.indices[index] = 1;
             });
+        // Reserve space for new nodes.
+        self.pruned.clear();
+        self.pruned.reserve(self.indices.iter().sum());
         {
-            // Do exclusive scan.
+            // Do inclusive scan.
             let mut sum = 0usize;
             for index in self.indices.iter_mut() {
-                if let Some(i) = index {
-                    let copy = sum;
-                    sum += *i;
-                    *index = Some(copy);
-                }
+                sum += *index;
+                *index = sum;
             }
         }
         // Filter, update and copy nodes.
-        self.pruned.clear();
-        self.pruned.reserve(nodes.len());
-        for node in (0..self.indices.len())
-            .zip(nodes.iter())
-            .filter(|(i, _node)| self.indices[*i].is_some())
-            .map(|(_i, node)| node)
-        {
-            self.pruned.push(match node {
-                // Update the indices of this node's inputs.
-                Constant(val) => Constant(*val),
-                Symbol(label) => Symbol(*label),
-                Unary(op, input) => {
-                    Unary(*op, self.indices[*input].ok_or(TreeError::PruningFailed)?)
-                }
-                Binary(op, lhs, rhs) => Binary(
-                    *op,
-                    self.indices[*lhs].ok_or(TreeError::PruningFailed)?,
-                    self.indices[*rhs].ok_or(TreeError::PruningFailed)?,
-                ),
-            });
+        for i in 0..self.indices.len() {
+            let index = self.indices[i];
+            if index > 0 && (i == 0 || self.indices[i - 1] < index) {
+                // We subtract 1 from all indices because we did an inclusive sum.
+                self.pruned.push(match nodes[i] {
+                    Constant(val) => Constant(val),
+                    Symbol(label) => Symbol(label),
+                    Unary(op, input) => Unary(op, self.indices[input] - 1),
+                    Binary(op, lhs, rhs) => {
+                        Binary(op, self.indices[lhs] - 1, self.indices[rhs] - 1)
+                    }
+                });
+            }
         }
         std::mem::swap(&mut self.pruned, &mut nodes);
-        return Ok(nodes);
+        return nodes;
     }
 }
 
