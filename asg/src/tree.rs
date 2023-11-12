@@ -53,7 +53,7 @@ impl BinaryOp {
 }
 
 use crate::{
-    helper::{equivalent, fold_constants, DepthWalker, Pruner},
+    helper::{fold_constants, Deduplicater, Pruner},
     parser::{parse_tree, LispParseError},
 };
 use BinaryOp::*;
@@ -153,95 +153,17 @@ impl Tree {
     }
 
     pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
-        let mut walker = DepthWalker::new();
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        self.nodes =
-            Self::validate(pruner.prune(fold_constants(self.nodes), root_index, &mut walker))?;
+        self.nodes = Self::validate(pruner.prune(fold_constants(self.nodes), root_index))?;
         return Ok(self);
     }
 
-    fn node_hashes(&self) -> Box<[u64]> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        // Using a boxed slice to avoid accidental resizing later.
-        let mut hashes: Box<[u64]> = vec![0; self.len()].into_boxed_slice();
-        for index in 0..self.len() {
-            let hash: u64 = match self.nodes[index] {
-                Constant(value) => value.to_bits().into(),
-                Symbol(label) => {
-                    let mut s: DefaultHasher = Default::default();
-                    label.hash(&mut s);
-                    s.finish()
-                }
-                Unary(op, input) => {
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
-                    hashes[input].hash(&mut s);
-                    s.finish()
-                }
-                Binary(op, lhs, rhs) => {
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
-                    let (hash1, hash2) = {
-                        let mut hash1 = hashes[lhs];
-                        let mut hash2 = hashes[rhs];
-                        if op.is_commutative() && hash1 > hash2 {
-                            std::mem::swap(&mut hash1, &mut hash2);
-                        }
-                        (hash1, hash2)
-                    };
-                    hash1.hash(&mut s);
-                    hash2.hash(&mut s);
-                    s.finish()
-                }
-            };
-            hashes[index] = hash;
-        }
-        return hashes;
-    }
-
     pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
-        use std::collections::hash_map::HashMap;
-        // Compute new indices after deduplication.
-        let mut walker1 = DepthWalker::new();
-        let indices = {
-            let mut indices: Box<[usize]> = (0..self.len()).collect();
-            // Compute hashes to find potential duplicates.
-            let hashes = self.node_hashes();
-            // Map hashes to node indices.
-            let mut revmap: HashMap<u64, usize> = HashMap::new();
-            // These walkers are for checking the equivalence of the
-            // nodes with the same hash.
-            let mut walker2 = DepthWalker::new();
-            for i in 0..hashes.len() {
-                let h = hashes[i];
-                let entry = revmap.entry(h).or_insert(i);
-                if *entry != i && equivalent(*entry, i, &self.nodes, &mut walker1, &mut walker2) {
-                    // The i-th node should be replaced with entry-th node.
-                    indices[i] = *entry;
-                }
-            }
-            indices
-        };
-        for node in self.nodes.iter_mut() {
-            match node {
-                Constant(_) => {}
-                Symbol(_) => {}
-                Unary(_, input) => {
-                    *input = indices[*input];
-                }
-                Binary(_, lhs, rhs) => {
-                    *lhs = indices[*lhs];
-                    *rhs = indices[*rhs];
-                }
-            }
-        }
-        {
-            let mut pruner = Pruner::new();
-            let root_index = self.root_index();
-            self.nodes = Self::validate(pruner.prune(self.nodes, root_index, &mut walker1))?;
-        }
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
+        let root_index = self.root_index();
+        self.nodes = Self::validate(pruner.prune(dedup.run(self.nodes), root_index))?;
         return Ok(self);
     }
 

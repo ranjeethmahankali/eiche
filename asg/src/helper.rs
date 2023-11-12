@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::tree::{BinaryOp, Node, Node::*, Tree, UnaryOp};
 
 impl Into<Tree> for Node {
@@ -190,6 +192,97 @@ impl PartialOrd for Node {
             (Binary(_, _, _), Unary(_, _)) => Some(Greater),
             (Binary(op1, _, _), Binary(op2, _, _)) => Some(op1.index().cmp(&op2.index())),
         }
+    }
+}
+
+pub struct Deduplicater {
+    indices: Vec<usize>,
+    hashes: Vec<u64>,
+    walker1: DepthWalker,
+    walker2: DepthWalker,
+    hash_to_index: HashMap<u64, usize>,
+}
+
+impl Deduplicater {
+    pub fn new() -> Self {
+        Deduplicater {
+            indices: vec![],
+            hashes: vec![],
+            walker1: DepthWalker::new(),
+            walker2: DepthWalker::new(),
+            hash_to_index: HashMap::new(),
+        }
+    }
+
+    fn calc_hashes(&mut self, nodes: &Vec<Node>) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        // Using a boxed slice to avoid accidental resizing later.
+        self.hashes.clear();
+        self.hashes.resize(nodes.len(), 0);
+        for index in 0..nodes.len() {
+            let hash: u64 = match nodes[index] {
+                Constant(value) => value.to_bits().into(),
+                Symbol(label) => {
+                    let mut s: DefaultHasher = Default::default();
+                    label.hash(&mut s);
+                    s.finish()
+                }
+                Unary(op, input) => {
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
+                    self.hashes[input].hash(&mut s);
+                    s.finish()
+                }
+                Binary(op, lhs, rhs) => {
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
+                    let (hash1, hash2) = {
+                        let mut hash1 = self.hashes[lhs];
+                        let mut hash2 = self.hashes[rhs];
+                        if op.is_commutative() && hash1 > hash2 {
+                            std::mem::swap(&mut hash1, &mut hash2);
+                        }
+                        (hash1, hash2)
+                    };
+                    hash1.hash(&mut s);
+                    hash2.hash(&mut s);
+                    s.finish()
+                }
+            };
+            self.hashes[index] = hash;
+        }
+    }
+
+    pub fn run(&mut self, mut nodes: Vec<Node>) -> Vec<Node> {
+        // Compute unique indices after deduplication.
+        self.indices.clear();
+        self.indices.extend(0..nodes.len());
+        self.calc_hashes(&nodes);
+        self.hash_to_index.clear();
+        for i in 0..self.hashes.len() {
+            let h = self.hashes[i];
+            let entry = self.hash_to_index.entry(h).or_insert(i);
+            if *entry != i && equivalent(*entry, i, &nodes, &mut self.walker1, &mut self.walker2) {
+                // The i-th node should be replaced with entry-th node.
+                self.indices[i] = *entry;
+            }
+        }
+        // Update nodes.
+        for node in nodes.iter_mut() {
+            match node {
+                Constant(_) => {}
+                Symbol(_) => {}
+                Unary(_, input) => {
+                    *input = self.indices[*input];
+                }
+                Binary(_, lhs, rhs) => {
+                    *lhs = self.indices[*lhs];
+                    *rhs = self.indices[*rhs];
+                }
+            }
+        }
+        return nodes;
     }
 }
 
@@ -396,6 +489,7 @@ impl<'a> Iterator for DepthIterator<'a> {
 pub struct Pruner {
     indices: Vec<usize>,
     pruned: Vec<Node>,
+    walker: DepthWalker,
 }
 
 impl Pruner {
@@ -403,6 +497,7 @@ impl Pruner {
         Pruner {
             indices: vec![],
             pruned: vec![],
+            walker: DepthWalker::new(),
         }
     }
 
@@ -410,16 +505,11 @@ impl Pruner {
     /// and nodes that are not visited are filtered out. The filtered
     /// `nodes` are returned. You can minimize allocations by using
     /// the same pruner multiple times.
-    pub fn prune(
-        &mut self,
-        mut nodes: Vec<Node>,
-        root_index: usize,
-        walker: &mut DepthWalker,
-    ) -> Vec<Node> {
+    pub fn prune(&mut self, mut nodes: Vec<Node>, root_index: usize) -> Vec<Node> {
         self.indices.clear();
         self.indices.resize(nodes.len(), 0);
         // Mark used nodes.
-        walker
+        self.walker
             .walk_nodes(&nodes, root_index, true, NodeOrdering::Original)
             .for_each(|(index, _parent)| {
                 self.indices[index] = 1;
