@@ -1,3 +1,5 @@
+pub mod macros;
+pub mod mutate;
 pub mod parser;
 pub mod tree;
 

@@ -1,12 +1,5 @@
 use crate::tree::{BinaryOp, Node, Node::*, Tree, TreeError, UnaryOp};
 
-#[macro_export]
-macro_rules! const_assert {
-    ($message: literal, $($tt:tt)*) => {
-        const _: () = assert!($($tt)*, $message);
-    }
-}
-
 impl Into<Tree> for Node {
     fn into(self) -> Tree {
         Tree::new(self)
@@ -227,8 +220,7 @@ pub fn equivalent(
         let mut iter1 = walker1.walk_nodes(&nodes, left, false, Deterministic);
         let mut iter2 = walker2.walk_nodes(&nodes, right, false, Deterministic);
         loop {
-            let (left, right) = (iter1.next(), iter2.next());
-            match (left, right) {
+            match (iter1.next(), iter2.next()) {
                 (None, None) => {
                     // Both iterators ended.
                     return true;

@@ -277,13 +277,6 @@ pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
         .ok_or(LispParseError::Unknown)?)
 }
 
-#[macro_export]
-macro_rules! parsetree {
-    ($($exp:tt) *) => {
-        $crate::parser::parse_tree(stringify!($($exp) *))
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

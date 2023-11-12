@@ -166,8 +166,16 @@ impl Tree {
                 Binary(op, lhs, rhs) => {
                     let mut s: DefaultHasher = Default::default();
                     op.hash(&mut s);
-                    hashes[lhs].hash(&mut s);
-                    hashes[rhs].hash(&mut s);
+                    let (hash1, hash2) = {
+                        let mut hash1 = hashes[lhs];
+                        let mut hash2 = hashes[rhs];
+                        if op.is_commutative() && hash1 > hash2 {
+                            std::mem::swap(&mut hash1, &mut hash2);
+                        }
+                        (hash1, hash2)
+                    };
+                    hash1.hash(&mut s);
+                    hash2.hash(&mut s);
                     s.finish()
                 }
             };
@@ -321,83 +329,6 @@ pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
-#[macro_export]
-macro_rules! deftree {
-    () => {}; // empty;
-    (($($a:tt)*)) => { // Unwrap redundant parens.
-        deftree!($($a)*)
-    };
-    ({$a:expr}) => { // Unwrap curly braces to variables.
-        $a
-    };
-    ({$($a:tt)*}) => { // More complex expressions.
-        {$($a)*}
-    };
-    // Unary ops.
-    (- $a:tt) => {
-        -deftree!($a)
-    };
-    (sqrt $a:tt) => {
-        $crate::tree::sqrt(deftree!($a))
-    };
-    (abs $a:tt) => {
-        $crate::tree::abs(deftree!($a))
-    };
-    (sin $a:tt) => {
-        $crate::tree::sin(deftree!($a))
-    };
-    (cos $a:tt) => {
-        $crate::tree::cos(deftree!($a))
-    };
-    (tan $a:tt) => {
-        $crate::tree::tan(deftree!($a))
-    };
-    (log $a:tt) => {
-        $crate::tree::log(deftree!($a))
-    };
-    (exp $a:tt) => {
-        $crate::tree::exp(deftree!($a))
-    };
-    // Binary ops.
-    (+ $a:tt $b:tt) => {
-        deftree!($a) + deftree!($b)
-    };
-    (- $a:tt $b:tt) => {
-        deftree!($a) - deftree!($b)
-    };
-    (* $a:tt $b:tt) => {
-        deftree!($a) * deftree!($b)
-    };
-    (/ $a:tt $b:tt) => {
-        deftree!($a) / deftree!($b)
-    };
-    (pow $a:tt $b: tt) => {
-        $crate::tree::pow(deftree!($a), deftree!($b))
-    };
-    (min $a:tt $b: tt) => {
-        $crate::tree::min(deftree!($a), deftree!($b))
-    };
-    (max $a:tt $b: tt) => {
-        $crate::tree::max(deftree!($a), deftree!($b))
-    };
-    // Symbols.
-    ($a:ident) => {{
-        const LABEL: &str = stringify!($a);
-        $crate::const_assert!(
-            "Symbols can only have a single character as an identifier.",
-            LABEL.len() == 1
-        );
-        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Symbol(LABEL.chars().next().unwrap()))
-    }};
-    // Float constants.
-    (const $tt:expr) => {
-        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($tt))
-    };
-    ($a:literal) => {
-        <$crate::tree::Node as Into<Tree>>::into($crate::tree::Node::Constant($a))
-    };
-}
-
 #[derive(Debug)]
 pub enum EvaluationError {
     VariableNotFound(char),
@@ -472,6 +403,7 @@ impl<'a> Evaluator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deftree;
 
     #[test]
     fn add() {
