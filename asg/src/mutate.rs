@@ -210,27 +210,25 @@ mod tests {
         check_bindings(&capture, &template, &tree);
     }
 
+    fn check_template(name: &str, tree: Tree, node_index: usize) {
+        let mut capture = Capture::new();
+        capture.node_index = None;
+        capture.bindings.clear();
+        print!("Checking template {} ... ", name);
+        let template = get_template_by_name(name).unwrap();
+        assert!(!capture.is_valid());
+        template.first_match(&tree, &mut capture);
+        if !capture.is_valid() || capture.node_index.unwrap() != node_index {
+            println!("Template:{}Tree:{}", template.ping(), tree);
+        }
+        assert!(capture.is_valid());
+        assert!(matches!(capture.node_index, Some(i) if i == node_index));
+        check_bindings(&capture, &template, &tree);
+        println!("✔ Passed.");
+    }
+
     #[test]
-    fn basic_template_matching() {
-        let mut check_template = {
-            let mut capture = Capture::new();
-            let closure = move |name: &str, tree: Tree, node_index: usize| {
-                capture.node_index = None;
-                capture.bindings.clear();
-                print!("Checking template {} ... ", name);
-                let template = get_template_by_name(name).unwrap();
-                assert!(!capture.is_valid());
-                template.first_match(&tree, &mut capture);
-                if !capture.is_valid() || capture.node_index.unwrap() != node_index {
-                    println!("Template:{}Tree:{}", template.ping(), tree);
-                }
-                assert!(capture.is_valid());
-                assert!(matches!(capture.node_index, Some(i) if i == node_index));
-                check_bindings(&capture, &template, &tree);
-                println!("✔ Passed.");
-            };
-            closure
-        };
+    fn match_distribute_mul() {
         check_template(
             "distribute_mul",
             deftree!(* 0.5 (+ (* x 2.5) (* x 1.5)))
@@ -238,11 +236,19 @@ mod tests {
                 .unwrap(),
             6,
         );
+    }
+
+    #[test]
+    fn match_min_of_sqrt() {
         check_template(
             "min_of_sqrt",
             deftree!(+ 2.57 (* 1.23 (min (sqrt 2) (sqrt 3)))),
             6,
         );
+    }
+
+    #[test]
+    fn match_rearrange_frac() {
         check_template(
             "rearrange_frac",
             deftree!(sqrt (log (* (/ x 2) (/ 2 x))))
@@ -250,29 +256,61 @@ mod tests {
                 .unwrap(),
             4,
         );
+    }
+
+    #[test]
+    fn match_divide_by_self() {
         check_template(
             "divide_by_self",
             deftree!(+ 1 (/ p p)).deduplicate().unwrap(),
             2,
         );
+    }
+
+    #[test]
+    fn match_distribute_pow_div() {
         check_template("distribute_pow_div", deftree!(pow (pow (/ 2 3) 2) 2.5), 4);
+    }
+
+    #[test]
+    fn match_distribute_pow_mul() {
         check_template("distribute_pow_mul", deftree!(pow (pow (* 2 3) 2) 2.5), 4);
+    }
+
+    #[test]
+    fn match_square_sqrt() {
         check_template(
             "square_sqrt",
             deftree!(log (+ 1 (exp (pow (sqrt 3.2556) 2)))),
             4,
         );
+    }
+
+    #[test]
+    fn match_sqrt_square() {
         check_template(
             "sqrt_square",
             deftree!(log (+ 1 (exp (sqrt (pow 3.2345 2.))))),
             4,
         );
+    }
+
+    #[test]
+    fn match_square_abs() {
         check_template("square_abs", deftree!(log (+ 1 (exp (pow (abs 2) 2.)))), 4);
+    }
+
+    #[test]
+    fn match_mul_exponents() {
         check_template(
             "mul_exponents",
             deftree!(log (+ 1 (exp (pow (pow x 3.) 2.)))),
             5,
         );
+    }
+
+    #[test]
+    fn match_add_exponents() {
         check_template(
             "add_exponents",
             deftree!(log (+ 1 (exp (* (pow (log x) 2) (pow (log x) 3)))))
@@ -280,6 +318,10 @@ mod tests {
                 .unwrap(),
             7,
         );
+    }
+
+    #[test]
+    fn match_add_frac() {
         check_template(
             "add_frac",
             deftree!(log (+ 1 (exp (+ (/ 2 (sqrt (+ 2 x))) (/ 3 (sqrt (+ x 2)))))))
@@ -287,43 +329,83 @@ mod tests {
                 .unwrap(),
             8,
         );
+    }
+
+    #[test]
+    fn match_add_zero() {
         check_template(
             "add_zero",
             deftree!(log (+ 1 (exp (+ 0 (exp (+ 1 (log p))))))),
             7,
         );
+    }
+
+    #[test]
+    fn match_sub_zero() {
         check_template(
             "sub_zero",
             deftree!(log (+ 1 (exp (- (exp (+ 1 (log p))) 0)))),
             7,
         );
+    }
+
+    #[test]
+    fn match_mul_1() {
         check_template(
             "mul_1",
             deftree!(log (+ 1 (exp (* (exp (+ 1 (log p))) 1)))),
             7,
         );
+    }
+
+    #[test]
+    fn match_pow_1() {
         check_template(
             "pow_1",
             deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 1)))),
             7,
         );
+    }
+
+    #[test]
+    fn match_div_1() {
         check_template(
             "div_1",
             deftree!(log (+ 1 (exp (/ (exp (+ 1 (log p))) 1)))),
             7,
         );
+    }
+
+    #[test]
+    fn match_mul_0() {
         check_template(
             "mul_0",
             deftree!(log (+ 1 (exp (* (exp (+ 1 (log p))) 0)))),
             7,
         );
+    }
+
+    #[test]
+    fn match_pow_0() {
         check_template(
             "pow_0",
             deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 0)))),
             7,
         );
+    }
+
+    #[test]
+    fn match_min_expand() {
         check_template("min_expand", deftree!(log (+ 1 (exp (min x 2)))), 3);
+    }
+
+    #[test]
+    fn match_max_expand() {
         check_template("max_expand", deftree!(log (+ 1 (exp (max x 2)))), 3);
+    }
+
+    #[test]
+    fn match_max_of_sub() {
         check_template(
             "max_of_sub",
             deftree!(log (+ 1 (exp (min (- x 2) (- x 3)))))
