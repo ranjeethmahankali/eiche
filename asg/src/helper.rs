@@ -138,6 +138,7 @@ impl BinaryOp {
         }
     }
 
+    /// Check if the binary op is commutative.
     pub fn is_commutative(&self) -> bool {
         use BinaryOp::*;
         match self {
@@ -165,7 +166,7 @@ impl std::fmt::Display for Node {
 
 impl PartialOrd for Node {
     /// This implementation only accounts for the node, its type and
-    /// the data heal inside the node. It DOES NOT take into account
+    /// the data held inside the node. It DOES NOT take into account
     /// the children of the node when comparing two nodes.
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering::*;
@@ -194,6 +195,11 @@ impl PartialOrd for Node {
     }
 }
 
+/// Helper struct for deduplicating common subtrees.
+///
+/// Deduplication requires allocations. Those buffers are owned by
+/// this struct, so reusing the same instance of `Deduplicater` can
+/// avoid unnecessary allocations.
 pub struct Deduplicater {
     indices: Vec<usize>,
     hashes: Vec<u64>,
@@ -203,6 +209,7 @@ pub struct Deduplicater {
 }
 
 impl Deduplicater {
+    /// Create a new deduplicater.
     pub fn new() -> Self {
         Deduplicater {
             indices: vec![],
@@ -253,6 +260,16 @@ impl Deduplicater {
         }
     }
 
+    /// Deduplicate `nodes`. The `nodes` are expected to be
+    /// topologically sorted. If they are not, this function might
+    /// produce incorrect results. If you suspect the nodes are not
+    /// topologically sorted, use the `TopoSorter` to sort them first.
+    ///
+    /// If a subtree appears twice, any node with the second subtree
+    /// as its input will be rewired to the first subtree. That means,
+    /// after deduplication, there can be `dead` nodes remaining, that
+    /// are not connected to the root. Consider pruning the tree
+    /// afterwards.
     pub fn run(&mut self, mut nodes: Vec<Node>) -> Vec<Node> {
         // Compute unique indices after deduplication.
         self.indices.clear();
@@ -342,14 +359,15 @@ pub fn equivalent(
     }
 }
 
+/// Helper struct for traversing the tree depth first.
+///
+/// Doing a non-recursive depth first traversal requires
+/// allocations. Those buffers are owned by this instance. So reusing
+/// the same walker many times is recommended to avoid unnecessary
+/// allocations.
 pub struct DepthWalker {
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
-}
-
-pub enum NodeOrdering {
-    Original,
-    Deterministic,
 }
 
 impl DepthWalker {
@@ -360,6 +378,11 @@ impl DepthWalker {
         }
     }
 
+    /// Get an iterator that walks the nodes of `tree`. If `unique` is
+    /// true, no node will be visited more than once. The choice of
+    /// `order` will affect the order in which the children of certain
+    /// nodes are traversed. See the documentation of `NodeOrdering`
+    /// for more details.
     pub fn walk_tree<'a>(
         &'a mut self,
         tree: &'a Tree,
@@ -369,6 +392,12 @@ impl DepthWalker {
         self.walk_nodes(&tree.nodes(), tree.root_index(), unique, ordering)
     }
 
+    /// Get an iterator that walks the given `nodes` starting from the
+    /// node at `root_index`. If `unique` is true, no node will be
+    /// visited more than once. The choice of `order` will affect the
+    /// order in which the children of certain nodes are
+    /// traversed. See the documentation of `NodeOrdering` for more
+    /// details.
     pub fn walk_nodes<'a>(
         &'a mut self,
         nodes: &'a [Node],
@@ -394,6 +423,24 @@ impl DepthWalker {
     }
 }
 
+/// When traversing a tree depth first, sometimes the subtrees
+/// children of a node can be visited in more than one possible
+/// order. For example, this is the case with commutative binary ops.
+pub enum NodeOrdering {
+    /// Traverse children in the order they appear in the parent.
+    Original,
+    /// Sort the children in a deterministic way, irrespective of the
+    /// order they appear in the parent.
+    Deterministic,
+}
+
+/// Iterator that walks the tree depth first.
+///
+/// The lifetime of this iterator is bound to the lifetime of the
+/// nodes it's traversing. For that reason, this is a separate struct
+/// from `DepthWalker`. That way, the `DepthWalker` instance won't get
+/// tangled up in lifetimes and it can be used multiple traversals,
+/// even on different trees.
 pub struct DepthIterator<'a> {
     unique: bool,
     ordering: NodeOrdering,
@@ -485,6 +532,10 @@ impl<'a> Iterator for DepthIterator<'a> {
     }
 }
 
+/// Tree pruner.
+///
+/// An instance of `Pruner` can be used to prune a list of nodes to
+/// remove unused nodes.
 pub struct Pruner {
     indices: Vec<usize>,
     pruned: Vec<Node>,
@@ -492,6 +543,7 @@ pub struct Pruner {
 }
 
 impl Pruner {
+    /// Create a new `Pruner` instance.
     pub fn new() -> Pruner {
         Pruner {
             indices: vec![],
@@ -500,6 +552,8 @@ impl Pruner {
         }
     }
 
+    /// Prune `nodes` to remove unused ones.
+    ///
     /// The given `nodes` are walked depth-first using the `walker`
     /// and nodes that are not visited are filtered out. The filtered
     /// `nodes` are returned. You can minimize allocations by using
@@ -574,6 +628,12 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
     return nodes;
 }
 
+/// Topological sorter.
+///
+/// For the topology of a tree to be considered valid, the root of the
+/// tree must be the last node, and every node must appear after its
+/// inputs. A `TopoSorter` instance can be used to sort a vector of
+/// nodes to be topologically valid.
 pub struct TopoSorter {
     depths: Vec<usize>,
     sorted_indices: Vec<usize>,
@@ -583,6 +643,7 @@ pub struct TopoSorter {
 }
 
 impl TopoSorter {
+    /// Create a new `TopoSorter` instance.
     pub fn new() -> TopoSorter {
         TopoSorter {
             depths: Vec::new(),
@@ -593,6 +654,10 @@ impl TopoSorter {
         }
     }
 
+    /// Sort `nodes` to be topologically valid, with `root_index` as
+    /// the new root. Depending on the choice of root, the output
+    /// vector may be littered with unused nodes, and may require
+    /// pruning later.
     pub fn run(&mut self, mut nodes: Vec<Node>, mut root_index: usize) -> (Vec<Node>, usize) {
         // Compute depths of all nodes.
         self.depths.clear();
@@ -637,8 +702,10 @@ impl TopoSorter {
     }
 }
 
-pub fn to_lisp(node: &Node, nodes: &Vec<Node>) -> String {
-    match node {
+/// Convert the list of nodes to a lisp string, by recursively
+/// traversing the nodes starting at `root`.
+pub fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
+    match root {
         Constant(val) => val.to_string(),
         Symbol(label) => label.to_string(),
         Unary(op, input) => format!(
