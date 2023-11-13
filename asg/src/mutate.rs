@@ -1,4 +1,5 @@
 use crate::{
+    helper::{fold_constants, Deduplicater, Pruner, TopoSorter},
     template::{get_templates, Template},
     tree::{Node, Tree},
 };
@@ -140,11 +141,13 @@ impl Template {
     }
 }
 
-#[derive(Debug)]
 struct Capture {
     node_index: Option<usize>,
     bindings: Vec<(char, usize)>,
     node_map: Vec<usize>,
+    topo_sorter: TopoSorter,
+    pruner: Pruner,
+    deduper: Deduplicater,
 }
 
 impl Capture {
@@ -153,6 +156,9 @@ impl Capture {
             node_index: None,
             bindings: vec![],
             node_map: vec![],
+            topo_sorter: TopoSorter::new(),
+            pruner: Pruner::new(),
+            deduper: Deduplicater::new(),
         }
     }
 
@@ -178,6 +184,7 @@ impl Capture {
     fn apply(&mut self, template: &Template, tree: &Tree) -> Option<Tree> {
         use crate::tree::Node::*;
         let mut nodes = tree.nodes().clone();
+        let root_index = tree.root_index();
         let ping = template.ping();
         self.node_map.clear();
         self.node_map.resize(ping.len(), 0);
@@ -214,10 +221,13 @@ impl Capture {
                 ),
             }
         }
-        // Topological sort.
-        // Constant folding.
-        // Pruning.
-        todo!();
+        // Clean up and make a tree.
+        let (nodes, root_index) = self.topo_sorter.run(nodes, root_index);
+        return Tree::from_nodes(
+            self.pruner
+                .run(self.deduper.run(fold_constants(nodes)), root_index),
+        )
+        .ok();
     }
 
     fn binding_state(&self) -> usize {

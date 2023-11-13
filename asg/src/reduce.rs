@@ -1,4 +1,4 @@
-use crate::{match_template::Mutations, tree::Tree};
+use crate::{mutate::Mutations, tree::Tree};
 
 pub fn reduce(tree: Tree) {
     let mutations = Mutations::from(&tree);

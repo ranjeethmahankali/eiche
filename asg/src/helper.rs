@@ -574,6 +574,67 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
     return nodes;
 }
 
+pub struct TopoSorter {
+    depths: Vec<usize>,
+    indices: Vec<usize>,
+    sorted: Vec<Node>,
+    walker: DepthWalker,
+}
+
+impl TopoSorter {
+    pub fn new() -> TopoSorter {
+        TopoSorter {
+            depths: Vec::new(),
+            indices: Vec::new(),
+            sorted: Vec::new(),
+            walker: DepthWalker::new(),
+        }
+    }
+
+    pub fn run(&mut self, mut nodes: Vec<Node>, mut root_index: usize) -> (Vec<Node>, usize) {
+        // Compute depths of all nodes.
+        self.depths.clear();
+        self.depths.resize(nodes.len(), 0);
+        for (index, maybe_parent) in
+            self.walker
+                .walk_nodes(&nodes, root_index, false, NodeOrdering::Original)
+        {
+            if let Some(parent) = maybe_parent {
+                self.depths[index] = usize::max(self.depths[index], 1 + self.depths[parent]);
+            }
+        }
+        // Sort the node indices by depth.
+        self.indices.clear();
+        self.indices.extend(0..nodes.len());
+        self.indices
+            .sort_by(|a, b| self.depths[*b].cmp(&self.depths[*a])); // Highest depth at the start.
+                                                                    // Gather the sorted nodes.
+        self.sorted.clear();
+        self.sorted
+            .extend(
+                self.indices
+                    .iter()
+                    .zip(0..self.indices.len())
+                    .map(|(index, i)| -> Node {
+                        if *index == root_index {
+                            root_index = i;
+                        }
+                        match nodes[*index] {
+                            Constant(v) => Constant(v),
+                            Symbol(label) => Symbol(label),
+                            Unary(op, input) => Unary(op, self.indices[input]),
+                            Binary(op, lhs, rhs) => {
+                                Binary(op, self.indices[lhs], self.indices[rhs])
+                            }
+                        }
+                    }),
+            );
+        // Swap the sorted nodes and the incoming nodes.
+        std::mem::swap(&mut self.sorted, &mut nodes);
+        return (nodes, root_index);
+    }
+}
+
 pub fn to_lisp(node: &Node, nodes: &Vec<Node>) -> String {
     match node {
         Constant(val) => val.to_string(),
