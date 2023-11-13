@@ -576,7 +576,8 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
 
 pub struct TopoSorter {
     depths: Vec<usize>,
-    indices: Vec<usize>,
+    sorted_indices: Vec<usize>,
+    index_map: Vec<usize>,
     sorted: Vec<Node>,
     walker: DepthWalker,
 }
@@ -585,7 +586,8 @@ impl TopoSorter {
     pub fn new() -> TopoSorter {
         TopoSorter {
             depths: Vec::new(),
-            indices: Vec::new(),
+            sorted_indices: Vec::new(),
+            index_map: Vec::new(),
             sorted: Vec::new(),
             walker: DepthWalker::new(),
         }
@@ -604,31 +606,31 @@ impl TopoSorter {
             }
         }
         // Sort the node indices by depth.
-        self.indices.clear();
-        self.indices.extend(0..nodes.len());
-        self.indices
-            .sort_by(|a, b| self.depths[*b].cmp(&self.depths[*a])); // Highest depth at the start.
-                                                                    // Gather the sorted nodes.
+        self.sorted_indices.clear();
+        self.sorted_indices.extend(0..nodes.len());
+        // Highest depth at the start.
+        self.sorted_indices
+            .sort_by(|a, b| self.depths[*b].cmp(&self.depths[*a]));
+        // Build a map from old indices to new indices.
+        self.index_map.clear();
+        self.index_map.resize(nodes.len(), 0);
+        for (index, i) in self.sorted_indices.iter().zip(0..self.sorted_indices.len()) {
+            self.index_map[*index] = i;
+            if *index == root_index {
+                root_index = i;
+            }
+        }
+        // Gather the sorted nodes.
         self.sorted.clear();
         self.sorted
-            .extend(
-                self.indices
-                    .iter()
-                    .zip(0..self.indices.len())
-                    .map(|(index, i)| -> Node {
-                        if *index == root_index {
-                            root_index = i;
-                        }
-                        match nodes[*index] {
-                            Constant(v) => Constant(v),
-                            Symbol(label) => Symbol(label),
-                            Unary(op, input) => Unary(op, self.indices[input]),
-                            Binary(op, lhs, rhs) => {
-                                Binary(op, self.indices[lhs], self.indices[rhs])
-                            }
-                        }
-                    }),
-            );
+            .extend(self.sorted_indices.iter().map(|index| -> Node {
+                match nodes[*index] {
+                    Constant(v) => Constant(v),
+                    Symbol(label) => Symbol(label),
+                    Unary(op, input) => Unary(op, self.index_map[input]),
+                    Binary(op, lhs, rhs) => Binary(op, self.index_map[lhs], self.index_map[rhs]),
+                }
+            }));
         // Swap the sorted nodes and the incoming nodes.
         std::mem::swap(&mut self.sorted, &mut nodes);
         return (nodes, root_index);
@@ -671,5 +673,73 @@ pub fn to_lisp(node: &Node, nodes: &Vec<Node>) -> String {
             to_lisp(&nodes[*lhs], nodes),
             to_lisp(&nodes[*rhs], nodes)
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tree::TreeError;
+    use {super::*, BinaryOp::*, UnaryOp::*};
+
+    #[test]
+    pub fn topological_sorting_0() {
+        let mut sorter = TopoSorter::new();
+        let (nodes, root) = sorter.run(vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')], 1);
+        assert_eq!(root, 2);
+        assert_eq!(nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
+    }
+
+    #[test]
+    pub fn topological_sorting_1() {
+        let nodes = vec![
+            Symbol('x'),            // 0
+            Binary(Add, 0, 2),      // 1
+            Constant(2.245),        // 2
+            Binary(Multiply, 1, 5), // 3
+            Unary(Sqrt, 3),         // 4 - root
+            Symbol('y'),            // 5
+        ];
+        assert!(matches!(
+            Tree::from_nodes(nodes.clone()),
+            Err(TreeError::WrongNodeOrder)
+        ));
+        let mut sorter = TopoSorter::new();
+        let (nodes, root) = sorter.run(nodes, 4);
+        println!("Sorted: {:?}", nodes);
+        assert_eq!(root, 5);
+        assert!(matches!(
+            Tree::from_nodes(nodes),
+            Ok(tree) if tree.len() == 6,
+        ));
+    }
+
+    #[test]
+    pub fn topological_sort_2() {
+        let nodes = vec![
+            Symbol('a'),            // 0
+            Binary(Add, 0, 2),      // 1
+            Symbol('b'),            // 2
+            Unary(Log, 5),          // 3
+            Symbol('x'),            // 4
+            Binary(Add, 4, 6),      // 5
+            Symbol('y'),            // 6
+            Symbol('p'),            // 7
+            Binary(Add, 7, 9),      // 8
+            Symbol('p'),            // 9
+            Binary(Pow, 11, 8),     // 10 - root.
+            Binary(Multiply, 3, 1), // 11
+        ];
+        assert!(matches!(
+            Tree::from_nodes(nodes.clone()),
+            Err(TreeError::WrongNodeOrder)
+        ));
+        let mut sorter = TopoSorter::new();
+        let (nodes, root) = sorter.run(nodes, 10);
+        println!("Sorted: {:?}", nodes);
+        assert_eq!(root, 11);
+        assert!(matches!(
+            Tree::from_nodes(nodes),
+            Ok(tree) if tree.len() == 12,
+        ));
     }
 }
