@@ -2,15 +2,6 @@ use lazy_static::lazy_static;
 
 use crate::tree::Tree;
 
-#[derive(Clone)]
-pub struct Template {
-    name: String,
-    ping: Tree,
-    pong: Tree,
-    dof_ping: Box<[usize]>,
-    dof_pong: Box<[usize]>,
-}
-
 /// This macro is only meant for use within this module.
 macro_rules! deftemplate {
     (($($tt:tt)*)) => { // Unwrap parens.
@@ -23,6 +14,15 @@ macro_rules! deftemplate {
             $crate::deftree!(($($pong) *))
         )
     };
+}
+
+#[derive(Clone)]
+pub struct Template {
+    name: String,
+    ping: Tree,
+    pong: Tree,
+    dof_ping: Box<[usize]>,
+    dof_pong: Box<[usize]>,
 }
 
 impl Template {
@@ -49,7 +49,7 @@ impl Template {
         return template;
     }
 
-    pub fn mirrored(&self) -> Template {
+    fn mirrored(&self) -> Template {
         Template {
             name: {
                 const REV: &str = "rev_";
@@ -60,13 +60,21 @@ impl Template {
             },
             ping: self.pong.clone(),
             pong: self.ping.clone(),
-            dof_ping: self.dof_ping.clone(),
-            dof_pong: self.dof_pong.clone(),
+            dof_ping: self.dof_pong.clone(),
+            dof_pong: self.dof_ping.clone(),
         }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn ping(&self) -> &Tree {
         &self.ping
+    }
+
+    pub fn pong(&self) -> &Tree {
+        &self.pong
     }
 
     pub fn dof_ping(&self) -> &Box<[usize]> {

@@ -36,13 +36,31 @@ impl<'a> Iterator for Mutations<'a> {
                 } else {
                     template.next_match(&self.tree, &mut self.capture);
                 }
-                if !self.capture.is_valid() {
-                    break;
-                } else {
-                    match self.capture.apply(template, &self.tree) {
+                if self.capture.is_valid() {
+                    // <DEBUG>
+                    println!("========================");
+                    println!(
+                        "Matching template {}:{} with tree:{}",
+                        template.name(),
+                        template.ping(),
+                        self.tree
+                    );
+                    println!("SUCCESS!");
+                    // </DEBUG>
+                    match self.capture.apply(template, &self.tree).ok() {
                         Some(tree) => return Some(tree),
-                        None => continue, // Try the next match.
+                        None => {
+                            // <DEBUG>
+                            println!(
+                                "Unable to apply the template matched at {:?}",
+                                self.capture.node_index
+                            );
+                            // </DEBUG?
+                            continue;
+                        } // Try the next match.
                     }
+                } else {
+                    break;
                 }
             }
             self.reset = true;
@@ -60,6 +78,15 @@ fn symbolic_match(
     rtree: &Tree,
     capture: &mut Capture,
 ) -> bool {
+    // <DEBUG>
+    // println!(
+    //     "Matching [{}|{}] {:?} | {:?}",
+    //     li,
+    //     ri,
+    //     ltree.node(li),
+    //     rtree.node(ri)
+    // );
+    // </DEBUG>
     match (ltree.node(li), rtree.node(ri)) {
         (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
         (Node::Constant(_), _) => return false,
@@ -181,18 +208,18 @@ impl Capture {
         dst.push(node);
     }
 
-    fn apply(&mut self, template: &Template, tree: &Tree) -> Option<Tree> {
+    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, ()> {
         use crate::tree::Node::*;
         let mut nodes = tree.nodes().clone();
         let root_index = tree.root_index();
-        let ping = template.ping();
+        let pong = template.pong();
         self.node_map.clear();
-        self.node_map.resize(ping.len(), 0);
-        for ni in 0..ping.len() {
-            if ni == ping.root_index() {
+        self.node_map.resize(pong.len(), 0);
+        for ni in 0..pong.len() {
+            if ni == pong.root_index() {
                 match self.node_index {
                     Some(i) => {
-                        nodes[i] = match ping.node(ni) {
+                        nodes[i] = match pong.node(ni) {
                             Constant(v) => Constant(*v),
                             Symbol(label) => Symbol(*label),
                             Unary(op, input) => Unary(*op, self.node_map[*input]),
@@ -201,15 +228,15 @@ impl Capture {
                             }
                         }
                     }
-                    None => return None,
+                    None => return Err(()),
                 }
                 continue;
             }
-            match ping.node(ni) {
+            match pong.node(ni) {
                 Constant(val) => self.add_node(&mut nodes, ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
-                    None => return None,
+                    None => return Err(()),
                 },
                 Unary(op, input) => {
                     self.add_node(&mut nodes, ni, Unary(*op, self.node_map[*input]))
@@ -222,12 +249,14 @@ impl Capture {
             }
         }
         // Clean up and make a tree.
-        let (nodes, root_index) = self.topo_sorter.run(nodes, root_index);
+        println!("Root index: {}", root_index);
+        println!("Reconstructed nodes: {:?}", nodes);
+        let (nodes, root_index) = self.topo_sorter.run(nodes, root_index).map_err(|_| ())?;
         return Tree::from_nodes(
             self.pruner
                 .run(self.deduper.run(fold_constants(nodes)), root_index),
         )
-        .ok();
+        .map_err(|_| ());
     }
 
     fn binding_state(&self) -> usize {
@@ -503,5 +532,16 @@ mod tests {
                 .unwrap(),
             6,
         );
+    }
+
+    #[test]
+    fn basic_mutation() {
+        let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y))
+            .deduplicate()
+            .unwrap();
+        for t in Mutations::from(&tree) {
+            println!("Mutation:{}", t);
+        }
+        todo!();
     }
 }

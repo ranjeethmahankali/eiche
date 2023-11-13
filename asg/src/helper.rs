@@ -622,6 +622,11 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
     return nodes;
 }
 
+#[derive(Debug)]
+pub enum TopologicalError {
+    CyclicGraph,
+}
+
 /// Topological sorter.
 ///
 /// For the topology of a tree to be considered valid, the root of the
@@ -652,7 +657,11 @@ impl TopoSorter {
     /// the new root. Depending on the choice of root, the output
     /// vector may be littered with unused nodes, and may require
     /// pruning later.
-    pub fn run(&mut self, mut nodes: Vec<Node>, mut root_index: usize) -> (Vec<Node>, usize) {
+    pub fn run(
+        &mut self,
+        mut nodes: Vec<Node>,
+        mut root_index: usize,
+    ) -> Result<(Vec<Node>, usize), TopologicalError> {
         // Compute depths of all nodes.
         self.depths.clear();
         self.depths.resize(nodes.len(), 0);
@@ -692,7 +701,7 @@ impl TopoSorter {
             }));
         // Swap the sorted nodes and the incoming nodes.
         std::mem::swap(&mut self.sorted, &mut nodes);
-        return (nodes, root_index);
+        return Ok((nodes, root_index));
     }
 }
 
@@ -743,15 +752,17 @@ mod tests {
     use {super::*, BinaryOp::*, UnaryOp::*};
 
     #[test]
-    pub fn topological_sorting_0() {
+    fn topological_sorting_0() {
         let mut sorter = TopoSorter::new();
-        let (nodes, root) = sorter.run(vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')], 1);
+        let (nodes, root) = sorter
+            .run(vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')], 1)
+            .unwrap();
         assert_eq!(root, 2);
         assert_eq!(nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
     }
 
     #[test]
-    pub fn topological_sorting_1() {
+    fn topological_sorting_1() {
         let nodes = vec![
             Symbol('x'),            // 0
             Binary(Add, 0, 2),      // 1
@@ -765,8 +776,7 @@ mod tests {
             Err(TreeError::WrongNodeOrder)
         ));
         let mut sorter = TopoSorter::new();
-        let (nodes, root) = sorter.run(nodes, 4);
-        println!("Sorted: {:?}", nodes);
+        let (nodes, root) = sorter.run(nodes, 4).unwrap();
         assert_eq!(root, 5);
         assert!(matches!(
             Tree::from_nodes(nodes),
@@ -775,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    pub fn topological_sort_2() {
+    fn topological_sorting_2() {
         let nodes = vec![
             Symbol('a'),            // 0
             Binary(Add, 0, 2),      // 1
@@ -795,12 +805,27 @@ mod tests {
             Err(TreeError::WrongNodeOrder)
         ));
         let mut sorter = TopoSorter::new();
-        let (nodes, root) = sorter.run(nodes, 10);
-        println!("Sorted: {:?}", nodes);
+        let (nodes, root) = sorter.run(nodes, 10).unwrap();
         assert_eq!(root, 11);
         assert!(matches!(
             Tree::from_nodes(nodes),
             Ok(tree) if tree.len() == 12,
         ));
+    }
+
+    #[test]
+    fn topological_sorting_3() {
+        let nodes = vec![
+            Binary(Pow, 8, 9),      // 0
+            Symbol('x'),            // 1
+            Binary(Multiply, 0, 1), // 2
+            Symbol('y'),            // 3
+            Binary(Multiply, 0, 3), // 4
+            Binary(Add, 2, 4),      // 5
+            Binary(Add, 1, 3),      // 6
+            Binary(Divide, 5, 6),   // 7
+            Unary(Sqrt, 0),         // 8
+            Constant(2.0),          // 9
+        ];
     }
 }
