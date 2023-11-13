@@ -98,30 +98,17 @@ impl Tree {
         }
     }
 
-    /// Validate the list of nodes. The topology of the nodes must be
-    /// valid and no constant nodes can contain NaNs.
-    fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
-        if !(0..nodes.len()).all(|i| match &nodes[i] {
-            Constant(val) => !f64::is_nan(*val),
-            Symbol(_) => true,
-            Unary(_op, input) => input < &i,
-            Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
-        }) {
-            return Err(TreeError::WrongNodeOrder);
-        }
-        // Maybe add more checks later.
-        return Ok(nodes);
-    }
-
     /// Create a new tree with `nodes`. If the `nodes` don't meet the
     /// requirements for represeting a standart tree, an appropriate
     /// `TreeError` is returned.
     pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, TreeError> {
         Ok(Tree {
-            nodes: Self::validate(nodes)?,
+            nodes: Self::validate_nodes(nodes)?,
         })
     }
 
+    /// Parse the `lisp` expression into a new tree. If the parsing
+    /// fails, an appropriate `LispParseError` is returned.
     pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
         parse_tree(lisp)
     }
@@ -133,22 +120,29 @@ impl Tree {
 
     /// Get a reference to root of the tree. This is the last node of
     /// the tree.
-    pub fn root(&self) -> Result<&Node, TreeError> {
-        self.nodes.last().ok_or(TreeError::EmptyTree)
+    pub fn root(&self) -> &Node {
+        // We can confidently unwrap because we should never create an
+        // invalid tree in the first place.
+        self.nodes.last().unwrap()
     }
 
+    /// Index of the root node. This will be the index of the last
+    /// node of the tree.
     pub fn root_index(&self) -> usize {
         self.len() - 1
     }
 
+    /// Get a reference to the node at `index`.
     pub fn node(&self, index: usize) -> &Node {
         &self.nodes[index]
     }
 
+    /// Reference to the nodes of this tree.
     pub fn nodes(&self) -> &Vec<Node> {
         &self.nodes
     }
 
+    /// Get a unique list of all symbols in this tree.
     pub fn symbols(&self) -> Vec<char> {
         let mut chars: Vec<_> = self
             .nodes
@@ -166,23 +160,44 @@ impl Tree {
         return chars;
     }
 
+    /// Convert the tree to a lisp expression. If there is something
+    /// wrong with this tree, and appropriate `TreeError` is returned.
     pub fn to_lisp(&self) -> Result<String, TreeError> {
-        Ok(crate::helper::to_lisp(self.root()?, self.nodes()))
+        Ok(crate::helper::to_lisp(self.root(), self.nodes()))
     }
 
+    /// Fold constants in this tree.
     pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        self.nodes = Self::validate(pruner.run(fold_constants(self.nodes), root_index))?;
+        self.nodes = Self::validate_nodes(pruner.run(fold_constants(self.nodes), root_index))?;
         return Ok(self);
     }
 
+    /// Deduplicate the common subtrees in this tree.
     pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        self.nodes = Self::validate(pruner.run(dedup.run(self.nodes), root_index))?;
+        self.nodes = Self::validate_nodes(pruner.run(dedup.run(self.nodes), root_index))?;
         return Ok(self);
+    }
+
+    /// Check if `nodes` can represent a valid tree.
+    fn validate_nodes(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
+        if nodes.is_empty() {
+            return Err(TreeError::EmptyTree);
+        }
+        if !(0..nodes.len()).all(|i| match &nodes[i] {
+            Constant(val) => !f64::is_nan(*val),
+            Symbol(_) => true,
+            Unary(_op, input) => input < &i,
+            Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
+        }) {
+            return Err(TreeError::WrongNodeOrder);
+        }
+        // Maybe add more checks later.
+        return Ok(nodes);
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
@@ -298,6 +313,7 @@ pub struct Evaluator<'a> {
 }
 
 impl<'a> Evaluator<'a> {
+    /// Create a new evaluator for `tree`.
     pub fn new(tree: &'a Tree) -> Evaluator {
         Evaluator {
             tree,
@@ -428,14 +444,14 @@ mod tests {
     fn symbol_deftree() {
         let tree = deftree!(x);
         assert_eq!(tree.len(), 1);
-        assert!(matches!(tree.root(), Ok(Symbol(label)) if *label == 'x'));
+        assert_eq!(tree.root(), &Symbol('x'));
     }
 
     #[test]
     fn constant_deftree() {
         let tree = deftree!(2.);
         assert_eq!(tree.len(), 1);
-        assert!(matches!(tree.root(), Ok(Constant(val)) if *val == 2.));
+        assert_eq!(tree.root(), &Constant(2.));
     }
 
     #[test]

@@ -126,7 +126,7 @@ pub mod tests {
     #[test]
     fn constant() {
         let x = deftree!(const std::f64::consts::PI);
-        assert!(matches!(x.root(), Ok(Constant(val)) if *val == std::f64::consts::PI));
+        assert_eq!(x.root(), &Constant(std::f64::consts::PI));
         let mut eval = Evaluator::new(&x);
         match eval.run() {
             Ok(val) => assert_eq!(val, std::f64::consts::PI),
@@ -409,7 +409,7 @@ pub mod tests {
         // Basic multiplication.
         let tree = deftree!(* 2. 3.).fold_constants().unwrap();
         assert_eq!(tree.len(), 1usize);
-        assert!(matches!(tree.root(), Ok(Constant(val)) if *val == 2.* 3.));
+        assert_eq!(tree.root(), &Constant(2. * 3.));
         // More complicated tree.
         let tree = deftree!(
             (/
