@@ -84,13 +84,26 @@ pub struct Tree {
 }
 
 impl Tree {
-    pub fn new(node: Node) -> Tree {
-        Tree { nodes: vec![node] }
+    /// Create a tree representing a constant value.
+    pub fn constant(val: f64) -> Tree {
+        Tree {
+            nodes: vec![Constant(val)],
+        }
     }
 
-    pub fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
+    /// Create a tree representing a symbol with the given `label`.
+    pub fn symbol(label: char) -> Tree {
+        Tree {
+            nodes: vec![Symbol(label)],
+        }
+    }
+
+    /// Validate the list of nodes. The topology of the nodes must be
+    /// valid and no constant nodes can contain NaNs.
+    fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
         if !(0..nodes.len()).all(|i| match &nodes[i] {
-            Constant(_) | Symbol(_) => true,
+            Constant(val) => !f64::is_nan(*val),
+            Symbol(_) => true,
             Unary(_op, input) => input < &i,
             Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
         }) {
@@ -100,6 +113,9 @@ impl Tree {
         return Ok(nodes);
     }
 
+    /// Create a new tree with `nodes`. If the `nodes` don't meet the
+    /// requirements for represeting a standart tree, an appropriate
+    /// `TreeError` is returned.
     pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, TreeError> {
         Ok(Tree {
             nodes: Self::validate(nodes)?,
@@ -115,6 +131,8 @@ impl Tree {
         self.nodes.len()
     }
 
+    /// Get a reference to root of the tree. This is the last node of
+    /// the tree.
     pub fn root(&self) -> Result<&Node, TreeError> {
         self.nodes.last().ok_or(TreeError::EmptyTree)
     }
