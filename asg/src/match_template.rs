@@ -3,18 +3,52 @@ use crate::{
     tree::{Node, Tree},
 };
 
-pub fn simplify_tree(tree: Tree) {
-    let templates = get_templates();
-    let mut capture = Capture::new();
-    let mut candidates: Vec<Tree> = Vec::new();
-    for t in templates {
-        t.first_match(&tree, &mut capture);
-        while capture.is_valid() {
-            candidates.push(capture.apply(tree.clone()));
-            t.next_match(&tree, &mut capture);
+pub struct Mutations<'a> {
+    tree: &'a Tree,
+    capture: Capture,
+    template_index: usize,
+    reset: bool,
+}
+
+impl<'a> Mutations<'a> {
+    pub fn from(tree: &'a Tree) -> Mutations {
+        Mutations {
+            tree,
+            capture: Capture::new(),
+            template_index: 0,
+            reset: true,
         }
     }
-    todo!();
+}
+
+impl<'a> Iterator for Mutations<'a> {
+    type Item = Tree;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let templates = get_templates();
+        while self.template_index < templates.len() {
+            while self.reset || self.capture.is_valid() {
+                let template = &templates[self.template_index];
+                if self.reset {
+                    template.first_match(&self.tree, &mut self.capture);
+                    self.reset = false;
+                } else {
+                    template.next_match(&self.tree, &mut self.capture);
+                }
+                if !self.capture.is_valid() {
+                    break;
+                } else {
+                    match self.capture.apply(template, &self.tree) {
+                        Some(tree) => return Some(tree),
+                        None => continue, // Try the next match.
+                    }
+                }
+            }
+            self.reset = true;
+            self.template_index += 1;
+        }
+        return None;
+    }
 }
 
 fn symbolic_match(
@@ -110,17 +144,19 @@ impl Template {
 struct Capture {
     node_index: Option<usize>,
     bindings: Vec<(char, usize)>,
+    node_map: Vec<usize>,
 }
 
 impl Capture {
-    pub fn new() -> Capture {
+    fn new() -> Capture {
         Capture {
             node_index: None,
             bindings: vec![],
+            node_map: vec![],
         }
     }
 
-    pub fn bind(&mut self, label: char, index: usize) -> bool {
+    fn bind(&mut self, label: char, index: usize) -> bool {
         for (l, i) in self.bindings.iter() {
             if *l == label {
                 return *i == index;
@@ -130,19 +166,65 @@ impl Capture {
         return true;
     }
 
-    pub fn is_valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         return self.node_index.is_some();
     }
 
-    pub fn apply(&self, _tree: Tree) -> Tree {
+    fn add_node(&mut self, dst: &mut Vec<Node>, src: usize, node: Node) {
+        self.node_map[src] = dst.len();
+        dst.push(node);
+    }
+
+    fn apply(&mut self, template: &Template, tree: &Tree) -> Option<Tree> {
+        use crate::tree::Node::*;
+        let mut nodes = tree.nodes().clone();
+        let ping = template.ping();
+        self.node_map.clear();
+        self.node_map.resize(ping.len(), 0);
+        for ni in 0..ping.len() {
+            if ni == ping.root_index() {
+                match self.node_index {
+                    Some(i) => {
+                        nodes[i] = match ping.node(ni) {
+                            Constant(v) => Constant(*v),
+                            Symbol(label) => Symbol(*label),
+                            Unary(op, input) => Unary(*op, self.node_map[*input]),
+                            Binary(op, lhs, rhs) => {
+                                Binary(*op, self.node_map[*lhs], self.node_map[*rhs])
+                            }
+                        }
+                    }
+                    None => return None,
+                }
+                continue;
+            }
+            match ping.node(ni) {
+                Constant(val) => self.add_node(&mut nodes, ni, Constant(*val)),
+                Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
+                    Some((_ch, i)) => self.node_map[ni] = *i,
+                    None => return None,
+                },
+                Unary(op, input) => {
+                    self.add_node(&mut nodes, ni, Unary(*op, self.node_map[*input]))
+                }
+                Binary(op, lhs, rhs) => self.add_node(
+                    &mut nodes,
+                    ni,
+                    Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
+                ),
+            }
+        }
+        // Topological sort.
+        // Constant folding.
+        // Pruning.
         todo!();
     }
 
-    pub fn binding_state(&self) -> usize {
+    fn binding_state(&self) -> usize {
         self.bindings.len()
     }
 
-    pub fn restore_bindings(&mut self, state: usize) {
+    fn restore_bindings(&mut self, state: usize) {
         self.bindings.truncate(state);
     }
 }
