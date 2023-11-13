@@ -1,3 +1,4 @@
+/// Represents an operation with one input.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum UnaryOp {
     Negate,
@@ -10,6 +11,7 @@ pub enum UnaryOp {
     Exp,
 }
 
+/// Represents an operation with two inputs.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum BinaryOp {
     Add,
@@ -59,14 +61,18 @@ use crate::{
 use BinaryOp::*;
 use UnaryOp::*;
 
+/// Errors that can occur when constructing a tree.
 #[derive(Debug)]
 pub enum TreeError {
+    /// Nodes are not in a valid topological order.
     WrongNodeOrder,
-    ConstantFoldingFailed,
+    /// A constant node contains NaN.
+    ContainsNaN,
+    /// Tree conains no nodes.
     EmptyTree,
-    PruningFailed,
 }
 
+/// Represents a node in an abstract syntax `Tree`.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
     Constant(f64),
@@ -188,13 +194,13 @@ impl Tree {
         if nodes.is_empty() {
             return Err(TreeError::EmptyTree);
         }
-        if !(0..nodes.len()).all(|i| match &nodes[i] {
-            Constant(val) => !f64::is_nan(*val),
-            Symbol(_) => true,
-            Unary(_op, input) => input < &i,
-            Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
-        }) {
-            return Err(TreeError::WrongNodeOrder);
+        for i in 0..nodes.len() {
+            match &nodes[i] {
+                Constant(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
+                Unary(_, input) if *input >= i => return Err(TreeError::WrongNodeOrder),
+                Binary(_, l, r) if *l >= i || *r >= i => return Err(TreeError::WrongNodeOrder),
+                Symbol(_) | _ => {} // Do nothing.
+            }
         }
         // Maybe add more checks later.
         return Ok(nodes);
@@ -253,14 +259,18 @@ impl core::ops::Div<Tree> for Tree {
     }
 }
 
+/// Construct a tree that represents raising `base` to the power of
+/// `exponent`.
 pub fn pow(base: Tree, exponent: Tree) -> Tree {
     base.binary_op(exponent, Pow)
 }
 
+/// Construct a tree that represents the smaller of `lhs` and `rhs`.
 pub fn min(lhs: Tree, rhs: Tree) -> Tree {
     lhs.binary_op(rhs, Min)
 }
 
+/// Construct a tree that represents the larger of `lhs` and `rhs`.
 pub fn max(lhs: Tree, rhs: Tree) -> Tree {
     lhs.binary_op(rhs, Max)
 }
@@ -273,40 +283,53 @@ impl core::ops::Neg for Tree {
     }
 }
 
+/// Construct a tree representing the square root of `x`.
 pub fn sqrt(x: Tree) -> Tree {
     x.unary_op(Sqrt)
 }
 
+/// Construct a tree representing the absolute value of `x`.
 pub fn abs(x: Tree) -> Tree {
     x.unary_op(Abs)
 }
 
+/// Construct a tree representing the sine of `x`.
 pub fn sin(x: Tree) -> Tree {
     x.unary_op(Sin)
 }
 
+/// Construct a tree representing the cosine of `x`.
 pub fn cos(x: Tree) -> Tree {
     x.unary_op(Cos)
 }
 
+/// Construct a tree representing the tangent of 'x'.
 pub fn tan(x: Tree) -> Tree {
     x.unary_op(Tan)
 }
 
+/// Construct a tree representing the natural logarithm of `x`.
 pub fn log(x: Tree) -> Tree {
     x.unary_op(Log)
 }
 
+/// Construct a tree representing `e` raised to the power of `x`.
 pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
+/// Errors that can occur when evaluating a tree.
 #[derive(Debug)]
 pub enum EvaluationError {
+    /// A symbol was not assigned a value before evaluating.
     VariableNotFound(char),
+    /// A register with uninitialized value was encountered during
+    /// evaluation. This could mean the topology of the tree is
+    /// broken.
     UninitializedValueRead,
 }
 
+/// This can be used to compute the value(s) of the tree.
 pub struct Evaluator<'a> {
     tree: &'a Tree,
     regs: Box<[Option<f64>]>,
