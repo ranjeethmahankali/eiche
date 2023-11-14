@@ -1,5 +1,6 @@
 use crate::{
-    tree::{Node, Node::*},
+    prune::Pruner,
+    tree::{Node, Node::*, Tree, TreeError},
     walk::{DepthWalker, NodeOrdering},
 };
 use std::collections::HashMap;
@@ -175,6 +176,16 @@ pub fn equivalent(
                 }
             }
         }
+    }
+}
+
+impl Tree {
+    /// Deduplicate the common subtrees in this tree.
+    pub fn deduplicate(self) -> Result<Tree, TreeError> {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
+        let root_index = self.root_index();
+        return Tree::from_nodes(pruner.run(dedup.run(self.take_nodes()), root_index));
     }
 }
 

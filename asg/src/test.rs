@@ -1,5 +1,9 @@
 #[cfg(test)]
 pub mod util {
+    use crate::{eval::Evaluator, tree::Tree};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
     macro_rules! assert_float_eq {
         ($a:expr, $b:expr, $eps:expr) => {{
             // Make variables to avoid evaluating experssions multiple times.
@@ -18,12 +22,8 @@ pub mod util {
             assert_float_eq!($a, $b, f64::EPSILON)
         };
     }
-
     pub(crate) use assert_float_eq;
 
-    use crate::{eval::Evaluator, tree::Tree};
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
     /// Helper function to evaluate the tree with randomly sampled
     /// variable values and compare the result to the one returned by
     /// the `expectedfn` for the same inputs. The values must be

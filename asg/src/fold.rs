@@ -1,4 +1,7 @@
-use crate::tree::{Node, Node::*};
+use crate::{
+    prune::Pruner,
+    tree::{Node, Node::*, Tree, TreeError},
+};
 
 /// Compute the results of operations on constants and fold those into
 /// constant nodes. The unused nodes after folding are not
@@ -28,6 +31,15 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
         }
     }
     return nodes;
+}
+
+impl Tree {
+    /// Fold constants in this tree.
+    pub fn fold_constants(self) -> Result<Tree, TreeError> {
+        let mut pruner = Pruner::new();
+        let root_index = self.root_index();
+        return Tree::from_nodes(pruner.run(fold_constants(self.take_nodes()), root_index));
+    }
 }
 
 #[cfg(test)]

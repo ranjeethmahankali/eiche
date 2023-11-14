@@ -96,12 +96,7 @@ impl BinaryOp {
     }
 }
 
-use crate::{
-    dedup::Deduplicater,
-    fold::fold_constants,
-    prune::Pruner,
-    io::{parse_tree, LispParseError},
-};
+use crate::io::{parse_tree, LispParseError};
 use BinaryOp::*;
 use UnaryOp::*;
 
@@ -214,23 +209,6 @@ impl Tree {
         chars.sort();
         chars.dedup();
         return chars;
-    }
-
-    /// Fold constants in this tree.
-    pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
-        let mut pruner = Pruner::new();
-        let root_index = self.root_index();
-        self.nodes = Self::validate_nodes(pruner.run(fold_constants(self.nodes), root_index))?;
-        return Ok(self);
-    }
-
-    /// Deduplicate the common subtrees in this tree.
-    pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
-        let mut dedup = Deduplicater::new();
-        let mut pruner = Pruner::new();
-        let root_index = self.root_index();
-        self.nodes = Self::validate_nodes(pruner.run(dedup.run(self.nodes), root_index))?;
-        return Ok(self);
     }
 
     /// Check if `nodes` can represent a valid tree.
