@@ -1,5 +1,6 @@
 use crate::{
-    helper::{fold_constants, Deduplicater, Pruner, TopoSorter},
+    dedup::Deduplicater,
+    helper::{fold_constants, Pruner, TopoSorter},
     template::{get_templates, Template},
     tree::{Node, Tree},
 };
@@ -264,10 +265,8 @@ impl Capture {
 mod tests {
     use super::*;
     use crate::{
-        deftree,
-        helper::{equivalent, DepthWalker},
-        template::get_template_by_name,
-        tests::tests::compare_trees,
+        dedup::equivalent, deftree, template::get_template_by_name, tests::tests::compare_trees,
+        walk::DepthWalker,
     };
 
     fn check_bindings(capture: &Capture, template: &Template, tree: &Tree) {

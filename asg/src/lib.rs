@@ -7,3 +7,5 @@ mod macros;
 mod mutate;
 mod template;
 mod tests;
+mod dedup;
+mod walk;

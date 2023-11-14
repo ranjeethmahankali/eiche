@@ -3,8 +3,12 @@ pub mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
+    use crate::dedup::equivalent;
     use crate::tree::{BinaryOp::*, Evaluator, Node, Node::*, Tree, TreeError, UnaryOp::*};
-    use crate::{deftree, helper::*, parsetree};
+    use crate::{
+        deftree, parsetree,
+        walk::{DepthWalker, NodeOrdering},
+    };
 
     macro_rules! assert_float_eq {
         ($a:expr, $b:expr, $eps:expr) => {{

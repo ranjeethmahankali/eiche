@@ -37,6 +37,20 @@ impl UnaryOp {
             Exp => f64::exp(value),
         }
     }
+    /// The index of the variant for comparison and sorting.
+    pub fn index(&self) -> u8 {
+        use UnaryOp::*;
+        match self {
+            Negate => 0,
+            Sqrt => 1,
+            Abs => 2,
+            Sin => 3,
+            Cos => 4,
+            Tan => 5,
+            Log => 6,
+            Exp => 7,
+        }
+    }
 }
 
 impl BinaryOp {
@@ -52,10 +66,39 @@ impl BinaryOp {
             Max => f64::max(lhs, rhs),
         }
     }
+
+    /// The index of the variant for comparison and sorting.
+    pub fn index(&self) -> u8 {
+        use BinaryOp::*;
+        match self {
+            Add => 0,
+            Subtract => 1,
+            Multiply => 2,
+            Divide => 3,
+            Pow => 4,
+            Min => 5,
+            Max => 6,
+        }
+    }
+
+    /// Check if the binary op is commutative.
+    pub fn is_commutative(&self) -> bool {
+        use BinaryOp::*;
+        match self {
+            Add => true,
+            Subtract => false,
+            Multiply => true,
+            Divide => false,
+            Pow => false,
+            Min => true,
+            Max => true,
+        }
+    }
 }
 
 use crate::{
-    helper::{fold_constants, Deduplicater, Pruner},
+    dedup::Deduplicater,
+    helper::{fold_constants, Pruner},
     parser::{parse_tree, LispParseError},
 };
 use BinaryOp::*;
