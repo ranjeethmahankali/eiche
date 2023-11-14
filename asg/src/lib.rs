@@ -1,14 +1,14 @@
+pub mod eval;
 pub mod parser;
 pub mod reduce;
 pub mod tree;
 
-mod helper;
+mod dedup;
+mod fold;
 mod macros;
 mod mutate;
-mod template;
-mod tests;
-mod dedup;
-mod walk;
 mod prune;
 mod sort;
-mod fold;
+mod template;
+mod tests;
+mod walk;

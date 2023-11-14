@@ -4,7 +4,8 @@ pub mod tests {
     use rand::SeedableRng;
 
     use crate::dedup::equivalent;
-    use crate::tree::{BinaryOp::*, Evaluator, Node, Node::*, Tree, TreeError, UnaryOp::*};
+    use crate::eval::Evaluator;
+    use crate::tree::{BinaryOp::*, Node, Node::*, Tree, TreeError, UnaryOp::*};
     use crate::{
         deftree, parsetree,
         walk::{DepthWalker, NodeOrdering},
