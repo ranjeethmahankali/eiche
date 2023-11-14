@@ -19,7 +19,7 @@ struct Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
-    pub fn from(lisp: &'a str) -> Tokenizer<'a> {
+    fn from(lisp: &'a str) -> Tokenizer<'a> {
         Tokenizer {
             lisp,
             last: 0,
@@ -125,16 +125,25 @@ enum Parsed<'a> {
 
 use Parsed::*;
 
+/// Errors that can occur when parsing a lisp expression into a
+/// `Tree`.
 #[derive(Debug)]
 pub enum LispParseError {
+    /// Error when parsing a floating point number.
     Float,
+    /// Error when parsing a symbol's character.
     Symbol,
+    /// Error when parsing an expression.
     MalformedExpression,
+    /// Unrecognized token.
     InvalidToken(String),
+    /// Less than expected tokens for the given operation / context.
     TooFewTokens,
+    /// More than expected tokens for the given operation / context.
     TooManyTokens,
+    /// Malformed parentheses.
     MalformedParentheses,
-    MalformedTemplate(String),
+    /// All other problems.
     Unknown,
 }
 
@@ -159,7 +168,7 @@ fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, Li
     };
     if FLT_REGEX.is_match(atom) {
         return Ok(Done(push_node(
-            Constant(atom.parse::<f64>().ok().ok_or(LispParseError::Float)?),
+            Constant(atom.parse::<f64>().map_err(|_| LispParseError::Float)?),
             nodes,
         )));
     }
@@ -242,7 +251,7 @@ fn parse_expression<'a>(
     }
 }
 
-pub fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
+fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
     // First pass to collect statistics.
     let (nodecount, maxdepth) = count_nodes(&lisp);
     // Allocate memory according to collected statistics.
@@ -271,10 +280,10 @@ pub fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
     return Err(LispParseError::Unknown);
 }
 
+/// Parse the `lisp` expression into a `Tree`. If the parsing fails, an
+/// appropriate `LispParseError` is returned.
 pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
-    Ok(Tree::from_nodes(parse_nodes(&lisp)?)
-        .ok()
-        .ok_or(LispParseError::Unknown)?)
+    Ok(Tree::from_nodes(parse_nodes(&lisp)?).map_err(|_| LispParseError::Unknown)?)
 }
 
 #[cfg(test)]
@@ -294,15 +303,15 @@ mod tests {
     fn single_token() {
         // Constant.
         let tree = parse_tree("5.55").unwrap();
-        assert!(matches!(tree.root().unwrap(), Constant(val) if *val == 5.55));
+        assert!(matches!(tree.root(), Constant(val) if *val == 5.55));
         // Constant with spaces.
         let tree = parse_tree(" 5.55   ").unwrap();
-        assert!(matches!(tree.root().unwrap(), Constant(val) if *val == 5.55));
+        assert!(matches!(tree.root(), Constant(val) if *val == 5.55));
         // Symbol.
         let tree = parse_tree("x").unwrap();
-        assert!(matches!(tree.root().unwrap(), Symbol(label) if *label == 'x'));
+        assert!(matches!(tree.root(), Symbol(label) if *label == 'x'));
         // Symbol with spaces.
         let tree = parse_tree(" x     ").unwrap();
-        assert!(matches!(tree.root().unwrap(), Symbol(label) if *label == 'x'));
+        assert!(matches!(tree.root(), Symbol(label) if *label == 'x'));
     }
 }

@@ -1,3 +1,4 @@
+/// Represents an operation with one input.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum UnaryOp {
     Negate,
@@ -10,6 +11,7 @@ pub enum UnaryOp {
     Exp,
 }
 
+/// Represents an operation with two inputs.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum BinaryOp {
     Add,
@@ -53,20 +55,24 @@ impl BinaryOp {
 }
 
 use crate::{
-    helper::{equivalent, fold_constants, DepthWalker, Pruner},
+    helper::{fold_constants, Deduplicater, Pruner},
     parser::{parse_tree, LispParseError},
 };
 use BinaryOp::*;
 use UnaryOp::*;
 
+/// Errors that can occur when constructing a tree.
 #[derive(Debug)]
 pub enum TreeError {
+    /// Nodes are not in a valid topological order.
     WrongNodeOrder,
-    ConstantFoldingFailed,
+    /// A constant node contains NaN.
+    ContainsNaN,
+    /// Tree conains no nodes.
     EmptyTree,
-    PruningFailed,
 }
 
+/// Represents a node in an abstract syntax `Tree`.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
     Constant(f64),
@@ -84,28 +90,31 @@ pub struct Tree {
 }
 
 impl Tree {
-    pub fn new(node: Node) -> Tree {
-        Tree { nodes: vec![node] }
-    }
-
-    pub fn validate(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
-        if !(0..nodes.len()).all(|i| match &nodes[i] {
-            Constant(_) | Symbol(_) => true,
-            Unary(_op, input) => input < &i,
-            Binary(_op, lhs, rhs) => lhs < &i && rhs < &i,
-        }) {
-            return Err(TreeError::WrongNodeOrder);
+    /// Create a tree representing a constant value.
+    pub fn constant(val: f64) -> Tree {
+        Tree {
+            nodes: vec![Constant(val)],
         }
-        // Maybe add more checks later.
-        return Ok(nodes);
     }
 
+    /// Create a tree representing a symbol with the given `label`.
+    pub fn symbol(label: char) -> Tree {
+        Tree {
+            nodes: vec![Symbol(label)],
+        }
+    }
+
+    /// Create a new tree with `nodes`. If the `nodes` don't meet the
+    /// requirements for represeting a standart tree, an appropriate
+    /// `TreeError` is returned.
     pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, TreeError> {
         Ok(Tree {
-            nodes: Self::validate(nodes)?,
+            nodes: Self::validate_nodes(nodes)?,
         })
     }
 
+    /// Parse the `lisp` expression into a new tree. If the parsing
+    /// fails, an appropriate `LispParseError` is returned.
     pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
         parse_tree(lisp)
     }
@@ -115,117 +124,86 @@ impl Tree {
         self.nodes.len()
     }
 
-    pub fn root(&self) -> Result<&Node, TreeError> {
-        self.nodes.last().ok_or(TreeError::EmptyTree)
+    /// Get a reference to root of the tree. This is the last node of
+    /// the tree.
+    pub fn root(&self) -> &Node {
+        // We can confidently unwrap because we should never create an
+        // invalid tree in the first place.
+        self.nodes.last().unwrap()
     }
 
+    /// Index of the root node. This will be the index of the last
+    /// node of the tree.
     pub fn root_index(&self) -> usize {
         self.len() - 1
     }
 
+    /// Get a reference to the node at `index`.
     pub fn node(&self, index: usize) -> &Node {
         &self.nodes[index]
     }
 
+    /// Reference to the nodes of this tree.
     pub fn nodes(&self) -> &Vec<Node> {
         &self.nodes
     }
 
-    pub fn to_lisp(&self) -> Result<String, TreeError> {
-        Ok(crate::helper::to_lisp(self.root()?, self.nodes()))
+    /// Get a unique list of all symbols in this tree.
+    pub fn symbols(&self) -> Vec<char> {
+        let mut chars: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                if let Symbol(label) = n {
+                    Some(*label)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        chars.sort();
+        chars.dedup();
+        return chars;
     }
 
+    /// Convert the tree to a lisp expression. If there is something
+    /// wrong with this tree, and appropriate `TreeError` is returned.
+    pub fn to_lisp(&self) -> String {
+        crate::helper::to_lisp(self.root(), self.nodes())
+    }
+
+    /// Fold constants in this tree.
     pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
-        let mut walker = DepthWalker::new();
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        self.nodes =
-            Self::validate(pruner.prune(fold_constants(self.nodes), root_index, &mut walker)?)?;
+        self.nodes = Self::validate_nodes(pruner.run(fold_constants(self.nodes), root_index))?;
         return Ok(self);
     }
 
-    fn node_hashes(&self) -> Box<[u64]> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        // Using a boxed slice to avoid accidental resizing later.
-        let mut hashes: Box<[u64]> = vec![0; self.len()].into_boxed_slice();
-        for index in 0..self.len() {
-            let hash: u64 = match self.nodes[index] {
-                Constant(value) => value.to_bits().into(),
-                Symbol(label) => {
-                    let mut s: DefaultHasher = Default::default();
-                    label.hash(&mut s);
-                    s.finish()
-                }
-                Unary(op, input) => {
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
-                    hashes[input].hash(&mut s);
-                    s.finish()
-                }
-                Binary(op, lhs, rhs) => {
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
-                    let (hash1, hash2) = {
-                        let mut hash1 = hashes[lhs];
-                        let mut hash2 = hashes[rhs];
-                        if op.is_commutative() && hash1 > hash2 {
-                            std::mem::swap(&mut hash1, &mut hash2);
-                        }
-                        (hash1, hash2)
-                    };
-                    hash1.hash(&mut s);
-                    hash2.hash(&mut s);
-                    s.finish()
-                }
-            };
-            hashes[index] = hash;
-        }
-        return hashes;
-    }
-
+    /// Deduplicate the common subtrees in this tree.
     pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
-        use std::collections::hash_map::HashMap;
-        // Compute new indices after deduplication.
-        let mut walker1 = DepthWalker::new();
-        let indices = {
-            let mut indices: Box<[usize]> = (0..self.len()).collect();
-            // Compute hashes to find potential duplicates.
-            let hashes = self.node_hashes();
-            // Map hashes to node indices.
-            let mut revmap: HashMap<u64, usize> = HashMap::new();
-            // These walkers are for checking the equivalence of the
-            // nodes with the same hash.
-            let mut walker2 = DepthWalker::new();
-            for i in 0..hashes.len() {
-                let h = hashes[i];
-                let entry = revmap.entry(h).or_insert(i);
-                if *entry != i && equivalent(*entry, i, &self.nodes, &mut walker1, &mut walker2) {
-                    // The i-th node should be replaced with entry-th node.
-                    indices[i] = *entry;
-                }
-            }
-            indices
-        };
-        for node in self.nodes.iter_mut() {
-            match node {
-                Constant(_) => {}
-                Symbol(_) => {}
-                Unary(_, input) => {
-                    *input = indices[*input];
-                }
-                Binary(_, lhs, rhs) => {
-                    *lhs = indices[*lhs];
-                    *rhs = indices[*rhs];
-                }
-            }
-        }
-        {
-            let mut pruner = Pruner::new();
-            let root_index = self.root_index();
-            self.nodes = Self::validate(pruner.prune(self.nodes, root_index, &mut walker1)?)?;
-        }
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
+        let root_index = self.root_index();
+        self.nodes = Self::validate_nodes(pruner.run(dedup.run(self.nodes), root_index))?;
         return Ok(self);
+    }
+
+    /// Check if `nodes` can represent a valid tree.
+    fn validate_nodes(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
+        if nodes.is_empty() {
+            return Err(TreeError::EmptyTree);
+        }
+        for i in 0..nodes.len() {
+            match &nodes[i] {
+                Constant(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
+                Unary(_, input) if *input >= i => return Err(TreeError::WrongNodeOrder),
+                Binary(_, l, r) if *l >= i || *r >= i => return Err(TreeError::WrongNodeOrder),
+                Symbol(_) | _ => {} // Do nothing.
+            }
+        }
+        // Maybe add more checks later.
+        return Ok(nodes);
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
@@ -281,14 +259,18 @@ impl core::ops::Div<Tree> for Tree {
     }
 }
 
+/// Construct a tree that represents raising `base` to the power of
+/// `exponent`.
 pub fn pow(base: Tree, exponent: Tree) -> Tree {
     base.binary_op(exponent, Pow)
 }
 
+/// Construct a tree that represents the smaller of `lhs` and `rhs`.
 pub fn min(lhs: Tree, rhs: Tree) -> Tree {
     lhs.binary_op(rhs, Min)
 }
 
+/// Construct a tree that represents the larger of `lhs` and `rhs`.
 pub fn max(lhs: Tree, rhs: Tree) -> Tree {
     lhs.binary_op(rhs, Max)
 }
@@ -301,46 +283,60 @@ impl core::ops::Neg for Tree {
     }
 }
 
+/// Construct a tree representing the square root of `x`.
 pub fn sqrt(x: Tree) -> Tree {
     x.unary_op(Sqrt)
 }
 
+/// Construct a tree representing the absolute value of `x`.
 pub fn abs(x: Tree) -> Tree {
     x.unary_op(Abs)
 }
 
+/// Construct a tree representing the sine of `x`.
 pub fn sin(x: Tree) -> Tree {
     x.unary_op(Sin)
 }
 
+/// Construct a tree representing the cosine of `x`.
 pub fn cos(x: Tree) -> Tree {
     x.unary_op(Cos)
 }
 
+/// Construct a tree representing the tangent of 'x'.
 pub fn tan(x: Tree) -> Tree {
     x.unary_op(Tan)
 }
 
+/// Construct a tree representing the natural logarithm of `x`.
 pub fn log(x: Tree) -> Tree {
     x.unary_op(Log)
 }
 
+/// Construct a tree representing `e` raised to the power of `x`.
 pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
+/// Errors that can occur when evaluating a tree.
 #[derive(Debug)]
 pub enum EvaluationError {
+    /// A symbol was not assigned a value before evaluating.
     VariableNotFound(char),
+    /// A register with uninitialized value was encountered during
+    /// evaluation. This could mean the topology of the tree is
+    /// broken.
     UninitializedValueRead,
 }
 
+/// This can be used to compute the value(s) of the tree.
 pub struct Evaluator<'a> {
     tree: &'a Tree,
     regs: Box<[Option<f64>]>,
 }
 
 impl<'a> Evaluator<'a> {
+    /// Create a new evaluator for `tree`.
     pub fn new(tree: &'a Tree) -> Evaluator {
         Evaluator {
             tree,
@@ -471,14 +467,14 @@ mod tests {
     fn symbol_deftree() {
         let tree = deftree!(x);
         assert_eq!(tree.len(), 1);
-        assert!(matches!(tree.root(), Ok(Symbol(label)) if *label == 'x'));
+        assert_eq!(tree.root(), &Symbol('x'));
     }
 
     #[test]
     fn constant_deftree() {
         let tree = deftree!(2.);
         assert_eq!(tree.len(), 1);
-        assert!(matches!(tree.root(), Ok(Constant(val)) if *val == 2.));
+        assert_eq!(tree.root(), &Constant(2.));
     }
 
     #[test]

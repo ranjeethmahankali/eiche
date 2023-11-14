@@ -74,14 +74,14 @@ macro_rules! deftree {
             "Symbols can only have a single character as an identifier.",
             LABEL.len() == 1
         );
-        <$crate::tree::Node as Into<$crate::tree::Tree>>::into($crate::tree::Node::Symbol(LABEL.chars().next().unwrap()))
+        $crate::tree::Tree::symbol(LABEL.chars().next().unwrap())
     }};
     // Float constants.
     (const $tt:expr) => {
-        <$crate::tree::Node as Into<$crate::tree::Tree>>::into($crate::tree::Node::Constant($tt))
+        $crate::tree::Tree::constant($tt)
     };
     ($a:literal) => {
-        <$crate::tree::Node as Into<$crate::tree::Tree>>::into($crate::tree::Node::Constant($a as f64))
+        $crate::tree::Tree::constant($a as f64)
     };
 }
 

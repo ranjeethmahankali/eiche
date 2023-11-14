@@ -1,45 +1,28 @@
-use crate::tree::{BinaryOp, Node, Node::*, Tree, TreeError, UnaryOp};
+use std::collections::HashMap;
 
-impl Into<Tree> for Node {
-    fn into(self) -> Tree {
-        Tree::new(self)
-    }
-}
+use crate::tree::{BinaryOp, Node, Node::*, Tree, UnaryOp};
 
 impl From<f64> for Tree {
     fn from(value: f64) -> Self {
-        return Constant(value).into();
-    }
-}
-
-impl From<f64> for Node {
-    fn from(value: f64) -> Self {
-        return Constant(value);
-    }
-}
-
-impl From<char> for Node {
-    fn from(value: char) -> Self {
-        return Symbol(value);
+        return Self::constant(value);
     }
 }
 
 impl From<char> for Tree {
     fn from(c: char) -> Self {
-        return Symbol(c).into();
+        return Self::symbol(c);
     }
 }
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[derive(Debug)]
         enum Token {
             Branch,
             Pass,
             Turn,
             Gap,
             Newline,
-            Data(usize),
+            NodeIndex(usize),
         }
         use Token::*;
         // Walk the tree and collect tokens.
@@ -60,7 +43,7 @@ impl std::fmt::Display for Tree {
                         }
                         tokens.push(Turn);
                     }
-                    tokens.push(Data(index));
+                    tokens.push(NodeIndex(index));
                     tokens.push(Newline);
                 }
                 tokens
@@ -69,7 +52,7 @@ impl std::fmt::Display for Tree {
             let mut line_start: usize = 0;
             for i in 0..tokens.len() {
                 match tokens[i] {
-                    Branch | Pass | Gap | Data(_) => {} // Do nothing.
+                    Branch | Pass | Gap | NodeIndex(_) => {} // Do nothing.
                     Newline => line_start = i,
                     Turn => {
                         let offset = i - line_start;
@@ -77,7 +60,7 @@ impl std::fmt::Display for Tree {
                             if let Newline = tokens[li] {
                                 let ti = li + offset;
                                 tokens[ti] = match &tokens[ti] {
-                                    Branch | Pass | Data(_) => break,
+                                    Branch | Pass | NodeIndex(_) => break,
                                     Turn => Branch,
                                     Gap => Pass,
                                     Newline => panic!("FATAL: Failed to convert tree to a string"),
@@ -98,7 +81,7 @@ impl std::fmt::Display for Tree {
                 Turn => write!(f, " └── ")?,
                 Gap => write!(f, "     ")?,
                 Newline => write!(f, "\n")?,
-                Data(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
+                NodeIndex(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
             };
         }
         write!(f, "\n")
@@ -137,6 +120,7 @@ impl BinaryOp {
         }
     }
 
+    /// Check if the binary op is commutative.
     pub fn is_commutative(&self) -> bool {
         use BinaryOp::*;
         match self {
@@ -164,7 +148,7 @@ impl std::fmt::Display for Node {
 
 impl PartialOrd for Node {
     /// This implementation only accounts for the node, its type and
-    /// the data heal inside the node. It DOES NOT take into account
+    /// the data held inside the node. It DOES NOT take into account
     /// the children of the node when comparing two nodes.
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering::*;
@@ -190,6 +174,113 @@ impl PartialOrd for Node {
             (Binary(_, _, _), Unary(_, _)) => Some(Greater),
             (Binary(op1, _, _), Binary(op2, _, _)) => Some(op1.index().cmp(&op2.index())),
         }
+    }
+}
+
+/// Helper struct for deduplicating common subtrees.
+///
+/// Deduplication requires allocations. Those buffers are owned by
+/// this struct, so reusing the same instance of `Deduplicater` can
+/// avoid unnecessary allocations.
+pub struct Deduplicater {
+    indices: Vec<usize>,
+    hashes: Vec<u64>,
+    walker1: DepthWalker,
+    walker2: DepthWalker,
+    hash_to_index: HashMap<u64, usize>,
+}
+
+impl Deduplicater {
+    /// Create a new deduplicater.
+    pub fn new() -> Self {
+        Deduplicater {
+            indices: vec![],
+            hashes: vec![],
+            walker1: DepthWalker::new(),
+            walker2: DepthWalker::new(),
+            hash_to_index: HashMap::new(),
+        }
+    }
+
+    fn calc_hashes(&mut self, nodes: &Vec<Node>) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        // Using a boxed slice to avoid accidental resizing later.
+        self.hashes.clear();
+        self.hashes.resize(nodes.len(), 0);
+        for index in 0..nodes.len() {
+            let hash: u64 = match nodes[index] {
+                Constant(value) => value.to_bits().into(),
+                Symbol(label) => {
+                    let mut s: DefaultHasher = Default::default();
+                    label.hash(&mut s);
+                    s.finish()
+                }
+                Unary(op, input) => {
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
+                    self.hashes[input].hash(&mut s);
+                    s.finish()
+                }
+                Binary(op, lhs, rhs) => {
+                    let (hash1, hash2) = {
+                        let mut hash1 = self.hashes[lhs];
+                        let mut hash2 = self.hashes[rhs];
+                        if op.is_commutative() && hash1 > hash2 {
+                            std::mem::swap(&mut hash1, &mut hash2);
+                        }
+                        (hash1, hash2)
+                    };
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
+                    hash1.hash(&mut s);
+                    hash2.hash(&mut s);
+                    s.finish()
+                }
+            };
+            self.hashes[index] = hash;
+        }
+    }
+
+    /// Deduplicate `nodes`. The `nodes` are expected to be
+    /// topologically sorted. If they are not, this function might
+    /// produce incorrect results. If you suspect the nodes are not
+    /// topologically sorted, use the `TopoSorter` to sort them first.
+    ///
+    /// If a subtree appears twice, any node with the second subtree
+    /// as its input will be rewired to the first subtree. That means,
+    /// after deduplication, there can be `dead` nodes remaining, that
+    /// are not connected to the root. Consider pruning the tree
+    /// afterwards.
+    pub fn run(&mut self, mut nodes: Vec<Node>) -> Vec<Node> {
+        // Compute unique indices after deduplication.
+        self.indices.clear();
+        self.indices.extend(0..nodes.len());
+        self.calc_hashes(&nodes);
+        self.hash_to_index.clear();
+        for i in 0..self.hashes.len() {
+            let h = self.hashes[i];
+            let entry = self.hash_to_index.entry(h).or_insert(i);
+            if *entry != i && equivalent(*entry, i, &nodes, &mut self.walker1, &mut self.walker2) {
+                // The i-th node should be replaced with entry-th node.
+                self.indices[i] = *entry;
+            }
+        }
+        // Update nodes.
+        for node in nodes.iter_mut() {
+            match node {
+                Constant(_) => {}
+                Symbol(_) => {}
+                Unary(_, input) => {
+                    *input = self.indices[*input];
+                }
+                Binary(_, lhs, rhs) => {
+                    *lhs = self.indices[*lhs];
+                    *rhs = self.indices[*rhs];
+                }
+            }
+        }
+        return nodes;
     }
 }
 
@@ -250,14 +341,15 @@ pub fn equivalent(
     }
 }
 
+/// Helper struct for traversing the tree depth first.
+///
+/// Doing a non-recursive depth first traversal requires
+/// allocations. Those buffers are owned by this instance. So reusing
+/// the same walker many times is recommended to avoid unnecessary
+/// allocations.
 pub struct DepthWalker {
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
-}
-
-pub enum NodeOrdering {
-    Original,
-    Deterministic,
 }
 
 impl DepthWalker {
@@ -268,6 +360,11 @@ impl DepthWalker {
         }
     }
 
+    /// Get an iterator that walks the nodes of `tree`. If `unique` is
+    /// true, no node will be visited more than once. The choice of
+    /// `order` will affect the order in which the children of certain
+    /// nodes are traversed. See the documentation of `NodeOrdering`
+    /// for more details.
     pub fn walk_tree<'a>(
         &'a mut self,
         tree: &'a Tree,
@@ -277,6 +374,12 @@ impl DepthWalker {
         self.walk_nodes(&tree.nodes(), tree.root_index(), unique, ordering)
     }
 
+    /// Get an iterator that walks the given `nodes` starting from the
+    /// node at `root_index`. If `unique` is true, no node will be
+    /// visited more than once. The choice of `order` will affect the
+    /// order in which the children of certain nodes are
+    /// traversed. See the documentation of `NodeOrdering` for more
+    /// details.
     pub fn walk_nodes<'a>(
         &'a mut self,
         nodes: &'a [Node],
@@ -302,6 +405,24 @@ impl DepthWalker {
     }
 }
 
+/// When traversing a tree depth first, sometimes the subtrees
+/// children of a node can be visited in more than one possible
+/// order. For example, this is the case with commutative binary ops.
+pub enum NodeOrdering {
+    /// Traverse children in the order they appear in the parent.
+    Original,
+    /// Sort the children in a deterministic way, irrespective of the
+    /// order they appear in the parent.
+    Deterministic,
+}
+
+/// Iterator that walks the tree depth first.
+///
+/// The lifetime of this iterator is bound to the lifetime of the
+/// nodes it's traversing. For that reason, this is a separate struct
+/// from `DepthWalker`. That way, the `DepthWalker` instance won't get
+/// tangled up in lifetimes and it can be used multiple traversals,
+/// even on different trees.
 pub struct DepthIterator<'a> {
     unique: bool,
     ordering: NodeOrdering,
@@ -393,72 +514,69 @@ impl<'a> Iterator for DepthIterator<'a> {
     }
 }
 
+/// Tree pruner.
+///
+/// An instance of `Pruner` can be used to prune a list of nodes to
+/// remove unused nodes.
 pub struct Pruner {
-    indices: Vec<Option<usize>>,
+    indices: Vec<usize>,
     pruned: Vec<Node>,
+    walker: DepthWalker,
 }
 
 impl Pruner {
+    /// Create a new `Pruner` instance.
     pub fn new() -> Pruner {
         Pruner {
             indices: vec![],
             pruned: vec![],
+            walker: DepthWalker::new(),
         }
     }
 
+    /// Prune `nodes` to remove unused ones.
+    ///
     /// The given `nodes` are walked depth-first using the `walker`
     /// and nodes that are not visited are filtered out. The filtered
     /// `nodes` are returned. You can minimize allocations by using
     /// the same pruner multiple times.
-    pub fn prune(
-        &mut self,
-        mut nodes: Vec<Node>,
-        root_index: usize,
-        walker: &mut DepthWalker,
-    ) -> Result<Vec<Node>, TreeError> {
+    pub fn run(&mut self, mut nodes: Vec<Node>, root_index: usize) -> Vec<Node> {
         self.indices.clear();
-        self.indices.resize(nodes.len(), None);
+        self.indices.resize(nodes.len(), 0);
         // Mark used nodes.
-        walker
+        self.walker
             .walk_nodes(&nodes, root_index, true, NodeOrdering::Original)
             .for_each(|(index, _parent)| {
-                self.indices[index] = Some(1_usize);
+                self.indices[index] = 1;
             });
+        // Reserve space for new nodes.
+        self.pruned.clear();
+        self.pruned.reserve(self.indices.iter().sum());
         {
-            // Do exclusive scan.
+            // Do inclusive scan.
             let mut sum = 0usize;
             for index in self.indices.iter_mut() {
-                if let Some(i) = index {
-                    let copy = sum;
-                    sum += *i;
-                    *index = Some(copy);
-                }
+                sum += *index;
+                *index = sum;
             }
         }
         // Filter, update and copy nodes.
-        self.pruned.clear();
-        self.pruned.reserve(nodes.len());
-        for node in (0..self.indices.len())
-            .zip(nodes.iter())
-            .filter(|(i, _node)| self.indices[*i].is_some())
-            .map(|(_i, node)| node)
-        {
-            self.pruned.push(match node {
-                // Update the indices of this node's inputs.
-                Constant(val) => Constant(*val),
-                Symbol(label) => Symbol(*label),
-                Unary(op, input) => {
-                    Unary(*op, self.indices[*input].ok_or(TreeError::PruningFailed)?)
-                }
-                Binary(op, lhs, rhs) => Binary(
-                    *op,
-                    self.indices[*lhs].ok_or(TreeError::PruningFailed)?,
-                    self.indices[*rhs].ok_or(TreeError::PruningFailed)?,
-                ),
-            });
+        for i in 0..self.indices.len() {
+            let index = self.indices[i];
+            if index > 0 && (i == 0 || self.indices[i - 1] < index) {
+                // We subtract 1 from all indices because we did an inclusive sum.
+                self.pruned.push(match nodes[i] {
+                    Constant(val) => Constant(val),
+                    Symbol(label) => Symbol(label),
+                    Unary(op, input) => Unary(op, self.indices[input] - 1),
+                    Binary(op, lhs, rhs) => {
+                        Binary(op, self.indices[lhs] - 1, self.indices[rhs] - 1)
+                    }
+                });
+            }
         }
         std::mem::swap(&mut self.pruned, &mut nodes);
-        return Ok(nodes);
+        return nodes;
     }
 }
 
@@ -492,8 +610,101 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
     return nodes;
 }
 
-pub fn to_lisp(node: &Node, nodes: &Vec<Node>) -> String {
-    match node {
+#[derive(Debug)]
+pub enum TopologicalError {
+    CyclicGraph,
+}
+
+/// Topological sorter.
+///
+/// For the topology of a tree to be considered valid, the root of the
+/// tree must be the last node, and every node must appear after its
+/// inputs. A `TopoSorter` instance can be used to sort a vector of
+/// nodes to be topologically valid.
+pub struct TopoSorter {
+    depths: Vec<usize>,
+    sorted_indices: Vec<usize>,
+    index_map: Vec<usize>,
+    sorted: Vec<Node>,
+    walker: DepthWalker,
+}
+
+impl TopoSorter {
+    /// Create a new `TopoSorter` instance.
+    pub fn new() -> TopoSorter {
+        TopoSorter {
+            depths: Vec::new(),
+            sorted_indices: Vec::new(),
+            index_map: Vec::new(),
+            sorted: Vec::new(),
+            walker: DepthWalker::new(),
+        }
+    }
+
+    /// Sort `nodes` to be topologically valid, with `root_index` as
+    /// the new root. Depending on the choice of root, the output
+    /// vector may be littered with unused nodes, and may require
+    /// pruning later.
+    pub fn run(
+        &mut self,
+        mut nodes: Vec<Node>,
+        mut root_index: usize,
+    ) -> Result<(Vec<Node>, usize), TopologicalError> {
+        // Compute depths of all nodes.
+        self.depths.clear();
+        self.depths.resize(nodes.len(), 0);
+        for (index, maybe_parent) in
+            self.walker
+                .walk_nodes(&nodes, root_index, false, NodeOrdering::Original)
+        {
+            if let Some(parent) = maybe_parent {
+                self.depths[index] = usize::max(self.depths[index], 1 + self.depths[parent]);
+                if self.depths[index] >= nodes.len() {
+                    // TODO: This is a terrible way to detect large
+                    // cycles. As you'd have to traverse the whole
+                    // cycle many times to reach this
+                    // condition. Implement proper cycle detection
+                    // later.
+                    return Err(TopologicalError::CyclicGraph);
+                }
+            }
+        }
+        // Sort the node indices by depth.
+        self.sorted_indices.clear();
+        self.sorted_indices.extend(0..nodes.len());
+        // Highest depth at the start.
+        self.sorted_indices
+            .sort_by(|a, b| self.depths[*b].cmp(&self.depths[*a]));
+        // Build a map from old indices to new indices.
+        self.index_map.clear();
+        self.index_map.resize(nodes.len(), 0);
+        for (index, i) in self.sorted_indices.iter().zip(0..self.sorted_indices.len()) {
+            self.index_map[*index] = i;
+            if *index == root_index {
+                root_index = i;
+            }
+        }
+        // Gather the sorted nodes.
+        self.sorted.clear();
+        self.sorted
+            .extend(self.sorted_indices.iter().map(|index| -> Node {
+                match nodes[*index] {
+                    Constant(v) => Constant(v),
+                    Symbol(label) => Symbol(label),
+                    Unary(op, input) => Unary(op, self.index_map[input]),
+                    Binary(op, lhs, rhs) => Binary(op, self.index_map[lhs], self.index_map[rhs]),
+                }
+            }));
+        // Swap the sorted nodes and the incoming nodes.
+        std::mem::swap(&mut self.sorted, &mut nodes);
+        return Ok((nodes, root_index));
+    }
+}
+
+/// Convert the list of nodes to a lisp string, by recursively
+/// traversing the nodes starting at `root`.
+pub fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
+    match root {
         Constant(val) => val.to_string(),
         Symbol(label) => label.to_string(),
         Unary(op, input) => format!(
@@ -528,5 +739,96 @@ pub fn to_lisp(node: &Node, nodes: &Vec<Node>) -> String {
             to_lisp(&nodes[*lhs], nodes),
             to_lisp(&nodes[*rhs], nodes)
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tree::TreeError;
+    use {super::*, BinaryOp::*, UnaryOp::*};
+
+    #[test]
+    fn topological_sorting_0() {
+        let mut sorter = TopoSorter::new();
+        let (nodes, root) = sorter
+            .run(vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')], 1)
+            .unwrap();
+        assert_eq!(root, 2);
+        assert_eq!(nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
+    }
+
+    #[test]
+    fn topological_sorting_1() {
+        let nodes = vec![
+            Symbol('x'),            // 0
+            Binary(Add, 0, 2),      // 1
+            Constant(2.245),        // 2
+            Binary(Multiply, 1, 5), // 3
+            Unary(Sqrt, 3),         // 4 - root
+            Symbol('y'),            // 5
+        ];
+        assert!(matches!(
+            Tree::from_nodes(nodes.clone()),
+            Err(TreeError::WrongNodeOrder)
+        ));
+        let mut sorter = TopoSorter::new();
+        let (nodes, root) = sorter.run(nodes, 4).unwrap();
+        assert_eq!(root, 5);
+        assert!(matches!(
+            Tree::from_nodes(nodes),
+            Ok(tree) if tree.len() == 6,
+        ));
+    }
+
+    #[test]
+    fn topological_sorting_2() {
+        let nodes = vec![
+            Symbol('a'),            // 0
+            Binary(Add, 0, 2),      // 1
+            Symbol('b'),            // 2
+            Unary(Log, 5),          // 3
+            Symbol('x'),            // 4
+            Binary(Add, 4, 6),      // 5
+            Symbol('y'),            // 6
+            Symbol('p'),            // 7
+            Binary(Add, 7, 9),      // 8
+            Symbol('p'),            // 9
+            Binary(Pow, 11, 8),     // 10 - root.
+            Binary(Multiply, 3, 1), // 11
+        ];
+        assert!(matches!(
+            Tree::from_nodes(nodes.clone()),
+            Err(TreeError::WrongNodeOrder)
+        ));
+        let mut sorter = TopoSorter::new();
+        let (nodes, root) = sorter.run(nodes, 10).unwrap();
+        assert_eq!(root, 11);
+        assert!(matches!(
+            Tree::from_nodes(nodes),
+            Ok(tree) if tree.len() == 12,
+        ));
+    }
+
+    #[test]
+    fn topological_sorting_3() {
+        let mut sorter = TopoSorter::new();
+        assert!(matches!(
+            sorter.run(
+                vec![
+                    Binary(Pow, 8, 9),      // 0
+                    Symbol('x'),            // 1
+                    Binary(Multiply, 0, 1), // 2
+                    Symbol('y'),            // 3
+                    Binary(Multiply, 0, 3), // 4
+                    Binary(Add, 2, 4),      // 5
+                    Binary(Add, 1, 3),      // 6
+                    Binary(Divide, 5, 6),   // 7
+                    Unary(Sqrt, 0),         // 8
+                    Constant(2.0),          // 9
+                ],
+                0,
+            ),
+            Err(TopologicalError::CyclicGraph)
+        ));
     }
 }
