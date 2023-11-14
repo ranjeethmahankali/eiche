@@ -98,8 +98,9 @@ impl BinaryOp {
 
 use crate::{
     dedup::Deduplicater,
-    helper::{fold_constants, Pruner},
+    fold::fold_constants,
     parser::{parse_tree, LispParseError},
+    prune::Pruner,
 };
 use BinaryOp::*;
 use UnaryOp::*;

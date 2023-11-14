@@ -1,6 +1,8 @@
 use crate::{
     dedup::Deduplicater,
-    helper::{fold_constants, Pruner, TopoSorter},
+    fold::fold_constants,
+    prune::Pruner,
+    sort::TopoSorter,
     template::{get_templates, Template},
     tree::{Node, Tree},
 };

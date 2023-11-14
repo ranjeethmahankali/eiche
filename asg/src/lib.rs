@@ -9,3 +9,6 @@ mod template;
 mod tests;
 mod dedup;
 mod walk;
+mod prune;
+mod sort;
+mod fold;
