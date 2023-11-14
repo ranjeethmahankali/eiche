@@ -2,18 +2,6 @@ use std::collections::HashMap;
 
 use crate::tree::{BinaryOp, Node, Node::*, Tree, UnaryOp};
 
-impl From<f64> for Node {
-    fn from(value: f64) -> Self {
-        return Constant(value);
-    }
-}
-
-impl From<char> for Node {
-    fn from(value: char) -> Self {
-        return Symbol(value);
-    }
-}
-
 impl From<f64> for Tree {
     fn from(value: f64) -> Self {
         return Self::constant(value);
