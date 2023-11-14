@@ -1,651 +1,455 @@
-#[cfg(test)]
-pub mod tests {
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
+use crate::{
+    tree::{
+        BinaryOp::*,
+        Node::{self, *},
+        Tree,
+        UnaryOp::*,
+    },
+    walk::{DepthWalker, NodeOrdering},
+};
+use lazy_static::lazy_static;
+use regex::Regex;
+use std::str::CharIndices;
 
-    use crate::dedup::equivalent;
-    use crate::eval::Evaluator;
-    use crate::tree::{BinaryOp::*, Node, Node::*, Tree, TreeError, UnaryOp::*};
-    use crate::{
-        deftree, parsetree,
-        walk::{DepthWalker, NodeOrdering},
-    };
+#[derive(Debug, Copy, Clone)]
+enum Token<'a> {
+    Open,
+    Atom(&'a str),
+    Close,
+}
+use Token::*;
 
-    macro_rules! assert_float_eq {
-        ($a:expr, $b:expr, $eps:expr) => {{
-            // Make variables to avoid evaluating experssions multiple times.
-            let a = $a;
-            let b = $b;
-            let eps = $eps;
-            let error = f64::abs(a - b);
-            if error > eps {
-                panic!(
-                    "Assertion failed: |({}) - ({})| = {:e} < {:e}",
-                    a, b, error, eps
-                );
-            }
-        }};
-        ($a:expr, $b:expr) => {
-            assert_float_eq!($a, $b, f64::EPSILON)
-        };
-    }
+struct Tokenizer<'a> {
+    lisp: &'a str,
+    last: usize,
+    curr: usize,
+    iter: CharIndices<'a>,
+    next: Option<Token<'a>>,
+}
 
-    /// Helper function to evaluate the tree with randomly sampled
-    /// variable values and compare the result to the one returned by
-    /// the `expectedfn` for the same inputs. The values must be
-    /// within `eps` of each other.
-    ///
-    /// Each variable is sampled within the range indicated by the
-    /// corresponding entry in `vardata`. Each entry in vardata
-    /// consists of the label of the symbol / variable, lower bound
-    /// and upper bound.
-    fn check_tree_eval<F>(
-        tree: Tree,
-        mut expectedfn: F,
-        vardata: &[(char, f64, f64)],
-        samples_per_var: usize,
-        eps: f64,
-    ) where
-        F: FnMut(&[f64]) -> Option<f64>,
-    {
-        use rand::Rng;
-        let mut eval = Evaluator::new(&tree);
-        let nvars = vardata.len();
-        let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f64>::with_capacity(nvars);
-        let mut rng = StdRng::seed_from_u64(42);
-        while indices[0] <= samples_per_var {
-            let vari = sample.len();
-            let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f64>() * (upper - lower);
-            sample.push(value);
-            eval.set_var(label, value);
-            indices[vari] += 1;
-            if vari < nvars - 1 {
-                continue;
-            }
-            // We set all the variables. Run the test.
-            assert_float_eq!(
-                eval.run().expect("Unable to compute the actual value."),
-                expectedfn(&sample[..]).expect("Unable to compute expected value."),
-                eps
-            );
-            // Clean up the index stack.
-            sample.pop();
-            let mut vari = vari;
-            while indices[vari] == samples_per_var && vari > 0 {
-                if let Some(_) = sample.pop() {
-                    indices[vari] = 0;
-                    vari -= 1;
-                } else {
-                    assert!(false); // To ensure the logic of this test is correct.
-                }
-            }
+impl<'a> Tokenizer<'a> {
+    fn from(lisp: &'a str) -> Tokenizer<'a> {
+        Tokenizer {
+            lisp,
+            last: 0,
+            curr: 0,
+            iter: lisp.char_indices(),
+            next: None,
         }
     }
+}
 
-    pub fn compare_trees(
-        tree1: &Tree,
-        tree2: &Tree,
-        vardata: &[(char, f64, f64)],
-        samples_per_var: usize,
-        eps: f64,
-    ) {
-        use rand::Rng;
-        let mut eval1 = Evaluator::new(&tree1);
-        let mut eval2 = Evaluator::new(&tree2);
-        let nvars = vardata.len();
-        let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f64>::with_capacity(nvars);
-        let mut rng = StdRng::seed_from_u64(42);
-        while indices[0] <= samples_per_var {
-            let vari = sample.len();
-            let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f64>() * (upper - lower);
-            sample.push(value);
-            eval1.set_var(label, value);
-            eval2.set_var(label, value);
-            indices[vari] += 1;
-            if vari < nvars - 1 {
-                continue;
-            }
-            assert_float_eq!(
-                eval1.run().expect("Unable to compute the actual value."),
-                eval2.run().expect("Unable to compute expected value."),
-                eps
-            );
-            // Clean up the index stack.
-            sample.pop();
-            let mut vari = vari;
-            while indices[vari] == samples_per_var && vari > 0 {
-                if let Some(_) = sample.pop() {
-                    indices[vari] = 0;
-                    vari -= 1;
-                } else {
-                    assert!(false); // To ensure the logic of this test is correct.
-                }
-            }
+impl<'a> Iterator for Tokenizer<'a> {
+    type Item = Token<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(token) = self.next {
+            self.next = None;
+            return Some(token);
         }
-    }
-
-    #[test]
-    fn constant() {
-        let x = deftree!(const std::f64::consts::PI);
-        assert_eq!(x.root(), &Constant(std::f64::consts::PI));
-        let mut eval = Evaluator::new(&x);
-        match eval.run() {
-            Ok(val) => assert_eq!(val, std::f64::consts::PI),
-            _ => assert!(false),
-        }
-    }
-
-    #[test]
-    fn variable_in_deftree() {
-        let lisp = deftree!(+ 1. (+ (cos x) (pow (cos x) 2.)));
-        let cx = deftree!(cos x);
-        let with_vars = deftree!(+ 1. (+ {cx.clone()} (pow {cx} 2.)));
-        assert_eq!(lisp, with_vars);
-        compare_trees(&lisp, &with_vars, &[('x', -5., 5.)], 100, 0.);
-        // More complex expressions.
-        use crate::tree::pow;
-        let tree: Tree = deftree!(
-            (+
-             {
-                 let three: Tree = 3.0.into();
-                 three * pow('x'.into(), 2.0.into())
-             }
-             (+ (* 2. x) 1.))
-        );
-        let expected = deftree!(+ (* 3. (pow x 2.)) (+ (* 2. x) 1.));
-        assert_eq!(tree, expected);
-        compare_trees(&expected, &tree, &[('x', -5., 5.)], 100, 0.);
-    }
-
-    #[test]
-    fn pythagoras() {
-        const TRIPLETS: [(f64, f64, f64); 6] = [
-            (3., 4., 5.),
-            (5., 12., 13.),
-            (8., 15., 17.),
-            (7., 24., 25.),
-            (20., 21., 29.),
-            (12., 35., 37.),
-        ];
-        let h = deftree!(sqrt (+ (pow x 2.) (pow y 2.)));
-        let mut eval = Evaluator::new(&h);
-        for (x, y, expected) in TRIPLETS {
-            eval.set_var('x', x);
-            eval.set_var('y', y);
-            match eval.run() {
-                Ok(val) => assert_eq!(val, expected),
-                _ => assert!(false),
-            }
-        }
-    }
-
-    #[test]
-    fn trig_identity() {
-        use rand::Rng;
-        const PI_2: f64 = 2.0 * std::f64::consts::TAU;
-        let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.));
-        let mut eval = Evaluator::new(&sum);
-        let mut rng = StdRng::seed_from_u64(42);
-        for _ in 0..100 {
-            let x: f64 = PI_2 * rng.gen::<f64>();
-            eval.set_var('x', x);
-            match eval.run() {
-                Ok(val) => assert_float_eq!(val, 1.),
-                _ => assert!(false),
-            }
-        }
-    }
-
-    #[test]
-    fn sum_test() {
-        check_tree_eval(
-            deftree!(+ x y),
-            |vars: &[f64]| {
-                if let [x, y] = vars[..] {
-                    Some(x + y)
-                } else {
-                    None
-                }
-            },
-            &[('x', -5., 5.), ('y', -5., 5.)],
-            10,
-            0.,
-        );
-    }
-
-    #[test]
-    fn evaluate_trees() {
-        check_tree_eval(
-            deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)),
-            |vars: &[f64]| {
-                if let [x] = vars[..] {
-                    Some(
-                        f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
-                            / (f64::cos(x) + 2.),
-                    )
-                } else {
-                    None
-                }
-            },
-            &[('x', -2.5, 2.5)],
-            100,
-            0.,
-        );
-        check_tree_eval(
-            deftree!(
-                (max (min
-                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
-            ),
-            |vars: &[f64]| {
-                if let [x, y, z] = vars[..] {
-                    let s1 = f64::sqrt(
-                        f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
-                    ) - 2.75;
-                    let s2 = f64::sqrt(
-                        f64::powf(x + 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
-                    ) - 4.;
-                    let s3 = f64::sqrt(
-                        f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
-                    ) - 5.25;
-                    Some(f64::max(f64::min(s1, s2), s3))
-                } else {
-                    None
-                }
-            },
-            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
-            20,
-            1e-14,
-        );
-    }
-
-    #[test]
-    fn tree_string_formatting() {
-        let tree = deftree!(
-            (max (min
-                  (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-             (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
-        );
-        assert_eq!(
-            format!("{}", tree).trim(),
-            "
-[61] Max(40, 60)
- ├── [40] Min(19, 39)
- │    ├── [19] Subtract(17, 18)
- │    │    ├── [17] Sqrt(16)
- │    │    │    └── [16] Add(10, 15)
- │    │    │         ├── [10] Add(4, 9)
- │    │    │         │    ├── [4] Pow(2, 3)
- │    │    │         │    │    ├── [2] Subtract(0, 1)
- │    │    │         │    │    │    ├── [0] Symbol(x)
- │    │    │         │    │    │    └── [1] Constant(2)
- │    │    │         │    │    └── [3] Constant(2)
- │    │    │         │    └── [9] Pow(7, 8)
- │    │    │         │         ├── [7] Subtract(5, 6)
- │    │    │         │         │    ├── [5] Symbol(y)
- │    │    │         │         │    └── [6] Constant(3)
- │    │    │         │         └── [8] Constant(2)
- │    │    │         └── [15] Pow(13, 14)
- │    │    │              ├── [13] Subtract(11, 12)
- │    │    │              │    ├── [11] Symbol(z)
- │    │    │              │    └── [12] Constant(4)
- │    │    │              └── [14] Constant(2)
- │    │    └── [18] Constant(2.75)
- │    └── [39] Subtract(37, 38)
- │         ├── [37] Sqrt(36)
- │         │    └── [36] Add(30, 35)
- │         │         ├── [30] Add(24, 29)
- │         │         │    ├── [24] Pow(22, 23)
- │         │         │    │    ├── [22] Add(20, 21)
- │         │         │    │    │    ├── [20] Symbol(x)
- │         │         │    │    │    └── [21] Constant(2)
- │         │         │    │    └── [23] Constant(2)
- │         │         │    └── [29] Pow(27, 28)
- │         │         │         ├── [27] Subtract(25, 26)
- │         │         │         │    ├── [25] Symbol(y)
- │         │         │         │    └── [26] Constant(3)
- │         │         │         └── [28] Constant(2)
- │         │         └── [35] Pow(33, 34)
- │         │              ├── [33] Subtract(31, 32)
- │         │              │    ├── [31] Symbol(z)
- │         │              │    └── [32] Constant(4)
- │         │              └── [34] Constant(2)
- │         └── [38] Constant(4)
- └── [60] Subtract(58, 59)
-      ├── [58] Sqrt(57)
-      │    └── [57] Add(51, 56)
-      │         ├── [51] Add(45, 50)
-      │         │    ├── [45] Pow(43, 44)
-      │         │    │    ├── [43] Add(41, 42)
-      │         │    │    │    ├── [41] Symbol(x)
-      │         │    │    │    └── [42] Constant(2)
-      │         │    │    └── [44] Constant(2)
-      │         │    └── [50] Pow(48, 49)
-      │         │         ├── [48] Add(46, 47)
-      │         │         │    ├── [46] Symbol(y)
-      │         │         │    └── [47] Constant(3)
-      │         │         └── [49] Constant(2)
-      │         └── [56] Pow(54, 55)
-      │              ├── [54] Subtract(52, 53)
-      │              │    ├── [52] Symbol(z)
-      │              │    └── [53] Constant(4)
-      │              └── [55] Constant(2)
-      └── [59] Constant(5.25)"
-                .trim()
-        );
-        let tree = tree.deduplicate().unwrap();
-        assert_eq!(
-            format!("{}", tree).trim(),
-            "
-[31] Max(23, 30)
- ├── [23] Min(16, 22)
- │    ├── [16] Subtract(14, 15)
- │    │    ├── [14] Sqrt(13)
- │    │    │    └── [13] Add(8, 12)
- │    │    │         ├── [8] Add(3, 7)
- │    │    │         │    ├── [3] Pow(2, 1)
- │    │    │         │    │    ├── [2] Subtract(0, 1)
- │    │    │         │    │    │    ├── [0] Symbol(x)
- │    │    │         │    │    │    └── [1] Constant(2)
- │    │    │         │    │    └── [1] Constant(2)
- │    │    │         │    └── [7] Pow(6, 1)
- │    │    │         │         ├── [6] Subtract(4, 5)
- │    │    │         │         │    ├── [4] Symbol(y)
- │    │    │         │         │    └── [5] Constant(3)
- │    │    │         │         └── [1] Constant(2)
- │    │    │         └── [12] Pow(11, 1)
- │    │    │              ├── [11] Subtract(9, 10)
- │    │    │              │    ├── [9] Symbol(z)
- │    │    │              │    └── [10] Constant(4)
- │    │    │              └── [1] Constant(2)
- │    │    └── [15] Constant(2.75)
- │    └── [22] Subtract(21, 10)
- │         ├── [21] Sqrt(20)
- │         │    └── [20] Add(19, 12)
- │         │         ├── [19] Add(18, 7)
- │         │         │    ├── [18] Pow(17, 1)
- │         │         │    │    ├── [17] Add(0, 1)
- │         │         │    │    │    ├── [0] Symbol(x)
- │         │         │    │    │    └── [1] Constant(2)
- │         │         │    │    └── [1] Constant(2)
- │         │         │    └── [7] Pow(6, 1)
- │         │         │         ├── [6] Subtract(4, 5)
- │         │         │         │    ├── [4] Symbol(y)
- │         │         │         │    └── [5] Constant(3)
- │         │         │         └── [1] Constant(2)
- │         │         └── [12] Pow(11, 1)
- │         │              ├── [11] Subtract(9, 10)
- │         │              │    ├── [9] Symbol(z)
- │         │              │    └── [10] Constant(4)
- │         │              └── [1] Constant(2)
- │         └── [10] Constant(4)
- └── [30] Subtract(28, 29)
-      ├── [28] Sqrt(27)
-      │    └── [27] Add(26, 12)
-      │         ├── [26] Add(18, 25)
-      │         │    ├── [18] Pow(17, 1)
-      │         │    │    ├── [17] Add(0, 1)
-      │         │    │    │    ├── [0] Symbol(x)
-      │         │    │    │    └── [1] Constant(2)
-      │         │    │    └── [1] Constant(2)
-      │         │    └── [25] Pow(24, 1)
-      │         │         ├── [24] Add(4, 5)
-      │         │         │    ├── [4] Symbol(y)
-      │         │         │    └── [5] Constant(3)
-      │         │         └── [1] Constant(2)
-      │         └── [12] Pow(11, 1)
-      │              ├── [11] Subtract(9, 10)
-      │              │    ├── [9] Symbol(z)
-      │              │    └── [10] Constant(4)
-      │              └── [1] Constant(2)
-      └── [29] Constant(5.25)"
-                .trim()
-        );
-    }
-
-    #[test]
-    fn constant_folding() {
-        // Basic multiplication.
-        let tree = deftree!(* 2. 3.).fold_constants().unwrap();
-        assert_eq!(tree.len(), 1usize);
-        assert_eq!(tree.root(), &Constant(2. * 3.));
-        // More complicated tree.
-        let tree = deftree!(
-            (/
-             (+ x (* 2. 3.))
-             (log (+ x (/ 2. (min 5. (max 3. (- 9. 5.)))))))
-        );
-        let expected = deftree!(/ (+ x 6.) (log (+ x 0.5)));
-        assert!(tree.len() > expected.len());
-        let tree = tree.fold_constants().unwrap();
-        assert_eq!(tree, expected);
-        compare_trees(&tree, &expected, &[('x', 0.1, 10.)], 100, 0.);
-    }
-
-    #[test]
-    fn deduplication_1() {
-        let tree = deftree!(
-            (max (min
-                  (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-             (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
-        );
-        let nodup = tree.clone().deduplicate().unwrap();
-        assert!(tree.len() > nodup.len());
-        assert_eq!(nodup.len(), 32);
-        compare_trees(
-            &tree,
-            &nodup,
-            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
-            20,
-            0.,
-        );
-    }
-
-    #[test]
-    fn deduplication_2() {
-        let tree = deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.));
-        let nodup = tree.clone().deduplicate().unwrap();
-        assert!(tree.len() > nodup.len());
-        assert_eq!(nodup.len(), 10);
-        compare_trees(&tree, &nodup, &[('x', -10., 10.)], 400, 0.);
-    }
-
-    #[test]
-    fn deduplication_3() {
-        let tree = deftree!(
-            (/
-             (+ (pow (sin x) 2.) (+ (pow (cos x) 2.) (* 2. (* (sin x) (cos x)))))
-             (+ (pow (sin y) 2.) (+ (pow (cos y) 2.) (* 2. (* (sin y) (cos y))))))
-        );
-        let nodup = tree.clone().deduplicate().unwrap();
-        assert!(tree.len() > nodup.len());
-        assert_eq!(nodup.len(), 20);
-        compare_trees(&tree, &nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);
-    }
-
-    #[test]
-    fn depth_traverse() {
-        let mut walker = DepthWalker::new();
-        {
-            let tree = deftree!(+ (pow x 2.) (pow y 2.));
-            // Make sure two successive traversal yield the same nodes.
-            let a: Vec<_> = walker
-                .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
-                .collect();
-            let b: Vec<_> = walker
-                .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
-                .collect();
-            assert_eq!(a, b);
-        }
-        {
-            // Make sure the same TraverseDepth can be used on multiple trees.
-            let tree = deftree!(+ (pow x 3.) (pow y 3.));
-            let a: Vec<_> = walker
-                .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
-                .collect();
-            let tree2 = tree.clone();
-            let b: Vec<_> = walker
-                .walk_tree(&tree2, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
-                .collect();
-            assert_eq!(a, b);
-        }
-    }
-
-    #[test]
-    fn tree_from_nodes() {
-        // Nodes in order.
-        match Tree::from_nodes(vec![
-            Symbol('x'),            // 0
-            Constant(2.245),        // 1
-            Binary(Add, 0, 1),      // 2
-            Symbol('y'),            // 3
-            Unary(Sqrt, 3),         // 4
-            Binary(Multiply, 2, 4), // 5
-        ]) {
-            Ok(tree) => {
-                assert_eq!(tree.len(), 6);
-            }
-            Err(_) => assert!(false),
-        };
-        // Nodes out of order.
-        assert!(matches!(
-            Tree::from_nodes(vec![
-                Symbol('x'),            // 0
-                Binary(Add, 0, 1),      // 1
-                Constant(2.245),        // 2
-                Binary(Multiply, 2, 4), // 3
-                Symbol('y'),            // 4
-                Unary(Sqrt, 3),         // 5
-            ]),
-            Err(TreeError::WrongNodeOrder)
-        ));
-    }
-
-    #[test]
-    fn recursive_compare() {
-        {
-            // Check if 'Add' node with mirrored inputs is compared
-            // correctly.
-            let mut nodes = vec![
-                Symbol('y'),            // 0
-                Symbol('x'),            // 1
-                Binary(Add, 0, 1),      // 2
-                Symbol('x'),            // 3
-                Symbol('y'),            // 4
-                Binary(Add, 3, 4),      // 5
-                Binary(Add, 5, 2),      // 6
-                Binary(Add, 2, 2),      // 7
-                Binary(Multiply, 6, 7), // 8
-            ];
-            let mut walker1 = DepthWalker::new();
-            let mut walker2 = DepthWalker::new();
-            fn check_tree(nodes: &Vec<Node>) {
-                let tree = Tree::from_nodes(nodes.clone());
-                match tree {
-                    Ok(tree) => {
-                        assert_eq!(tree.len(), nodes.len());
+        while let Some((i, c)) = self.iter.next() {
+            self.curr = i + 1;
+            match c {
+                '(' => {
+                    if i > self.last {
+                        self.next = Some(Open);
+                        let token = Some(Atom(&self.lisp[self.last..i]));
+                        self.last = i + 1;
+                        return token;
+                    } else {
+                        self.last = i + 1;
+                        return Some(Open);
                     }
-                    Err(_) => assert!(false),
-                };
-            }
-            check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
-            // Try more mirroring
-            nodes[6] = Binary(Add, 2, 5);
-            check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
-            // Multiply node with mirrored inputs.
-            nodes[2] = Binary(Multiply, 0, 1);
-            nodes[5] = Binary(Multiply, 3, 4);
-            check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
-            // Min node with mirrored inputs.
-            nodes[2] = Binary(Min, 0, 1);
-            nodes[5] = Binary(Min, 3, 4);
-            check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
-            // Max node with mirrored inputs.
-            nodes[2] = Binary(Max, 0, 1);
-            nodes[5] = Binary(Max, 3, 4);
-            check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
-            // Subtract node with mirrored inputs.
-            nodes[2] = Binary(Subtract, 0, 1);
-            nodes[5] = Binary(Subtract, 3, 4);
-            check_tree(&nodes);
-            assert!(!equivalent(
-                2,
-                5,
-                &nodes,
-                &nodes,
-                &mut walker1,
-                &mut walker2
-            ));
-            assert!(!equivalent(
-                6,
-                7,
-                &nodes,
-                &nodes,
-                &mut walker1,
-                &mut walker2
-            ));
-            // Divide node with mirrored inputs.
-            nodes[2] = Binary(Divide, 0, 1);
-            nodes[5] = Binary(Divide, 3, 4);
-            check_tree(&nodes);
-            assert!(!equivalent(
-                2,
-                5,
-                &nodes,
-                &nodes,
-                &mut walker1,
-                &mut walker2
-            ));
-            assert!(!equivalent(
-                6,
-                7,
-                &nodes,
-                &nodes,
-                &mut walker1,
-                &mut walker2
-            ));
-            // Pow node with mirrored inputs.
-            nodes[2] = Binary(Pow, 0, 1);
-            nodes[5] = Binary(Pow, 3, 4);
-            check_tree(&nodes);
-            assert!(!equivalent(
-                2,
-                5,
-                &nodes,
-                &nodes,
-                &mut walker1,
-                &mut walker2
-            ));
-            assert!(!equivalent(
-                6,
-                7,
-                &nodes,
-                &nodes,
-                &mut walker1,
-                &mut walker2
-            ));
+                }
+                ')' => {
+                    if i > self.last {
+                        self.next = Some(Close);
+                        let token = Some(Atom(&self.lisp[self.last..i]));
+                        self.last = i + 1;
+                        return token;
+                    } else {
+                        self.last = i + 1;
+                        return Some(Close);
+                    }
+                }
+                _ => {
+                    if c.is_whitespace() {
+                        if i > self.last {
+                            let token = Some(Atom(&self.lisp[self.last..i]));
+                            self.last = i + 1;
+                            return token;
+                        } else {
+                            self.last = i + 1;
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+            };
         }
+        if self.curr > self.last {
+            let token = Some(Atom(&self.lisp[self.last..]));
+            self.last = self.curr + 1;
+            return token;
+        }
+        return None;
+    }
+}
+
+fn count_nodes(lisp: &str) -> (usize, usize) {
+    let mut nodecount: usize = 0;
+    let mut maxdepth: usize = 0;
+    let mut depth: usize = 0;
+    let mut open: bool = false;
+    for token in Tokenizer::from(&lisp) {
+        match token {
+            Open => {
+                depth += 1;
+                maxdepth = usize::max(depth, maxdepth);
+                open = true;
+            }
+            Atom(_) => {
+                if !open {
+                    nodecount += 1;
+                } else {
+                    open = false;
+                }
+            }
+            Close => {
+                depth -= 1;
+                nodecount += 1;
+                open = false;
+            }
+        }
+    }
+    (nodecount, maxdepth)
+}
+
+#[derive(Debug)]
+enum Parsed<'a> {
+    Done(usize),
+    Todo(&'a str),
+}
+
+use Parsed::*;
+
+/// Errors that can occur when parsing a lisp expression into a
+/// `Tree`.
+#[derive(Debug)]
+pub enum LispParseError {
+    /// Error when parsing a floating point number.
+    Float,
+    /// Error when parsing a symbol's character.
+    Symbol,
+    /// Error when parsing an expression.
+    MalformedExpression,
+    /// Unrecognized token.
+    InvalidToken(String),
+    /// Less than expected tokens for the given operation / context.
+    TooFewTokens,
+    /// More than expected tokens for the given operation / context.
+    TooManyTokens,
+    /// Malformed parentheses.
+    MalformedParentheses,
+    /// All other problems.
+    Unknown,
+}
+
+fn push_node(node: Node, nodes: &mut Vec<Node>) -> usize {
+    let i = nodes.len();
+    nodes.push(node);
+    return i;
+}
+
+fn parse_atom<'a>(atom: &'a str, nodes: &mut Vec<Node>) -> Result<Parsed<'a>, LispParseError> {
+    lazy_static! {
+        // These are run in unit tests, so it is safe to unwrap these.
+        static ref FLT_REGEX: Regex = Regex::new("^\\d+\\.*\\d*$").unwrap();
+        static ref SYM_REGEX: Regex = Regex::new("^[a-zA-Z]$").unwrap();
+    };
+    if FLT_REGEX.is_match(atom) {
+        return Ok(Done(push_node(
+            Constant(atom.parse::<f64>().map_err(|_| LispParseError::Float)?),
+            nodes,
+        )));
+    }
+    if SYM_REGEX.is_match(atom) {
+        return Ok(Done(push_node(
+            Symbol(atom.chars().nth(0).ok_or(LispParseError::Symbol)?),
+            nodes,
+        )));
+    }
+    return Ok(Todo(atom));
+}
+
+fn parse_unary(op: &str, input: usize, nodes: &mut Vec<Node>) -> Result<usize, LispParseError> {
+    Ok(push_node(
+        Unary(
+            match op {
+                "-" => Negate,
+                "sqrt" => Sqrt,
+                "abs" => Abs,
+                "sin" => Sin,
+                "cos" => Cos,
+                "tan" => Tan,
+                "log" => Log,
+                "exp" => Exp,
+                _ => return Err(LispParseError::InvalidToken(op.to_string())),
+            },
+            input,
+        ),
+        nodes,
+    ))
+}
+
+fn parse_binary(
+    op: &str,
+    lhs: usize,
+    rhs: usize,
+    nodes: &mut Vec<Node>,
+) -> Result<usize, LispParseError> {
+    Ok(push_node(
+        Binary(
+            match op {
+                "+" => Add,
+                "-" => Subtract,
+                "*" => Multiply,
+                "/" => Divide,
+                "pow" => Pow,
+                "min" => Min,
+                "max" => Max,
+                _ => return Err(LispParseError::InvalidToken(op.to_string())),
+            },
+            lhs,
+            rhs,
+        ),
+        nodes,
+    ))
+}
+
+fn parse_expression<'a>(
+    expr: &[Parsed<'a>],
+    nodes: &mut Vec<Node>,
+) -> Result<usize, LispParseError> {
+    match expr.len() {
+        0 => Err(LispParseError::TooFewTokens),
+        1 => match &expr[0] {
+            Done(i) => Ok(*i),
+            // Expression of length cannot be a todo item.
+            Todo(token) => Err(LispParseError::InvalidToken(token.to_string())),
+        },
+        2 => match (&expr[0], &expr[1]) {
+            (Todo(op), Done(input)) => Ok(parse_unary(op, *input, nodes)?),
+            // Anything that's not a valid unary op.
+            _ => Err(LispParseError::MalformedExpression),
+        },
+        3 => match (&expr[0], &expr[1], &expr[2]) {
+            (Todo(op), Done(lhs), Done(rhs)) => Ok(parse_binary(op, *lhs, *rhs, nodes)?),
+            // Anything that's not a valid binary op.
+            _ => Err(LispParseError::MalformedExpression),
+        },
+        _ => Err(LispParseError::TooManyTokens),
+    }
+}
+
+fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
+    // First pass to collect statistics.
+    let (nodecount, maxdepth) = count_nodes(&lisp);
+    // Allocate memory according to collected statistics.
+    let mut nodes: Vec<Node> = Vec::with_capacity(nodecount);
+    let mut parens: Vec<usize> = Vec::with_capacity(maxdepth);
+    let mut stack: Vec<Parsed> = Vec::with_capacity(maxdepth + 4);
+    for token in Tokenizer::from(&lisp) {
+        match token {
+            Open => parens.push(stack.len()),
+            Atom(token) => stack.push(parse_atom(token, &mut nodes)?),
+            Close => {
+                let last = parens.pop().ok_or(LispParseError::MalformedParentheses)?;
+                let parsed = parse_expression(&stack[last..], &mut nodes)?;
+                stack.truncate(last);
+                stack.push(Done(parsed));
+            }
+        }
+    }
+    if stack.len() == 1 {
+        if let Done(index) = stack.remove(0) {
+            if index == nodes.len() - 1 {
+                return Ok(nodes);
+            }
+        }
+    }
+    return Err(LispParseError::Unknown);
+}
+
+/// Parse the `lisp` expression into a `Tree`. If the parsing fails, an
+/// appropriate `LispParseError` is returned.
+pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
+    Ok(Tree::from_nodes(parse_nodes(&lisp)?).map_err(|_| LispParseError::Unknown)?)
+}
+
+/// Convert the list of nodes to a lisp string, by recursively
+/// traversing the nodes starting at `root`.
+pub fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
+    match root {
+        Constant(val) => val.to_string(),
+        Symbol(label) => label.to_string(),
+        Unary(op, input) => format!(
+            "({} {})",
+            {
+                match op {
+                    Negate => "-",
+                    Sqrt => "sqrt",
+                    Abs => "abs",
+                    Sin => "sin",
+                    Cos => "cos",
+                    Tan => "tan",
+                    Log => "log",
+                    Exp => "exp",
+                }
+            },
+            to_lisp(&nodes[*input], nodes)
+        ),
+        Binary(op, lhs, rhs) => format!(
+            "({} {} {})",
+            {
+                match op {
+                    Add => "+",
+                    Subtract => "-",
+                    Multiply => "*",
+                    Divide => "/",
+                    Pow => "pow",
+                    Min => "min",
+                    Max => "max",
+                }
+            },
+            to_lisp(&nodes[*lhs], nodes),
+            to_lisp(&nodes[*rhs], nodes)
+        ),
+    }
+}
+
+impl Tree {
+    /// Convert the tree to a lisp expression. If there is something
+    /// wrong with this tree, and appropriate `TreeError` is returned.
+    pub fn to_lisp(&self) -> String {
+        to_lisp(self.root(), self.nodes())
+    }
+}
+
+impl std::fmt::Display for Tree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        enum Token {
+            Branch,
+            Pass,
+            Turn,
+            Gap,
+            Newline,
+            NodeIndex(usize),
+        }
+        use Token::*;
+        // Walk the tree and collect tokens.
+        let tokens = {
+            // First pass of collecting tokens with no branching.
+            let mut tokens = {
+                let mut tokens: Vec<Token> = Vec::with_capacity(self.len()); // Likely need more memory.
+                let mut walker = DepthWalker::new();
+                let mut node_depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
+                for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
+                    if let Some(pi) = parent {
+                        node_depths[index] = node_depths[pi] + 1;
+                    }
+                    let depth = node_depths[index];
+                    if depth > 0 {
+                        for _ in 0..(depth - 1) {
+                            tokens.push(Gap);
+                        }
+                        tokens.push(Turn);
+                    }
+                    tokens.push(NodeIndex(index));
+                    tokens.push(Newline);
+                }
+                tokens
+            };
+            // Insert branching tokens where necessary.
+            let mut line_start: usize = 0;
+            for i in 0..tokens.len() {
+                match tokens[i] {
+                    Branch | Pass | Gap | NodeIndex(_) => {} // Do nothing.
+                    Newline => line_start = i,
+                    Turn => {
+                        let offset = i - line_start;
+                        for li in (0..line_start).rev() {
+                            if let Newline = tokens[li] {
+                                let ti = li + offset;
+                                tokens[ti] = match &tokens[ti] {
+                                    Branch | Pass | NodeIndex(_) => break,
+                                    Turn => Branch,
+                                    Gap => Pass,
+                                    Newline => panic!("FATAL: Failed to convert tree to a string"),
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            tokens
+        };
+        // Write all the tokens out.
+        write!(f, "\n")?;
+        for token in tokens.iter() {
+            match token {
+                Branch => write!(f, " ├── ")?,
+                Pass => write!(f, " │   ")?,
+                Turn => write!(f, " └── ")?,
+                Gap => write!(f, "     ")?,
+                Newline => write!(f, "\n")?,
+                NodeIndex(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
+            };
+        }
+        write!(f, "\n")
+    }
+}
+
+impl std::fmt::Display for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Constant(value) => write!(f, "Constant({})", value),
+            Symbol(label) => write!(f, "Symbol({})", label),
+            Unary(op, input) => write!(f, "{:?}({})", op, input),
+            Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{deftree, parsetree};
+
+    #[test]
+    fn node_counting() {
+        let (nodes, depth) = count_nodes(stringify!(
+            (- (sqrt (+ (pow x 2.) (pow y 2.))) 5.0)
+        ));
+        assert_eq!(nodes, 10);
+        assert_eq!(depth, 4);
+    }
+
+    #[test]
+    fn single_token() {
+        // Constant.
+        let tree = parse_tree("5.55").unwrap();
+        assert!(matches!(tree.root(), Constant(val) if *val == 5.55));
+        // Constant with spaces.
+        let tree = parse_tree(" 5.55   ").unwrap();
+        assert!(matches!(tree.root(), Constant(val) if *val == 5.55));
+        // Symbol.
+        let tree = parse_tree("x").unwrap();
+        assert!(matches!(tree.root(), Symbol(label) if *label == 'x'));
+        // Symbol with spaces.
+        let tree = parse_tree(" x     ").unwrap();
+        assert!(matches!(tree.root(), Symbol(label) if *label == 'x'));
     }
 
     #[test]
@@ -1075,6 +879,151 @@ pub mod tests {
                 └── [298] Multiply(296, 297)
                      ├── [296] Constant(2)
                      └── [297] Symbol(a)"
+                .trim()
+        );
+    }
+
+    #[test]
+    fn tree_string_formatting() {
+        let tree = deftree!(
+            (max (min
+                  (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+             (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+        );
+        assert_eq!(
+            format!("{}", tree).trim(),
+            "
+[61] Max(40, 60)
+ ├── [40] Min(19, 39)
+ │    ├── [19] Subtract(17, 18)
+ │    │    ├── [17] Sqrt(16)
+ │    │    │    └── [16] Add(10, 15)
+ │    │    │         ├── [10] Add(4, 9)
+ │    │    │         │    ├── [4] Pow(2, 3)
+ │    │    │         │    │    ├── [2] Subtract(0, 1)
+ │    │    │         │    │    │    ├── [0] Symbol(x)
+ │    │    │         │    │    │    └── [1] Constant(2)
+ │    │    │         │    │    └── [3] Constant(2)
+ │    │    │         │    └── [9] Pow(7, 8)
+ │    │    │         │         ├── [7] Subtract(5, 6)
+ │    │    │         │         │    ├── [5] Symbol(y)
+ │    │    │         │         │    └── [6] Constant(3)
+ │    │    │         │         └── [8] Constant(2)
+ │    │    │         └── [15] Pow(13, 14)
+ │    │    │              ├── [13] Subtract(11, 12)
+ │    │    │              │    ├── [11] Symbol(z)
+ │    │    │              │    └── [12] Constant(4)
+ │    │    │              └── [14] Constant(2)
+ │    │    └── [18] Constant(2.75)
+ │    └── [39] Subtract(37, 38)
+ │         ├── [37] Sqrt(36)
+ │         │    └── [36] Add(30, 35)
+ │         │         ├── [30] Add(24, 29)
+ │         │         │    ├── [24] Pow(22, 23)
+ │         │         │    │    ├── [22] Add(20, 21)
+ │         │         │    │    │    ├── [20] Symbol(x)
+ │         │         │    │    │    └── [21] Constant(2)
+ │         │         │    │    └── [23] Constant(2)
+ │         │         │    └── [29] Pow(27, 28)
+ │         │         │         ├── [27] Subtract(25, 26)
+ │         │         │         │    ├── [25] Symbol(y)
+ │         │         │         │    └── [26] Constant(3)
+ │         │         │         └── [28] Constant(2)
+ │         │         └── [35] Pow(33, 34)
+ │         │              ├── [33] Subtract(31, 32)
+ │         │              │    ├── [31] Symbol(z)
+ │         │              │    └── [32] Constant(4)
+ │         │              └── [34] Constant(2)
+ │         └── [38] Constant(4)
+ └── [60] Subtract(58, 59)
+      ├── [58] Sqrt(57)
+      │    └── [57] Add(51, 56)
+      │         ├── [51] Add(45, 50)
+      │         │    ├── [45] Pow(43, 44)
+      │         │    │    ├── [43] Add(41, 42)
+      │         │    │    │    ├── [41] Symbol(x)
+      │         │    │    │    └── [42] Constant(2)
+      │         │    │    └── [44] Constant(2)
+      │         │    └── [50] Pow(48, 49)
+      │         │         ├── [48] Add(46, 47)
+      │         │         │    ├── [46] Symbol(y)
+      │         │         │    └── [47] Constant(3)
+      │         │         └── [49] Constant(2)
+      │         └── [56] Pow(54, 55)
+      │              ├── [54] Subtract(52, 53)
+      │              │    ├── [52] Symbol(z)
+      │              │    └── [53] Constant(4)
+      │              └── [55] Constant(2)
+      └── [59] Constant(5.25)"
+                .trim()
+        );
+        let tree = tree.deduplicate().unwrap();
+        assert_eq!(
+            format!("{}", tree).trim(),
+            "
+[31] Max(23, 30)
+ ├── [23] Min(16, 22)
+ │    ├── [16] Subtract(14, 15)
+ │    │    ├── [14] Sqrt(13)
+ │    │    │    └── [13] Add(8, 12)
+ │    │    │         ├── [8] Add(3, 7)
+ │    │    │         │    ├── [3] Pow(2, 1)
+ │    │    │         │    │    ├── [2] Subtract(0, 1)
+ │    │    │         │    │    │    ├── [0] Symbol(x)
+ │    │    │         │    │    │    └── [1] Constant(2)
+ │    │    │         │    │    └── [1] Constant(2)
+ │    │    │         │    └── [7] Pow(6, 1)
+ │    │    │         │         ├── [6] Subtract(4, 5)
+ │    │    │         │         │    ├── [4] Symbol(y)
+ │    │    │         │         │    └── [5] Constant(3)
+ │    │    │         │         └── [1] Constant(2)
+ │    │    │         └── [12] Pow(11, 1)
+ │    │    │              ├── [11] Subtract(9, 10)
+ │    │    │              │    ├── [9] Symbol(z)
+ │    │    │              │    └── [10] Constant(4)
+ │    │    │              └── [1] Constant(2)
+ │    │    └── [15] Constant(2.75)
+ │    └── [22] Subtract(21, 10)
+ │         ├── [21] Sqrt(20)
+ │         │    └── [20] Add(19, 12)
+ │         │         ├── [19] Add(18, 7)
+ │         │         │    ├── [18] Pow(17, 1)
+ │         │         │    │    ├── [17] Add(0, 1)
+ │         │         │    │    │    ├── [0] Symbol(x)
+ │         │         │    │    │    └── [1] Constant(2)
+ │         │         │    │    └── [1] Constant(2)
+ │         │         │    └── [7] Pow(6, 1)
+ │         │         │         ├── [6] Subtract(4, 5)
+ │         │         │         │    ├── [4] Symbol(y)
+ │         │         │         │    └── [5] Constant(3)
+ │         │         │         └── [1] Constant(2)
+ │         │         └── [12] Pow(11, 1)
+ │         │              ├── [11] Subtract(9, 10)
+ │         │              │    ├── [9] Symbol(z)
+ │         │              │    └── [10] Constant(4)
+ │         │              └── [1] Constant(2)
+ │         └── [10] Constant(4)
+ └── [30] Subtract(28, 29)
+      ├── [28] Sqrt(27)
+      │    └── [27] Add(26, 12)
+      │         ├── [26] Add(18, 25)
+      │         │    ├── [18] Pow(17, 1)
+      │         │    │    ├── [17] Add(0, 1)
+      │         │    │    │    ├── [0] Symbol(x)
+      │         │    │    │    └── [1] Constant(2)
+      │         │    │    └── [1] Constant(2)
+      │         │    └── [25] Pow(24, 1)
+      │         │         ├── [24] Add(4, 5)
+      │         │         │    ├── [4] Symbol(y)
+      │         │         │    └── [5] Constant(3)
+      │         │         └── [1] Constant(2)
+      │         └── [12] Pow(11, 1)
+      │              ├── [11] Subtract(9, 10)
+      │              │    ├── [9] Symbol(z)
+      │              │    └── [10] Constant(4)
+      │              └── [1] Constant(2)
+      └── [29] Constant(5.25)"
                 .trim()
         );
     }

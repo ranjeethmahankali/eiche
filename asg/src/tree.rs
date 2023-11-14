@@ -99,9 +99,8 @@ impl BinaryOp {
 use crate::{
     dedup::Deduplicater,
     fold::fold_constants,
-    parser::{parse_tree, LispParseError},
     prune::Pruner,
-    walk::{DepthWalker, NodeOrdering},
+    io::{parse_tree, LispParseError},
 };
 use BinaryOp::*;
 use UnaryOp::*;
@@ -375,91 +374,6 @@ impl From<char> for Tree {
     }
 }
 
-impl std::fmt::Display for Tree {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        enum Token {
-            Branch,
-            Pass,
-            Turn,
-            Gap,
-            Newline,
-            NodeIndex(usize),
-        }
-        use Token::*;
-        // Walk the tree and collect tokens.
-        let tokens = {
-            // First pass of collecting tokens with no branching.
-            let mut tokens = {
-                let mut tokens: Vec<Token> = Vec::with_capacity(self.len()); // Likely need more memory.
-                let mut walker = DepthWalker::new();
-                let mut node_depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-                for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
-                    if let Some(pi) = parent {
-                        node_depths[index] = node_depths[pi] + 1;
-                    }
-                    let depth = node_depths[index];
-                    if depth > 0 {
-                        for _ in 0..(depth - 1) {
-                            tokens.push(Gap);
-                        }
-                        tokens.push(Turn);
-                    }
-                    tokens.push(NodeIndex(index));
-                    tokens.push(Newline);
-                }
-                tokens
-            };
-            // Insert branching tokens where necessary.
-            let mut line_start: usize = 0;
-            for i in 0..tokens.len() {
-                match tokens[i] {
-                    Branch | Pass | Gap | NodeIndex(_) => {} // Do nothing.
-                    Newline => line_start = i,
-                    Turn => {
-                        let offset = i - line_start;
-                        for li in (0..line_start).rev() {
-                            if let Newline = tokens[li] {
-                                let ti = li + offset;
-                                tokens[ti] = match &tokens[ti] {
-                                    Branch | Pass | NodeIndex(_) => break,
-                                    Turn => Branch,
-                                    Gap => Pass,
-                                    Newline => panic!("FATAL: Failed to convert tree to a string"),
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            tokens
-        };
-        // Write all the tokens out.
-        write!(f, "\n")?;
-        for token in tokens.iter() {
-            match token {
-                Branch => write!(f, " ├── ")?,
-                Pass => write!(f, " │   ")?,
-                Turn => write!(f, " └── ")?,
-                Gap => write!(f, "     ")?,
-                Newline => write!(f, "\n")?,
-                NodeIndex(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
-            };
-        }
-        write!(f, "\n")
-    }
-}
-
-impl std::fmt::Display for Node {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Constant(value) => write!(f, "Constant({})", value),
-            Symbol(label) => write!(f, "Symbol({})", label),
-            Unary(op, input) => write!(f, "{:?}({})", op, input),
-            Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
-        }
-    }
-}
-
 impl PartialOrd for Node {
     /// This implementation only accounts for the node, its type and
     /// the data held inside the node. It DOES NOT take into account
@@ -494,6 +408,36 @@ impl PartialOrd for Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tree_from_nodes() {
+        // Nodes in order.
+        match Tree::from_nodes(vec![
+            Symbol('x'),            // 0
+            Constant(2.245),        // 1
+            Binary(Add, 0, 1),      // 2
+            Symbol('y'),            // 3
+            Unary(Sqrt, 3),         // 4
+            Binary(Multiply, 2, 4), // 5
+        ]) {
+            Ok(tree) => {
+                assert_eq!(tree.len(), 6);
+            }
+            Err(_) => assert!(false),
+        };
+        // Nodes out of order.
+        assert!(matches!(
+            Tree::from_nodes(vec![
+                Symbol('x'),            // 0
+                Binary(Add, 0, 1),      // 1
+                Constant(2.245),        // 2
+                Binary(Multiply, 2, 4), // 3
+                Symbol('y'),            // 4
+                Unary(Sqrt, 3),         // 5
+            ]),
+            Err(TreeError::WrongNodeOrder)
+        ));
+    }
 
     #[test]
     fn add() {
@@ -556,4 +500,6 @@ mod tests {
         let y = abs(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Abs, 0)]);
     }
+
+    // TODO: Add tests for the remaining operators.
 }

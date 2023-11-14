@@ -172,3 +172,41 @@ impl<'a> Iterator for DepthIterator<'a> {
         return Some((index, parent));
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::deftree;
+
+    #[test]
+    fn depth_traverse() {
+        let mut walker = DepthWalker::new();
+        {
+            let tree = deftree!(+ (pow x 2.) (pow y 2.));
+            // Make sure two successive traversal yield the same nodes.
+            let a: Vec<_> = walker
+                .walk_tree(&tree, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            let b: Vec<_> = walker
+                .walk_tree(&tree, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            assert_eq!(a, b);
+        }
+        {
+            // Make sure the same TraverseDepth can be used on multiple trees.
+            let tree = deftree!(+ (pow x 3.) (pow y 3.));
+            let a: Vec<_> = walker
+                .walk_tree(&tree, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            let tree2 = tree.clone();
+            let b: Vec<_> = walker
+                .walk_tree(&tree2, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            assert_eq!(a, b);
+        }
+    }
+}

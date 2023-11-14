@@ -245,7 +245,7 @@ mod tests {
     fn check_templates() {
         let mut checked: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
         let mut check_one = |name: &'static str, vardata: &[(char, f64, f64)], eps: f64| {
-            use crate::tests::tests::compare_trees;
+            use crate::test::util::compare_trees;
             // Find template by name.
             let template = TEMPLATES
                 .iter()

@@ -1,6 +1,6 @@
 pub mod eval;
-pub mod parser;
 pub mod reduce;
+pub mod io;
 pub mod tree;
 
 mod dedup;
@@ -10,5 +10,5 @@ mod mutate;
 mod prune;
 mod sort;
 mod template;
-mod tests;
+mod test;
 mod walk;

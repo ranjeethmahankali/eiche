@@ -177,3 +177,169 @@ pub fn equivalent(
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        deftree,
+        test::util::compare_trees,
+        tree::{BinaryOp::*, Tree},
+    };
+
+    #[test]
+    fn recursive_compare() {
+        // Check if 'Add' node with mirrored inputs is compared
+        // correctly.
+        let mut nodes = vec![
+            Symbol('y'),            // 0
+            Symbol('x'),            // 1
+            Binary(Add, 0, 1),      // 2
+            Symbol('x'),            // 3
+            Symbol('y'),            // 4
+            Binary(Add, 3, 4),      // 5
+            Binary(Add, 5, 2),      // 6
+            Binary(Add, 2, 2),      // 7
+            Binary(Multiply, 6, 7), // 8
+        ];
+        let mut walker1 = DepthWalker::new();
+        let mut walker2 = DepthWalker::new();
+        fn check_tree(nodes: &Vec<Node>) {
+            let tree = Tree::from_nodes(nodes.clone());
+            match tree {
+                Ok(tree) => {
+                    assert_eq!(tree.len(), nodes.len());
+                }
+                Err(_) => assert!(false),
+            };
+        }
+        check_tree(&nodes);
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
+        // Try more mirroring
+        nodes[6] = Binary(Add, 2, 5);
+        check_tree(&nodes);
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
+        // Multiply node with mirrored inputs.
+        nodes[2] = Binary(Multiply, 0, 1);
+        nodes[5] = Binary(Multiply, 3, 4);
+        check_tree(&nodes);
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
+        // Min node with mirrored inputs.
+        nodes[2] = Binary(Min, 0, 1);
+        nodes[5] = Binary(Min, 3, 4);
+        check_tree(&nodes);
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
+        // Max node with mirrored inputs.
+        nodes[2] = Binary(Max, 0, 1);
+        nodes[5] = Binary(Max, 3, 4);
+        check_tree(&nodes);
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
+        // Subtract node with mirrored inputs.
+        nodes[2] = Binary(Subtract, 0, 1);
+        nodes[5] = Binary(Subtract, 3, 4);
+        check_tree(&nodes);
+        assert!(!equivalent(
+            2,
+            5,
+            &nodes,
+            &nodes,
+            &mut walker1,
+            &mut walker2
+        ));
+        assert!(!equivalent(
+            6,
+            7,
+            &nodes,
+            &nodes,
+            &mut walker1,
+            &mut walker2
+        ));
+        // Divide node with mirrored inputs.
+        nodes[2] = Binary(Divide, 0, 1);
+        nodes[5] = Binary(Divide, 3, 4);
+        check_tree(&nodes);
+        assert!(!equivalent(
+            2,
+            5,
+            &nodes,
+            &nodes,
+            &mut walker1,
+            &mut walker2
+        ));
+        assert!(!equivalent(
+            6,
+            7,
+            &nodes,
+            &nodes,
+            &mut walker1,
+            &mut walker2
+        ));
+        // Pow node with mirrored inputs.
+        nodes[2] = Binary(Pow, 0, 1);
+        nodes[5] = Binary(Pow, 3, 4);
+        check_tree(&nodes);
+        assert!(!equivalent(
+            2,
+            5,
+            &nodes,
+            &nodes,
+            &mut walker1,
+            &mut walker2
+        ));
+        assert!(!equivalent(
+            6,
+            7,
+            &nodes,
+            &nodes,
+            &mut walker1,
+            &mut walker2
+        ));
+    }
+
+    #[test]
+    fn deduplication_1() {
+        let tree = deftree!(
+            (max (min
+                  (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+             (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+        );
+        let nodup = tree.clone().deduplicate().unwrap();
+        assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 32);
+        compare_trees(
+            &tree,
+            &nodup,
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn deduplication_2() {
+        let tree = deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.));
+        let nodup = tree.clone().deduplicate().unwrap();
+        assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 10);
+        compare_trees(&tree, &nodup, &[('x', -10., 10.)], 400, 0.);
+    }
+
+    #[test]
+    fn deduplication_3() {
+        let tree = deftree!(
+            (/
+             (+ (pow (sin x) 2.) (+ (pow (cos x) 2.) (* 2. (* (sin x) (cos x)))))
+             (+ (pow (sin y) 2.) (+ (pow (cos y) 2.) (* 2. (* (sin y) (cos y))))))
+        );
+        let nodup = tree.clone().deduplicate().unwrap();
+        assert!(tree.len() > nodup.len());
+        assert_eq!(nodup.len(), 20);
+        compare_trees(&tree, &nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);
+    }
+}

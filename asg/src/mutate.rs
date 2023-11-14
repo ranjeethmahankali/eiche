@@ -267,7 +267,7 @@ impl Capture {
 mod tests {
     use super::*;
     use crate::{
-        dedup::equivalent, deftree, template::get_template_by_name, tests::tests::compare_trees,
+        dedup::equivalent, deftree, template::get_template_by_name, test::util::compare_trees,
         walk::DepthWalker,
     };
 
