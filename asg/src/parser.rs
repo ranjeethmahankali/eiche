@@ -286,6 +286,55 @@ pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
     Ok(Tree::from_nodes(parse_nodes(&lisp)?).map_err(|_| LispParseError::Unknown)?)
 }
 
+/// Convert the list of nodes to a lisp string, by recursively
+/// traversing the nodes starting at `root`.
+pub fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
+    match root {
+        Constant(val) => val.to_string(),
+        Symbol(label) => label.to_string(),
+        Unary(op, input) => format!(
+            "({} {})",
+            {
+                match op {
+                    Negate => "-",
+                    Sqrt => "sqrt",
+                    Abs => "abs",
+                    Sin => "sin",
+                    Cos => "cos",
+                    Tan => "tan",
+                    Log => "log",
+                    Exp => "exp",
+                }
+            },
+            to_lisp(&nodes[*input], nodes)
+        ),
+        Binary(op, lhs, rhs) => format!(
+            "({} {} {})",
+            {
+                match op {
+                    Add => "+",
+                    Subtract => "-",
+                    Multiply => "*",
+                    Divide => "/",
+                    Pow => "pow",
+                    Min => "min",
+                    Max => "max",
+                }
+            },
+            to_lisp(&nodes[*lhs], nodes),
+            to_lisp(&nodes[*rhs], nodes)
+        ),
+    }
+}
+
+impl Tree {
+    /// Convert the tree to a lisp expression. If there is something
+    /// wrong with this tree, and appropriate `TreeError` is returned.
+    pub fn to_lisp(&self) -> String {
+        to_lisp(self.root(), self.nodes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

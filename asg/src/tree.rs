@@ -148,6 +148,12 @@ impl Tree {
         &self.nodes
     }
 
+    /// Drop this tree and take ownership of the nodes. The nodes are
+    /// returned.
+    pub fn take_nodes(self) -> Vec<Node> {
+        self.nodes
+    }
+
     /// Get a unique list of all symbols in this tree.
     pub fn symbols(&self) -> Vec<char> {
         let mut chars: Vec<_> = self
@@ -164,12 +170,6 @@ impl Tree {
         chars.sort();
         chars.dedup();
         return chars;
-    }
-
-    /// Convert the tree to a lisp expression. If there is something
-    /// wrong with this tree, and appropriate `TreeError` is returned.
-    pub fn to_lisp(&self) -> String {
-        crate::helper::to_lisp(self.root(), self.nodes())
     }
 
     /// Fold constants in this tree.

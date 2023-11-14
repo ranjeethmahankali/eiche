@@ -263,7 +263,12 @@ impl Capture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{deftree, template::get_template_by_name, tests::tests::compare_trees};
+    use crate::{
+        deftree,
+        helper::{equivalent, DepthWalker},
+        template::get_template_by_name,
+        tests::tests::compare_trees,
+    };
 
     fn check_bindings(capture: &Capture, template: &Template, tree: &Tree) {
         let left: Vec<_> = {
@@ -528,12 +533,26 @@ mod tests {
 
     #[test]
     fn basic_mutation() {
+        let mut lwalker = DepthWalker::new();
+        let mut rwalker = DepthWalker::new();
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y))
             .deduplicate()
             .unwrap();
+        let simpler = deftree!(/ (* p (+ x y)) (+ x y));
+        let mut found: bool = false;
         for m in Mutations::from(&tree) {
             match m {
                 Ok(mutated) => {
+                    assert_ne!(mutated, tree);
+                    found = found
+                        || equivalent(
+                            mutated.root_index(),
+                            simpler.root_index(),
+                            mutated.nodes(),
+                            simpler.nodes(),
+                            &mut lwalker,
+                            &mut rwalker,
+                        );
                     compare_trees(
                         &tree,
                         &mutated,
@@ -545,5 +564,6 @@ mod tests {
                 Err(_) => assert!(false),
             }
         }
+        assert!(found);
     }
 }

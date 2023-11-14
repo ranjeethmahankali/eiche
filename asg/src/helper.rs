@@ -261,7 +261,16 @@ impl Deduplicater {
         for i in 0..self.hashes.len() {
             let h = self.hashes[i];
             let entry = self.hash_to_index.entry(h).or_insert(i);
-            if *entry != i && equivalent(*entry, i, &nodes, &mut self.walker1, &mut self.walker2) {
+            if *entry != i
+                && equivalent(
+                    *entry,
+                    i,
+                    &nodes,
+                    &nodes,
+                    &mut self.walker1,
+                    &mut self.walker2,
+                )
+            {
                 // The i-th node should be replaced with entry-th node.
                 self.indices[i] = *entry;
             }
@@ -301,17 +310,18 @@ impl Deduplicater {
 pub fn equivalent(
     left: usize,
     right: usize,
-    nodes: &[Node],
-    walker1: &mut DepthWalker,
-    walker2: &mut DepthWalker,
+    lnodes: &[Node],
+    rnodes: &[Node],
+    lwalker: &mut DepthWalker,
+    rwalker: &mut DepthWalker,
 ) -> bool {
     {
         use crate::helper::NodeOrdering::*;
         // Zip the depth first iterators and compare.
-        let mut iter1 = walker1.walk_nodes(&nodes, left, false, Deterministic);
-        let mut iter2 = walker2.walk_nodes(&nodes, right, false, Deterministic);
+        let mut liter = lwalker.walk_nodes(&lnodes, left, false, Deterministic);
+        let mut riter = rwalker.walk_nodes(&rnodes, right, false, Deterministic);
         loop {
-            match (iter1.next(), iter2.next()) {
+            match (liter.next(), riter.next()) {
                 (None, None) => {
                     // Both iterators ended.
                     return true;
@@ -320,13 +330,14 @@ pub fn equivalent(
                     // One of the iterators ended prematurely.
                     return false;
                 }
-                (Some((i1, _p1)), Some((i2, _p2))) => {
-                    if i1 == i2 {
-                        iter1.skip_children();
-                        iter2.skip_children();
+                (Some((li, _lp)), Some((ri, _rp))) => {
+                    if std::ptr::eq(lnodes, rnodes) && li == ri {
+                        println!("Bailing out early!");
+                        liter.skip_children();
+                        riter.skip_children();
                         continue;
                     }
-                    if !match (nodes[i1], nodes[i2]) {
+                    if !match (lnodes[li], rnodes[ri]) {
                         (Constant(v1), Constant(v2)) => v1 == v2,
                         (Symbol(c1), Symbol(c2)) => c1 == c2,
                         (Unary(op1, _input1), Unary(op2, _input2)) => op1 == op2,
@@ -698,47 +709,6 @@ impl TopoSorter {
         // Swap the sorted nodes and the incoming nodes.
         std::mem::swap(&mut self.sorted, &mut nodes);
         return Ok((nodes, root_index));
-    }
-}
-
-/// Convert the list of nodes to a lisp string, by recursively
-/// traversing the nodes starting at `root`.
-pub fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
-    match root {
-        Constant(val) => val.to_string(),
-        Symbol(label) => label.to_string(),
-        Unary(op, input) => format!(
-            "({} {})",
-            {
-                match op {
-                    UnaryOp::Negate => "-",
-                    UnaryOp::Sqrt => "sqrt",
-                    UnaryOp::Abs => "abs",
-                    UnaryOp::Sin => "sin",
-                    UnaryOp::Cos => "cos",
-                    UnaryOp::Tan => "tan",
-                    UnaryOp::Log => "log",
-                    UnaryOp::Exp => "exp",
-                }
-            },
-            to_lisp(&nodes[*input], nodes)
-        ),
-        Binary(op, lhs, rhs) => format!(
-            "({} {} {})",
-            {
-                match op {
-                    BinaryOp::Add => "+",
-                    BinaryOp::Subtract => "-",
-                    BinaryOp::Multiply => "*",
-                    BinaryOp::Divide => "/",
-                    BinaryOp::Pow => "pow",
-                    BinaryOp::Min => "min",
-                    BinaryOp::Max => "max",
-                }
-            },
-            to_lisp(&nodes[*lhs], nodes),
-            to_lisp(&nodes[*rhs], nodes)
-        ),
     }
 }
 

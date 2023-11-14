@@ -555,49 +555,91 @@ pub mod tests {
                 };
             }
             check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
             // Try more mirroring
             nodes[6] = Binary(Add, 2, 5);
             check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
             // Multiply node with mirrored inputs.
             nodes[2] = Binary(Multiply, 0, 1);
             nodes[5] = Binary(Multiply, 3, 4);
             check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
             // Min node with mirrored inputs.
             nodes[2] = Binary(Min, 0, 1);
             nodes[5] = Binary(Min, 3, 4);
             check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
             // Max node with mirrored inputs.
             nodes[2] = Binary(Max, 0, 1);
             nodes[5] = Binary(Max, 3, 4);
             check_tree(&nodes);
-            assert!(equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
-            assert!(equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
+            assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
             // Subtract node with mirrored inputs.
             nodes[2] = Binary(Subtract, 0, 1);
             nodes[5] = Binary(Subtract, 3, 4);
             check_tree(&nodes);
-            assert!(!equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
-            assert!(!equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            assert!(!equivalent(
+                2,
+                5,
+                &nodes,
+                &nodes,
+                &mut walker1,
+                &mut walker2
+            ));
+            assert!(!equivalent(
+                6,
+                7,
+                &nodes,
+                &nodes,
+                &mut walker1,
+                &mut walker2
+            ));
             // Divide node with mirrored inputs.
             nodes[2] = Binary(Divide, 0, 1);
             nodes[5] = Binary(Divide, 3, 4);
             check_tree(&nodes);
-            assert!(!equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
-            assert!(!equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            assert!(!equivalent(
+                2,
+                5,
+                &nodes,
+                &nodes,
+                &mut walker1,
+                &mut walker2
+            ));
+            assert!(!equivalent(
+                6,
+                7,
+                &nodes,
+                &nodes,
+                &mut walker1,
+                &mut walker2
+            ));
             // Pow node with mirrored inputs.
             nodes[2] = Binary(Pow, 0, 1);
             nodes[5] = Binary(Pow, 3, 4);
             check_tree(&nodes);
-            assert!(!equivalent(2, 5, &nodes, &mut walker1, &mut walker2));
-            assert!(!equivalent(6, 7, &nodes, &mut walker1, &mut walker2));
+            assert!(!equivalent(
+                2,
+                5,
+                &nodes,
+                &nodes,
+                &mut walker1,
+                &mut walker2
+            ));
+            assert!(!equivalent(
+                6,
+                7,
+                &nodes,
+                &nodes,
+                &mut walker1,
+                &mut walker2
+            ));
         }
     }
 
