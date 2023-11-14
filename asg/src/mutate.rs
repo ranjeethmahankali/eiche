@@ -23,7 +23,7 @@ impl<'a> Mutations<'a> {
 }
 
 impl<'a> Iterator for Mutations<'a> {
-    type Item = Tree;
+    type Item = Result<Tree, ()>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let templates = get_templates();
@@ -37,28 +37,7 @@ impl<'a> Iterator for Mutations<'a> {
                     template.next_match(&self.tree, &mut self.capture);
                 }
                 if self.capture.is_valid() {
-                    // <DEBUG>
-                    println!("========================");
-                    println!(
-                        "Matching template {}:{} with tree:{}",
-                        template.name(),
-                        template.ping(),
-                        self.tree
-                    );
-                    println!("SUCCESS!");
-                    // </DEBUG>
-                    match self.capture.apply(template, &self.tree).ok() {
-                        Some(tree) => return Some(tree),
-                        None => {
-                            // <DEBUG>
-                            println!(
-                                "Unable to apply the template matched at {:?}",
-                                self.capture.node_index
-                            );
-                            // </DEBUG?
-                            continue;
-                        } // Try the next match.
-                    }
+                    return Some(self.capture.apply(template, &self.tree));
                 } else {
                     break;
                 }
@@ -78,15 +57,6 @@ fn symbolic_match(
     rtree: &Tree,
     capture: &mut Capture,
 ) -> bool {
-    // <DEBUG>
-    // println!(
-    //     "Matching [{}|{}] {:?} | {:?}",
-    //     li,
-    //     ri,
-    //     ltree.node(li),
-    //     rtree.node(ri)
-    // );
-    // </DEBUG>
     match (ltree.node(li), rtree.node(ri)) {
         (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
         (Node::Constant(_), _) => return false,
@@ -215,23 +185,13 @@ impl Capture {
         let pong = template.pong();
         self.node_map.clear();
         self.node_map.resize(pong.len(), 0);
+        let oldroot = match self.node_index {
+            Some(i) => i,
+            None => return Err(()),
+        };
+        let mut newroot = oldroot;
+        let num_nodes = nodes.len();
         for ni in 0..pong.len() {
-            if ni == pong.root_index() {
-                match self.node_index {
-                    Some(i) => {
-                        nodes[i] = match pong.node(ni) {
-                            Constant(v) => Constant(*v),
-                            Symbol(label) => Symbol(*label),
-                            Unary(op, input) => Unary(*op, self.node_map[*input]),
-                            Binary(op, lhs, rhs) => {
-                                Binary(*op, self.node_map[*lhs], self.node_map[*rhs])
-                            }
-                        }
-                    }
-                    None => return Err(()),
-                }
-                continue;
-            }
             match pong.node(ni) {
                 Constant(val) => self.add_node(&mut nodes, ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
@@ -247,10 +207,42 @@ impl Capture {
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
                 ),
             }
+            if ni == pong.root_index() {
+                newroot = self.node_map[ni];
+            }
         }
+        // Rewire old pattern root to the new pattern root. Only
+        // iterate over the preexisting nodes, not the ones we just
+        // added.
+        for i in 0..num_nodes {
+            match nodes.get_mut(i) {
+                Some(node) => {
+                    match node {
+                        Constant(_) | Symbol(_) => {} // Do nothing.
+                        Unary(_, input) => {
+                            if *input == oldroot {
+                                *input = newroot;
+                            }
+                        }
+                        Binary(_, lhs, rhs) => {
+                            if *lhs == oldroot {
+                                *lhs = newroot;
+                            }
+                            if *rhs == oldroot {
+                                *rhs = newroot;
+                            }
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        let root_index = if oldroot == root_index {
+            newroot
+        } else {
+            root_index
+        };
         // Clean up and make a tree.
-        println!("Root index: {}", root_index);
-        println!("Reconstructed nodes: {:?}", nodes);
         let (nodes, root_index) = self.topo_sorter.run(nodes, root_index).map_err(|_| ())?;
         return Tree::from_nodes(
             self.pruner
@@ -271,7 +263,7 @@ impl Capture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{deftree, template::get_template_by_name};
+    use crate::{deftree, template::get_template_by_name, tests::tests::compare_trees};
 
     fn check_bindings(capture: &Capture, template: &Template, tree: &Tree) {
         let left: Vec<_> = {
@@ -339,7 +331,7 @@ mod tests {
         assert!(!capture.is_valid());
         template.first_match(&tree, &mut capture);
         if !capture.is_valid() || capture.node_index.unwrap() != node_index {
-            println!("Template:{}Tree:{}", template.ping(), tree);
+            panic!("Template:{}Tree:{}", template.ping(), tree);
         }
         assert!(capture.is_valid());
         assert!(matches!(capture.node_index, Some(i) if i == node_index));
@@ -539,9 +531,19 @@ mod tests {
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y))
             .deduplicate()
             .unwrap();
-        for t in Mutations::from(&tree) {
-            println!("Mutation:{}", t);
+        for m in Mutations::from(&tree) {
+            match m {
+                Ok(mutated) => {
+                    compare_trees(
+                        &tree,
+                        &mutated,
+                        &[('p', 0.1, 10.), ('x', 0.1, 10.), ('y', 0.1, 10.)],
+                        20,
+                        1e-14,
+                    );
+                }
+                Err(_) => assert!(false),
+            }
         }
-        todo!();
     }
 }

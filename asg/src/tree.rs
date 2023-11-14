@@ -168,8 +168,8 @@ impl Tree {
 
     /// Convert the tree to a lisp expression. If there is something
     /// wrong with this tree, and appropriate `TreeError` is returned.
-    pub fn to_lisp(&self) -> Result<String, TreeError> {
-        Ok(crate::helper::to_lisp(self.root(), self.nodes()))
+    pub fn to_lisp(&self) -> String {
+        crate::helper::to_lisp(self.root(), self.nodes())
     }
 
     /// Fold constants in this tree.

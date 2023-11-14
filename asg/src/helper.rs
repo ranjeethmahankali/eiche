@@ -624,7 +624,7 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
 
 #[derive(Debug)]
 pub enum TopologicalError {
-    CyclicGraph,
+    // CyclicGraph,
 }
 
 /// Topological sorter.
@@ -813,19 +813,19 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn topological_sorting_3() {
-        let nodes = vec![
-            Binary(Pow, 8, 9),      // 0
-            Symbol('x'),            // 1
-            Binary(Multiply, 0, 1), // 2
-            Symbol('y'),            // 3
-            Binary(Multiply, 0, 3), // 4
-            Binary(Add, 2, 4),      // 5
-            Binary(Add, 1, 3),      // 6
-            Binary(Divide, 5, 6),   // 7
-            Unary(Sqrt, 0),         // 8
-            Constant(2.0),          // 9
-        ];
-    }
+    // #[test]
+    // fn topological_sorting_3() {
+    //     let nodes = vec![
+    //         Binary(Pow, 8, 9),      // 0
+    //         Symbol('x'),            // 1
+    //         Binary(Multiply, 0, 1), // 2
+    //         Symbol('y'),            // 3
+    //         Binary(Multiply, 0, 3), // 4
+    //         Binary(Add, 2, 4),      // 5
+    //         Binary(Add, 1, 3),      // 6
+    //         Binary(Divide, 5, 6),   // 7
+    //         Unary(Sqrt, 0),         // 8
+    //         Constant(2.0),          // 9
+    //     ];
+    // }
 }

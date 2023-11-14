@@ -65,9 +65,9 @@ impl Template {
         }
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
+    // pub fn name(&self) -> &str {
+    //     &self.name
+    // }
 
     pub fn ping(&self) -> &Tree {
         &self.ping
