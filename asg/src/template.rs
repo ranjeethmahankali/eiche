@@ -220,14 +220,14 @@ pub fn get_templates() -> &'static Vec<Template> {
 }
 
 #[cfg(test)]
-pub fn get_template_by_name(name: &str) -> Option<&Template> {
-    get_templates().iter().find(|&t| t.name == name)
-}
-
-#[cfg(test)]
-mod tests {
+pub mod test {
     use super::*;
     use std::collections::HashSet;
+
+    #[cfg(test)]
+    pub fn get_template_by_name(name: &str) -> Option<&Template> {
+        get_templates().iter().find(|&t| t.name == name)
+    }
 
     #[test]
     fn t_load_templates() {

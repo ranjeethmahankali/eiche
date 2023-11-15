@@ -335,7 +335,7 @@ impl Tree {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
     use crate::{deftree, parsetree};
 

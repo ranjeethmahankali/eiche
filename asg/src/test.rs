@@ -1,4 +1,3 @@
-#[cfg(test)]
 pub mod util {
     use crate::{eval::Evaluator, tree::Tree};
     use rand::rngs::StdRng;

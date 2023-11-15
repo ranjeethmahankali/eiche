@@ -95,7 +95,7 @@ impl TopoSorter {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use {
         super::*,
         crate::{

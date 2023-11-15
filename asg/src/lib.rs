@@ -11,5 +11,7 @@ mod mutate;
 mod prune;
 mod sort;
 mod template;
-mod test;
 mod walk;
+
+#[cfg(test)]
+mod test;

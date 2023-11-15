@@ -95,7 +95,7 @@ macro_rules! parsetree {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use crate::tree::{BinaryOp::*, Node::*, UnaryOp::*};
 
     #[test]

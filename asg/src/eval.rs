@@ -79,7 +79,7 @@ impl<'a> Evaluator<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+mod test{
     use super::*;
     use crate::deftree;
     use crate::test::util::{assert_float_eq, check_tree_eval, compare_trees};

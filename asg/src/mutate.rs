@@ -264,11 +264,11 @@ impl Capture {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
     use crate::{
-        dedup::equivalent, deftree, template::get_template_by_name, test::util::compare_trees,
-        walk::DepthWalker,
+        dedup::equivalent, deftree, template::test::get_template_by_name,
+        test::util::compare_trees, walk::DepthWalker,
     };
 
     fn t_check_bindings(capture: &Capture, template: &Template, tree: &Tree) {
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn t_match_with_dofs_1() {
-        let template = get_template_by_name("add_zero").unwrap();
+        let template = Template::from("add_zero", deftree!(+ x 0.), deftree!(x));
         let two: Tree = (-2.0).into();
         let tree = deftree!(+ 0 {two});
         let mut capture = Capture::new();
@@ -300,7 +300,11 @@ mod tests {
 
     #[test]
     fn t_match_with_dofs_2() {
-        let template = Template::from("test", deftree!(/ (+ a b) a), deftree!(+ 1 (/ b a)));
+        let template = Template::from(
+            "fraction_rearrange",
+            deftree!(/ (+ a b) a),
+            deftree!(+ 1 (/ b a)),
+        );
         let tree = deftree!(/ (+ p q) q).deduplicate().unwrap();
         let mut capture = Capture::new();
         assert!(!capture.is_valid());
