@@ -459,6 +459,30 @@ mod tests {
     }
 
     #[test]
+    fn t_pow() {
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let p = pow(x, y);
+        assert_eq!(p.nodes, vec![Symbol('x'), Symbol('y'), Binary(Pow, 0, 1)]);
+    }
+
+    #[test]
+    fn t_min() {
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let m = min(x, y);
+        assert_eq!(m.nodes, vec![Symbol('x'), Symbol('y'), Binary(Min, 0, 1)]);
+    }
+
+    #[test]
+    fn t_max() {
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let m = max(x, y);
+        assert_eq!(m.nodes, vec![Symbol('x'), Symbol('y'), Binary(Max, 0, 1)]);
+    }
+
+    #[test]
     fn t_negate() {
         let x: Tree = 'x'.into();
         let neg = -x;
@@ -479,5 +503,38 @@ mod tests {
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Abs, 0)]);
     }
 
-    // TODO: Add tests for the remaining operators.
+    #[test]
+    fn t_sin_test() {
+        let x: Tree = 'x'.into();
+        let y = sin(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Sin, 0)]);
+    }
+
+    #[test]
+    fn t_cos_test() {
+        let x: Tree = 'x'.into();
+        let y = cos(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Cos, 0)]);
+    }
+
+    #[test]
+    fn t_tan_test() {
+        let x: Tree = 'x'.into();
+        let y = tan(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Tan, 0)]);
+    }
+
+    #[test]
+    fn t_log_test() {
+        let x: Tree = 'x'.into();
+        let y = log(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Log, 0)]);
+    }
+
+    #[test]
+    fn t_exp_test() {
+        let x: Tree = 'x'.into();
+        let y = exp(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Exp, 0)]);
+    }
 }

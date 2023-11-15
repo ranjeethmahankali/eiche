@@ -69,4 +69,43 @@ impl Pruner {
     }
 }
 
-// TODO: test
+#[cfg(test)]
+mod test {
+    use crate::{
+        prune::Pruner,
+        tree::{BinaryOp::*, Node::*, Tree, UnaryOp::*},
+    };
+
+    #[test]
+    fn t_prune_0() {
+        let nodes = vec![
+            Symbol('x'),       // 0
+            Symbol('y'),       // 1
+            Constant(2.),      // 2
+            Constant(3.),      // 3
+            Unary(Sqrt, 0),    // 4
+            Unary(Sqrt, 3),    // 5
+            Binary(Pow, 4, 5), // 6
+            Binary(Add, 0, 1), // 7
+        ];
+        let mut pruner = Pruner::new();
+        assert!({
+            // Prune with #6 as the root.
+            let tree = Tree::from_nodes(pruner.run(nodes.clone(), 6)).unwrap();
+            tree.len() == 5
+                && tree.nodes()
+                    == &vec![
+                        Symbol('x'),
+                        Constant(3.),
+                        Unary(Sqrt, 0),
+                        Unary(Sqrt, 1),
+                        Binary(Pow, 2, 3),
+                    ]
+        });
+        assert!({
+            // Prune with #7 as the root.
+            let tree = Tree::from_nodes(pruner.run(nodes, 7)).unwrap();
+            tree.len() == 3 && tree.nodes() == &vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]
+        });
+    }
+}
