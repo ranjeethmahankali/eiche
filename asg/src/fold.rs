@@ -1,33 +1,43 @@
 use crate::{
     prune::Pruner,
-    tree::{Node, Node::*, Tree, TreeError},
+    tree::{BinaryOp::*, Node, Node::*, Tree, TreeError},
 };
 
 /// Compute the results of operations on constants and fold those into
 /// constant nodes. The unused nodes after folding are not
 /// pruned. Use a pruner for that.
-pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
+pub fn fold(mut nodes: Vec<Node>) -> Vec<Node> {
     for index in 0..nodes.len() {
-        let constval = match nodes[index] {
+        let folded = match nodes[index] {
             Constant(_) => None,
             Symbol(_) => None,
             Unary(op, input) => {
                 if let Constant(value) = nodes[input] {
-                    Some(op.apply(value))
+                    Some(Constant(op.apply(value)))
                 } else {
                     None
                 }
             }
-            Binary(op, lhs, rhs) => {
-                if let (Constant(a), Constant(b)) = (&nodes[lhs], &nodes[rhs]) {
-                    Some(op.apply(*a, *b))
-                } else {
-                    None
-                }
-            }
+            Binary(op, lhs, rhs) => match (op, &nodes[lhs], &nodes[rhs]) {
+                // Constant folding.
+                (op, Constant(a), Constant(b)) => Some(Constant(op.apply(*a, *b))),
+                // Identity ops.
+                (Add, lhs, Constant(val)) if *val == 0. => Some(*lhs),
+                (Add, Constant(val), rhs) if *val == 0. => Some(*rhs),
+                (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
+                (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
+                (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
+                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
+                (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
+                // Other ops.
+                (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(1.)),
+                (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(0.)),
+                (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(0.)),
+                _ => None,
+            },
         };
-        if let Some(value) = constval {
-            nodes[index] = Constant(value);
+        if let Some(node) = folded {
+            nodes[index] = node;
         }
     }
     return nodes;
@@ -35,10 +45,10 @@ pub fn fold_constants(mut nodes: Vec<Node>) -> Vec<Node> {
 
 impl Tree {
     /// Fold constants in this tree.
-    pub fn fold_constants(self) -> Result<Tree, TreeError> {
+    pub fn fold(self) -> Result<Tree, TreeError> {
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        return Tree::from_nodes(pruner.run(fold_constants(self.take_nodes()), root_index));
+        return Tree::from_nodes(pruner.run(fold(self.take_nodes()), root_index));
     }
 }
 
@@ -49,7 +59,7 @@ mod test {
 
     #[test]
     fn t_sconstant_folding_0() {
-        let tree = deftree!(* 2. 3.).fold_constants().unwrap();
+        let tree = deftree!(* 2. 3.).fold().unwrap();
         assert_eq!(tree.len(), 1usize);
         assert_eq!(tree.root(), &Constant(2. * 3.));
     }
@@ -63,8 +73,112 @@ mod test {
         );
         let expected = deftree!(/ (+ x 6.) (log (+ x 0.5)));
         assert!(tree.len() > expected.len());
-        let tree = tree.fold_constants().unwrap();
+        let tree = tree.fold().unwrap();
         assert_eq!(tree, expected);
         compare_trees(&tree, &expected, &[('x', 0.1, 10.)], 100, 0.);
+    }
+
+    #[test]
+    fn t_add_zero() {
+        assert_eq!(
+            deftree!(+ (pow x (+ y 0)) 0).fold().unwrap(),
+            deftree!(pow x y)
+        );
+        assert_eq!(
+            deftree!(pow (+ (+ (cos (+ x 0)) (/ 1 (+ (sin y) 0))) 0) (* 2 (+ (+ x 0) y)))
+                .fold()
+                .unwrap(),
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+        );
+    }
+
+    #[test]
+    fn t_sub_zero() {
+        assert_eq!(
+            deftree!(- (pow (- x 0) (+ y 0)) 0).fold().unwrap(),
+            deftree!(pow x y)
+        );
+        assert_eq!(
+            deftree!(pow (+ (cos (+ (- x 0) 0)) (/ 1 (- (sin (- y 0)) 0))) (* 2 (+ x (- y 0))))
+                .fold()
+                .unwrap(),
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+        );
+    }
+
+    #[test]
+    fn t_mul_1() {
+        assert_eq!(
+            deftree!(+ (pow (* 1 x) (* y 1)) 0).fold().unwrap(),
+            deftree!(pow x y)
+        );
+        assert_eq!(
+            deftree!(pow (+ (cos (* x (* 1 (+ 1 (* 0 x))))) (/ 1 (* (sin (- y 0)) 1))) (* (* (+ 2 0) (+ x y)) 1))
+                .fold()
+                .unwrap(),
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+        );
+    }
+
+    #[test]
+    fn t_pow_1() {
+        assert_eq!(
+            deftree!(pow (pow (pow x 1) (pow y 1)) (pow 1 1))
+                .fold()
+                .unwrap(),
+            deftree!(pow x y)
+        );
+        assert_eq!(
+            deftree!(pow (+ (cos (pow x (pow x (* 0 x)))) (/ 1 (sin y))) (* 2 (+ x (pow y 1))))
+                .fold()
+                .unwrap(),
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+        );
+    }
+
+    #[test]
+    fn t_div_1() {
+        assert_eq!(
+            deftree!(pow (/ x 1) (/ y (pow x (* t 0)))).fold().unwrap(),
+            deftree!(pow x y)
+        );
+        assert_eq!(
+            deftree!(pow (+ (cos (/ x 1)) (/ 1 (sin (/ y (pow t (* 0 p)))))) (* 2 (+ x y)))
+                .fold()
+                .unwrap(),
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+        );
+    }
+
+    #[test]
+    fn t_mul_0() {
+        assert_eq!(
+            deftree!(pow (+ x (* t 0)) (+ y (* t 0))).fold().unwrap(),
+            deftree!(pow x y)
+        );
+        assert_eq!(
+            deftree!(pow (+ (cos (+ x (* 0 t))) (/ 1 (sin (- y (* t 0)))))
+                     (* 2 (* (+ x y) (pow t (* 0 t)))))
+            .fold()
+            .unwrap(),
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+        );
+    }
+
+    #[test]
+    fn t_pow_0() {
+        assert_eq!(
+            deftree!(* (pow x (* t 0)) (pow (* x (pow t 0)) y))
+                .fold()
+                .unwrap(),
+            deftree!(pow x y)
+        );
+        assert_eq!(
+            deftree!(pow (+ (cos (* x (pow t 0))) (/ 1 (sin (* y (pow t (* x 0))))))
+                     (* 2 (+ x (* y (pow x 0)))))
+            .fold()
+            .unwrap(),
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+        );
     }
 }

@@ -155,39 +155,6 @@ lazy_static! {
                      pong (/ (+ a b) d)
         ),
 
-        // ====== Identity operations ======
-
-        deftemplate!(add_zero
-                     ping (+ x 0.)
-                     pong (x)
-        ),
-        deftemplate!(sub_zero
-                     ping (- x 0)
-                     pong (x)
-        ),
-        deftemplate!(mul_1
-                     ping (* x 1.)
-                     pong (x)
-        ),
-        deftemplate!(pow_1
-                     ping (pow x 1.)
-                     pong (x)
-        ),
-        deftemplate!(div_1
-                     ping (/ x 1.)
-                     pong (x)
-        ),
-
-        // ====== Other templates =======
-
-        deftemplate!(mul_0
-                     ping (* x 0.)
-                     pong (0.)
-        ),
-        deftemplate!(pow_0
-                     ping (pow x 0.)
-                     pong (1.)
-        ),
         // ====== Min and max simplifications ======
 
         // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
@@ -311,17 +278,7 @@ pub mod test {
             );
         }
         {
-            // === Identity operations ===
-            check_one("add_zero", &[('x', -10., 10.)], 0.);
-            check_one("sub_zero", &[('x', -10., 10.)], 0.);
-            check_one("mul_1", &[('x', -10., 10.)], 0.);
-            check_one("pow_1", &[('x', -10., 10.)], 0.);
-            check_one("div_1", &[('x', -10., 10.)], 0.);
-        }
-        {
             // === Other templates ===
-            check_one("mul_0", &[('x', -10., 10.)], 0.);
-            check_one("pow_0", &[('x', -10., 10.)], 0.);
             check_one("min_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
             check_one("max_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
             check_one(

@@ -1,6 +1,6 @@
 use crate::{
     dedup::Deduplicater,
-    fold::fold_constants,
+    fold::fold,
     prune::Pruner,
     sort::TopoSorter,
     template::{get_templates, Template},
@@ -71,7 +71,7 @@ fn symbolic_match(
                 return symbolic_match(ldofs, *input1, ltree, *input2, rtree, capture);
             }
         }
-        (Node::Unary(_, _), _) => return false,
+        (Node::Unary(..), _) => return false,
         (Node::Binary(lop, l1, r1), Node::Binary(rop, l2, r2)) => {
             if lop != rop {
                 return false;
@@ -98,7 +98,7 @@ fn symbolic_match(
                     && symbolic_match(ldofs, r1, ltree, l2, rtree, capture);
             }
         }
-        (Node::Binary(_, _, _), _) => return false,
+        (Node::Binary(..), _) => return false,
     }
 }
 
@@ -249,7 +249,7 @@ impl Capture {
         let (nodes, root_index) = self.topo_sorter.run(nodes, root_index).map_err(|_| ())?;
         return Tree::from_nodes(
             self.pruner
-                .run(self.deduper.run(fold_constants(nodes)), root_index),
+                .run(self.deduper.run(fold(nodes)), root_index),
         )
         .map_err(|_| ());
     }
@@ -453,69 +453,6 @@ mod test {
     }
 
     #[test]
-    fn t_match_add_zero() {
-        t_check_template(
-            "add_zero",
-            deftree!(log (+ 1 (exp (+ 0 (exp (+ 1 (log p))))))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_sub_zero() {
-        t_check_template(
-            "sub_zero",
-            deftree!(log (+ 1 (exp (- (exp (+ 1 (log p))) 0)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_mul_1() {
-        t_check_template(
-            "mul_1",
-            deftree!(log (+ 1 (exp (* (exp (+ 1 (log p))) 1)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_pow_1() {
-        t_check_template(
-            "pow_1",
-            deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 1)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_div_1() {
-        t_check_template(
-            "div_1",
-            deftree!(log (+ 1 (exp (/ (exp (+ 1 (log p))) 1)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_mul_0() {
-        t_check_template(
-            "mul_0",
-            deftree!(log (+ 1 (exp (* (exp (+ 1 (log p))) 0)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_pow_0() {
-        t_check_template(
-            "pow_0",
-            deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 0)))),
-            7,
-        );
-    }
-
-    #[test]
     fn t_match_min_expand() {
         t_check_template("min_expand", deftree!(log (+ 1 (exp (min x 2)))), 3);
     }
@@ -544,20 +481,21 @@ mod test {
             .deduplicate()
             .unwrap();
         let simpler = deftree!(/ (* p (+ x y)) (+ x y));
-        let mut found: bool = false;
+        let mut nequivalent: usize = 0;
         for m in Mutations::from(&tree) {
             match m {
                 Ok(mutated) => {
                     assert_ne!(mutated, tree);
-                    found = found
-                        || equivalent(
-                            mutated.root_index(),
-                            simpler.root_index(),
-                            mutated.nodes(),
-                            simpler.nodes(),
-                            &mut lwalker,
-                            &mut rwalker,
-                        );
+                    if equivalent(
+                        mutated.root_index(),
+                        simpler.root_index(),
+                        mutated.nodes(),
+                        simpler.nodes(),
+                        &mut lwalker,
+                        &mut rwalker,
+                    ) {
+                        nequivalent += 1;
+                    }
                     compare_trees(
                         &tree,
                         &mutated,
@@ -569,6 +507,6 @@ mod test {
                 Err(_) => assert!(false),
             }
         }
-        assert!(found);
+        assert_eq!(nequivalent, 1);
     }
 }
