@@ -1,6 +1,6 @@
 use crate::{
     dedup::Deduplicater,
-    fold::fold_constants,
+    fold::fold,
     prune::Pruner,
     sort::TopoSorter,
     template::{get_templates, Template},
@@ -249,7 +249,7 @@ impl Capture {
         let (nodes, root_index) = self.topo_sorter.run(nodes, root_index).map_err(|_| ())?;
         return Tree::from_nodes(
             self.pruner
-                .run(self.deduper.run(fold_constants(nodes)), root_index),
+                .run(self.deduper.run(fold(nodes)), root_index),
         )
         .map_err(|_| ());
     }
@@ -449,69 +449,6 @@ mod test {
                 .deduplicate()
                 .unwrap(),
             8,
-        );
-    }
-
-    #[test]
-    fn t_match_add_zero() {
-        t_check_template(
-            "add_zero",
-            deftree!(log (+ 1 (exp (+ 0 (exp (+ 1 (log p))))))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_sub_zero() {
-        t_check_template(
-            "sub_zero",
-            deftree!(log (+ 1 (exp (- (exp (+ 1 (log p))) 0)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_mul_1() {
-        t_check_template(
-            "mul_1",
-            deftree!(log (+ 1 (exp (* (exp (+ 1 (log p))) 1)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_pow_1() {
-        t_check_template(
-            "pow_1",
-            deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 1)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_div_1() {
-        t_check_template(
-            "div_1",
-            deftree!(log (+ 1 (exp (/ (exp (+ 1 (log p))) 1)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_mul_0() {
-        t_check_template(
-            "mul_0",
-            deftree!(log (+ 1 (exp (* (exp (+ 1 (log p))) 0)))),
-            7,
-        );
-    }
-
-    #[test]
-    fn t_match_pow_0() {
-        t_check_template(
-            "pow_0",
-            deftree!(log (+ 1 (exp (pow (exp (+ 1 (log p))) 0)))),
-            7,
         );
     }
 
