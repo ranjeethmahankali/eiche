@@ -87,7 +87,7 @@ mod tests {
     use rand::SeedableRng;
 
     #[test]
-    fn variable_in_deftree() {
+    fn t_variable_in_deftree() {
         let lisp = deftree!(+ 1. (+ (cos x) (pow (cos x) 2.)));
         let cx = deftree!(cos x);
         let with_vars = deftree!(+ 1. (+ {cx.clone()} (pow {cx} 2.)));
@@ -109,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn constant() {
+    fn t_constant() {
         let x = deftree!(const std::f64::consts::PI);
         assert_eq!(x.root(), &Constant(std::f64::consts::PI));
         let mut eval = Evaluator::new(&x);
@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn pythagoras() {
+    fn t_pythagoras() {
         const TRIPLETS: [(f64, f64, f64); 6] = [
             (3., 4., 5.),
             (5., 12., 13.),
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn trig_identity() {
+    fn t_trig_identity() {
         use rand::Rng;
         const PI_2: f64 = 2.0 * std::f64::consts::TAU;
         let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.));
@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_test() {
+    fn t_sum_test() {
         check_tree_eval(
             deftree!(+ x y),
             |vars: &[f64]| {
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_trees() {
+    fn t_evaluate_trees_1() {
         check_tree_eval(
             deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)),
             |vars: &[f64]| {
@@ -193,6 +193,10 @@ mod tests {
             100,
             0.,
         );
+    }
+
+    #[test]
+    fn t_evaluate_trees_2() {
         check_tree_eval(
             deftree!(
                 (max (min

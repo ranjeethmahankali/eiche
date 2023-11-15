@@ -105,7 +105,7 @@ mod tests {
     };
 
     #[test]
-    fn topological_sorting_0() {
+    fn t_topological_sorting_0() {
         let mut sorter = TopoSorter::new();
         let (nodes, root) = sorter
             .run(vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')], 1)
@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn topological_sorting_1() {
+    fn t_topological_sorting_1() {
         let nodes = vec![
             Symbol('x'),            // 0
             Binary(Add, 0, 2),      // 1
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn topological_sorting_2() {
+    fn t_topological_sorting_2() {
         let nodes = vec![
             Symbol('a'),            // 0
             Binary(Add, 0, 2),      // 1
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn topological_sorting_3() {
+    fn t_topological_sorting_3() {
         let mut sorter = TopoSorter::new();
         assert!(matches!(
             sorter.run(

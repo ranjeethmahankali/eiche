@@ -48,12 +48,14 @@ mod test {
     use crate::{deftree, test::util::compare_trees};
 
     #[test]
-    fn constant_folding() {
-        // Basic multiplication.
+    fn t_sconstant_folding_0() {
         let tree = deftree!(* 2. 3.).fold_constants().unwrap();
         assert_eq!(tree.len(), 1usize);
         assert_eq!(tree.root(), &Constant(2. * 3.));
-        // More complicated tree.
+    }
+
+    #[test]
+    fn t_constant_folding_1() {
         let tree = deftree!(
             (/
              (+ x (* 2. 3.))

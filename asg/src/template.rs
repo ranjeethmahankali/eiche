@@ -230,7 +230,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn load_templates() {
+    fn t_load_templates() {
         // Just to make sure all the templates are valid and load
         // correctly.
         assert!(!TEMPLATES.is_empty());
@@ -242,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn check_templates() {
+    fn t_check_templates() {
         let mut checked: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
         let mut check_one = |name: &'static str, vardata: &[(char, f64, f64)], eps: f64| {
             use crate::test::util::compare_trees;

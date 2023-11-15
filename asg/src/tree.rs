@@ -96,7 +96,7 @@ impl BinaryOp {
     }
 }
 
-use crate::io::{parse_tree, LispParseError};
+use crate::lisp::{parse_tree, LispParseError};
 use BinaryOp::*;
 use UnaryOp::*;
 
@@ -388,7 +388,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tree_from_nodes() {
+    fn t_tree_from_nodes() {
         // Nodes in order.
         match Tree::from_nodes(vec![
             Symbol('x'),            // 0
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn add() {
+    fn t_add() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x + y;
@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn multiply() {
+    fn t_multiply() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x * y;
@@ -437,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn subtract() {
+    fn t_subtract() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x - y;
@@ -448,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn divide() {
+    fn t_divide() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x / y;
@@ -459,21 +459,21 @@ mod tests {
     }
 
     #[test]
-    fn negate() {
+    fn t_negate() {
         let x: Tree = 'x'.into();
         let neg = -x;
         assert_eq!(neg.nodes, vec![Symbol('x'), Unary(Negate, 0)]);
     }
 
     #[test]
-    fn sqrt_test() {
+    fn t_sqrt_test() {
         let x: Tree = 'x'.into();
         let y = sqrt(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Sqrt, 0)]);
     }
 
     #[test]
-    fn abs_test() {
+    fn t_abs_test() {
         let x: Tree = 'x'.into();
         let y = abs(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Abs, 0)]);

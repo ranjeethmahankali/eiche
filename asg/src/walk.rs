@@ -179,7 +179,7 @@ mod test {
     use crate::deftree;
 
     #[test]
-    fn depth_traverse() {
+    fn t_depth_traverse() {
         let mut walker = DepthWalker::new();
         {
             let tree = deftree!(+ (pow x 2.) (pow y 2.));

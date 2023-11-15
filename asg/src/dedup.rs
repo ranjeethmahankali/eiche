@@ -30,46 +30,6 @@ impl Deduplicater {
         }
     }
 
-    fn calc_hashes(&mut self, nodes: &Vec<Node>) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        // Using a boxed slice to avoid accidental resizing later.
-        self.hashes.clear();
-        self.hashes.resize(nodes.len(), 0);
-        for index in 0..nodes.len() {
-            let hash: u64 = match nodes[index] {
-                Constant(value) => value.to_bits().into(),
-                Symbol(label) => {
-                    let mut s: DefaultHasher = Default::default();
-                    label.hash(&mut s);
-                    s.finish()
-                }
-                Unary(op, input) => {
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
-                    self.hashes[input].hash(&mut s);
-                    s.finish()
-                }
-                Binary(op, lhs, rhs) => {
-                    let (hash1, hash2) = {
-                        let mut hash1 = self.hashes[lhs];
-                        let mut hash2 = self.hashes[rhs];
-                        if op.is_commutative() && hash1 > hash2 {
-                            std::mem::swap(&mut hash1, &mut hash2);
-                        }
-                        (hash1, hash2)
-                    };
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
-                    hash1.hash(&mut s);
-                    hash2.hash(&mut s);
-                    s.finish()
-                }
-            };
-            self.hashes[index] = hash;
-        }
-    }
-
     /// Deduplicate `nodes`. The `nodes` are expected to be
     /// topologically sorted. If they are not, this function might
     /// produce incorrect results. If you suspect the nodes are not
@@ -118,6 +78,46 @@ impl Deduplicater {
             }
         }
         return nodes;
+    }
+
+    fn calc_hashes(&mut self, nodes: &Vec<Node>) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        // Using a boxed slice to avoid accidental resizing later.
+        self.hashes.clear();
+        self.hashes.resize(nodes.len(), 0);
+        for index in 0..nodes.len() {
+            let hash: u64 = match nodes[index] {
+                Constant(value) => value.to_bits().into(),
+                Symbol(label) => {
+                    let mut s: DefaultHasher = Default::default();
+                    label.hash(&mut s);
+                    s.finish()
+                }
+                Unary(op, input) => {
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
+                    self.hashes[input].hash(&mut s);
+                    s.finish()
+                }
+                Binary(op, lhs, rhs) => {
+                    let (hash1, hash2) = {
+                        let mut hash1 = self.hashes[lhs];
+                        let mut hash2 = self.hashes[rhs];
+                        if op.is_commutative() && hash1 > hash2 {
+                            std::mem::swap(&mut hash1, &mut hash2);
+                        }
+                        (hash1, hash2)
+                    };
+                    let mut s: DefaultHasher = Default::default();
+                    op.hash(&mut s);
+                    hash1.hash(&mut s);
+                    hash2.hash(&mut s);
+                    s.finish()
+                }
+            };
+            self.hashes[index] = hash;
+        }
     }
 }
 
@@ -199,7 +199,7 @@ mod test {
     };
 
     #[test]
-    fn recursive_compare() {
+    fn t_recursive_compare() {
         // Check if 'Add' node with mirrored inputs is compared
         // correctly.
         let mut nodes = vec![
@@ -215,7 +215,7 @@ mod test {
         ];
         let mut walker1 = DepthWalker::new();
         let mut walker2 = DepthWalker::new();
-        fn check_tree(nodes: &Vec<Node>) {
+        fn t_check_tree(nodes: &Vec<Node>) {
             let tree = Tree::from_nodes(nodes.clone());
             match tree {
                 Ok(tree) => {
@@ -224,36 +224,36 @@ mod test {
                 Err(_) => assert!(false),
             };
         }
-        check_tree(&nodes);
+        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Try more mirroring
         nodes[6] = Binary(Add, 2, 5);
-        check_tree(&nodes);
+        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Multiply node with mirrored inputs.
         nodes[2] = Binary(Multiply, 0, 1);
         nodes[5] = Binary(Multiply, 3, 4);
-        check_tree(&nodes);
+        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Min node with mirrored inputs.
         nodes[2] = Binary(Min, 0, 1);
         nodes[5] = Binary(Min, 3, 4);
-        check_tree(&nodes);
+        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Max node with mirrored inputs.
         nodes[2] = Binary(Max, 0, 1);
         nodes[5] = Binary(Max, 3, 4);
-        check_tree(&nodes);
+        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Subtract node with mirrored inputs.
         nodes[2] = Binary(Subtract, 0, 1);
         nodes[5] = Binary(Subtract, 3, 4);
-        check_tree(&nodes);
+        t_check_tree(&nodes);
         assert!(!equivalent(
             2,
             5,
@@ -273,7 +273,7 @@ mod test {
         // Divide node with mirrored inputs.
         nodes[2] = Binary(Divide, 0, 1);
         nodes[5] = Binary(Divide, 3, 4);
-        check_tree(&nodes);
+        t_check_tree(&nodes);
         assert!(!equivalent(
             2,
             5,
@@ -293,7 +293,7 @@ mod test {
         // Pow node with mirrored inputs.
         nodes[2] = Binary(Pow, 0, 1);
         nodes[5] = Binary(Pow, 3, 4);
-        check_tree(&nodes);
+        t_check_tree(&nodes);
         assert!(!equivalent(
             2,
             5,
@@ -313,7 +313,23 @@ mod test {
     }
 
     #[test]
-    fn deduplication_1() {
+    fn t_recursive_compare_2() {
+        let tree1 = deftree!(/ (+ (* x y) (+ b a)) (* (+ y x) (* a b)));
+        let tree2 = deftree!(/ (+ (* y x) (+ a b)) (* (+ y x) (* b a)));
+        let mut walker1 = DepthWalker::new();
+        let mut walker2 = DepthWalker::new();
+        assert!(equivalent(
+            tree1.root_index(),
+            tree2.root_index(),
+            tree1.nodes(),
+            tree2.nodes(),
+            &mut walker1,
+            &mut walker2
+        ));
+    }
+
+    #[test]
+    fn t_deduplication_1() {
         let tree = deftree!(
             (max (min
                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
@@ -333,7 +349,7 @@ mod test {
     }
 
     #[test]
-    fn deduplication_2() {
+    fn t_deduplication_2() {
         let tree = deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.));
         let nodup = tree.clone().deduplicate().unwrap();
         assert!(tree.len() > nodup.len());
@@ -342,7 +358,7 @@ mod test {
     }
 
     #[test]
-    fn deduplication_3() {
+    fn t_deduplication_3() {
         let tree = deftree!(
             (/
              (+ (pow (sin x) 2.) (+ (pow (cos x) 2.) (* 2. (* (sin x) (cos x)))))
