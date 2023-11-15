@@ -220,17 +220,17 @@ pub fn get_templates() -> &'static Vec<Template> {
 }
 
 #[cfg(test)]
-pub fn get_template_by_name(name: &str) -> Option<&Template> {
-    get_templates().iter().find(|&t| t.name == name)
-}
-
-#[cfg(test)]
-mod tests {
+pub mod test {
     use super::*;
     use std::collections::HashSet;
 
+    #[cfg(test)]
+    pub fn get_template_by_name(name: &str) -> Option<&Template> {
+        get_templates().iter().find(|&t| t.name == name)
+    }
+
     #[test]
-    fn load_templates() {
+    fn t_load_templates() {
         // Just to make sure all the templates are valid and load
         // correctly.
         assert!(!TEMPLATES.is_empty());
@@ -242,10 +242,10 @@ mod tests {
     }
 
     #[test]
-    fn check_templates() {
+    fn t_check_templates() {
         let mut checked: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
         let mut check_one = |name: &'static str, vardata: &[(char, f64, f64)], eps: f64| {
-            use crate::tests::tests::compare_trees;
+            use crate::test::util::compare_trees;
             // Find template by name.
             let template = TEMPLATES
                 .iter()

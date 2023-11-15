@@ -37,6 +37,20 @@ impl UnaryOp {
             Exp => f64::exp(value),
         }
     }
+    /// The index of the variant for comparison and sorting.
+    pub fn index(&self) -> u8 {
+        use UnaryOp::*;
+        match self {
+            Negate => 0,
+            Sqrt => 1,
+            Abs => 2,
+            Sin => 3,
+            Cos => 4,
+            Tan => 5,
+            Log => 6,
+            Exp => 7,
+        }
+    }
 }
 
 impl BinaryOp {
@@ -52,12 +66,37 @@ impl BinaryOp {
             Max => f64::max(lhs, rhs),
         }
     }
+
+    /// The index of the variant for comparison and sorting.
+    pub fn index(&self) -> u8 {
+        use BinaryOp::*;
+        match self {
+            Add => 0,
+            Subtract => 1,
+            Multiply => 2,
+            Divide => 3,
+            Pow => 4,
+            Min => 5,
+            Max => 6,
+        }
+    }
+
+    /// Check if the binary op is commutative.
+    pub fn is_commutative(&self) -> bool {
+        use BinaryOp::*;
+        match self {
+            Add => true,
+            Subtract => false,
+            Multiply => true,
+            Divide => false,
+            Pow => false,
+            Min => true,
+            Max => true,
+        }
+    }
 }
 
-use crate::{
-    helper::{fold_constants, Deduplicater, Pruner},
-    parser::{parse_tree, LispParseError},
-};
+use crate::lisp::{parse_tree, LispParseError};
 use BinaryOp::*;
 use UnaryOp::*;
 
@@ -148,6 +187,12 @@ impl Tree {
         &self.nodes
     }
 
+    /// Drop this tree and take ownership of the nodes. The nodes are
+    /// returned.
+    pub fn take_nodes(self) -> Vec<Node> {
+        self.nodes
+    }
+
     /// Get a unique list of all symbols in this tree.
     pub fn symbols(&self) -> Vec<char> {
         let mut chars: Vec<_> = self
@@ -164,29 +209,6 @@ impl Tree {
         chars.sort();
         chars.dedup();
         return chars;
-    }
-
-    /// Convert the tree to a lisp expression. If there is something
-    /// wrong with this tree, and appropriate `TreeError` is returned.
-    pub fn to_lisp(&self) -> String {
-        crate::helper::to_lisp(self.root(), self.nodes())
-    }
-
-    /// Fold constants in this tree.
-    pub fn fold_constants(mut self) -> Result<Tree, TreeError> {
-        let mut pruner = Pruner::new();
-        let root_index = self.root_index();
-        self.nodes = Self::validate_nodes(pruner.run(fold_constants(self.nodes), root_index))?;
-        return Ok(self);
-    }
-
-    /// Deduplicate the common subtrees in this tree.
-    pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
-        let mut dedup = Deduplicater::new();
-        let mut pruner = Pruner::new();
-        let root_index = self.root_index();
-        self.nodes = Self::validate_nodes(pruner.run(dedup.run(self.nodes), root_index))?;
-        return Ok(self);
     }
 
     /// Check if `nodes` can represent a valid tree.
@@ -318,91 +340,85 @@ pub fn exp(x: Tree) -> Tree {
     x.unary_op(Exp)
 }
 
-/// Errors that can occur when evaluating a tree.
-#[derive(Debug)]
-pub enum EvaluationError {
-    /// A symbol was not assigned a value before evaluating.
-    VariableNotFound(char),
-    /// A register with uninitialized value was encountered during
-    /// evaluation. This could mean the topology of the tree is
-    /// broken.
-    UninitializedValueRead,
+impl From<f64> for Tree {
+    fn from(value: f64) -> Self {
+        return Self::constant(value);
+    }
 }
 
-/// This can be used to compute the value(s) of the tree.
-pub struct Evaluator<'a> {
-    tree: &'a Tree,
-    regs: Box<[Option<f64>]>,
+impl From<char> for Tree {
+    fn from(c: char) -> Self {
+        return Self::symbol(c);
+    }
 }
 
-impl<'a> Evaluator<'a> {
-    /// Create a new evaluator for `tree`.
-    pub fn new(tree: &'a Tree) -> Evaluator {
-        Evaluator {
-            tree,
-            regs: vec![None; tree.nodes.len()].into_boxed_slice(),
+impl PartialOrd for Node {
+    /// This implementation only accounts for the node, its type and
+    /// the data held inside the node. It DOES NOT take into account
+    /// the children of the node when comparing two nodes.
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering::*;
+        match (self, other) {
+            // Constant
+            (Constant(a), Constant(b)) => a.partial_cmp(b),
+            (Constant(_), Symbol(_)) => Some(Less),
+            (Constant(_), Unary(_, _)) => Some(Less),
+            (Constant(_), Binary(_, _, _)) => Some(Less),
+            // Symbol
+            (Symbol(_), Constant(_)) => Some(Greater),
+            (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
+            (Symbol(_), Unary(_, _)) => Some(Less),
+            (Symbol(_), Binary(_, _, _)) => Some(Less),
+            // Unary
+            (Unary(_, _), Constant(_)) => Some(Greater),
+            (Unary(_, _), Symbol(_)) => Some(Greater),
+            (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
+            (Unary(_, _), Binary(_, _, _)) => Some(Less),
+            // Binary
+            (Binary(_, _, _), Constant(_)) => Some(Greater),
+            (Binary(_, _, _), Symbol(_)) => Some(Greater),
+            (Binary(_, _, _), Unary(_, _)) => Some(Greater),
+            (Binary(op1, _, _), Binary(op2, _, _)) => Some(op1.index().cmp(&op2.index())),
         }
-    }
-
-    /// Set all symbols in the evaluator matching `label` to
-    /// `value`. This `value` will be used for all future evaluations,
-    /// unless this function is called again with a different `value`.
-    pub fn set_var(&mut self, label: char, value: f64) {
-        for (node, reg) in self.tree.nodes.iter().zip(self.regs.iter_mut()) {
-            match node {
-                Symbol(l) if *l == label => {
-                    *reg = Some(value);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Read the value from the `index`-th register. Returns an error
-    /// if the register doesn't contain a value.
-    fn read(&self, index: usize) -> Result<f64, EvaluationError> {
-        match self.regs[index] {
-            Some(val) => Ok(val),
-            None => Err(EvaluationError::UninitializedValueRead),
-        }
-    }
-
-    /// Write the `value` into the `index`-th register. The existing
-    /// value is overwritten.
-    fn write(&mut self, index: usize, value: f64) {
-        self.regs[index] = Some(value);
-    }
-
-    /// Run the evaluator and return the result. The result may
-    /// contain the output value, or an
-    /// error. `Variablenotfound(label)` error means the variable
-    /// matching `label` hasn't been assigned a value using `set_var`.
-    pub fn run(&mut self) -> Result<f64, EvaluationError> {
-        for idx in 0..self.tree.len() {
-            self.write(
-                idx,
-                match &self.tree.nodes[idx] {
-                    Constant(val) => *val,
-                    Symbol(label) => match &self.regs[idx] {
-                        None => return Err(EvaluationError::VariableNotFound(*label)),
-                        Some(val) => *val,
-                    },
-                    Binary(op, lhs, rhs) => op.apply(self.read(*lhs)?, self.read(*rhs)?),
-                    Unary(op, input) => op.apply(self.read(*input)?),
-                },
-            );
-        }
-        return self.read(self.tree.root_index());
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
-    use crate::deftree;
 
     #[test]
-    fn add() {
+    fn t_tree_from_nodes() {
+        // Nodes in order.
+        match Tree::from_nodes(vec![
+            Symbol('x'),            // 0
+            Constant(2.245),        // 1
+            Binary(Add, 0, 1),      // 2
+            Symbol('y'),            // 3
+            Unary(Sqrt, 3),         // 4
+            Binary(Multiply, 2, 4), // 5
+        ]) {
+            Ok(tree) => {
+                assert_eq!(tree.len(), 6);
+            }
+            Err(_) => assert!(false),
+        };
+        // Nodes out of order.
+        assert!(matches!(
+            Tree::from_nodes(vec![
+                Symbol('x'),            // 0
+                Binary(Add, 0, 1),      // 1
+                Constant(2.245),        // 2
+                Binary(Multiply, 2, 4), // 3
+                Symbol('y'),            // 4
+                Unary(Sqrt, 3),         // 5
+            ]),
+            Err(TreeError::WrongNodeOrder)
+        ));
+    }
+
+    #[test]
+    fn t_add() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x + y;
@@ -410,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn multiply() {
+    fn t_multiply() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x * y;
@@ -421,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn subtract() {
+    fn t_subtract() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x - y;
@@ -432,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn divide() {
+    fn t_divide() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
         let sum = x / y;
@@ -443,240 +459,82 @@ mod tests {
     }
 
     #[test]
-    fn negate() {
+    fn t_pow() {
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let p = pow(x, y);
+        assert_eq!(p.nodes, vec![Symbol('x'), Symbol('y'), Binary(Pow, 0, 1)]);
+    }
+
+    #[test]
+    fn t_min() {
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let m = min(x, y);
+        assert_eq!(m.nodes, vec![Symbol('x'), Symbol('y'), Binary(Min, 0, 1)]);
+    }
+
+    #[test]
+    fn t_max() {
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let m = max(x, y);
+        assert_eq!(m.nodes, vec![Symbol('x'), Symbol('y'), Binary(Max, 0, 1)]);
+    }
+
+    #[test]
+    fn t_negate() {
         let x: Tree = 'x'.into();
         let neg = -x;
         assert_eq!(neg.nodes, vec![Symbol('x'), Unary(Negate, 0)]);
     }
 
     #[test]
-    fn sqrt_test() {
+    fn t_sqrt_test() {
         let x: Tree = 'x'.into();
         let y = sqrt(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Sqrt, 0)]);
     }
 
     #[test]
-    fn abs_test() {
+    fn t_abs_test() {
         let x: Tree = 'x'.into();
         let y = abs(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Abs, 0)]);
     }
 
     #[test]
-    fn symbol_deftree() {
-        let tree = deftree!(x);
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree.root(), &Symbol('x'));
+    fn t_sin_test() {
+        let x: Tree = 'x'.into();
+        let y = sin(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Sin, 0)]);
     }
 
     #[test]
-    fn constant_deftree() {
-        let tree = deftree!(2.);
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree.root(), &Constant(2.));
+    fn t_cos_test() {
+        let x: Tree = 'x'.into();
+        let y = cos(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Cos, 0)]);
     }
 
     #[test]
-    fn negate_deftree() {
-        let tree = deftree!(-x);
-        assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Negate, 0)]);
+    fn t_tan_test() {
+        let x: Tree = 'x'.into();
+        let y = tan(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Tan, 0)]);
     }
 
     #[test]
-    fn sqrt_deftree() {
-        let tree = deftree!(sqrt x);
-        assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Sqrt, 0)]);
+    fn t_log_test() {
+        let x: Tree = 'x'.into();
+        let y = log(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Log, 0)]);
     }
 
     #[test]
-    fn abs_deftree() {
-        let tree = deftree!(abs x);
-        assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Abs, 0)]);
-    }
-
-    #[test]
-    fn sin_deftree() {
-        let tree = deftree!(sin x);
-        assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Sin, 0)]);
-    }
-
-    #[test]
-    fn cos_deftree() {
-        let tree = deftree!(cos x);
-        assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Cos, 0)]);
-    }
-
-    #[test]
-    fn tan_deftree() {
-        let tree = deftree!(tan x);
-        assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Tan, 0)]);
-    }
-
-    #[test]
-    fn log_deftree() {
-        let tree = deftree!(log x);
-        assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Log, 0)]);
-    }
-
-    #[test]
-    fn exp_deftree() {
-        let tree = deftree!(exp x);
-        assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Exp, 0)]);
-    }
-
-    #[test]
-    fn add_deftree() {
-        let tree = deftree!(+ x y);
-        assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]
-        );
-        let tree = deftree!(+ 2. (-x));
-        assert_eq!(tree.len(), 4);
-        assert_eq!(
-            tree.nodes(),
-            &vec![
-                Constant(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Add, 0, 2)
-            ]
-        );
-    }
-
-    #[test]
-    fn subtract_deftree() {
-        let tree = deftree!(- x y);
-        assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Subtract, 0, 1)]
-        );
-        let tree = deftree!(-2.(-x));
-        assert_eq!(tree.len(), 4);
-        assert_eq!(
-            tree.nodes(),
-            &vec![
-                Constant(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Subtract, 0, 2)
-            ]
-        );
-    }
-
-    #[test]
-    fn multiply_deftree() {
-        let tree = deftree!(* x y);
-        assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Multiply, 0, 1)]
-        );
-        let tree = deftree!(*(2.)(-x));
-        assert_eq!(tree.len(), 4);
-        assert_eq!(
-            tree.nodes(),
-            &vec![
-                Constant(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Multiply, 0, 2)
-            ]
-        );
-    }
-
-    #[test]
-    fn divide_deftree() {
-        let tree = deftree!(/ x y);
-        assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Divide, 0, 1)]
-        );
-        let tree = deftree!(/ 2. (-x));
-        assert_eq!(tree.len(), 4);
-        assert_eq!(
-            tree.nodes(),
-            &vec![
-                Constant(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Divide, 0, 2)
-            ]
-        );
-    }
-
-    #[test]
-    fn pow_deftree() {
-        let tree = deftree!(pow x y);
-        assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Pow, 0, 1)]
-        );
-        let tree = deftree!(pow 2. (-x));
-        assert_eq!(tree.len(), 4);
-        assert_eq!(
-            tree.nodes(),
-            &vec![
-                Constant(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Pow, 0, 2)
-            ]
-        );
-    }
-
-    #[test]
-    fn min_deftree() {
-        let tree = deftree!(min x y);
-        assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Min, 0, 1)]
-        );
-        let tree = deftree!(min 2. (-x));
-        assert_eq!(tree.len(), 4);
-        assert_eq!(
-            tree.nodes(),
-            &vec![
-                Constant(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Min, 0, 2)
-            ]
-        );
-    }
-
-    #[test]
-    fn max_deftree() {
-        let tree = deftree!(max x y);
-        assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Max, 0, 1)]
-        );
-        let tree = deftree!(max 2. (-x));
-        assert_eq!(tree.len(), 4);
-        assert_eq!(
-            tree.nodes(),
-            &vec![
-                Constant(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Max, 0, 2)
-            ]
-        );
+    fn t_exp_test() {
+        let x: Tree = 'x'.into();
+        let y = exp(x);
+        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Exp, 0)]);
     }
 }
