@@ -287,7 +287,7 @@ pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
 
 /// Convert the list of nodes to a lisp string, by recursively
 /// traversing the nodes starting at `root`.
-pub fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
+fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
     match root {
         Constant(val) => val.to_string(),
         Symbol(label) => label.to_string(),
