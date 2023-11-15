@@ -1,7 +1,7 @@
 pub mod eval;
 pub mod io;
-pub mod lisp;
 pub mod latex;
+pub mod lisp;
 pub mod reduce;
 pub mod tree;
 
