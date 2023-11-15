@@ -159,7 +159,6 @@ pub fn equivalent(
                 }
                 (Some((li, _lp)), Some((ri, _rp))) => {
                     if std::ptr::eq(lnodes, rnodes) && li == ri {
-                        println!("Bailing out early!");
                         liter.skip_children();
                         riter.skip_children();
                         continue;

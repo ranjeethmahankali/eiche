@@ -71,7 +71,7 @@ fn symbolic_match(
                 return symbolic_match(ldofs, *input1, ltree, *input2, rtree, capture);
             }
         }
-        (Node::Unary(_, _), _) => return false,
+        (Node::Unary(..), _) => return false,
         (Node::Binary(lop, l1, r1), Node::Binary(rop, l2, r2)) => {
             if lop != rop {
                 return false;
@@ -98,7 +98,7 @@ fn symbolic_match(
                     && symbolic_match(ldofs, r1, ltree, l2, rtree, capture);
             }
         }
-        (Node::Binary(_, _, _), _) => return false,
+        (Node::Binary(..), _) => return false,
     }
 }
 
@@ -544,20 +544,21 @@ mod test {
             .deduplicate()
             .unwrap();
         let simpler = deftree!(/ (* p (+ x y)) (+ x y));
-        let mut found: bool = false;
+        let mut nequivalent: usize = 0;
         for m in Mutations::from(&tree) {
             match m {
                 Ok(mutated) => {
                     assert_ne!(mutated, tree);
-                    found = found
-                        || equivalent(
-                            mutated.root_index(),
-                            simpler.root_index(),
-                            mutated.nodes(),
-                            simpler.nodes(),
-                            &mut lwalker,
-                            &mut rwalker,
-                        );
+                    if equivalent(
+                        mutated.root_index(),
+                        simpler.root_index(),
+                        mutated.nodes(),
+                        simpler.nodes(),
+                        &mut lwalker,
+                        &mut rwalker,
+                    ) {
+                        nequivalent += 1;
+                    }
                     compare_trees(
                         &tree,
                         &mutated,
@@ -569,6 +570,6 @@ mod test {
                 Err(_) => assert!(false),
             }
         }
-        assert!(found);
+        assert_eq!(nequivalent, 1);
     }
 }

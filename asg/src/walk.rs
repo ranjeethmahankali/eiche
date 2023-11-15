@@ -100,8 +100,8 @@ impl<'a> DepthIterator<'a> {
         }
         match parent {
             // Nothing to do when number children is 1 or less.
-            Constant(_) | Symbol(_) | Unary(_, _) => {}
-            Binary(op, _, _) => {
+            Constant(_) | Symbol(_) | Unary(..) => {}
+            Binary(op, ..) => {
                 match self.ordering {
                     Original => {} // Do nothing.
                     Deterministic => {

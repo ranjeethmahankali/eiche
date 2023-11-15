@@ -362,23 +362,23 @@ impl PartialOrd for Node {
             // Constant
             (Constant(a), Constant(b)) => a.partial_cmp(b),
             (Constant(_), Symbol(_)) => Some(Less),
-            (Constant(_), Unary(_, _)) => Some(Less),
-            (Constant(_), Binary(_, _, _)) => Some(Less),
+            (Constant(_), Unary(..)) => Some(Less),
+            (Constant(_), Binary(..)) => Some(Less),
             // Symbol
             (Symbol(_), Constant(_)) => Some(Greater),
             (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
-            (Symbol(_), Unary(_, _)) => Some(Less),
-            (Symbol(_), Binary(_, _, _)) => Some(Less),
+            (Symbol(_), Unary(..)) => Some(Less),
+            (Symbol(_), Binary(..)) => Some(Less),
             // Unary
-            (Unary(_, _), Constant(_)) => Some(Greater),
-            (Unary(_, _), Symbol(_)) => Some(Greater),
+            (Unary(..), Constant(_)) => Some(Greater),
+            (Unary(..), Symbol(_)) => Some(Greater),
             (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
-            (Unary(_, _), Binary(_, _, _)) => Some(Less),
+            (Unary(..), Binary(..)) => Some(Less),
             // Binary
-            (Binary(_, _, _), Constant(_)) => Some(Greater),
-            (Binary(_, _, _), Symbol(_)) => Some(Greater),
-            (Binary(_, _, _), Unary(_, _)) => Some(Greater),
-            (Binary(op1, _, _), Binary(op2, _, _)) => Some(op1.index().cmp(&op2.index())),
+            (Binary(..), Constant(_)) => Some(Greater),
+            (Binary(..), Symbol(_)) => Some(Greater),
+            (Binary(..), Unary(..)) => Some(Greater),
+            (Binary(op1, ..), Binary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
         }
     }
 }
