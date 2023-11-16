@@ -233,12 +233,14 @@ mod test {
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y))
             .deduplicate()
             .unwrap();
+        // let tree = deftree!(* p (/ (+ x y) (+ x y))).deduplicate().unwrap();
         println!("${}$\n", tree.to_latex());
         for m in Mutations::from(&tree) {
             match m {
                 Ok(mutated) => {
                     assert_ne!(mutated, tree);
                     println!("${}$\n", mutated.to_latex());
+                    // println!("{}\n", mutated.to_lisp());
                 }
                 Err(_) => assert!(false),
             }
