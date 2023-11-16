@@ -4,6 +4,7 @@ pub mod tree;
 
 mod dedup;
 mod fold;
+mod heuristic;
 mod io;
 mod latex;
 mod lisp;
