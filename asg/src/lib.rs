@@ -1,5 +1,4 @@
 pub mod eval;
-pub mod io;
 pub mod latex;
 pub mod lisp;
 pub mod reduce;
@@ -7,6 +6,7 @@ pub mod tree;
 
 mod dedup;
 mod fold;
+mod io;
 mod macros;
 mod mutate;
 mod prune;
