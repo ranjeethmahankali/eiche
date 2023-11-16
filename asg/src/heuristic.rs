@@ -1,30 +1,7 @@
-use crate::tree::{Node, Node::*};
-
-struct UnionFind {
-    reps: Vec<usize>,
-}
-
-impl UnionFind {
-    fn new() -> UnionFind {
-        UnionFind { reps: Vec::new() }
-    }
-
-    fn reset(&mut self, len: usize) {
-        self.reps.clear();
-        self.reps.extend(0..len);
-    }
-
-    fn unite(&mut self, mut a: usize, b: usize) {
-        while a != self.reps[a] {
-            a = self.reps[a];
-        }
-        self.reps[b] = a;
-    }
-
-    fn find(&self, id: usize) -> usize {
-        self.reps[id]
-    }
-}
+use crate::{
+    tree::{Node, Node::*},
+    unionfind::UnionFind,
+};
 
 struct Tie {
     index: usize,

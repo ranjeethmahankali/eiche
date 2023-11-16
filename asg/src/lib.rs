@@ -13,6 +13,7 @@ mod mutate;
 mod prune;
 mod sort;
 mod template;
+mod unionfind;
 mod walk;
 
 #[cfg(test)]
