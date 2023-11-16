@@ -105,7 +105,7 @@ impl Deduplicater {
                         let mut hash1 = self.hashes[lhs];
                         let mut hash2 = self.hashes[rhs];
                         if op.is_commutative() && hash1 > hash2 {
-                            std::mem::swap(&mut hash1, &mut hash2);
+                            (hash1, hash2) = (hash2, hash1); // For determinism.
                         }
                         (hash1, hash2)
                     };

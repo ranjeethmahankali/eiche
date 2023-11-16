@@ -70,25 +70,18 @@ mod test {
     #[test]
     fn t_even_odd() {
         let mut ufind = UnionFind::new();
-        const NUM: usize = 10;
+        const NUM: usize = 16;
         ufind.reset(NUM);
         for i in 0..NUM {
             for j in (i + 1)..NUM {
                 assert_ne!(ufind.find(i), ufind.find(j));
             }
         }
-        for i in (0..NUM).step_by(2) {
+        for i in 2..NUM {
             if (i / 2) % 2 == 0 {
-                ufind.unite(i, 0);
+                ufind.unite(i, i - 2);
             } else {
-                ufind.unite(0, i);
-            }
-        }
-        for i in (1..NUM).step_by(2) {
-            if ((i - 1) / 2) % 2 == 0 {
-                ufind.unite(i, 1);
-            } else {
-                ufind.unite(1, i);
+                ufind.unite(i - 2, i);
             }
         }
         for i in 0..NUM {

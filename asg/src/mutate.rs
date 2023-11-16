@@ -82,8 +82,8 @@ fn symbolic_match(
                     let mut l2 = *l2;
                     let mut r2 = *r2;
                     if !lop.is_commutative() && ldofs[l1] > ldofs[r1] {
-                        std::mem::swap(&mut l1, &mut r1);
-                        std::mem::swap(&mut l2, &mut r2);
+                        (l1, r1) = (r1, l1);
+                        (l2, r2) = (r2, l2);
                     }
                     (l1, r1, l2, r2)
                 };
