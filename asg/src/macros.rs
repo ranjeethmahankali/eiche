@@ -90,7 +90,7 @@ macro_rules! deftree {
 #[macro_export]
 macro_rules! parsetree {
     ($($exp:tt) *) => {
-        $crate::lisp::parse_tree(stringify!($($exp) *))
+        $crate::tree::Tree::from_lisp(stringify!($($exp) *))
     };
 }
 

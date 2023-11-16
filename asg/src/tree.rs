@@ -96,9 +96,7 @@ impl BinaryOp {
     }
 }
 
-use crate::lisp::{parse_tree, LispParseError};
-use BinaryOp::*;
-use UnaryOp::*;
+use {BinaryOp::*, UnaryOp::*};
 
 /// Errors that can occur when constructing a tree.
 #[derive(Debug)]
@@ -150,12 +148,6 @@ impl Tree {
         Ok(Tree {
             nodes: Self::validate_nodes(nodes)?,
         })
-    }
-
-    /// Parse the `lisp` expression into a new tree. If the parsing
-    /// fails, an appropriate `LispParseError` is returned.
-    pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
-        parse_tree(lisp)
     }
 
     /// The number of nodes in this tree.

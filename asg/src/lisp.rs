@@ -279,12 +279,6 @@ fn parse_nodes(lisp: &str) -> Result<Vec<Node>, LispParseError> {
     return Err(LispParseError::Unknown);
 }
 
-/// Parse the `lisp` expression into a `Tree`. If the parsing fails, an
-/// appropriate `LispParseError` is returned.
-pub fn parse_tree(lisp: &str) -> Result<Tree, LispParseError> {
-    Ok(Tree::from_nodes(parse_nodes(&lisp)?).map_err(|_| LispParseError::Unknown)?)
-}
-
 /// Convert the list of nodes to a lisp string, by recursively
 /// traversing the nodes starting at `root`.
 fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
@@ -327,6 +321,12 @@ fn to_lisp(root: &Node, nodes: &Vec<Node>) -> String {
 }
 
 impl Tree {
+    /// Parse the `lisp` expression into a new tree. If the parsing
+    /// fails, an appropriate `LispParseError` is returned.
+    pub fn from_lisp(lisp: &str) -> Result<Tree, LispParseError> {
+        Ok(Tree::from_nodes(parse_nodes(&lisp)?).map_err(|_| LispParseError::Unknown)?)
+    }
+
     /// Convert the tree to a lisp expression. If there is something
     /// wrong with this tree, and appropriate `TreeError` is returned.
     pub fn to_lisp(&self) -> String {
@@ -351,16 +351,16 @@ mod test {
     #[test]
     fn t_single_token() {
         // Constant.
-        let tree = parse_tree("5.55").unwrap();
+        let tree = Tree::from_lisp("5.55").unwrap();
         assert!(matches!(tree.root(), Constant(val) if *val == 5.55));
         // Constant with spaces.
-        let tree = parse_tree(" 5.55   ").unwrap();
+        let tree = Tree::from_lisp(" 5.55   ").unwrap();
         assert!(matches!(tree.root(), Constant(val) if *val == 5.55));
         // Symbol.
-        let tree = parse_tree("x").unwrap();
+        let tree = Tree::from_lisp("x").unwrap();
         assert!(matches!(tree.root(), Symbol(label) if *label == 'x'));
         // Symbol with spaces.
-        let tree = parse_tree(" x     ").unwrap();
+        let tree = Tree::from_lisp(" x     ").unwrap();
         assert!(matches!(tree.root(), Symbol(label) if *label == 'x'));
     }
 
