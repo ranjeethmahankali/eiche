@@ -118,6 +118,14 @@ lazy_static! {
                      ping (* (/ a b) (/ x y))
                      pong (* (/ a y) (/ x b))
         ),
+        deftemplate!(rearrange_mul_div_1
+                     ping (/ (* x y) z)
+                     pong (* x (/ y z))
+        ),
+        deftemplate!(rearrange_mul_div_2
+                     ping (/ (* x y) z)
+                     pong (* y (/ x z))
+        ),
         deftemplate!(divide_by_self
                      ping (/ a a)
                      pong (1.0)
@@ -246,6 +254,16 @@ pub mod test {
                     ('y', -10., 10.),
                 ],
                 1e-10,
+            );
+            check_one(
+                "rearrange_mul_div_1",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "rearrange_mul_div_2",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
             );
             check_one("divide_by_self", &[('a', -10., 10.)], 1e-12);
             check_one(

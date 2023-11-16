@@ -1,6 +1,6 @@
 use crate::{
     dedup::Deduplicater,
-    fold::fold,
+    fold::fold_nodes,
     prune::Pruner,
     sort::TopoSorter,
     template::{get_templates, Template},
@@ -247,11 +247,8 @@ impl Capture {
         };
         // Clean up and make a tree.
         let (nodes, root_index) = self.topo_sorter.run(nodes, root_index).map_err(|_| ())?;
-        return Tree::from_nodes(
-            self.pruner
-                .run(self.deduper.run(fold(nodes)), root_index),
-        )
-        .map_err(|_| ());
+        return Tree::from_nodes(self.pruner.run(self.deduper.run(fold_nodes(nodes)), root_index))
+            .map_err(|_| ());
     }
 
     fn binding_state(&self) -> usize {
