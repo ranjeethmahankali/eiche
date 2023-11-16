@@ -255,6 +255,16 @@ pub mod test {
                 ],
                 1e-10,
             );
+            check_one(
+                "rearrange_mul_div_1",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "rearrange_mul_div_2",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
             check_one("divide_by_self", &[('a', -10., 10.)], 1e-12);
             check_one(
                 "distribute_pow_div",
