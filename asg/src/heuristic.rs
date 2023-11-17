@@ -30,7 +30,7 @@ impl LoopCounter {
     }
 
     fn reset(&mut self, len: usize) {
-        self.ufind.reset(len);
+        self.ufind.init(len);
         self.ancestors.clear();
         self.ancestors.reserve(len);
         self.ancestors.extend(0..len);
