@@ -5,74 +5,99 @@ use crate::{
 };
 
 pub struct EulerWalkHeuristic {
-    visited: Vec<bool>,
-    stack: Vec<usize>,
-    euler: Vec<usize>,
-    last_visited: Vec<usize>,
-    num_parents: Vec<usize>,
+    stack: Vec<(usize, usize)>,
+    euler: Vec<(usize, bool)>, // Index, whether visiting from a parent node.
+    node_data: Vec<(bool, usize, usize)>, // visited, last_visit, num_parents.
 }
 
 impl EulerWalkHeuristic {
     pub fn new() -> EulerWalkHeuristic {
         EulerWalkHeuristic {
-            visited: Vec::new(),
             stack: Vec::new(),
             euler: Vec::new(),
-            last_visited: Vec::new(),
-            num_parents: Vec::new(),
+            node_data: Vec::new(),
         }
     }
 
-    pub fn compute(&mut self, nodes: &Vec<Node>, root: usize) -> usize {
-        // Reset all buffers.
-        self.visited.clear();
-        self.visited.resize(nodes.len(), false);
+    fn reset(&mut self, size: usize) {
         self.stack.clear();
-        self.stack.reserve(nodes.len());
+        self.stack.reserve(size);
         self.euler.clear();
-        self.euler.reserve(3 * nodes.len()); // Estimate.
-        self.last_visited.clear();
-        self.last_visited.resize(nodes.len(), 0);
-        self.num_parents.clear();
-        self.num_parents.resize(nodes.len(), 0);
-        // Euler walk.
-        self.stack.push(root);
-        while let Some(i) = self.stack.pop() {
-            if !self.visited[i] {
+        self.euler.reserve(3 * size); // Estimate.
+        self.node_data.clear();
+        self.node_data.resize(size, (false, 0, 0));
+    }
+
+    fn walk(&mut self, nodes: &Vec<Node>, root: usize) {
+        self.stack.push((root, 0));
+        let mut prevdepth = 0;
+        while let Some((i, depth)) = self.stack.pop() {
+            let (visited, _, _) = &mut self.node_data[i];
+            if !(*visited) {
                 match &nodes[i] {
                     Constant(_) | Symbol(_) => {}
-                    Unary(_, input) => self.stack.extend_from_slice(&[i, *input]),
-                    Binary(_, lhs, rhs) => self.stack.extend_from_slice(&[i, *rhs, i, *lhs]),
+                    Unary(_, input) => self
+                        .stack
+                        .extend_from_slice(&[(i, depth), (*input, depth + 1)]),
+                    Binary(_, lhs, rhs) => self.stack.extend_from_slice(&[
+                        (i, depth),
+                        (*rhs, depth + 1),
+                        (i, depth),
+                        (*lhs, depth + 1),
+                    ]),
                 };
-                self.visited[i] = true;
+                *visited = true;
             }
-            self.euler.push(i);
+            self.euler.push((i, prevdepth < depth));
+            prevdepth = depth;
         }
-        // Count parents.
+    }
+
+    fn count_parents(&mut self, nodes: &Vec<Node>) {
         for node in nodes {
             match node {
                 Constant(_) | Symbol(_) => {}
-                Unary(_, input) => self.num_parents[*input] += 1,
+                Unary(_, input) => {
+                    self.node_data[*input].2 += 1;
+                }
                 Binary(_, lhs, rhs) => {
-                    self.num_parents[*lhs] += 1;
-                    self.num_parents[*rhs] += 1;
+                    self.node_data[*lhs].2 += 1;
+                    self.node_data[*rhs].2 += 1;
                 }
             }
         }
-        // Find distances between occurrences of nodes with multiple
-        // parents and sum them.
+    }
+
+    fn total_euler_distance(&mut self) -> usize {
         self.euler
             .iter()
             .zip(0..self.euler.len())
-            .map(|(node, i)| {
-                let last = std::mem::replace(&mut self.last_visited[*node], i);
-                if self.num_parents[*node] > 1 && last > 0 {
-                    i - last
+            .map(|((node, from_parent), i)| {
+                let last_visit = {
+                    let (_, last_visit, num_parents) = &mut self.node_data[*node];
+                    if *num_parents < 2 {
+                        return 0;
+                    }
+                    last_visit
+                };
+                let last = std::mem::replace(last_visit, i);
+                if *from_parent && last > 0 {
+                    return i - last;
                 } else {
-                    0
+                    return 0;
                 }
             })
             .sum()
+    }
+
+    fn compute(&mut self, nodes: &Vec<Node>, root: usize) -> usize {
+        if nodes.is_empty() {
+            return 0;
+        }
+        self.reset(nodes.len());
+        self.walk(nodes, root);
+        self.count_parents(nodes);
+        return self.total_euler_distance();
     }
 }
 
@@ -125,5 +150,14 @@ mod test {
             .deduplicate()
             .unwrap();
         assert_eq!(h.compute(tree.nodes(), tree.root_index()), 33);
+    }
+
+    #[test]
+    fn t_euler_walk_non_leaf() {
+        let mut h = EulerWalkHeuristic::new();
+        let tree = deftree!(+ (* 2 (+ x y)) (* (+ x y) 3))
+            .deduplicate()
+            .unwrap();
+        assert_eq!(h.compute(tree.nodes(), tree.root_index()), 4);
     }
 }
