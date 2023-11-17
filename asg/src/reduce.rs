@@ -5,37 +5,59 @@ use crate::{
 };
 
 pub struct EulerWalkHeuristic {
-    stack: Vec<(usize, usize)>,
-    euler: Vec<(usize, bool)>, // Index, whether visiting from a parent node.
-    node_data: Vec<(bool, usize, usize)>, // visited, last_visit, num_parents.
+    stack: Vec<(usize, usize)>, // index, depth
+    last_visit: Vec<Option<usize>>,
 }
 
+/// If two nodes have the same node as their one of their inputs, it
+/// creates a diamond shaped loop. If this loop is small, i.e. if the
+/// lowest common ancestor of the two nodes is near by, It is more
+/// likely that a known template will match with the tree and be able
+/// to simplify it. The euler-walk heuristic penalizes diamond shaped
+/// loops based on their size, i.e. larger loops have a higher cost
+/// than smaller loops. While the heuristic tries to add up the
+/// lengths of all diamond shaped loops, the value might not always be
+/// exact, depending on the traversal order. But the value is
+/// guaranteed to have a positive correlation with the number of
+/// diamond shaped loops and their sizes.
 impl EulerWalkHeuristic {
     pub fn new() -> EulerWalkHeuristic {
         EulerWalkHeuristic {
             stack: Vec::new(),
-            euler: Vec::new(),
-            node_data: Vec::new(),
+            last_visit: Vec::new(),
         }
     }
 
-    fn reset(&mut self, size: usize) {
+    /// In a typical depth first traversal, you just push the children
+    /// of the current node onto the stack. Instead, if you also push
+    /// the node itself, before every child, it results in an euler
+    /// walk. This is very useful because for any pair of nodes 'a'
+    /// and 'b', euler-walk necessarily contains a subpath that starts
+    /// at 'a' and ends at 'b' or starts at 'b' and ends at
+    /// 'a'. Furthermore, this subpath necessarily goes through the
+    /// lowest common ancestor of 'a' and 'b'. That means, if we're
+    /// visiting a node for the second (or more) time from a parent,
+    /// we've detected a diamond shaped loop, and the number of nodes
+    /// traversed since the last visit roughly correlates to the size
+    /// of the diamond shaped loop.
+    fn compute(&mut self, nodes: &Vec<Node>, root: usize) -> usize {
+        // Reset all buffers.
         self.stack.clear();
-        self.stack.reserve(size);
-        self.euler.clear();
-        self.euler.reserve(3 * size); // Estimate.
-        self.node_data.clear();
-        self.node_data.resize(size, (false, 0, 0));
-    }
-
-    fn walk(&mut self, nodes: &Vec<Node>, root: usize) {
+        self.stack.reserve(nodes.len());
+        self.last_visit.clear();
+        self.last_visit.resize(nodes.len(), None);
+        // Start the Euler walk.
         self.stack.push((root, 0));
-        let mut prevdepth = 0;
+        let mut prevdepth: usize = 0;
+        let mut counter: usize = 0;
+        let mut sum: usize = 0;
         while let Some((i, depth)) = self.stack.pop() {
-            let (visited, _, _) = &mut self.node_data[i];
-            if !(*visited) {
-                match &nodes[i] {
-                    Constant(_) | Symbol(_) => {}
+            match self.last_visit[i] {
+                // Accumulate the size of the diamond shaped loop.
+                Some(last) if prevdepth < depth => sum += counter - last,
+                // Push children if visiting for the first time.
+                None => match &nodes[i] {
+                    Constant(_) | Symbol(_) => {} // No children to push.
                     Unary(_, input) => self
                         .stack
                         .extend_from_slice(&[(i, depth), (*input, depth + 1)]),
@@ -45,59 +67,15 @@ impl EulerWalkHeuristic {
                         (i, depth),
                         (*lhs, depth + 1),
                     ]),
-                };
-                *visited = true;
+                },
+                _ => {} // Do nothing.
             }
-            self.euler.push((i, prevdepth < depth));
+            // Record visit, update counter and depth.
+            self.last_visit[i] = Some(counter);
+            counter += 1;
             prevdepth = depth;
         }
-    }
-
-    fn count_parents(&mut self, nodes: &Vec<Node>) {
-        for node in nodes {
-            match node {
-                Constant(_) | Symbol(_) => {}
-                Unary(_, input) => {
-                    self.node_data[*input].2 += 1;
-                }
-                Binary(_, lhs, rhs) => {
-                    self.node_data[*lhs].2 += 1;
-                    self.node_data[*rhs].2 += 1;
-                }
-            }
-        }
-    }
-
-    fn total_euler_distance(&mut self) -> usize {
-        self.euler
-            .iter()
-            .zip(0..self.euler.len())
-            .map(|((node, from_parent), i)| {
-                let last_visit = {
-                    let (_, last_visit, num_parents) = &mut self.node_data[*node];
-                    if *num_parents < 2 {
-                        return 0;
-                    }
-                    last_visit
-                };
-                let last = std::mem::replace(last_visit, i);
-                if *from_parent && last > 0 {
-                    return i - last;
-                } else {
-                    return 0;
-                }
-            })
-            .sum()
-    }
-
-    fn compute(&mut self, nodes: &Vec<Node>, root: usize) -> usize {
-        if nodes.is_empty() {
-            return 0;
-        }
-        self.reset(nodes.len());
-        self.walk(nodes, root);
-        self.count_parents(nodes);
-        return self.total_euler_distance();
+        return sum;
     }
 }
 
