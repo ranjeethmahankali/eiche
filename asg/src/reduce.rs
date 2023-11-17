@@ -4,7 +4,7 @@ use crate::{
     tree::{Node, Node::*},
 };
 
-pub struct EulerWalkHeuristic {
+struct Heuristic {
     stack: Vec<(usize, usize)>, // index, depth
     last_visit: Vec<Option<usize>>,
 }
@@ -20,9 +20,9 @@ pub struct EulerWalkHeuristic {
 /// exact, depending on the traversal order. But the value is
 /// guaranteed to have a positive correlation with the number of
 /// diamond shaped loops and their sizes.
-impl EulerWalkHeuristic {
-    pub fn new() -> EulerWalkHeuristic {
-        EulerWalkHeuristic {
+impl Heuristic {
+    pub fn new() -> Heuristic {
+        Heuristic {
             stack: Vec::new(),
             last_visit: Vec::new(),
         }
@@ -40,7 +40,7 @@ impl EulerWalkHeuristic {
     /// we've detected a diamond shaped loop, and the number of nodes
     /// traversed since the last visit roughly correlates to the size
     /// of the diamond shaped loop.
-    fn compute(&mut self, nodes: &Vec<Node>, root: usize) -> usize {
+    fn euler_walk_cost(&mut self, nodes: &Vec<Node>, root: usize) -> usize {
         // Reset all buffers.
         self.stack.clear();
         self.stack.reserve(nodes.len());
@@ -77,19 +77,19 @@ impl EulerWalkHeuristic {
         }
         return sum;
     }
-}
 
-fn complexity(tree: &Tree, euler: &mut EulerWalkHeuristic) -> usize {
-    tree.len() + euler.compute(tree.nodes(), tree.root_index())
+    fn cost(&mut self, tree: &Tree) -> usize {
+        tree.len() + self.euler_walk_cost(tree.nodes(), tree.root_index())
+    }
 }
 
 pub fn reduce(tree: Tree) -> Result<Tree, ()> {
     let mutations = Mutations::from(&tree);
     let mut costs = Vec::<usize>::new();
-    let mut lc = EulerWalkHeuristic::new();
+    let mut h = Heuristic::new();
     for tree in mutations {
         match tree {
-            Ok(t) => costs.push(complexity(&t, &mut lc)),
+            Ok(t) => costs.push(h.cost(&t)),
             Err(_) => todo!(),
         }
     }
@@ -103,39 +103,81 @@ mod test {
 
     #[test]
     fn t_euler_walk_depth_1() {
-        let mut h = EulerWalkHeuristic::new();
+        let mut h = Heuristic::new();
         let tree = deftree!(+ x x).deduplicate().unwrap();
-        assert_eq!(h.compute(tree.nodes(), tree.root_index()), 2);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 2);
     }
 
     #[test]
     fn t_euler_walk_depth_2() {
-        let mut h = EulerWalkHeuristic::new();
+        let mut h = Heuristic::new();
         let tree = deftree!(+ (* 2 x) (* 3 x)).deduplicate().unwrap();
-        assert_eq!(h.compute(tree.nodes(), tree.root_index()), 6);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 6);
     }
 
     #[test]
     fn t_euler_walk_multiple() {
-        let mut h = EulerWalkHeuristic::new();
+        let mut h = Heuristic::new();
         let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (* 4 x))
             .deduplicate()
             .unwrap();
-        println!("{}", tree);
-        assert_eq!(h.compute(tree.nodes(), tree.root_index()), 13);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 13);
         // Make sure the same heuristic instance can be reused on other trees.
         let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (+ (* 4 x) 2))
             .deduplicate()
             .unwrap();
-        assert_eq!(h.compute(tree.nodes(), tree.root_index()), 33);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 33);
     }
 
     #[test]
     fn t_euler_walk_non_leaf() {
-        let mut h = EulerWalkHeuristic::new();
+        let mut h = Heuristic::new();
         let tree = deftree!(+ (* 2 (+ x y)) (* (+ x y) 3))
             .deduplicate()
             .unwrap();
-        assert_eq!(h.compute(tree.nodes(), tree.root_index()), 4);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 4);
+    }
+
+    fn check_heuristic_and_mutations(mut before: Tree, mut after: Tree) {
+        // Make sure the 'after' tree has lower cost than the 'before
+        // tree. And that the 'after' tree is found exactly once
+        // among the mutations of the 'before' tree.
+        before = before.deduplicate().unwrap();
+        after = after.deduplicate().unwrap();
+        println!("${}$\n", after.to_latex());
+        let mut h = Heuristic::new();
+        assert!(h.cost(&before) > h.cost(&after));
+        assert_eq!(
+            1,
+            Mutations::from(&before)
+                .filter_map(|t| match t {
+                    Ok(tree) => {
+                        println!("${}$\n", tree.to_latex());
+                        if tree.equivalent(&after) {
+                            Some(1)
+                        } else {
+                            None
+                        }
+                    }
+                    Err(_) => panic!("Unable to generate mutations for tree."),
+                })
+                .sum::<usize>()
+        );
+    }
+
+    #[test]
+    fn t_heuristic_cost_1() {
+        check_heuristic_and_mutations(
+            deftree!(/ (+ (* p x) (* p y)) (+ x y)),
+            deftree!(/ (* p (+ x y)) (+ x y)),
+        );
+    }
+
+    #[test]
+    fn t_heuristic_cost_2() {
+        check_heuristic_and_mutations(
+            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
+            deftree!(log (+ 1 (exp (sqrt (min x y))))),
+        );
     }
 }
