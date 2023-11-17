@@ -4,7 +4,6 @@ pub mod tree;
 
 mod dedup;
 mod fold;
-mod heuristic;
 mod io;
 mod latex;
 mod lisp;
@@ -13,7 +12,6 @@ mod mutate;
 mod prune;
 mod sort;
 mod template;
-mod unionfind;
 mod walk;
 
 #[cfg(test)]
