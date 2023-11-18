@@ -10,12 +10,14 @@ pub mod util {
             let b = $b;
             let eps = $eps;
             let error = f64::abs(a - b);
-            if error > eps {
-                panic!(
-                    "Assertion failed: |({}) - ({})| = {:e} < {:e}",
-                    a, b, error, eps
-                );
-            }
+            assert!(
+                error <= eps,
+                "Assertion failed: |({}) - ({})| = {:e} < {:e}",
+                a,
+                b,
+                error,
+                eps
+            );
         }};
         ($a:expr, $b:expr) => {
             assert_float_eq!($a, $b, f64::EPSILON)
@@ -58,11 +60,7 @@ pub mod util {
                 continue;
             }
             // We set all the variables. Run the test.
-            assert_float_eq!(
-                eval.run().expect("Unable to compute the actual value."),
-                expectedfn(&sample[..]).expect("Unable to compute expected value."),
-                eps
-            );
+            assert_float_eq!(eval.run().unwrap(), expectedfn(&sample[..]).unwrap(), eps);
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -102,11 +100,7 @@ pub mod util {
             if vari < nvars - 1 {
                 continue;
             }
-            assert_float_eq!(
-                eval1.run().expect("Unable to compute the actual value."),
-                eval2.run().expect("Unable to compute expected value."),
-                eps
-            );
+            assert_float_eq!(eval1.run().unwrap(), eval2.run().unwrap(), eps);
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;

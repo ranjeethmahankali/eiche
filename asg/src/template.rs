@@ -276,10 +276,7 @@ pub mod test {
         let mut check_one = |name: &'static str, vardata: &[(char, f64, f64)], eps: f64| {
             use crate::test::util::compare_trees;
             // Find template by name.
-            let template = TEMPLATES
-                .iter()
-                .find(|t| t.name == name)
-                .expect(format!("No template found with name: {}", name).as_str());
+            let template = TEMPLATES.iter().find(|t| t.name == name).unwrap();
             // Check if valid trees can be made from the templates.
             print!("{}   ... ", name);
             compare_trees(&template.ping, &template.pong, vardata, 20, eps);
@@ -298,7 +295,7 @@ pub mod test {
                 &[('k', -10., 10.), ('a', -10., 10.), ('b', -10., 10.)],
                 1e-12,
             );
-            check_one("min_of_sqrt", &[('a', -10., 10.), ('b', -10., 10.)], 1e-12);
+            check_one("min_of_sqrt", &[('a', 0., 10.), ('b', 0., 10.)], 1e-12);
             check_one(
                 "rearrange_frac",
                 &[
@@ -330,7 +327,7 @@ pub mod test {
                 &[('a', 1., 5.), ('b', 1., 5.), ('k', 0.5, 3.)],
                 1e-10,
             );
-            check_one("square_sqrt", &[('a', -10., 10.)], 1e-12);
+            check_one("square_sqrt", &[('a', 0., 10.)], 1e-12);
             check_one("sqrt_square", &[('a', -10., 10.)], 1e-12);
             check_one("square_abs", &[('x', -10., 10.)], 0.);
             check_one(
@@ -367,12 +364,11 @@ pub mod test {
                 .filter(|name| !checked.contains(name))
                 .collect::<Vec<&str>>()
                 .join("\n");
-            if !unchecked.is_empty() {
-                panic!(
-                    "\nThe following templates have not been tested:\n{}\n",
-                    unchecked
-                );
-            }
+            assert!(
+                unchecked.is_empty(),
+                "\nThe following templates have not been tested:\n{}\n",
+                unchecked
+            );
         }
     }
 }

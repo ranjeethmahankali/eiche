@@ -306,9 +306,12 @@ mod test {
         capture.node_index = None;
         capture.bindings.clear();
         let template = get_template_by_name(name).unwrap();
-        if !capture.next_match(&template, &tree) || capture.node_index.unwrap() != node_index {
-            panic!("Template:{}Tree:{}", template.ping(), tree);
-        }
+        assert!(
+            capture.next_match(&template, &tree),
+            "Template:{}Tree:{}",
+            template.ping(),
+            tree
+        );
         assert!(matches!(capture.node_index, Some(i) if i == node_index));
         t_check_bindings(&capture, &template, &tree);
     }
@@ -446,11 +449,10 @@ mod test {
             assert_eq!(
                 1,
                 Mutations::of(&tree, capture)
-                    .filter(|result| {
-                        match result {
-                            Ok(tree) => expected.equivalent(tree),
-                            Err(_) => panic!("Unable to generate mutations of a tree"),
-                        }
+                    .filter_map(|result| if result.unwrap().equivalent(&expected) {
+                        Some(())
+                    } else {
+                        None
                     })
                     .count()
             );
@@ -486,24 +488,22 @@ mod test {
         assert_eq!(
             1,
             Mutations::of(&before, &mut capture)
-                .filter_map(|t| match t {
-                    Ok(tree) => {
-                        if equivalent(
-                            after.root_index(),
-                            tree.root_index(),
-                            after.nodes(),
-                            tree.nodes(),
-                            &mut lwalker,
-                            &mut rwalker,
-                        ) {
-                            Some(1)
-                        } else {
-                            None
-                        }
+                .filter_map(|t| {
+                    let tree = t.unwrap();
+                    if equivalent(
+                        after.root_index(),
+                        tree.root_index(),
+                        after.nodes(),
+                        tree.nodes(),
+                        &mut lwalker,
+                        &mut rwalker,
+                    ) {
+                        Some(())
+                    } else {
+                        None
                     }
-                    Err(_) => panic!("Error when generating mutations of a tree."),
                 })
-                .sum::<usize>()
+                .count()
         );
     }
 

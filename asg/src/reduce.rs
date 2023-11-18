@@ -139,29 +139,24 @@ mod test {
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 4);
     }
 
-    fn check_heuristic_and_mutations(mut before: Tree, mut after: Tree) {
+    fn check_heuristic_and_mutations(before: Tree, after: Tree) {
         // Make sure the 'after' tree has lower cost than the 'before
         // tree. And that the 'after' tree is found exactly once
         // among the mutations of the 'before' tree.
-        before = before.deduplicate().unwrap();
-        after = after.deduplicate().unwrap();
+        let before = before.deduplicate().unwrap();
+        let after = after.deduplicate().unwrap();
         let mut h = Heuristic::new();
         let mut capture = TemplateCapture::new();
         assert!(h.cost(&before) > h.cost(&after));
         assert_eq!(
             1,
             Mutations::of(&before, &mut capture)
-                .filter_map(|t| match t {
-                    Ok(tree) => {
-                        if tree.equivalent(&after) {
-                            Some(1)
-                        } else {
-                            None
-                        }
-                    }
-                    Err(_) => panic!("Unable to generate mutations for tree."),
+                .filter_map(|t| if t.unwrap().equivalent(&after) {
+                    Some(())
+                } else {
+                    None
                 })
-                .sum::<usize>()
+                .count()
         );
     }
 
