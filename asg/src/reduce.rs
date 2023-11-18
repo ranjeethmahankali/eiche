@@ -1,5 +1,5 @@
 use crate::{
-    mutate::Mutations,
+    mutate::{Mutations, TemplateCapture},
     tree::Tree,
     tree::{Node, Node::*},
 };
@@ -84,7 +84,8 @@ impl Heuristic {
 }
 
 pub fn reduce(tree: Tree) -> Result<Tree, ()> {
-    let mutations = Mutations::from(&tree);
+    let mut capture = TemplateCapture::new();
+    let mutations = Mutations::of(&tree, &mut capture);
     let mut costs = Vec::<usize>::new();
     let mut h = Heuristic::new();
     for tree in mutations {
@@ -145,10 +146,11 @@ mod test {
         before = before.deduplicate().unwrap();
         after = after.deduplicate().unwrap();
         let mut h = Heuristic::new();
+        let mut capture = TemplateCapture::new();
         assert!(h.cost(&before) > h.cost(&after));
         assert_eq!(
             1,
-            Mutations::from(&before)
+            Mutations::of(&before, &mut capture)
                 .filter_map(|t| match t {
                     Ok(tree) => {
                         if tree.equivalent(&after) {

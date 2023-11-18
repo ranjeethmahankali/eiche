@@ -126,7 +126,10 @@ fn with_parens(latex: String) -> String {
 
 #[cfg(test)]
 mod test {
-    use crate::{deftree, mutate::Mutations};
+    use crate::{
+        deftree,
+        mutate::{Mutations, TemplateCapture},
+    };
 
     #[test]
     fn t_negate() {
@@ -233,7 +236,8 @@ mod test {
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y))
             .deduplicate()
             .unwrap();
-        for m in Mutations::from(&tree) {
+        let mut capture = TemplateCapture::new();
+        for m in Mutations::of(&tree, &mut capture) {
             match m {
                 Ok(mutated) => {
                     assert_ne!(mutated, tree);

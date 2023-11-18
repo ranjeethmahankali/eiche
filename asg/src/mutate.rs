@@ -9,15 +9,15 @@ use crate::{
 
 pub struct Mutations<'a> {
     tree: &'a Tree,
-    capture: TemplateCapture,
+    capture: &'a mut TemplateCapture,
     template_index: usize,
 }
 
 impl<'a> Mutations<'a> {
-    pub fn from(tree: &'a Tree) -> Mutations {
+    pub fn of(tree: &'a Tree, capture: &'a mut TemplateCapture) -> Mutations<'a> {
         Mutations {
             tree,
-            capture: TemplateCapture::new(),
+            capture,
             template_index: 0,
         }
     }
@@ -438,14 +438,54 @@ mod test {
         );
     }
 
+    #[test]
+    fn t_mutate_multiple_trees() {
+        fn assert_one_match(tree: Tree, expected: Tree, capture: &mut TemplateCapture) {
+            let tree = tree.deduplicate().unwrap();
+            let expected = expected.deduplicate().unwrap();
+            assert_eq!(
+                1,
+                Mutations::of(&tree, capture)
+                    .filter(|result| {
+                        match result {
+                            Ok(tree) => expected.equivalent(tree),
+                            Err(_) => panic!("Unable to generate mutations of a tree"),
+                        }
+                    })
+                    .count()
+            );
+        }
+        let mut capture = TemplateCapture::new();
+        // Ensure the same template capture can be used to mutate
+        // multiple trees without having to reallocate.
+        assert_one_match(
+            deftree!(/ (+ (* p x) (* p y)) (+ x y)),
+            deftree!(/ (* p (+ x y)) (+ x y)),
+            &mut capture,
+        );
+        // Use same capture for a second set of trees.
+        assert_one_match(
+            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
+            deftree!(log (+ 1 (exp (sqrt (min x y))))),
+            &mut capture,
+        );
+        // Use the same capture on a third set of trees.
+        assert_one_match(
+            deftree!(/ (* (pow a b) (pow b c)) (pow c a)),
+            deftree!(* (pow a b) (/ (pow b c) (pow c a))),
+            &mut capture,
+        );
+    }
+
     fn check_mutations(mut before: Tree, mut after: Tree) {
         before = before.deduplicate().unwrap();
         after = after.deduplicate().unwrap();
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
+        let mut capture = TemplateCapture::new();
         assert_eq!(
             1,
-            Mutations::from(&before)
+            Mutations::of(&before, &mut capture)
                 .filter_map(|t| match t {
                     Ok(tree) => {
                         if equivalent(
