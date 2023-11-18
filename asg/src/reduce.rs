@@ -144,7 +144,6 @@ mod test {
         // among the mutations of the 'before' tree.
         before = before.deduplicate().unwrap();
         after = after.deduplicate().unwrap();
-        println!("${}$\n", after.to_latex());
         let mut h = Heuristic::new();
         assert!(h.cost(&before) > h.cost(&after));
         assert_eq!(
@@ -152,7 +151,6 @@ mod test {
             Mutations::from(&before)
                 .filter_map(|t| match t {
                     Ok(tree) => {
-                        println!("${}$\n", tree.to_latex());
                         if tree.equivalent(&after) {
                             Some(1)
                         } else {
