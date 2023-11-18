@@ -14,58 +14,24 @@ macro_rules! deftree {
     (($($a:tt)*)) => { // Unwrap redundant parens.
         $crate::deftree!($($a)*)
     };
-    ({$a:expr}) => { // Unwrap curly braces to variables.
+    ($a:block) => { // Block expressions.
         $a
     };
-    ({$($a:tt)*}) => { // More complex expressions.
-        {$($a)*}
+    // Unary ops with functions names.
+    ($unary_op:ident $a:tt) => {
+        $crate::tree::$unary_op($crate::deftree!($a))
     };
-    // Unary ops.
+    // Binary ops with function names.
+    ($binary_op:ident $a:tt $b:tt) => {
+        $crate::tree::$binary_op($crate::deftree!($a), $crate::deftree!($b))
+    };
+    // Negate operator
     (- $a:tt) => {
         -$crate::deftree!($a)
     };
-    (sqrt $a:tt) => {
-        $crate::tree::sqrt($crate::deftree!($a))
-    };
-    (abs $a:tt) => {
-        $crate::tree::abs($crate::deftree!($a))
-    };
-    (sin $a:tt) => {
-        $crate::tree::sin($crate::deftree!($a))
-    };
-    (cos $a:tt) => {
-        $crate::tree::cos($crate::deftree!($a))
-    };
-    (tan $a:tt) => {
-        $crate::tree::tan($crate::deftree!($a))
-    };
-    (log $a:tt) => {
-        $crate::tree::log($crate::deftree!($a))
-    };
-    (exp $a:tt) => {
-        $crate::tree::exp($crate::deftree!($a))
-    };
-    // Binary ops.
-    (+ $a:tt $b:tt) => {
-        $crate::deftree!($a) + $crate::deftree!($b)
-    };
-    (- $a:tt $b:tt) => {
-        $crate::deftree!($a) - $crate::deftree!($b)
-    };
-    (* $a:tt $b:tt) => {
-        $crate::deftree!($a) * $crate::deftree!($b)
-    };
-    (/ $a:tt $b:tt) => {
-        $crate::deftree!($a) / $crate::deftree!($b)
-    };
-    (pow $a:tt $b: tt) => {
-        $crate::tree::pow($crate::deftree!($a), $crate::deftree!($b))
-    };
-    (min $a:tt $b: tt) => {
-        $crate::tree::min($crate::deftree!($a), $crate::deftree!($b))
-    };
-    (max $a:tt $b: tt) => {
-        $crate::tree::max($crate::deftree!($a), $crate::deftree!($b))
+    // Binary ops with operators
+    ($op:tt $lhs:tt $rhs:tt) => {
+        $crate::deftree!($lhs) $op $crate::deftree!($rhs)
     };
     // Symbols.
     ($a:ident) => {{
