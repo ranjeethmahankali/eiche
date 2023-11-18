@@ -9,18 +9,16 @@ use crate::{
 
 pub struct Mutations<'a> {
     tree: &'a Tree,
-    capture: Capture,
+    capture: &'a mut TemplateCapture,
     template_index: usize,
-    reset: bool,
 }
 
 impl<'a> Mutations<'a> {
-    pub fn from(tree: &'a Tree) -> Mutations {
+    pub fn of(tree: &'a Tree, capture: &'a mut TemplateCapture) -> Mutations<'a> {
         Mutations {
             tree,
-            capture: Capture::new(),
+            capture,
             template_index: 0,
-            reset: true,
         }
     }
 }
@@ -31,117 +29,17 @@ impl<'a> Iterator for Mutations<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let templates = get_templates();
         while self.template_index < templates.len() {
-            while self.reset || self.capture.is_valid() {
-                let template = &templates[self.template_index];
-                if self.reset {
-                    template.first_match(&self.tree, &mut self.capture);
-                    self.reset = false;
-                } else {
-                    template.next_match(&self.tree, &mut self.capture);
-                }
-                if self.capture.is_valid() {
-                    return Some(self.capture.apply(template, &self.tree));
-                } else {
-                    break;
-                }
+            let template = &templates[self.template_index];
+            while self.capture.next_match(template, self.tree) {
+                return Some(self.capture.apply(template, &self.tree));
             }
-            self.reset = true;
             self.template_index += 1;
         }
         return None;
     }
 }
 
-fn symbolic_match(
-    ldofs: &Box<[usize]>,
-    li: usize,
-    ltree: &Tree,
-    ri: usize,
-    rtree: &Tree,
-    capture: &mut Capture,
-) -> bool {
-    match (ltree.node(li), rtree.node(ri)) {
-        (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
-        (Node::Constant(_), _) => return false,
-        (Node::Symbol(label), _) => return capture.bind(*label, ri),
-        (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
-            if lop != rop {
-                return false;
-            } else {
-                return symbolic_match(ldofs, *input1, ltree, *input2, rtree, capture);
-            }
-        }
-        (Node::Unary(..), _) => return false,
-        (Node::Binary(lop, l1, r1), Node::Binary(rop, l2, r2)) => {
-            if lop != rop {
-                return false;
-            } else {
-                let (l1, r1, l2, r2) = {
-                    let mut l1 = *l1;
-                    let mut r1 = *r1;
-                    let mut l2 = *l2;
-                    let mut r2 = *r2;
-                    if !lop.is_commutative() && ldofs[l1] > ldofs[r1] {
-                        (l1, r1) = (r1, l1);
-                        (l2, r2) = (r2, l2);
-                    }
-                    (l1, r1, l2, r2)
-                };
-                let state = capture.binding_state();
-                let ordered = symbolic_match(ldofs, l1, ltree, l2, rtree, capture)
-                    && symbolic_match(ldofs, r1, ltree, r2, rtree, capture);
-                if !lop.is_commutative() || ordered {
-                    return ordered;
-                }
-                capture.restore_bindings(state);
-                return symbolic_match(ldofs, l1, ltree, r2, rtree, capture)
-                    && symbolic_match(ldofs, r1, ltree, l2, rtree, capture);
-            }
-        }
-        (Node::Binary(..), _) => return false,
-    }
-}
-
-impl Template {
-    fn match_node(&self, from: usize, tree: &Tree, capture: &mut Capture) -> bool {
-        // Clear any previous bindings to start over fresh.
-        capture.bindings.clear();
-        symbolic_match(
-            &self.dof_ping(),
-            self.ping().root_index(),
-            self.ping(),
-            from,
-            tree,
-            capture,
-        )
-    }
-
-    fn match_from(&self, index: usize, tree: &Tree, capture: &mut Capture) {
-        capture.node_index = None;
-        if index >= tree.len() {
-            return;
-        }
-        for i in index..tree.len() {
-            if self.match_node(i, tree, capture) {
-                capture.node_index = Some(i);
-                return;
-            }
-        }
-    }
-
-    pub fn first_match(&self, tree: &Tree, capture: &mut Capture) {
-        self.match_from(0, tree, capture);
-    }
-
-    pub fn next_match(&self, tree: &Tree, capture: &mut Capture) {
-        match capture.node_index {
-            Some(i) => self.match_from(i + 1, tree, capture),
-            None => return,
-        }
-    }
-}
-
-pub struct Capture {
+pub struct TemplateCapture {
     node_index: Option<usize>,
     bindings: Vec<(char, usize)>,
     node_map: Vec<usize>,
@@ -150,9 +48,9 @@ pub struct Capture {
     deduper: Deduplicater,
 }
 
-impl Capture {
-    pub fn new() -> Capture {
-        Capture {
+impl TemplateCapture {
+    pub fn new() -> TemplateCapture {
+        TemplateCapture {
             node_index: None,
             bindings: vec![],
             node_map: vec![],
@@ -166,6 +64,33 @@ impl Capture {
         &self.bindings
     }
 
+    pub fn next_match(&mut self, template: &Template, tree: &Tree) -> bool {
+        // Set self.node_index to None and choose the starting index
+        // based on what was in self.node_index before setting it to None.
+        let start: usize = match std::mem::replace(&mut self.node_index, None) {
+            Some(i) => i + 1,
+            None => 0,
+        };
+        if start >= tree.len() {
+            return false;
+        }
+        for i in start..tree.len() {
+            // Clear any previous bindings to start over fresh.
+            self.bindings.clear();
+            if self.match_node(
+                template.dof_ping(),
+                template.ping().root_index(),
+                template.ping(),
+                i,
+                tree,
+            ) {
+                self.node_index = Some(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
     fn bind(&mut self, label: char, index: usize) -> bool {
         for (l, i) in self.bindings.iter() {
             if *l == label {
@@ -176,13 +101,17 @@ impl Capture {
         return true;
     }
 
-    pub fn is_valid(&self) -> bool {
-        return self.node_index.is_some();
-    }
-
     fn add_node(&mut self, dst: &mut Vec<Node>, src: usize, node: Node) {
         self.node_map[src] = dst.len();
         dst.push(node);
+    }
+
+    fn binding_checkpoint(&self) -> usize {
+        self.bindings.len()
+    }
+
+    fn restore_bindings(&mut self, state: usize) {
+        self.bindings.truncate(state);
     }
 
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, ()> {
@@ -258,12 +187,54 @@ impl Capture {
         .map_err(|_| ());
     }
 
-    fn binding_state(&self) -> usize {
-        self.bindings.len()
-    }
-
-    fn restore_bindings(&mut self, state: usize) {
-        self.bindings.truncate(state);
+    fn match_node(
+        &mut self,
+        ldofs: &Box<[usize]>,
+        li: usize,
+        ltree: &Tree,
+        ri: usize,
+        rtree: &Tree,
+    ) -> bool {
+        match (ltree.node(li), rtree.node(ri)) {
+            (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
+            (Node::Constant(_), _) => return false,
+            (Node::Symbol(label), _) => return self.bind(*label, ri),
+            (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
+                if lop != rop {
+                    return false;
+                } else {
+                    return self.match_node(ldofs, *input1, ltree, *input2, rtree);
+                }
+            }
+            (Node::Unary(..), _) => return false,
+            (Node::Binary(lop, l1, r1), Node::Binary(rop, l2, r2)) => {
+                if lop != rop {
+                    return false;
+                } else {
+                    let (l1, r1, l2, r2) = {
+                        let mut l1 = *l1;
+                        let mut r1 = *r1;
+                        let mut l2 = *l2;
+                        let mut r2 = *r2;
+                        if !lop.is_commutative() && ldofs[l1] > ldofs[r1] {
+                            (l1, r1) = (r1, l1);
+                            (l2, r2) = (r2, l2);
+                        }
+                        (l1, r1, l2, r2)
+                    };
+                    let checkpoint = self.binding_checkpoint();
+                    let ordered = self.match_node(ldofs, l1, ltree, l2, rtree)
+                        && self.match_node(ldofs, r1, ltree, r2, rtree);
+                    if !lop.is_commutative() || ordered {
+                        return ordered;
+                    }
+                    self.restore_bindings(checkpoint);
+                    return self.match_node(ldofs, l1, ltree, r2, rtree)
+                        && self.match_node(ldofs, r1, ltree, l2, rtree);
+                }
+            }
+            (Node::Binary(..), _) => return false,
+        }
     }
 }
 
@@ -274,7 +245,7 @@ mod test {
         dedup::equivalent, deftree, template::test::get_template_by_name, walk::DepthWalker,
     };
 
-    fn t_check_bindings(capture: &Capture, template: &Template, tree: &Tree) {
+    fn t_check_bindings(capture: &TemplateCapture, template: &Template, tree: &Tree) {
         let left: Vec<_> = {
             let mut chars: Vec<_> = capture.bindings.iter().map(|(c, _i)| *c).collect();
             chars.sort();
@@ -293,10 +264,8 @@ mod test {
         let template = Template::from("add_zero", deftree!(+ x 0.), deftree!(x));
         let two: Tree = (-2.0).into();
         let tree = deftree!(+ 0 {two});
-        let mut capture = Capture::new();
-        assert!(!capture.is_valid());
-        template.first_match(&tree, &mut capture);
-        assert!(capture.is_valid());
+        let mut capture = TemplateCapture::new();
+        assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 2));
         t_check_bindings(&capture, &template, &tree);
     }
@@ -309,10 +278,8 @@ mod test {
             deftree!(+ 1 (/ b a)),
         );
         let tree = deftree!(/ (+ p q) q).deduplicate().unwrap();
-        let mut capture = Capture::new();
-        assert!(!capture.is_valid());
-        template.first_match(&tree, &mut capture);
-        assert!(capture.is_valid());
+        let mut capture = TemplateCapture::new();
+        assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 3));
         t_check_bindings(&capture, &template, &tree);
     }
@@ -328,25 +295,23 @@ mod test {
             .deduplicate()
             .unwrap();
         print!("{}{}", template.ping(), tree); // DEBUG
-        let mut capture = Capture::new();
-        assert!(!capture.is_valid());
-        template.first_match(&tree, &mut capture);
-        assert!(capture.is_valid());
+        let mut capture = TemplateCapture::new();
+        assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 7));
         t_check_bindings(&capture, &template, &tree);
     }
 
     fn t_check_template(name: &str, tree: Tree, node_index: usize) {
-        let mut capture = Capture::new();
+        let mut capture = TemplateCapture::new();
         capture.node_index = None;
         capture.bindings.clear();
         let template = get_template_by_name(name).unwrap();
-        assert!(!capture.is_valid());
-        template.first_match(&tree, &mut capture);
-        if !capture.is_valid() || capture.node_index.unwrap() != node_index {
-            panic!("Template:{}Tree:{}", template.ping(), tree);
-        }
-        assert!(capture.is_valid());
+        assert!(
+            capture.next_match(&template, &tree),
+            "Template:{}Tree:{}",
+            template.ping(),
+            tree
+        );
         assert!(matches!(capture.node_index, Some(i) if i == node_index));
         t_check_bindings(&capture, &template, &tree);
     }
@@ -476,32 +441,69 @@ mod test {
         );
     }
 
+    #[test]
+    fn t_mutate_multiple_trees() {
+        fn assert_one_match(tree: Tree, expected: Tree, capture: &mut TemplateCapture) {
+            let tree = tree.deduplicate().unwrap();
+            let expected = expected.deduplicate().unwrap();
+            assert_eq!(
+                1,
+                Mutations::of(&tree, capture)
+                    .filter_map(|result| if result.unwrap().equivalent(&expected) {
+                        Some(())
+                    } else {
+                        None
+                    })
+                    .count()
+            );
+        }
+        let mut capture = TemplateCapture::new();
+        // Ensure the same template capture can be used to mutate
+        // multiple trees without having to reallocate.
+        assert_one_match(
+            deftree!(/ (+ (* p x) (* p y)) (+ x y)),
+            deftree!(/ (* p (+ x y)) (+ x y)),
+            &mut capture,
+        );
+        // Use same capture for a second set of trees.
+        assert_one_match(
+            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
+            deftree!(log (+ 1 (exp (sqrt (min x y))))),
+            &mut capture,
+        );
+        // Use the same capture on a third set of trees.
+        assert_one_match(
+            deftree!(/ (* (pow a b) (pow b c)) (pow c a)),
+            deftree!(* (pow a b) (/ (pow b c) (pow c a))),
+            &mut capture,
+        );
+    }
+
     fn check_mutations(mut before: Tree, mut after: Tree) {
         before = before.deduplicate().unwrap();
         after = after.deduplicate().unwrap();
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
+        let mut capture = TemplateCapture::new();
         assert_eq!(
             1,
-            Mutations::from(&before)
-                .filter_map(|t| match t {
-                    Ok(tree) => {
-                        if equivalent(
-                            after.root_index(),
-                            tree.root_index(),
-                            after.nodes(),
-                            tree.nodes(),
-                            &mut lwalker,
-                            &mut rwalker,
-                        ) {
-                            Some(1)
-                        } else {
-                            None
-                        }
+            Mutations::of(&before, &mut capture)
+                .filter_map(|t| {
+                    let tree = t.unwrap();
+                    if equivalent(
+                        after.root_index(),
+                        tree.root_index(),
+                        after.nodes(),
+                        tree.nodes(),
+                        &mut lwalker,
+                        &mut rwalker,
+                    ) {
+                        Some(())
+                    } else {
+                        None
                     }
-                    Err(_) => panic!("Error when generating mutations of a tree."),
                 })
-                .sum::<usize>()
+                .count()
         );
     }
 

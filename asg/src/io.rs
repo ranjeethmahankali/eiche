@@ -52,7 +52,7 @@ impl std::fmt::Display for Tree {
                                     Branch | Pass | NodeIndex(_) => break,
                                     Turn => Branch,
                                     Gap => Pass,
-                                    Newline => panic!("FATAL: Failed to convert tree to a string"),
+                                    Newline => return Err(std::fmt::Error),
                                 }
                             }
                         }
