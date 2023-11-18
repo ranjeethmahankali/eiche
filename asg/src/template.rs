@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 
 use crate::{
-    mutate::Capture,
+    mutate::TemplateCapture,
     tree::{Node::*, Tree},
 };
 
@@ -30,7 +30,7 @@ pub struct Template {
 
 /// Check the capture to see if every symbol in src is bound to every
 /// symbol in dst.
-fn complete_capture(capture: &Capture, src: &Tree, dst: &Tree) -> bool {
+fn complete_capture(capture: &TemplateCapture, src: &Tree, dst: &Tree) -> bool {
     let mut lhs: Vec<_> = capture
         .bindings()
         .iter()
@@ -114,9 +114,10 @@ impl Template {
         // mirroring will produce a redundant template. It's no harm,
         // but no use either. So in the end it is harmful because it
         // wastes resources.
-        let mut capture = Capture::new();
-        out.first_match(self.ping(), &mut capture);
-        if capture.is_valid() && complete_capture(&capture, out.ping(), self.ping()) {
+        let mut capture = TemplateCapture::new();
+        if capture.next_match(&out, self.ping())
+            && complete_capture(&capture, out.ping(), self.ping())
+        {
             return None;
         }
         return Some(out);
