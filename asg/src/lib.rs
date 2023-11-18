@@ -16,3 +16,4 @@ mod walk;
 
 #[cfg(test)]
 mod test;
+mod hash;

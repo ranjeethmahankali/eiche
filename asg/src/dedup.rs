@@ -1,4 +1,5 @@
 use crate::{
+    hash::hash_nodes,
     prune::Pruner,
     tree::{Node, Node::*, Tree, TreeError},
     walk::{DepthWalker, NodeOrdering},
@@ -44,7 +45,7 @@ impl Deduplicater {
         // Compute unique indices after deduplication.
         self.indices.clear();
         self.indices.extend(0..nodes.len());
-        self.calc_hashes(&nodes);
+        hash_nodes(&nodes, &mut self.hashes);
         self.hash_to_index.clear();
         for i in 0..self.hashes.len() {
             let h = self.hashes[i];
@@ -78,46 +79,6 @@ impl Deduplicater {
             }
         }
         return nodes;
-    }
-
-    fn calc_hashes(&mut self, nodes: &Vec<Node>) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        // Using a boxed slice to avoid accidental resizing later.
-        self.hashes.clear();
-        self.hashes.resize(nodes.len(), 0);
-        for index in 0..nodes.len() {
-            let hash: u64 = match nodes[index] {
-                Constant(value) => value.to_bits().into(),
-                Symbol(label) => {
-                    let mut s: DefaultHasher = Default::default();
-                    label.hash(&mut s);
-                    s.finish()
-                }
-                Unary(op, input) => {
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
-                    self.hashes[input].hash(&mut s);
-                    s.finish()
-                }
-                Binary(op, lhs, rhs) => {
-                    let (hash1, hash2) = {
-                        let mut hash1 = self.hashes[lhs];
-                        let mut hash2 = self.hashes[rhs];
-                        if op.is_commutative() && hash1 > hash2 {
-                            (hash1, hash2) = (hash2, hash1); // For determinism.
-                        }
-                        (hash1, hash2)
-                    };
-                    let mut s: DefaultHasher = Default::default();
-                    op.hash(&mut s);
-                    hash1.hash(&mut s);
-                    hash2.hash(&mut s);
-                    s.finish()
-                }
-            };
-            self.hashes[index] = hash;
-        }
     }
 }
 

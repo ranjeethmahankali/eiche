@@ -1,4 +1,7 @@
+use std::collections::{BinaryHeap, HashMap};
+
 use crate::{
+    hash::hash_tree,
     mutate::{Mutations, TemplateCapture},
     tree::Tree,
     tree::{Node, Node::*},
@@ -83,18 +86,97 @@ impl Heuristic {
     }
 }
 
-pub fn reduce(tree: Tree) -> Result<Tree, ()> {
-    let mut capture = TemplateCapture::new();
-    let mutations = Mutations::of(&tree, &mut capture);
-    let mut costs = Vec::<usize>::new();
-    let mut h = Heuristic::new();
-    for tree in mutations {
-        match tree {
-            Ok(t) => costs.push(h.cost(&t)),
-            Err(_) => todo!(),
+struct Candidate {
+    tree: Tree,
+    prev: usize,
+    steps: usize,
+    complexity: usize,
+}
+
+impl Candidate {
+    pub fn from(tree: Tree, prev: usize, steps: usize, heuristic: &mut Heuristic) -> Candidate {
+        let complexity = heuristic.cost(&tree);
+        Candidate {
+            tree,
+            prev,
+            steps,
+            complexity,
         }
     }
-    todo!();
+
+    pub fn cost(&self) -> usize {
+        self.steps + self.complexity
+    }
+}
+
+impl PartialOrd for Candidate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.cost().partial_cmp(&other.cost())
+    }
+}
+
+impl PartialEq for Candidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.tree == other.tree
+    }
+}
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.cost().cmp(&other.cost())
+    }
+}
+impl Eq for Candidate {}
+
+pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
+    const MAX_CANDIDATES: usize = 100;
+    let mut capture = TemplateCapture::new();
+    let mut hfn = Heuristic::new();
+    let mut explored = Vec::<Candidate>::new();
+    let mut indexmap = HashMap::<u64, usize>::new();
+    let mut hashbuf = Vec::<u64>::new();
+    let mut heap = BinaryHeap::<Candidate>::new();
+    let mut min_complexity = usize::MAX;
+    let mut best_candidate = 0;
+    heap.push(Candidate::from(tree, 0, 0, &mut hfn));
+    while let Some(cand) = heap.pop() {
+        let hash = hash_tree(&cand.tree, &mut hashbuf);
+        let index = explored.len();
+        match indexmap.insert(hash, index) {
+            Some(_old) => {
+                continue;
+            }
+            None => {
+                explored.push(cand);
+            }
+        }
+        let cand = explored.last().unwrap();
+        if cand.complexity < min_complexity {
+            min_complexity = cand.complexity;
+            best_candidate = index;
+        }
+        let entry = indexmap.entry(hash).or_insert(explored.len());
+        if *entry < explored.len() {
+            continue;
+        }
+        for mutation in Mutations::of(&cand.tree, &mut capture) {
+            let tree = mutation.map_err(|_| ())?; // TODO: Use proper error
+            heap.push(Candidate::from(tree, index, cand.steps + 1, &mut hfn));
+        }
+        if explored.len() > MAX_CANDIDATES {
+            break;
+        }
+    }
+    let mut steps = Vec::<Tree>::new();
+    let mut i = best_candidate;
+    loop {
+        let cand = &explored[i];
+        steps.push(cand.tree.clone());
+        if cand.prev == i {
+            break;
+        }
+        i = cand.prev;
+    }
+    return Ok(steps);
 }
 
 #[cfg(test)]
