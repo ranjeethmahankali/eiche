@@ -1,6 +1,9 @@
 use lazy_static::lazy_static;
 
-use crate::tree::Tree;
+use crate::{
+    mutate::Capture,
+    tree::{Node::*, Tree},
+};
 
 /// This macro is only meant for use within this module.
 macro_rules! deftemplate {
@@ -23,6 +26,36 @@ pub struct Template {
     pong: Tree,
     dof_ping: Box<[usize]>,
     dof_pong: Box<[usize]>,
+}
+
+/// Check the capture to see if every symbol in src is bound to every
+/// symbol in dst.
+fn complete_capture(capture: &Capture, src: &Tree, dst: &Tree) -> bool {
+    let mut lhs: Vec<_> = capture
+        .bindings()
+        .iter()
+        .map(|(label, _index)| *label)
+        .collect();
+    lhs.sort();
+    let mut rhs = src.symbols();
+    rhs.sort();
+    if lhs != rhs {
+        return false;
+    }
+    lhs.clear();
+    lhs.extend(capture.bindings().iter().filter_map(|(_label, index)| {
+        match &dst.nodes()[*index] {
+            Constant(_) | Unary(_, _) | Binary(_, _, _) => None,
+            Symbol(l) => Some(l),
+        }
+    }));
+    lhs.sort();
+    rhs = dst.symbols();
+    rhs.sort();
+    if lhs != rhs {
+        return false;
+    }
+    return true;
 }
 
 impl Template {
@@ -49,8 +82,21 @@ impl Template {
         return template;
     }
 
-    fn mirrored(&self) -> Template {
-        Template {
+    fn valid(self) -> Option<Template> {
+        // All symbols in pong must be present in ping too. Otherwise
+        // the template cannot be applied to a tree.
+        let symbols = self.ping().symbols();
+        for label in self.pong().symbols() {
+            match symbols.iter().find(|&c| *c == label) {
+                Some(_) => {} // Do nothing.
+                None => return None,
+            }
+        }
+        return Some(self);
+    }
+
+    fn mirrored(&self) -> Option<Template> {
+        let out = Template {
             name: {
                 const REV: &str = "rev_";
                 match self.name.strip_prefix(REV) {
@@ -63,11 +109,18 @@ impl Template {
             dof_ping: self.dof_pong.clone(),
             dof_pong: self.dof_ping.clone(),
         }
+        .valid()?;
+        // Make sure the template is not symmetric. If it is,
+        // mirroring will produce a redundant template. It's no harm,
+        // but no use either. So in the end it is harmful because it
+        // wastes resources.
+        let mut capture = Capture::new();
+        out.first_match(self.ping(), &mut capture);
+        if capture.is_valid() && complete_capture(&capture, out.ping(), self.ping()) {
+            return None;
+        }
+        return Some(out);
     }
-
-    // pub fn name(&self) -> &str {
-    //     &self.name
-    // }
 
     pub fn ping(&self) -> &Tree {
         &self.ping
@@ -186,7 +239,7 @@ lazy_static! {
 
 fn mirrored(templates: &Vec<Template>) -> Vec<Template> {
     let mut out = templates.clone();
-    out.extend(templates.iter().map(|t| t.mirrored()));
+    out.extend(templates.iter().filter_map(|t| t.mirrored()));
     return out;
 }
 

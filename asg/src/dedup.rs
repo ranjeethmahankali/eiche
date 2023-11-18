@@ -105,7 +105,7 @@ impl Deduplicater {
                         let mut hash1 = self.hashes[lhs];
                         let mut hash2 = self.hashes[rhs];
                         if op.is_commutative() && hash1 > hash2 {
-                            std::mem::swap(&mut hash1, &mut hash2);
+                            (hash1, hash2) = (hash2, hash1); // For determinism.
                         }
                         (hash1, hash2)
                     };
@@ -185,6 +185,19 @@ impl Tree {
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
         return Tree::from_nodes(pruner.run(dedup.run(self.take_nodes()), root_index));
+    }
+
+    pub fn equivalent(&self, other: &Tree) -> bool {
+        let mut lwalker = DepthWalker::new();
+        let mut rwalker = DepthWalker::new();
+        equivalent(
+            self.root_index(),
+            other.root_index(),
+            self.nodes(),
+            other.nodes(),
+            &mut lwalker,
+            &mut rwalker,
+        )
     }
 }
 
@@ -325,6 +338,24 @@ mod test {
             &mut walker1,
             &mut walker2
         ));
+    }
+
+    #[test]
+    fn t_recursive_compare_3() {
+        // Sanity check with the same tree.
+        let a = deftree!(/ (* k (+ x y)) (+ x y)).deduplicate().unwrap();
+        let b = deftree!(/ (* k (+ x y)) (+ x y)).deduplicate().unwrap();
+        let mut walker1 = DepthWalker::new();
+        let mut walker2 = DepthWalker::new();
+        assert!(equivalent(
+            a.root_index(),
+            b.root_index(),
+            a.nodes(),
+            b.nodes(),
+            &mut walker1,
+            &mut walker2
+        ));
+        assert!(a.equivalent(&b));
     }
 
     #[test]

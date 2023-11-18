@@ -82,8 +82,8 @@ fn symbolic_match(
                     let mut l2 = *l2;
                     let mut r2 = *r2;
                     if !lop.is_commutative() && ldofs[l1] > ldofs[r1] {
-                        std::mem::swap(&mut l1, &mut r1);
-                        std::mem::swap(&mut l2, &mut r2);
+                        (l1, r1) = (r1, l1);
+                        (l2, r2) = (r2, l2);
                     }
                     (l1, r1, l2, r2)
                 };
@@ -129,11 +129,11 @@ impl Template {
         }
     }
 
-    fn first_match(&self, tree: &Tree, capture: &mut Capture) {
+    pub fn first_match(&self, tree: &Tree, capture: &mut Capture) {
         self.match_from(0, tree, capture);
     }
 
-    fn next_match(&self, tree: &Tree, capture: &mut Capture) {
+    pub fn next_match(&self, tree: &Tree, capture: &mut Capture) {
         match capture.node_index {
             Some(i) => self.match_from(i + 1, tree, capture),
             None => return,
@@ -141,7 +141,7 @@ impl Template {
     }
 }
 
-struct Capture {
+pub struct Capture {
     node_index: Option<usize>,
     bindings: Vec<(char, usize)>,
     node_map: Vec<usize>,
@@ -151,7 +151,7 @@ struct Capture {
 }
 
 impl Capture {
-    fn new() -> Capture {
+    pub fn new() -> Capture {
         Capture {
             node_index: None,
             bindings: vec![],
@@ -160,6 +160,10 @@ impl Capture {
             pruner: Pruner::new(),
             deduper: Deduplicater::new(),
         }
+    }
+
+    pub fn bindings(&self) -> &Vec<(char, usize)> {
+        &self.bindings
     }
 
     fn bind(&mut self, label: char, index: usize) -> bool {
@@ -172,7 +176,7 @@ impl Capture {
         return true;
     }
 
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         return self.node_index.is_some();
     }
 
@@ -247,8 +251,11 @@ impl Capture {
         };
         // Clean up and make a tree.
         let (nodes, root_index) = self.topo_sorter.run(nodes, root_index).map_err(|_| ())?;
-        return Tree::from_nodes(self.pruner.run(self.deduper.run(fold_nodes(nodes)), root_index))
-            .map_err(|_| ());
+        return Tree::from_nodes(
+            self.pruner
+                .run(self.deduper.run(fold_nodes(nodes)), root_index),
+        )
+        .map_err(|_| ());
     }
 
     fn binding_state(&self) -> usize {
@@ -264,8 +271,7 @@ impl Capture {
 mod test {
     use super::*;
     use crate::{
-        dedup::equivalent, deftree, template::test::get_template_by_name,
-        test::util::compare_trees, walk::DepthWalker,
+        dedup::equivalent, deftree, template::test::get_template_by_name, walk::DepthWalker,
     };
 
     fn t_check_bindings(capture: &Capture, template: &Template, tree: &Tree) {
@@ -470,40 +476,129 @@ mod test {
         );
     }
 
-    #[test]
-    fn t_basic_mutation() {
+    fn check_mutations(mut before: Tree, mut after: Tree) {
+        before = before.deduplicate().unwrap();
+        after = after.deduplicate().unwrap();
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
-        let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y))
-            .deduplicate()
-            .unwrap();
-        let simpler = deftree!(/ (* p (+ x y)) (+ x y));
-        let mut nequivalent: usize = 0;
-        for m in Mutations::from(&tree) {
-            match m {
-                Ok(mutated) => {
-                    assert_ne!(mutated, tree);
-                    if equivalent(
-                        mutated.root_index(),
-                        simpler.root_index(),
-                        mutated.nodes(),
-                        simpler.nodes(),
-                        &mut lwalker,
-                        &mut rwalker,
-                    ) {
-                        nequivalent += 1;
+        assert_eq!(
+            1,
+            Mutations::from(&before)
+                .filter_map(|t| match t {
+                    Ok(tree) => {
+                        if equivalent(
+                            after.root_index(),
+                            tree.root_index(),
+                            after.nodes(),
+                            tree.nodes(),
+                            &mut lwalker,
+                            &mut rwalker,
+                        ) {
+                            Some(1)
+                        } else {
+                            None
+                        }
                     }
-                    compare_trees(
-                        &tree,
-                        &mutated,
-                        &[('p', 0.1, 10.), ('x', 0.1, 10.), ('y', 0.1, 10.)],
-                        20,
-                        1e-14,
-                    );
-                }
-                Err(_) => assert!(false),
-            }
-        }
-        assert_eq!(nequivalent, 1);
+                    Err(_) => panic!("Error when generating mutations of a tree."),
+                })
+                .sum::<usize>()
+        );
+    }
+
+    #[test]
+    fn t_mul_add() {
+        check_mutations(
+            deftree!(/ (+ (* p x) (* p y)) (+ x y)),
+            deftree!(/ (* p (+ x y)) (+ x y)),
+        );
+    }
+
+    #[test]
+    fn t_min_sqrt() {
+        check_mutations(
+            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
+            deftree!(log (+ 1 (exp (sqrt (min x y))))),
+        );
+    }
+
+    #[test]
+    fn t_rearrange_frac() {
+        check_mutations(
+            deftree!(* (/ (+ a b) (pow x y)) (/ (+ x y) (pow a b))),
+            deftree!(* (/ (+ a b) (pow a b)) (/ (+ x y) (pow x y))),
+        );
+    }
+
+    #[test]
+    fn t_rearrage_mul_div() {
+        check_mutations(
+            deftree!(/ (* (pow a b) (pow b c)) (pow c a)),
+            deftree!(* (pow b c) (/ (pow a b) (pow c a))),
+        );
+        check_mutations(
+            deftree!(/ (* (pow a b) (pow b c)) (pow c a)),
+            deftree!(* (pow a b) (/ (pow b c) (pow c a))),
+        );
+    }
+
+    #[test]
+    fn t_divide_by_self() {
+        check_mutations(deftree!(/ (+ x (pow y z)) (+ (pow y z) x)), deftree!(1));
+    }
+
+    #[test]
+    fn t_distribute_pow_div() {
+        check_mutations(
+            deftree!(pow (/ (* x y) (* 2 3)) 5),
+            deftree!(/ (pow (* x y) 5) (pow (* 2 3) 5)).fold().unwrap(),
+        );
+    }
+
+    #[test]
+    fn t_distribute_pow_mul() {
+        check_mutations(
+            deftree!(pow (* (* x y) (* 2 3)) 5),
+            deftree!(* (pow (* x y) 5) (pow (* 2 3) 5)).fold().unwrap(),
+        );
+    }
+
+    #[test]
+    fn t_square_sqrt() {
+        check_mutations(
+            deftree!(+ 1 (log (pow (sqrt (+ 2 (exp (/ x 2)))) 2))),
+            deftree!(+ 1 (log (+ 2 (exp (/ x 2))))),
+        );
+    }
+
+    #[test]
+    fn t_sqrt_square() {
+        check_mutations(
+            deftree!(+ 1 (log (sqrt (pow (+ 2 (exp (/ x 2))) 2)))),
+            deftree!(+ 1 (log (abs (+ 2 (exp (/ x 2)))))),
+        );
+    }
+
+    #[test]
+    fn t_square_abs() {
+        check_mutations(
+            deftree!(exp (+ 1 (log (pow (abs (* p q)) 2)))),
+            deftree!(exp (+ 1 (log (pow (* p q) 2)))),
+        );
+    }
+
+    #[test]
+    fn t_mul_exponents() {
+        check_mutations(
+            deftree!(exp (+ 1 (log (pow (pow p (+ 2 m)) (/ q r))))),
+            deftree!(exp (+ 1 (log (pow p (* (+ 2 m) (/ q r)))))),
+        );
+    }
+
+    #[test]
+    fn t_add_exponents() {
+        check_mutations(
+            deftree!(exp (+ 1 (log (* (pow p (+ 2 m)) (pow p (/ q r)))))),
+            deftree!(exp (+ 1 (log (pow p (+ (+ 2 m) (/ q r)))))),
+        );
     }
 }

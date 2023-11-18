@@ -185,7 +185,8 @@ impl Tree {
         self.nodes
     }
 
-    /// Get a unique list of all symbols in this tree.
+    /// Get a unique list of all symbols in this tree. The list of
+    /// chars is expected to be sorted.
     pub fn symbols(&self) -> Vec<char> {
         let mut chars: Vec<_> = self
             .nodes
