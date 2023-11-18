@@ -553,4 +553,52 @@ mod test {
             deftree!(/ (pow (* x y) 5) (pow (* 2 3) 5)).fold().unwrap(),
         );
     }
+
+    #[test]
+    fn t_distribute_pow_mul() {
+        check_mutations(
+            deftree!(pow (* (* x y) (* 2 3)) 5),
+            deftree!(* (pow (* x y) 5) (pow (* 2 3) 5)).fold().unwrap(),
+        );
+    }
+
+    #[test]
+    fn t_square_sqrt() {
+        check_mutations(
+            deftree!(+ 1 (log (pow (sqrt (+ 2 (exp (/ x 2)))) 2))),
+            deftree!(+ 1 (log (+ 2 (exp (/ x 2))))),
+        );
+    }
+
+    #[test]
+    fn t_sqrt_square() {
+        check_mutations(
+            deftree!(+ 1 (log (sqrt (pow (+ 2 (exp (/ x 2))) 2)))),
+            deftree!(+ 1 (log (abs (+ 2 (exp (/ x 2)))))),
+        );
+    }
+
+    #[test]
+    fn t_square_abs() {
+        check_mutations(
+            deftree!(exp (+ 1 (log (pow (abs (* p q)) 2)))),
+            deftree!(exp (+ 1 (log (pow (* p q) 2)))),
+        );
+    }
+
+    #[test]
+    fn t_mul_exponents() {
+        check_mutations(
+            deftree!(exp (+ 1 (log (pow (pow p (+ 2 m)) (/ q r))))),
+            deftree!(exp (+ 1 (log (pow p (* (+ 2 m) (/ q r)))))),
+        );
+    }
+
+    #[test]
+    fn t_add_exponents() {
+        check_mutations(
+            deftree!(exp (+ 1 (log (* (pow p (+ 2 m)) (pow p (/ q r)))))),
+            deftree!(exp (+ 1 (log (pow p (+ (+ 2 m) (/ q r)))))),
+        );
+    }
 }
