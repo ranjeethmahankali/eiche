@@ -2,7 +2,7 @@ use std::collections::{BinaryHeap, HashMap};
 
 use crate::{
     hash::hash_tree,
-    mutate::{Mutations, MutationError, TemplateCapture},
+    mutate::{MutationError, Mutations, TemplateCapture},
     template::get_templates,
     tree::Tree,
     tree::{Node, Node::*},
@@ -118,18 +118,17 @@ impl Ord for Candidate {
 }
 impl Eq for Candidate {}
 
-pub fn reduce(tree: Tree, max_candidates: usize) -> Result<Vec<Tree>, MutationError> {
+pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, MutationError> {
     let mut capture = TemplateCapture::new();
     let tree = {
         let root_index = tree.root_index();
         capture.make_compact_tree(tree.take_nodes(), root_index)?
     };
     let mut hfn = Heuristic::new();
-    let mut explored = Vec::<Candidate>::with_capacity(max_candidates);
+    let mut explored = Vec::<Candidate>::with_capacity(max_iter);
     let mut indexmap = HashMap::<u64, usize>::new();
     let mut hashbuf = Vec::<u64>::new();
-    let mut heap =
-        BinaryHeap::<Candidate>::with_capacity(get_templates().len() * max_candidates / 2); // Estimate.
+    let mut heap = BinaryHeap::<Candidate>::with_capacity(get_templates().len() * max_iter / 2); // Estimate.
     let mut min_complexity = usize::MAX;
     let mut best_candidate = 0;
     let start_complexity = hfn.cost(&tree);
@@ -155,7 +154,7 @@ pub fn reduce(tree: Tree, max_candidates: usize) -> Result<Vec<Tree>, MutationEr
             min_complexity = cand.complexity;
             best_candidate = index;
         }
-        if explored.len() == max_candidates {
+        if explored.len() == max_iter {
             break;
         }
         for mutation in Mutations::of(&cand.tree, &mut capture) {

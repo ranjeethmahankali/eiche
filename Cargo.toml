@@ -5,4 +5,5 @@
 resolver = "2"
 members = [
         "asg",
+        "testbench",
 ]
