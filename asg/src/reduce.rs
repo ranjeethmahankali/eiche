@@ -3,9 +3,10 @@ use std::collections::{BinaryHeap, HashMap};
 use crate::{
     hash::hash_tree,
     mutate::{Mutations, TemplateCapture},
+    sort::TopologicalError,
     template::get_templates,
     tree::Tree,
-    tree::{Node, Node::*},
+    tree::{Node, Node::*, TreeError},
 };
 
 struct Heuristic {
@@ -118,14 +119,20 @@ impl Ord for Candidate {
 }
 impl Eq for Candidate {}
 
-pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
+#[derive(Debug)]
+pub enum SimplificationError {
+    InvalidCapture,
+    UnboundSymbol,
+    InvalidTopology(TopologicalError),
+    TreeCreationError(TreeError),
+}
+
+pub fn reduce(tree: Tree) -> Result<Vec<Tree>, SimplificationError> {
     let max_candidates: usize = get_templates().len() * tree.len() * 3;
     let mut capture = TemplateCapture::new();
     let tree = {
         let root_index = tree.root_index();
-        capture
-            .make_compact_tree(tree.take_nodes(), root_index)
-            .map_err(|_| ())? // TODO: Use proper error.
+        capture.make_compact_tree(tree.take_nodes(), root_index)?
     };
     let mut hfn = Heuristic::new();
     let mut explored = Vec::<Candidate>::new();
@@ -158,7 +165,7 @@ pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
             best_candidate = index;
         }
         for mutation in Mutations::of(&cand.tree, &mut capture) {
-            let tree = mutation.map_err(|_| ())?; // TODO: Use proper error.
+            let tree = mutation?;
             let complexity = hfn.cost(&tree);
             if complexity < 3 * min_complexity {
                 heap.push(Candidate {

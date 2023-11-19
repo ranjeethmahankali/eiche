@@ -2,9 +2,10 @@ use crate::{
     dedup::Deduplicater,
     fold::fold_nodes,
     prune::Pruner,
-    sort::{TopoSorter, TopologicalError},
+    reduce::SimplificationError,
+    sort::TopoSorter,
     template::{get_templates, Template},
-    tree::{Node, Tree, TreeError},
+    tree::{Node, Tree},
 };
 
 pub struct Mutations<'a> {
@@ -37,14 +38,6 @@ impl<'a> Iterator for Mutations<'a> {
         }
         return None;
     }
-}
-
-#[derive(Debug)]
-pub enum SimplificationError {
-    InvalidCapture,
-    UnboundSymbol,
-    InvalidTopology(TopologicalError),
-    TreeCreationError(TreeError),
 }
 
 pub struct TemplateCapture {
