@@ -24,8 +24,6 @@ pub struct Template {
     name: String,
     ping: Tree,
     pong: Tree,
-    dof_ping: Box<[usize]>,
-    dof_pong: Box<[usize]>,
 }
 
 /// Check the capture to see if every symbol in src is bound to every
@@ -60,26 +58,11 @@ fn complete_capture(capture: &TemplateCapture, src: &Tree, dst: &Tree) -> bool {
 
 impl Template {
     pub fn from(name: &str, ping: Tree, pong: Tree) -> Template {
-        let pinglen = ping.len();
-        let ponglen = pong.len();
-        let mut template = Template {
+        Template {
             name: name.to_string(),
             ping,
             pong,
-            dof_ping: vec![0; pinglen].into_boxed_slice(),
-            dof_pong: vec![0; ponglen].into_boxed_slice(),
-        };
-        calc_dof(
-            &template.ping,
-            template.ping.root_index(),
-            &mut template.dof_ping,
-        );
-        calc_dof(
-            &template.pong,
-            template.pong.root_index(),
-            &mut template.dof_pong,
-        );
-        return template;
+        }
     }
 
     fn valid(self) -> Option<Template> {
@@ -106,8 +89,6 @@ impl Template {
             },
             ping: self.pong.clone(),
             pong: self.ping.clone(),
-            dof_ping: self.dof_pong.clone(),
-            dof_pong: self.dof_ping.clone(),
         }
         .valid()?;
         // Make sure the template is not symmetric. If it is,
@@ -130,32 +111,6 @@ impl Template {
     pub fn pong(&self) -> &Tree {
         &self.pong
     }
-
-    pub fn dof_ping(&self) -> &Box<[usize]> {
-        return &self.dof_ping;
-    }
-}
-
-fn calc_dof(tree: &Tree, root: usize, dofs: &mut Box<[usize]>) {
-    use crate::tree::Node::*;
-    dofs[root] = match tree.node(root) {
-        Constant(_) | Symbol(_) => 0,
-        Unary(_op, input) => {
-            calc_dof(tree, *input, dofs);
-            dofs[*input]
-        }
-        Binary(op, lhs, rhs) => {
-            calc_dof(tree, *lhs, dofs);
-            calc_dof(tree, *rhs, dofs);
-            dofs[*lhs] + dofs[*rhs] + {
-                if op.is_commutative() {
-                    1
-                } else {
-                    0
-                }
-            }
-        }
-    };
 }
 
 lazy_static! {

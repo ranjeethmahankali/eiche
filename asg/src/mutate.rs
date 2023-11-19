@@ -78,13 +78,7 @@ impl TemplateCapture {
         for i in start..tree.len() {
             // Clear any previous bindings to start over fresh.
             self.bindings.clear();
-            if self.match_node(
-                template.dof_ping(),
-                template.ping().root_index(),
-                template.ping(),
-                i,
-                tree,
-            ) {
+            if self.match_node(template.ping().root_index(), template.ping(), i, tree) {
                 self.node_index = Some(i);
                 return true;
             }
@@ -123,11 +117,11 @@ impl TemplateCapture {
         dst.push(node);
     }
 
-    fn binding_checkpoint(&self) -> usize {
+    fn checkpoint(&self) -> usize {
         self.bindings.len()
     }
 
-    fn restore_bindings(&mut self, state: usize) {
+    fn restore(&mut self, state: usize) {
         self.bindings.truncate(state);
     }
 
@@ -199,53 +193,63 @@ impl TemplateCapture {
         return self.make_compact_tree(nodes, root_index);
     }
 
-    fn match_node(
+    fn match_node(&mut self, li: usize, ltree: &Tree, ri: usize, rtree: &Tree) -> bool {
+        let cpt = self.checkpoint();
+        let (found_1, commutable) = self.match_node_commute(li, ltree, ri, rtree, false);
+        if found_1 {
+            return true;
+        }
+        if commutable {
+            self.restore(cpt);
+            let (found, _commutable) = self.match_node_commute(li, ltree, ri, rtree, true);
+            return found;
+        }
+        return false;
+    }
+
+    fn match_node_commute(
         &mut self,
-        ldofs: &Box<[usize]>,
         li: usize,
         ltree: &Tree,
         ri: usize,
         rtree: &Tree,
-    ) -> bool {
+        commute: bool,
+    ) -> (bool, bool) {
         match (ltree.node(li), rtree.node(ri)) {
-            (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
-            (Node::Constant(_), _) => return false,
-            (Node::Symbol(label), _) => return self.bind(*label, ri),
+            (Node::Constant(v1), Node::Constant(v2)) => (v1 == v2, false),
+            (Node::Constant(_), _) => return (false, false),
+            (Node::Symbol(label), _) => return (self.bind(*label, ri), false),
             (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
                 if lop != rop {
-                    return false;
+                    return (false, false);
                 } else {
-                    return self.match_node(ldofs, *input1, ltree, *input2, rtree);
+                    return self.match_node_commute(*input1, ltree, *input2, rtree, commute);
                 }
             }
-            (Node::Unary(..), _) => return false,
-            (Node::Binary(lop, l1, r1), Node::Binary(rop, l2, r2)) => {
+            (Node::Unary(..), _) => return (false, false),
+            (Node::Binary(lop, mut l1, mut r1), Node::Binary(rop, l2, r2)) => {
                 if lop != rop {
-                    return false;
-                } else {
-                    let (l1, r1, l2, r2) = {
-                        let mut l1 = *l1;
-                        let mut r1 = *r1;
-                        let mut l2 = *l2;
-                        let mut r2 = *r2;
-                        if !lop.is_commutative() && ldofs[l1] > ldofs[r1] {
-                            (l1, r1) = (r1, l1);
-                            (l2, r2) = (r2, l2);
-                        }
-                        (l1, r1, l2, r2)
-                    };
-                    let checkpoint = self.binding_checkpoint();
-                    let ordered = self.match_node(ldofs, l1, ltree, l2, rtree)
-                        && self.match_node(ldofs, r1, ltree, r2, rtree);
-                    if !lop.is_commutative() || ordered {
-                        return ordered;
-                    }
-                    self.restore_bindings(checkpoint);
-                    return self.match_node(ldofs, l1, ltree, r2, rtree)
-                        && self.match_node(ldofs, r1, ltree, l2, rtree);
+                    return (false, false);
                 }
+                if lop.is_commutative() && commute {
+                    (l1, r1) = (r1, l1);
+                }
+                let (mut found, comm_left) =
+                    self.match_node_commute(l1, ltree, *l2, rtree, commute);
+                if !found && comm_left {
+                    (found, _) = self.match_node_commute(l1, ltree, *l2, rtree, !commute);
+                }
+                if !found {
+                    return (false, lop.is_commutative() || comm_left);
+                }
+                let (mut found, comm_right) =
+                    self.match_node_commute(r1, ltree, *r2, rtree, commute);
+                if !found && comm_right {
+                    (found, _) = self.match_node_commute(r1, ltree, *r2, rtree, !commute);
+                }
+                return (found, lop.is_commutative() || comm_left || comm_right);
             }
-            (Node::Binary(..), _) => return false,
+            (Node::Binary(..), _) => return (false, false),
         }
     }
 }
@@ -306,7 +310,6 @@ mod test {
         let tree = deftree!(/ (+ (+ p q) (+ r s)) (+ r s))
             .deduplicate()
             .unwrap();
-        print!("{}{}", template.ping(), tree); // DEBUG
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 7));
