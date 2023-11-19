@@ -2,10 +2,18 @@ use crate::{
     dedup::Deduplicater,
     fold::fold_nodes,
     prune::Pruner,
-    sort::TopoSorter,
+    sort::{TopoSorter, TopologicalError},
     template::{get_templates, Template},
-    tree::{Node, Tree},
+    tree::{Node, Tree, TreeError},
 };
+
+#[derive(Debug)]
+pub enum MutationError {
+    InvalidCapture,
+    UnboundSymbol,
+    InvalidTopology(TopologicalError),
+    TreeCreationError(TreeError),
+}
 
 pub struct Mutations<'a> {
     tree: &'a Tree,
@@ -24,7 +32,7 @@ impl<'a> Mutations<'a> {
 }
 
 impl<'a> Iterator for Mutations<'a> {
-    type Item = Result<Tree, ()>;
+    type Item = Result<Tree, MutationError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let templates = get_templates();
@@ -77,18 +85,28 @@ impl TemplateCapture {
         for i in start..tree.len() {
             // Clear any previous bindings to start over fresh.
             self.bindings.clear();
-            if self.match_node(
-                template.dof_ping(),
-                template.ping().root_index(),
-                template.ping(),
-                i,
-                tree,
-            ) {
+            if self.match_node(template.ping().root_index(), template.ping(), i, tree) {
                 self.node_index = Some(i);
                 return true;
             }
         }
         return false;
+    }
+
+    pub fn make_compact_tree(
+        &mut self,
+        nodes: Vec<Node>,
+        root_index: usize,
+    ) -> Result<Tree, MutationError> {
+        let (nodes, root_index) = self
+            .topo_sorter
+            .run(nodes, root_index)
+            .map_err(|e| MutationError::InvalidTopology(e))?;
+        return Tree::from_nodes(
+            self.pruner
+                .run(self.deduper.run(fold_nodes(nodes)), root_index),
+        )
+        .map_err(|e| MutationError::TreeCreationError(e));
     }
 
     fn bind(&mut self, label: char, index: usize) -> bool {
@@ -106,15 +124,15 @@ impl TemplateCapture {
         dst.push(node);
     }
 
-    fn binding_checkpoint(&self) -> usize {
+    fn checkpoint(&self) -> usize {
         self.bindings.len()
     }
 
-    fn restore_bindings(&mut self, state: usize) {
+    fn restore(&mut self, state: usize) {
         self.bindings.truncate(state);
     }
 
-    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, ()> {
+    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
         use crate::tree::Node::*;
         let mut nodes = tree.nodes().clone();
         let root_index = tree.root_index();
@@ -123,7 +141,7 @@ impl TemplateCapture {
         self.node_map.resize(pong.len(), 0);
         let oldroot = match self.node_index {
             Some(i) => i,
-            None => return Err(()),
+            None => return Err(MutationError::InvalidCapture),
         };
         let mut newroot = oldroot;
         let num_nodes = nodes.len();
@@ -132,7 +150,7 @@ impl TemplateCapture {
                 Constant(val) => self.add_node(&mut nodes, ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
-                    None => return Err(()),
+                    None => return Err(MutationError::UnboundSymbol),
                 },
                 Unary(op, input) => {
                     self.add_node(&mut nodes, ni, Unary(*op, self.node_map[*input]))
@@ -179,61 +197,70 @@ impl TemplateCapture {
             root_index
         };
         // Clean up and make a tree.
-        let (nodes, root_index) = self.topo_sorter.run(nodes, root_index).map_err(|_| ())?;
-        return Tree::from_nodes(
-            self.pruner
-                .run(self.deduper.run(fold_nodes(nodes)), root_index),
-        )
-        .map_err(|_| ());
+        return self.make_compact_tree(nodes, root_index);
     }
 
-    fn match_node(
+    fn match_node(&mut self, li: usize, ltree: &Tree, ri: usize, rtree: &Tree) -> bool {
+        let cpt = self.checkpoint();
+        let (found_1, commutable) = self.match_node_commute(li, ltree, ri, rtree, false);
+        if found_1 {
+            return true;
+        }
+        if commutable {
+            self.restore(cpt);
+            let (found, _commutable) = self.match_node_commute(li, ltree, ri, rtree, true);
+            return found;
+        }
+        return false;
+    }
+
+    fn match_node_commute(
         &mut self,
-        ldofs: &Box<[usize]>,
         li: usize,
         ltree: &Tree,
         ri: usize,
         rtree: &Tree,
-    ) -> bool {
+        commute: bool,
+    ) -> (bool, bool) {
         match (ltree.node(li), rtree.node(ri)) {
-            (Node::Constant(v1), Node::Constant(v2)) => v1 == v2,
-            (Node::Constant(_), _) => return false,
-            (Node::Symbol(label), _) => return self.bind(*label, ri),
+            (Node::Constant(v1), Node::Constant(v2)) => (v1 == v2, false),
+            (Node::Constant(_), _) => return (false, false),
+            (Node::Symbol(label), _) => return (self.bind(*label, ri), false),
             (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
                 if lop != rop {
-                    return false;
+                    return (false, false);
                 } else {
-                    return self.match_node(ldofs, *input1, ltree, *input2, rtree);
+                    return self.match_node_commute(*input1, ltree, *input2, rtree, commute);
                 }
             }
-            (Node::Unary(..), _) => return false,
-            (Node::Binary(lop, l1, r1), Node::Binary(rop, l2, r2)) => {
+            (Node::Unary(..), _) => return (false, false),
+            (Node::Binary(lop, mut l1, mut r1), Node::Binary(rop, l2, r2)) => {
                 if lop != rop {
-                    return false;
-                } else {
-                    let (l1, r1, l2, r2) = {
-                        let mut l1 = *l1;
-                        let mut r1 = *r1;
-                        let mut l2 = *l2;
-                        let mut r2 = *r2;
-                        if !lop.is_commutative() && ldofs[l1] > ldofs[r1] {
-                            (l1, r1) = (r1, l1);
-                            (l2, r2) = (r2, l2);
-                        }
-                        (l1, r1, l2, r2)
-                    };
-                    let checkpoint = self.binding_checkpoint();
-                    let ordered = self.match_node(ldofs, l1, ltree, l2, rtree)
-                        && self.match_node(ldofs, r1, ltree, r2, rtree);
-                    if !lop.is_commutative() || ordered {
-                        return ordered;
-                    }
-                    self.restore_bindings(checkpoint);
-                    return self.match_node(ldofs, l1, ltree, r2, rtree)
-                        && self.match_node(ldofs, r1, ltree, l2, rtree);
+                    return (false, false);
                 }
+                if lop.is_commutative() && commute {
+                    (l1, r1) = (r1, l1);
+                }
+                let cpt = self.checkpoint();
+                let (mut found_left, comm_left) =
+                    self.match_node_commute(l1, ltree, *l2, rtree, commute);
+                if !found_left && comm_left {
+                    self.restore(cpt);
+                    (found_left, _) = self.match_node_commute(l1, ltree, *l2, rtree, !commute);
+                }
+                let cpt = self.checkpoint();
+                let (mut found_right, comm_right) =
+                    self.match_node_commute(r1, ltree, *r2, rtree, commute);
+                if !found_right && comm_right {
+                    self.restore(cpt);
+                    (found_right, _) = self.match_node_commute(r1, ltree, *r2, rtree, !commute);
+                }
+                return (
+                    found_left && found_right,
+                    lop.is_commutative() || comm_left || comm_right,
+                );
             }
-            (Node::Binary(..), _) => return false,
+            (Node::Binary(..), _) => return (false, false),
         }
     }
 }
@@ -294,7 +321,6 @@ mod test {
         let tree = deftree!(/ (+ (+ p q) (+ r s)) (+ r s))
             .deduplicate()
             .unwrap();
-        print!("{}{}", template.ping(), tree); // DEBUG
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 7));
@@ -302,6 +328,7 @@ mod test {
     }
 
     fn t_check_template(name: &str, tree: Tree, node_index: usize) {
+        let tree = tree.deduplicate().unwrap();
         let mut capture = TemplateCapture::new();
         capture.node_index = None;
         capture.bindings.clear();
@@ -312,19 +339,14 @@ mod test {
             template.ping(),
             tree
         );
-        assert!(matches!(capture.node_index, Some(i) if i == node_index));
+        assert!(matches!(capture.node_index, Some(_)));
+        assert_eq!(node_index, capture.node_index.unwrap());
         t_check_bindings(&capture, &template, &tree);
     }
 
     #[test]
     fn t_match_distribute_mul() {
-        t_check_template(
-            "distribute_mul",
-            deftree!(* 0.5 (+ (* x 2.5) (* x 1.5)))
-                .deduplicate()
-                .unwrap(),
-            6,
-        );
+        t_check_template("distribute_mul", deftree!(* 0.5 (+ (* x 2.5) (* x 1.5))), 6);
     }
 
     #[test]
@@ -340,30 +362,24 @@ mod test {
     fn t_match_rearrange_frac() {
         t_check_template(
             "rearrange_frac",
-            deftree!(sqrt (log (* (/ x 2) (/ 2 x))))
-                .deduplicate()
-                .unwrap(),
+            deftree!(sqrt (log (* (/ x 2) (/ 2 x)))),
             4,
         );
     }
 
     #[test]
     fn t_match_divide_by_self() {
-        t_check_template(
-            "divide_by_self",
-            deftree!(+ 1 (/ p p)).deduplicate().unwrap(),
-            2,
-        );
+        t_check_template("divide_by_self", deftree!(+ 1 (/ p p)), 2);
     }
 
     #[test]
     fn t_match_distribute_pow_div() {
-        t_check_template("distribute_pow_div", deftree!(pow (pow (/ 2 3) 2) 2.5), 4);
+        t_check_template("distribute_pow_div", deftree!(pow (pow (/ 2 3) 2) 2.5), 3);
     }
 
     #[test]
     fn t_match_distribute_pow_mul() {
-        t_check_template("distribute_pow_mul", deftree!(pow (pow (* 2 3) 2) 2.5), 4);
+        t_check_template("distribute_pow_mul", deftree!(pow (pow (* 2 3) 2) 2.5), 3);
     }
 
     #[test]
@@ -386,7 +402,7 @@ mod test {
 
     #[test]
     fn t_match_square_abs() {
-        t_check_template("square_abs", deftree!(log (+ 1 (exp (pow (abs 2) 2.)))), 4);
+        t_check_template("square_abs", deftree!(log (+ 1 (exp (pow (abs 2) 2.)))), 3);
     }
 
     #[test]
@@ -402,9 +418,7 @@ mod test {
     fn t_match_add_exponents() {
         t_check_template(
             "add_exponents",
-            deftree!(log (+ 1 (exp (* (pow (log x) 2) (pow (log x) 3)))))
-                .deduplicate()
-                .unwrap(),
+            deftree!(log (+ 1 (exp (* (pow (log x) 2) (pow (log x) 3))))),
             7,
         );
     }
@@ -413,9 +427,7 @@ mod test {
     fn t_match_add_frac() {
         t_check_template(
             "add_frac",
-            deftree!(log (+ 1 (exp (+ (/ 2 (sqrt (+ 2 x))) (/ 3 (sqrt (+ x 2)))))))
-                .deduplicate()
-                .unwrap(),
+            deftree!(log (+ 1 (exp (+ (/ 2 (sqrt (+ 2 x))) (/ 3 (sqrt (+ x 2))))))),
             8,
         );
     }
@@ -431,14 +443,22 @@ mod test {
     }
 
     #[test]
-    fn t_match_max_of_sub() {
+    fn t_match_min_of_sub_1() {
         t_check_template(
-            "max_of_sub",
-            deftree!(log (+ 1 (exp (min (- x 2) (- x 3)))))
-                .deduplicate()
-                .unwrap(),
+            "min_of_sub_1",
+            deftree!(log (+ 1 (exp (min (- x 2) (- x 3))))),
             6,
         );
+    }
+
+    #[test]
+    fn t_match_min_of_add_1() {
+        const NAME: &str = "min_of_add_1";
+        // Make sure all permutations work.
+        t_check_template(NAME, deftree!(min (+ x z) (+ x y)), 5);
+        t_check_template(NAME, deftree!(min (+ z x) (+ x y)), 5);
+        t_check_template(NAME, deftree!(min (+ z x) (+ y x)), 5);
+        t_check_template(NAME, deftree!(min (+ x z) (+ y x)), 5);
     }
 
     #[test]

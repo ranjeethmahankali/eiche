@@ -1,5 +1,9 @@
+use std::collections::{BinaryHeap, HashMap};
+
 use crate::{
-    mutate::{Mutations, TemplateCapture},
+    hash::hash_tree,
+    mutate::{Mutations, MutationError, TemplateCapture},
+    template::get_templates,
     tree::Tree,
     tree::{Node, Node::*},
 };
@@ -83,18 +87,97 @@ impl Heuristic {
     }
 }
 
-pub fn reduce(tree: Tree) -> Result<Tree, ()> {
+struct Candidate {
+    tree: Tree,
+    prev: usize,
+    steps: usize,
+    complexity: usize,
+}
+
+impl Candidate {
+    pub fn cost(&self) -> usize {
+        self.steps + self.complexity
+    }
+}
+
+impl PartialOrd for Candidate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        other.cost().partial_cmp(&self.cost())
+    }
+}
+
+impl PartialEq for Candidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.tree == other.tree
+    }
+}
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.cost().cmp(&self.cost())
+    }
+}
+impl Eq for Candidate {}
+
+pub fn reduce(tree: Tree, max_candidates: usize) -> Result<Vec<Tree>, MutationError> {
     let mut capture = TemplateCapture::new();
-    let mutations = Mutations::of(&tree, &mut capture);
-    let mut costs = Vec::<usize>::new();
-    let mut h = Heuristic::new();
-    for tree in mutations {
-        match tree {
-            Ok(t) => costs.push(h.cost(&t)),
-            Err(_) => todo!(),
+    let tree = {
+        let root_index = tree.root_index();
+        capture.make_compact_tree(tree.take_nodes(), root_index)?
+    };
+    let mut hfn = Heuristic::new();
+    let mut explored = Vec::<Candidate>::with_capacity(max_candidates);
+    let mut indexmap = HashMap::<u64, usize>::new();
+    let mut hashbuf = Vec::<u64>::new();
+    let mut heap =
+        BinaryHeap::<Candidate>::with_capacity(get_templates().len() * max_candidates / 2); // Estimate.
+    let mut min_complexity = usize::MAX;
+    let mut best_candidate = 0;
+    let start_complexity = hfn.cost(&tree);
+    heap.push(Candidate {
+        tree,
+        prev: 0,
+        steps: 0,
+        complexity: start_complexity,
+    });
+    while let Some(cand) = heap.pop() {
+        let hash = hash_tree(&cand.tree, &mut hashbuf);
+        let index = explored.len();
+        match indexmap.insert(hash, index) {
+            Some(_old) => {
+                continue;
+            }
+            None => {
+                explored.push(cand);
+            }
+        }
+        let cand = explored.last().unwrap();
+        if cand.complexity < min_complexity {
+            min_complexity = cand.complexity;
+            best_candidate = index;
+        }
+        if explored.len() == max_candidates {
+            break;
+        }
+        for mutation in Mutations::of(&cand.tree, &mut capture) {
+            let tree = mutation?;
+            let complexity = hfn.cost(&tree);
+            heap.push(Candidate {
+                tree,
+                prev: index,
+                steps: cand.steps + 1,
+                complexity,
+            });
         }
     }
-    todo!();
+    let mut steps = Vec::<Tree>::new();
+    let mut i = best_candidate;
+    while explored[i].prev != i {
+        let cand = &explored[i];
+        steps.push(cand.tree.clone());
+        i = cand.prev;
+    }
+    steps.reverse();
+    return Ok(steps);
 }
 
 #[cfg(test)]
@@ -174,5 +257,20 @@ mod test {
             deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
             deftree!(log (+ 1 (exp (sqrt (min x y))))),
         );
+    }
+
+    #[test]
+    fn t_reduce_0() {
+        let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y));
+        let steps = reduce(tree, 8).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(p)));
+    }
+
+    #[test]
+    fn t_reduce_1() {
+        let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
+                                  (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)));
+        let steps = reduce(tree, 8).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(1)));
     }
 }
