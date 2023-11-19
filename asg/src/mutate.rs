@@ -24,7 +24,7 @@ impl<'a> Mutations<'a> {
 }
 
 impl<'a> Iterator for Mutations<'a> {
-    type Item = Result<Tree, MutationError>;
+    type Item = Result<Tree, SimplificationError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let templates = get_templates();
@@ -40,7 +40,7 @@ impl<'a> Iterator for Mutations<'a> {
 }
 
 #[derive(Debug)]
-pub enum MutationError {
+pub enum SimplificationError {
     InvalidCapture,
     UnboundSymbol,
     InvalidTopology(TopologicalError),
@@ -99,6 +99,22 @@ impl TemplateCapture {
         return false;
     }
 
+    pub fn make_compact_tree(
+        &mut self,
+        nodes: Vec<Node>,
+        root_index: usize,
+    ) -> Result<Tree, SimplificationError> {
+        let (nodes, root_index) = self
+            .topo_sorter
+            .run(nodes, root_index)
+            .map_err(|e| SimplificationError::InvalidTopology(e))?;
+        return Tree::from_nodes(
+            self.pruner
+                .run(self.deduper.run(fold_nodes(nodes)), root_index),
+        )
+        .map_err(|e| SimplificationError::TreeCreationError(e));
+    }
+
     fn bind(&mut self, label: char, index: usize) -> bool {
         for (l, i) in self.bindings.iter() {
             if *l == label {
@@ -122,7 +138,7 @@ impl TemplateCapture {
         self.bindings.truncate(state);
     }
 
-    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
+    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, SimplificationError> {
         use crate::tree::Node::*;
         let mut nodes = tree.nodes().clone();
         let root_index = tree.root_index();
@@ -131,7 +147,7 @@ impl TemplateCapture {
         self.node_map.resize(pong.len(), 0);
         let oldroot = match self.node_index {
             Some(i) => i,
-            None => return Err(MutationError::InvalidCapture),
+            None => return Err(SimplificationError::InvalidCapture),
         };
         let mut newroot = oldroot;
         let num_nodes = nodes.len();
@@ -140,7 +156,7 @@ impl TemplateCapture {
                 Constant(val) => self.add_node(&mut nodes, ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
-                    None => return Err(MutationError::UnboundSymbol),
+                    None => return Err(SimplificationError::UnboundSymbol),
                 },
                 Unary(op, input) => {
                     self.add_node(&mut nodes, ni, Unary(*op, self.node_map[*input]))
@@ -187,15 +203,7 @@ impl TemplateCapture {
             root_index
         };
         // Clean up and make a tree.
-        let (nodes, root_index) = self
-            .topo_sorter
-            .run(nodes, root_index)
-            .map_err(|e| MutationError::InvalidTopology(e))?;
-        return Tree::from_nodes(
-            self.pruner
-                .run(self.deduper.run(fold_nodes(nodes)), root_index),
-        )
-        .map_err(|e| MutationError::TreeCreationError(e));
+        return self.make_compact_tree(nodes, root_index);
     }
 
     fn match_node(

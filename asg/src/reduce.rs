@@ -111,7 +111,7 @@ impl Candidate {
 
 impl PartialOrd for Candidate {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.cost().partial_cmp(&other.cost())
+        other.cost().partial_cmp(&self.cost())
     }
 }
 
@@ -122,7 +122,7 @@ impl PartialEq for Candidate {
 }
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.cost().cmp(&other.cost())
+        other.cost().cmp(&self.cost())
     }
 }
 impl Eq for Candidate {}
@@ -130,6 +130,12 @@ impl Eq for Candidate {}
 pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
     const MAX_CANDIDATES: usize = 100;
     let mut capture = TemplateCapture::new();
+    let tree = {
+        let root_index = tree.root_index();
+        capture
+            .make_compact_tree(tree.take_nodes(), root_index)
+            .map_err(|_| ())? // TODO: Use proper error.
+    };
     let mut hfn = Heuristic::new();
     let mut explored = Vec::<Candidate>::new();
     let mut indexmap = HashMap::<u64, usize>::new();
@@ -154,12 +160,8 @@ pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
             min_complexity = cand.complexity;
             best_candidate = index;
         }
-        let entry = indexmap.entry(hash).or_insert(explored.len());
-        if *entry < explored.len() {
-            continue;
-        }
         for mutation in Mutations::of(&cand.tree, &mut capture) {
-            let tree = mutation.map_err(|_| ())?; // TODO: Use proper error
+            let tree = mutation.map_err(|_| ())?; // TODO: Use proper error.
             heap.push(Candidate::from(tree, index, cand.steps + 1, &mut hfn));
         }
         if explored.len() > MAX_CANDIDATES {
@@ -168,14 +170,12 @@ pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
     }
     let mut steps = Vec::<Tree>::new();
     let mut i = best_candidate;
-    loop {
+    while explored[i].prev != i {
         let cand = &explored[i];
         steps.push(cand.tree.clone());
-        if cand.prev == i {
-            break;
-        }
         i = cand.prev;
     }
+    steps.reverse();
     return Ok(steps);
 }
 
@@ -256,5 +256,24 @@ mod test {
             deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
             deftree!(log (+ 1 (exp (sqrt (min x y))))),
         );
+    }
+
+    #[test]
+    fn t_reduce_0() {
+        let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y));
+        println!("${}$\n", tree.to_latex());
+        let steps = reduce(tree).unwrap();
+        let expected = vec![
+            deftree!(/ (* p (+ x y)) (+ x y)).deduplicate().unwrap(),
+            deftree!(* p (/ (+ x y) (+ x y))).deduplicate().unwrap(),
+            deftree!(p),
+        ];
+        assert_eq!(steps.len(), expected.len());
+        for (left, right) in steps.iter().zip(expected.iter()) {
+            assert!(left.equivalent(right));
+        }
+        for step in steps {
+            println!("= ${}$\n", step.to_latex());
+        }
     }
 }
