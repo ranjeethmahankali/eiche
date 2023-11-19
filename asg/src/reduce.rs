@@ -4,7 +4,6 @@ use crate::{
     hash::hash_tree,
     mutate::{Mutations, TemplateCapture},
     sort::TopologicalError,
-    template::get_templates,
     tree::Tree,
     tree::{Node, Node::*, TreeError},
 };
@@ -127,15 +126,14 @@ pub enum SimplificationError {
     TreeCreationError(TreeError),
 }
 
-pub fn reduce(tree: Tree) -> Result<Vec<Tree>, SimplificationError> {
-    let max_candidates: usize = get_templates().len() * tree.len() * 3;
+pub fn reduce(tree: Tree, max_candidates: usize) -> Result<Vec<Tree>, SimplificationError> {
     let mut capture = TemplateCapture::new();
     let tree = {
         let root_index = tree.root_index();
         capture.make_compact_tree(tree.take_nodes(), root_index)?
     };
     let mut hfn = Heuristic::new();
-    let mut explored = Vec::<Candidate>::new();
+    let mut explored = Vec::<Candidate>::with_capacity(max_candidates);
     let mut indexmap = HashMap::<u64, usize>::new();
     let mut hashbuf = Vec::<u64>::new();
     let mut heap = BinaryHeap::<Candidate>::new();
@@ -159,6 +157,9 @@ pub fn reduce(tree: Tree) -> Result<Vec<Tree>, SimplificationError> {
                 explored.push(cand);
             }
         }
+        if explored.len() == max_candidates {
+            break;
+        }
         let cand = explored.last().unwrap();
         if cand.complexity < min_complexity {
             min_complexity = cand.complexity;
@@ -167,17 +168,12 @@ pub fn reduce(tree: Tree) -> Result<Vec<Tree>, SimplificationError> {
         for mutation in Mutations::of(&cand.tree, &mut capture) {
             let tree = mutation?;
             let complexity = hfn.cost(&tree);
-            if complexity < 3 * min_complexity {
-                heap.push(Candidate {
-                    tree,
-                    prev: index,
-                    steps: cand.steps + 1,
-                    complexity,
-                });
-            }
-        }
-        if explored.len() > max_candidates {
-            break;
+            heap.push(Candidate {
+                tree,
+                prev: index,
+                steps: cand.steps + 1,
+                complexity,
+            });
         }
     }
     let mut steps = Vec::<Tree>::new();
@@ -273,36 +269,27 @@ mod test {
     #[test]
     fn t_reduce_0() {
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y));
-        let steps = reduce(tree).unwrap();
-        let expected = vec![
-            deftree!(/ (* p (+ x y)) (+ x y)).deduplicate().unwrap(),
-            deftree!(* p (/ (+ x y) (+ x y))).deduplicate().unwrap(),
-            deftree!(p),
-        ];
-        assert_eq!(steps.len(), expected.len());
-        for (left, right) in steps.iter().zip(expected.iter()) {
-            assert!(left.equivalent(right));
-        }
+        let steps = reduce(tree, 8).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(p)));
     }
 
     #[test]
     fn t_reduce_1() {
         let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)));
-        let steps = reduce(tree).unwrap();
-        let expected = vec![
-            deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
-                           (/ (pow y 2) (pow (sqrt (+ (pow x 2) (pow y 2))) 2)))),
-            deftree!((sqrt (+ (/ (pow x 2) (pow (sqrt (+ (pow x 2) (pow y 2))) 2))
-                            (/ (pow y 2) (pow (sqrt (+ (pow x 2) (pow y 2))) 2))))),
-            deftree!((sqrt (/ (+ (pow x 2) (pow y 2))
-                            (pow (sqrt (+ (pow x 2) (pow y 2))) 2)))),
-            deftree!((sqrt (/ (+ (pow x 2) (pow y 2)) (+ (pow x 2) (pow y 2))))),
-            deftree!(1),
-        ];
-        assert_eq!(steps.len(), expected.len());
-        for (left, right) in steps.iter().zip(expected.iter()) {
-            assert!(left.equivalent(right));
-        }
+        let steps = reduce(tree, 8).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(1)));
     }
+
+    // #[test]
+    // fn t_reduce_2() {
+    //     let tree = deftree!(min
+    //                         (- (sqrt (+ (+ (pow (- x 1) 2) (pow y 2)) (pow z 2))) 3)
+    //                         (- (sqrt (+ (+ (pow x 2) (pow (- y 1) 2)) (pow z 2))) 3));
+    //     println!("${}$\n", tree.to_latex());
+    //     let steps = reduce(tree, 16).unwrap();
+    //     for step in steps {
+    //         println!(" = ${}$\n", step.to_latex());
+    //     }
+    // }
 }

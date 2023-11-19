@@ -234,17 +234,21 @@ impl TemplateCapture {
                 if lop.is_commutative() && commute {
                     (l1, r1) = (r1, l1);
                 }
+                let cpt = self.checkpoint();
                 let (mut found, comm_left) =
                     self.match_node_commute(l1, ltree, *l2, rtree, commute);
                 if !found && comm_left {
+                    self.restore(cpt);
                     (found, _) = self.match_node_commute(l1, ltree, *l2, rtree, !commute);
                 }
                 if !found {
                     return (false, lop.is_commutative() || comm_left);
                 }
+                let cpt = self.checkpoint();
                 let (mut found, comm_right) =
                     self.match_node_commute(r1, ltree, *r2, rtree, commute);
                 if !found && comm_right {
+                    self.restore(cpt);
                     (found, _) = self.match_node_commute(r1, ltree, *r2, rtree, !commute);
                 }
                 return (found, lop.is_commutative() || comm_left || comm_right);
@@ -438,6 +442,15 @@ mod test {
             deftree!(log (+ 1 (exp (min (- x 2) (- x 3))))),
             6,
         );
+    }
+
+    #[test]
+    fn t_match_min_of_add_1() {
+        // Make sure all commutations work.
+        t_check_template("min_of_add_1", deftree!(min (+ x z) (+ x y)), 5);
+        t_check_template("min_of_add_1", deftree!(min (+ z x) (+ x y)), 5);
+        t_check_template("min_of_add_1", deftree!(min (+ z x) (+ y x)), 5);
+        t_check_template("min_of_add_1", deftree!(min (+ x z) (+ y x)), 5);
     }
 
     #[test]
