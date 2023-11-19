@@ -2,11 +2,18 @@ use crate::{
     dedup::Deduplicater,
     fold::fold_nodes,
     prune::Pruner,
-    reduce::SimplificationError,
-    sort::TopoSorter,
+    sort::{TopoSorter, TopologicalError},
     template::{get_templates, Template},
-    tree::{Node, Tree},
+    tree::{Node, Tree, TreeError},
 };
+
+#[derive(Debug)]
+pub enum MutationError {
+    InvalidCapture,
+    UnboundSymbol,
+    InvalidTopology(TopologicalError),
+    TreeCreationError(TreeError),
+}
 
 pub struct Mutations<'a> {
     tree: &'a Tree,
@@ -25,7 +32,7 @@ impl<'a> Mutations<'a> {
 }
 
 impl<'a> Iterator for Mutations<'a> {
-    type Item = Result<Tree, SimplificationError>;
+    type Item = Result<Tree, MutationError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let templates = get_templates();
@@ -90,16 +97,16 @@ impl TemplateCapture {
         &mut self,
         nodes: Vec<Node>,
         root_index: usize,
-    ) -> Result<Tree, SimplificationError> {
+    ) -> Result<Tree, MutationError> {
         let (nodes, root_index) = self
             .topo_sorter
             .run(nodes, root_index)
-            .map_err(|e| SimplificationError::InvalidTopology(e))?;
+            .map_err(|e| MutationError::InvalidTopology(e))?;
         return Tree::from_nodes(
             self.pruner
                 .run(self.deduper.run(fold_nodes(nodes)), root_index),
         )
-        .map_err(|e| SimplificationError::TreeCreationError(e));
+        .map_err(|e| MutationError::TreeCreationError(e));
     }
 
     fn bind(&mut self, label: char, index: usize) -> bool {
@@ -125,7 +132,7 @@ impl TemplateCapture {
         self.bindings.truncate(state);
     }
 
-    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, SimplificationError> {
+    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
         use crate::tree::Node::*;
         let mut nodes = tree.nodes().clone();
         let root_index = tree.root_index();
@@ -134,7 +141,7 @@ impl TemplateCapture {
         self.node_map.resize(pong.len(), 0);
         let oldroot = match self.node_index {
             Some(i) => i,
-            None => return Err(SimplificationError::InvalidCapture),
+            None => return Err(MutationError::InvalidCapture),
         };
         let mut newroot = oldroot;
         let num_nodes = nodes.len();
@@ -143,7 +150,7 @@ impl TemplateCapture {
                 Constant(val) => self.add_node(&mut nodes, ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
-                    None => return Err(SimplificationError::UnboundSymbol),
+                    None => return Err(MutationError::UnboundSymbol),
                 },
                 Unary(op, input) => {
                     self.add_node(&mut nodes, ni, Unary(*op, self.node_map[*input]))
@@ -235,23 +242,23 @@ impl TemplateCapture {
                     (l1, r1) = (r1, l1);
                 }
                 let cpt = self.checkpoint();
-                let (mut found, comm_left) =
+                let (mut found_left, comm_left) =
                     self.match_node_commute(l1, ltree, *l2, rtree, commute);
-                if !found && comm_left {
+                if !found_left && comm_left {
                     self.restore(cpt);
-                    (found, _) = self.match_node_commute(l1, ltree, *l2, rtree, !commute);
-                }
-                if !found {
-                    return (false, lop.is_commutative() || comm_left);
+                    (found_left, _) = self.match_node_commute(l1, ltree, *l2, rtree, !commute);
                 }
                 let cpt = self.checkpoint();
-                let (mut found, comm_right) =
+                let (mut found_right, comm_right) =
                     self.match_node_commute(r1, ltree, *r2, rtree, commute);
-                if !found && comm_right {
+                if !found_right && comm_right {
                     self.restore(cpt);
-                    (found, _) = self.match_node_commute(r1, ltree, *r2, rtree, !commute);
+                    (found_right, _) = self.match_node_commute(r1, ltree, *r2, rtree, !commute);
                 }
-                return (found, lop.is_commutative() || comm_left || comm_right);
+                return (
+                    found_left && found_right,
+                    lop.is_commutative() || comm_left || comm_right,
+                );
             }
             (Node::Binary(..), _) => return (false, false),
         }
@@ -446,11 +453,12 @@ mod test {
 
     #[test]
     fn t_match_min_of_add_1() {
-        // Make sure all commutations work.
-        t_check_template("min_of_add_1", deftree!(min (+ x z) (+ x y)), 5);
-        t_check_template("min_of_add_1", deftree!(min (+ z x) (+ x y)), 5);
-        t_check_template("min_of_add_1", deftree!(min (+ z x) (+ y x)), 5);
-        t_check_template("min_of_add_1", deftree!(min (+ x z) (+ y x)), 5);
+        const NAME: &str = "min_of_add_1";
+        // Make sure all permutations work.
+        t_check_template(NAME, deftree!(min (+ x z) (+ x y)), 5);
+        t_check_template(NAME, deftree!(min (+ z x) (+ x y)), 5);
+        t_check_template(NAME, deftree!(min (+ z x) (+ y x)), 5);
+        t_check_template(NAME, deftree!(min (+ x z) (+ y x)), 5);
     }
 
     #[test]

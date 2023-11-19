@@ -2,10 +2,10 @@ use std::collections::{BinaryHeap, HashMap};
 
 use crate::{
     hash::hash_tree,
-    mutate::{Mutations, TemplateCapture},
-    sort::TopologicalError,
+    mutate::{Mutations, MutationError, TemplateCapture},
+    template::get_templates,
     tree::Tree,
-    tree::{Node, Node::*, TreeError},
+    tree::{Node, Node::*},
 };
 
 struct Heuristic {
@@ -118,15 +118,7 @@ impl Ord for Candidate {
 }
 impl Eq for Candidate {}
 
-#[derive(Debug)]
-pub enum SimplificationError {
-    InvalidCapture,
-    UnboundSymbol,
-    InvalidTopology(TopologicalError),
-    TreeCreationError(TreeError),
-}
-
-pub fn reduce(tree: Tree, max_candidates: usize) -> Result<Vec<Tree>, SimplificationError> {
+pub fn reduce(tree: Tree, max_candidates: usize) -> Result<Vec<Tree>, MutationError> {
     let mut capture = TemplateCapture::new();
     let tree = {
         let root_index = tree.root_index();
@@ -136,7 +128,8 @@ pub fn reduce(tree: Tree, max_candidates: usize) -> Result<Vec<Tree>, Simplifica
     let mut explored = Vec::<Candidate>::with_capacity(max_candidates);
     let mut indexmap = HashMap::<u64, usize>::new();
     let mut hashbuf = Vec::<u64>::new();
-    let mut heap = BinaryHeap::<Candidate>::new();
+    let mut heap =
+        BinaryHeap::<Candidate>::with_capacity(get_templates().len() * max_candidates / 2); // Estimate.
     let mut min_complexity = usize::MAX;
     let mut best_candidate = 0;
     let start_complexity = hfn.cost(&tree);
@@ -157,13 +150,13 @@ pub fn reduce(tree: Tree, max_candidates: usize) -> Result<Vec<Tree>, Simplifica
                 explored.push(cand);
             }
         }
-        if explored.len() == max_candidates {
-            break;
-        }
         let cand = explored.last().unwrap();
         if cand.complexity < min_complexity {
             min_complexity = cand.complexity;
             best_candidate = index;
+        }
+        if explored.len() == max_candidates {
+            break;
         }
         for mutation in Mutations::of(&cand.tree, &mut capture) {
             let tree = mutation?;
@@ -280,16 +273,4 @@ mod test {
         let steps = reduce(tree, 8).unwrap();
         assert!(steps.last().unwrap().equivalent(&deftree!(1)));
     }
-
-    // #[test]
-    // fn t_reduce_2() {
-    //     let tree = deftree!(min
-    //                         (- (sqrt (+ (+ (pow (- x 1) 2) (pow y 2)) (pow z 2))) 3)
-    //                         (- (sqrt (+ (+ (pow x 2) (pow (- y 1) 2)) (pow z 2))) 3));
-    //     println!("${}$\n", tree.to_latex());
-    //     let steps = reduce(tree, 16).unwrap();
-    //     for step in steps {
-    //         println!(" = ${}$\n", step.to_latex());
-    //     }
-    // }
 }
