@@ -266,7 +266,6 @@ mod test {
     #[test]
     fn t_reduce_0() {
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y));
-        println!("${}$\n", tree.to_latex());
         let steps = reduce(tree).unwrap();
         let expected = vec![
             deftree!(/ (* p (+ x y)) (+ x y)).deduplicate().unwrap(),
@@ -277,48 +276,26 @@ mod test {
         for (left, right) in steps.iter().zip(expected.iter()) {
             assert!(left.equivalent(right));
         }
-        for step in steps {
-            println!("= ${}$\n", step.to_latex());
-        }
     }
 
     #[test]
     fn t_reduce_1() {
         let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)));
-        println!("${}$\n", tree.to_latex());
         let steps = reduce(tree).unwrap();
-        // let expected = vec![
-        //     deftree!(/ (* p (+ x y)) (+ x y)).deduplicate().unwrap(),
-        //     deftree!(* p (/ (+ x y) (+ x y))).deduplicate().unwrap(),
-        //     deftree!(p),
-        // ];
-        // assert_eq!(steps.len(), expected.len());
-        // for (left, right) in steps.iter().zip(expected.iter()) {
-        //     assert!(left.equivalent(right));
-        // }
-        for step in steps {
-            println!("= ${}$\n", step.to_latex());
-        }
-    }
-
-    #[test]
-    fn t_reduce_2() {
-        let tree = deftree!(min (- (sqrt (+ (+ (pow (- x 1) 2) (pow y 2)) (pow z 2))) 5)
-                            (- (sqrt (+ (+ (pow x 2) (pow (- y 1) 2)) (pow z 2))) 5));
-        println!("${}$\n", tree.to_latex());
-        let steps = reduce(tree).unwrap();
-        // let expected = vec![
-        //     deftree!(/ (* p (+ x y)) (+ x y)).deduplicate().unwrap(),
-        //     deftree!(* p (/ (+ x y) (+ x y))).deduplicate().unwrap(),
-        //     deftree!(p),
-        // ];
-        // assert_eq!(steps.len(), expected.len());
-        // for (left, right) in steps.iter().zip(expected.iter()) {
-        //     assert!(left.equivalent(right));
-        // }
-        for step in steps {
-            println!("= ${}$\n", step.to_latex());
+        let expected = vec![
+            deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
+                           (/ (pow y 2) (pow (sqrt (+ (pow x 2) (pow y 2))) 2)))),
+            deftree!((sqrt (+ (/ (pow x 2) (pow (sqrt (+ (pow x 2) (pow y 2))) 2))
+                            (/ (pow y 2) (pow (sqrt (+ (pow x 2) (pow y 2))) 2))))),
+            deftree!((sqrt (/ (+ (pow x 2) (pow y 2))
+                            (pow (sqrt (+ (pow x 2) (pow y 2))) 2)))),
+            deftree!((sqrt (/ (+ (pow x 2) (pow y 2)) (+ (pow x 2) (pow y 2))))),
+            deftree!(1),
+        ];
+        assert_eq!(steps.len(), expected.len());
+        for (left, right) in steps.iter().zip(expected.iter()) {
+            assert!(left.equivalent(right));
         }
     }
 }
