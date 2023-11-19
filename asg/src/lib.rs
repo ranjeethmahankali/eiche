@@ -4,6 +4,7 @@ pub mod tree;
 
 mod dedup;
 mod fold;
+mod hash;
 mod io;
 mod latex;
 mod lisp;
@@ -16,4 +17,3 @@ mod walk;
 
 #[cfg(test)]
 mod test;
-mod hash;

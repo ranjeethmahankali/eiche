@@ -3,6 +3,7 @@ use std::collections::{BinaryHeap, HashMap};
 use crate::{
     hash::hash_tree,
     mutate::{Mutations, TemplateCapture},
+    template::get_templates,
     tree::Tree,
     tree::{Node, Node::*},
 };
@@ -94,16 +95,6 @@ struct Candidate {
 }
 
 impl Candidate {
-    pub fn from(tree: Tree, prev: usize, steps: usize, heuristic: &mut Heuristic) -> Candidate {
-        let complexity = heuristic.cost(&tree);
-        Candidate {
-            tree,
-            prev,
-            steps,
-            complexity,
-        }
-    }
-
     pub fn cost(&self) -> usize {
         self.steps + self.complexity
     }
@@ -128,7 +119,7 @@ impl Ord for Candidate {
 impl Eq for Candidate {}
 
 pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
-    const MAX_CANDIDATES: usize = 100;
+    let max_candidates: usize = get_templates().len() * tree.len() * 3;
     let mut capture = TemplateCapture::new();
     let tree = {
         let root_index = tree.root_index();
@@ -143,7 +134,13 @@ pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
     let mut heap = BinaryHeap::<Candidate>::new();
     let mut min_complexity = usize::MAX;
     let mut best_candidate = 0;
-    heap.push(Candidate::from(tree, 0, 0, &mut hfn));
+    let start_complexity = hfn.cost(&tree);
+    heap.push(Candidate {
+        tree,
+        prev: 0,
+        steps: 0,
+        complexity: start_complexity,
+    });
     while let Some(cand) = heap.pop() {
         let hash = hash_tree(&cand.tree, &mut hashbuf);
         let index = explored.len();
@@ -162,9 +159,17 @@ pub fn reduce(tree: Tree) -> Result<Vec<Tree>, ()> {
         }
         for mutation in Mutations::of(&cand.tree, &mut capture) {
             let tree = mutation.map_err(|_| ())?; // TODO: Use proper error.
-            heap.push(Candidate::from(tree, index, cand.steps + 1, &mut hfn));
+            let complexity = hfn.cost(&tree);
+            if complexity < 3 * min_complexity {
+                heap.push(Candidate {
+                    tree,
+                    prev: index,
+                    steps: cand.steps + 1,
+                    complexity,
+                });
+            }
         }
-        if explored.len() > MAX_CANDIDATES {
+        if explored.len() > max_candidates {
             break;
         }
     }
@@ -272,6 +277,46 @@ mod test {
         for (left, right) in steps.iter().zip(expected.iter()) {
             assert!(left.equivalent(right));
         }
+        for step in steps {
+            println!("= ${}$\n", step.to_latex());
+        }
+    }
+
+    #[test]
+    fn t_reduce_1() {
+        let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
+                                  (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)));
+        println!("${}$\n", tree.to_latex());
+        let steps = reduce(tree).unwrap();
+        // let expected = vec![
+        //     deftree!(/ (* p (+ x y)) (+ x y)).deduplicate().unwrap(),
+        //     deftree!(* p (/ (+ x y) (+ x y))).deduplicate().unwrap(),
+        //     deftree!(p),
+        // ];
+        // assert_eq!(steps.len(), expected.len());
+        // for (left, right) in steps.iter().zip(expected.iter()) {
+        //     assert!(left.equivalent(right));
+        // }
+        for step in steps {
+            println!("= ${}$\n", step.to_latex());
+        }
+    }
+
+    #[test]
+    fn t_reduce_2() {
+        let tree = deftree!(min (- (sqrt (+ (+ (pow (- x 1) 2) (pow y 2)) (pow z 2))) 5)
+                            (- (sqrt (+ (+ (pow x 2) (pow (- y 1) 2)) (pow z 2))) 5));
+        println!("${}$\n", tree.to_latex());
+        let steps = reduce(tree).unwrap();
+        // let expected = vec![
+        //     deftree!(/ (* p (+ x y)) (+ x y)).deduplicate().unwrap(),
+        //     deftree!(* p (/ (+ x y) (+ x y))).deduplicate().unwrap(),
+        //     deftree!(p),
+        // ];
+        // assert_eq!(steps.len(), expected.len());
+        // for (left, right) in steps.iter().zip(expected.iter()) {
+        //     assert!(left.equivalent(right));
+        // }
         for step in steps {
             println!("= ${}$\n", step.to_latex());
         }

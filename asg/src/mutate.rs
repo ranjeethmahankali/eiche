@@ -450,9 +450,9 @@ mod test {
     }
 
     #[test]
-    fn t_match_max_of_sub() {
+    fn t_match_min_of_sub_1() {
         t_check_template(
-            "max_of_sub",
+            "min_of_sub_1",
             deftree!(log (+ 1 (exp (min (- x 2) (- x 3)))))
                 .deduplicate()
                 .unwrap(),

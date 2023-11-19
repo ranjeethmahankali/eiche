@@ -53,8 +53,8 @@ fn to_latex(node: &Node, nodes: &Vec<Node>) -> String {
                 Multiply => format!("{{{}}}.{{{}}}", lx, rx),
                 Divide => format!("\\dfrac{{{}}}{{{}}}", lx, rx),
                 Pow => format!("{{{}}}^{{{}}}", lx, rx),
-                Min => format!("\\min({{{}}}, {{{}}})", lx, rx),
-                Max => format!("\\max({{{}}}, {{{}}})", lx, rx),
+                Min => format!("\\min\\left({{{}}}, {{{}}}\\right)", lx, rx),
+                Max => format!("\\max\\left({{{}}}, {{{}}}\\right)", lx, rx),
             }
         }
     }
@@ -173,8 +173,14 @@ mod test {
         assert_eq!("-{{x}.{y}}", deftree!(- (* x y)).to_latex());
         assert_eq!("-{\\dfrac{x}{y}}", deftree!(- (/ x y)).to_latex());
         assert_eq!("-{{x}^{y}}", deftree!(- (pow x y)).to_latex());
-        assert_eq!("-{\\min({x}, {y})}", deftree!(- (min x y)).to_latex());
-        assert_eq!("-{\\max({x}, {y})}", deftree!(- (max x y)).to_latex());
+        assert_eq!(
+            "-{\\min\\left({x}, {y}\\right)}",
+            deftree!(- (min x y)).to_latex()
+        );
+        assert_eq!(
+            "-{\\max\\left({x}, {y}\\right)}",
+            deftree!(- (max x y)).to_latex()
+        );
     }
 
     #[test]
@@ -214,11 +220,11 @@ mod test {
         assert_eq!("\\sqrt{\\dfrac{x}{y}}", deftree!(sqrt (/ x y)).to_latex());
         assert_eq!("\\sqrt{{x}^{y}}", deftree!(sqrt (pow x y)).to_latex());
         assert_eq!(
-            "\\sqrt{\\min({x}, {y})}",
+            "\\sqrt{\\min\\left({x}, {y}\\right)}",
             deftree!(sqrt (min x y)).to_latex()
         );
         assert_eq!(
-            "\\sqrt{\\max({x}, {y})}",
+            "\\sqrt{\\max\\left({x}, {y}\\right)}",
             deftree!(sqrt (max x y)).to_latex()
         );
     }

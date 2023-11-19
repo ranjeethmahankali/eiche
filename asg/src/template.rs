@@ -229,9 +229,17 @@ lazy_static! {
                      pong (/ (+ (+ a b) (abs (- b a))) 2.)
 
         ),
-        deftemplate!(max_of_sub
+        deftemplate!(min_of_sub_1
                      ping (min (- a x) (- a y))
                      pong (- a (max x y))
+        ),
+        deftemplate!(min_of_sub_2
+                     ping (min (- x c) (- y c))
+                     pong (- (min x y) c)
+        ),
+        deftemplate!(min_of_add_1
+                     ping (min (+ a x) (+ b x))
+                     pong (+ x (min a b))
         ),
     ];
 
@@ -349,9 +357,9 @@ pub mod test {
         {
             // === Other templates ===
             check_one("min_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
-            check_one("max_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
+            check_one("max__1expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
             check_one(
-                "max_of_sub",
+                "min_of_sub",
                 &[('a', -10., 10.), ('x', -10., 10.), ('y', -10., 10.)],
                 1e-14,
             );
