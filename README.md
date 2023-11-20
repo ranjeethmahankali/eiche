@@ -1,4 +1,4 @@
-## Symba
+# Symba
 
   Pet project to get acquainted with Rust, and to mess around with
   symbolic expressions, hence the name 'Symba'.
