@@ -37,6 +37,7 @@ impl UnaryOp {
             Exp => f64::exp(value),
         }
     }
+
     /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use UnaryOp::*;
