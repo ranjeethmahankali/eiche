@@ -522,7 +522,12 @@ mod test {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         before = before.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
-        after = after.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        after = after
+            .fold()
+            .unwrap()
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
         let mut capture = TemplateCapture::new();
@@ -593,7 +598,7 @@ mod test {
     fn t_distribute_pow_div() {
         check_mutations(
             deftree!(pow (/ (* x y) (* 2 3)) 5),
-            deftree!(/ (pow (* x y) 5) (pow (* 2 3) 5)).fold().unwrap(),
+            deftree!(/ (pow (* x y) 5) (pow (* 2 3) 5)),
         );
     }
 
@@ -601,7 +606,7 @@ mod test {
     fn t_distribute_pow_mul() {
         check_mutations(
             deftree!(pow (* (* x y) (* 2 3)) 5),
-            deftree!(* (pow (* x y) 5) (pow (* 2 3) 5)).fold().unwrap(),
+            deftree!(* (pow (* x y) 5) (pow (* 2 3) 5)),
         );
     }
 
