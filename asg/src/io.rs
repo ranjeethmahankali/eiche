@@ -90,10 +90,12 @@ impl std::fmt::Display for Node {
 
 #[cfg(test)]
 mod test {
-    use crate::deftree;
+    use crate::{dedup::Deduplicater, deftree, prune::Pruner};
 
     #[test]
     fn t_tree_string_formatting() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let tree = deftree!(
             (max (min
                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
@@ -167,7 +169,7 @@ mod test {
       └── [59] Constant(5.25)"
                 .trim()
         );
-        let tree = tree.deduplicate().unwrap();
+        let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
         assert_eq!(
             format!("{}", tree).trim(),
             "

@@ -1,6 +1,6 @@
 use crate::tree::{Node, Node::*, Tree};
 
-pub fn hash_nodes(nodes: &Vec<Node>, hashbuf: &mut Vec<u64>) {
+pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     // Using a boxed slice to avoid accidental resizing later.
@@ -40,7 +40,9 @@ pub fn hash_nodes(nodes: &Vec<Node>, hashbuf: &mut Vec<u64>) {
     }
 }
 
-pub fn hash_tree(tree: &Tree, hashbuf: &mut Vec<u64>) -> u64 {
-    hash_nodes(tree.nodes(), hashbuf);
-    return hashbuf[tree.root_index()];
+impl Tree {
+    pub fn hash(&self, hashbuf: &mut Vec<u64>) -> u64 {
+        hash_nodes(self.nodes(), hashbuf);
+        return hashbuf[self.root_index()];
+    }
 }

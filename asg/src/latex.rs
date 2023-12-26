@@ -6,7 +6,7 @@ impl Tree {
     }
 }
 
-fn to_latex(node: &Node, nodes: &Vec<Node>) -> String {
+fn to_latex(node: &Node, nodes: &[Node]) -> String {
     match node {
         Constant(val) => val.to_string(),
         Symbol(label) => label.to_string(),
@@ -127,8 +127,10 @@ fn with_parens(latex: String) -> String {
 #[cfg(test)]
 mod test {
     use crate::{
+        dedup::Deduplicater,
         deftree,
         mutate::{Mutations, TemplateCapture},
+        prune::Pruner,
     };
 
     #[test]
@@ -239,9 +241,12 @@ mod test {
 
     #[test]
     fn t_mutations_latex() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y))
-            .deduplicate()
-            .unwrap();
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         let mut capture = TemplateCapture::new();
         for m in Mutations::of(&tree, &mut capture) {
             match m {
