@@ -7,7 +7,6 @@ mod fold;
 mod hash;
 mod io;
 mod latex;
-mod lisp;
 mod macros;
 mod mutate;
 mod prune;

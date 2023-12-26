@@ -51,15 +51,6 @@ macro_rules! deftree {
     };
 }
 
-/// Convert the lisp expression into a string and parse the string
-/// into a tree.
-#[macro_export]
-macro_rules! parsetree {
-    ($($exp:tt) *) => {
-        $crate::tree::Tree::from_lisp(stringify!($($exp) *))
-    };
-}
-
 #[cfg(test)]
 mod test {
     use crate::tree::{BinaryOp::*, Node::*, UnaryOp::*};
