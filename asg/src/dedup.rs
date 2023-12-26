@@ -41,7 +41,7 @@ impl Deduplicater {
     /// after deduplication, there can be `dead` nodes remaining, that
     /// are not connected to the root. Consider pruning the tree
     /// afterwards.
-    pub fn run(&mut self, mut nodes: Vec<Node>) -> Vec<Node> {
+    pub fn run(&mut self, nodes: &mut Vec<Node>) {
         // Compute unique indices after deduplication.
         self.indices.clear();
         self.indices.extend(0..nodes.len());
@@ -78,7 +78,6 @@ impl Deduplicater {
                 }
             }
         }
-        return nodes;
     }
 }
 
@@ -141,11 +140,13 @@ pub fn equivalent(
 
 impl Tree {
     /// Deduplicate the common subtrees in this tree.
-    pub fn deduplicate(self) -> Result<Tree, TreeError> {
+    pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        return Tree::from_nodes(pruner.run(dedup.run(self.take_nodes()), root_index));
+        dedup.run(self.nodes_mut());
+        pruner.run(self.nodes_mut(), root_index);
+        return self.validated();
     }
 
     pub fn equivalent(&self, other: &Tree) -> bool {
@@ -165,11 +166,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        deftree,
-        test::util::compare_trees,
-        tree::{BinaryOp::*, Tree},
-    };
+    use crate::{deftree, test::util::compare_trees, tree::BinaryOp::*};
 
     #[test]
     fn t_recursive_compare() {
@@ -188,45 +185,30 @@ mod test {
         ];
         let mut walker1 = DepthWalker::new();
         let mut walker2 = DepthWalker::new();
-        fn t_check_tree(nodes: &Vec<Node>) {
-            let tree = Tree::from_nodes(nodes.clone());
-            match tree {
-                Ok(tree) => {
-                    assert_eq!(tree.len(), nodes.len());
-                }
-                Err(_) => assert!(false),
-            };
-        }
-        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Try more mirroring
         nodes[6] = Binary(Add, 2, 5);
-        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Multiply node with mirrored inputs.
         nodes[2] = Binary(Multiply, 0, 1);
         nodes[5] = Binary(Multiply, 3, 4);
-        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Min node with mirrored inputs.
         nodes[2] = Binary(Min, 0, 1);
         nodes[5] = Binary(Min, 3, 4);
-        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Max node with mirrored inputs.
         nodes[2] = Binary(Max, 0, 1);
         nodes[5] = Binary(Max, 3, 4);
-        t_check_tree(&nodes);
         assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2));
         assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2));
         // Subtract node with mirrored inputs.
         nodes[2] = Binary(Subtract, 0, 1);
         nodes[5] = Binary(Subtract, 3, 4);
-        t_check_tree(&nodes);
         assert!(!equivalent(
             2,
             5,
@@ -246,7 +228,6 @@ mod test {
         // Divide node with mirrored inputs.
         nodes[2] = Binary(Divide, 0, 1);
         nodes[5] = Binary(Divide, 3, 4);
-        t_check_tree(&nodes);
         assert!(!equivalent(
             2,
             5,
@@ -266,7 +247,6 @@ mod test {
         // Pow node with mirrored inputs.
         nodes[2] = Binary(Pow, 0, 1);
         nodes[5] = Binary(Pow, 3, 4);
-        t_check_tree(&nodes);
         assert!(!equivalent(
             2,
             5,

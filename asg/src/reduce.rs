@@ -44,7 +44,7 @@ impl Heuristic {
     /// we've detected a diamond shaped loop, and the number of nodes
     /// traversed since the last visit roughly correlates to the size
     /// of the diamond shaped loop.
-    fn euler_walk_cost(&mut self, nodes: &Vec<Node>, root: usize) -> usize {
+    fn euler_walk_cost(&mut self, nodes: &[Node], root: usize) -> usize {
         // Reset all buffers.
         self.stack.clear();
         self.stack.reserve(nodes.len());
@@ -120,10 +120,7 @@ impl Eq for Candidate {}
 
 pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, MutationError> {
     let mut capture = TemplateCapture::new();
-    let tree = {
-        let root_index = tree.root_index();
-        capture.make_compact_tree(tree.take_nodes(), root_index)?
-    };
+    let tree = capture.make_compact_tree(tree, None)?;
     let mut hfn = Heuristic::new();
     let mut explored = Vec::<Candidate>::with_capacity(max_iter);
     let mut indexmap = HashMap::<u64, usize>::new();

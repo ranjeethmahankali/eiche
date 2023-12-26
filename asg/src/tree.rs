@@ -142,15 +142,6 @@ impl Tree {
         }
     }
 
-    /// Create a new tree with `nodes`. If the `nodes` don't meet the
-    /// requirements for represeting a standart tree, an appropriate
-    /// `TreeError` is returned.
-    pub fn from_nodes(nodes: Vec<Node>) -> Result<Tree, TreeError> {
-        Ok(Tree {
-            nodes: Self::validate_nodes(nodes)?,
-        })
-    }
-
     /// The number of nodes in this tree.
     pub fn len(&self) -> usize {
         self.nodes.len()
@@ -176,14 +167,12 @@ impl Tree {
     }
 
     /// Reference to the nodes of this tree.
-    pub fn nodes(&self) -> &Vec<Node> {
+    pub fn nodes(&self) -> &[Node] {
         &self.nodes
     }
 
-    /// Drop this tree and take ownership of the nodes. The nodes are
-    /// returned.
-    pub fn take_nodes(self) -> Vec<Node> {
-        self.nodes
+    pub fn nodes_mut(&mut self) -> &mut Vec<Node> {
+        &mut self.nodes
     }
 
     /// Get a unique list of all symbols in this tree. The list of
@@ -205,13 +194,12 @@ impl Tree {
         return chars;
     }
 
-    /// Check if `nodes` can represent a valid tree.
-    fn validate_nodes(nodes: Vec<Node>) -> Result<Vec<Node>, TreeError> {
-        if nodes.is_empty() {
+    pub fn validated(self) -> Result<Tree, TreeError> {
+        if self.nodes.is_empty() {
             return Err(TreeError::EmptyTree);
         }
-        for i in 0..nodes.len() {
-            match &nodes[i] {
+        for i in 0..self.nodes.len() {
+            match &self.nodes[i] {
                 Constant(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
                 Unary(_, input) if *input >= i => return Err(TreeError::WrongNodeOrder),
                 Binary(_, l, r) if *l >= i || *r >= i => return Err(TreeError::WrongNodeOrder),
@@ -219,7 +207,7 @@ impl Tree {
             }
         }
         // Maybe add more checks later.
-        return Ok(nodes);
+        return Ok(self);
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
@@ -380,36 +368,6 @@ impl PartialOrd for Node {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn t_tree_from_nodes() {
-        // Nodes in order.
-        match Tree::from_nodes(vec![
-            Symbol('x'),            // 0
-            Constant(2.245),        // 1
-            Binary(Add, 0, 1),      // 2
-            Symbol('y'),            // 3
-            Unary(Sqrt, 3),         // 4
-            Binary(Multiply, 2, 4), // 5
-        ]) {
-            Ok(tree) => {
-                assert_eq!(tree.len(), 6);
-            }
-            Err(_) => assert!(false),
-        };
-        // Nodes out of order.
-        assert!(matches!(
-            Tree::from_nodes(vec![
-                Symbol('x'),            // 0
-                Binary(Add, 0, 1),      // 1
-                Constant(2.245),        // 2
-                Binary(Multiply, 2, 4), // 3
-                Symbol('y'),            // 4
-                Unary(Sqrt, 3),         // 5
-            ]),
-            Err(TreeError::WrongNodeOrder)
-        ));
-    }
 
     #[test]
     fn t_add() {

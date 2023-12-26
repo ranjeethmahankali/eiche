@@ -6,7 +6,7 @@ use crate::{
 /// Compute the results of operations on constants and fold those into
 /// constant nodes. The unused nodes after folding are not
 /// pruned. Use a pruner for that.
-pub fn fold_nodes(mut nodes: Vec<Node>) -> Vec<Node> {
+pub fn fold_nodes(nodes: &mut Vec<Node>) {
     for index in 0..nodes.len() {
         let folded = match nodes[index] {
             Constant(_) => None,
@@ -40,7 +40,6 @@ pub fn fold_nodes(mut nodes: Vec<Node>) -> Vec<Node> {
             nodes[index] = node;
         }
     }
-    return nodes;
 }
 
 impl Tree {
@@ -50,10 +49,12 @@ impl Tree {
     /// folded. The resulting tree is pruned and checked for validity
     /// befoore it is returned. If the resulting tree is not valid,
     /// the appropriate `TreeError` is returned.
-    pub fn fold(self) -> Result<Tree, TreeError> {
+    pub fn fold(mut self) -> Result<Tree, TreeError> {
         let mut pruner = Pruner::new();
         let root_index = self.root_index();
-        return Tree::from_nodes(pruner.run(fold_nodes(self.take_nodes()), root_index));
+        fold_nodes(self.nodes_mut());
+        pruner.run(self.nodes_mut(), root_index);
+        return self.validated();
     }
 }
 

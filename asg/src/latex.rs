@@ -6,7 +6,7 @@ impl Tree {
     }
 }
 
-fn to_latex(node: &Node, nodes: &Vec<Node>) -> String {
+fn to_latex(node: &Node, nodes: &[Node]) -> String {
     match node {
         Constant(val) => val.to_string(),
         Symbol(label) => label.to_string(),

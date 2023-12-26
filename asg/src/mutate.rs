@@ -95,18 +95,23 @@ impl TemplateCapture {
 
     pub fn make_compact_tree(
         &mut self,
-        nodes: Vec<Node>,
-        root_index: usize,
+        mut tree: Tree,
+        newroot: Option<usize>,
     ) -> Result<Tree, MutationError> {
-        let (nodes, root_index) = self
+        let root_index = match newroot {
+            Some(root) => root,
+            None => tree.root_index(),
+        };
+        let root_index = self
             .topo_sorter
-            .run(nodes, root_index)
+            .run(tree.nodes_mut(), root_index)
             .map_err(|e| MutationError::InvalidTopology(e))?;
-        return Tree::from_nodes(
-            self.pruner
-                .run(self.deduper.run(fold_nodes(nodes)), root_index),
-        )
-        .map_err(|e| MutationError::TreeCreationError(e));
+        fold_nodes(tree.nodes_mut());
+        self.deduper.run(tree.nodes_mut());
+        self.pruner.run(tree.nodes_mut(), root_index);
+        return tree
+            .validated()
+            .map_err(|e| MutationError::TreeCreationError(e));
     }
 
     fn bind(&mut self, label: char, index: usize) -> bool {
@@ -134,8 +139,9 @@ impl TemplateCapture {
 
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
         use crate::tree::Node::*;
-        let mut nodes = tree.nodes().clone();
+        let mut tree = tree.clone();
         let root_index = tree.root_index();
+        let num_nodes = tree.nodes().len();
         let pong = template.pong();
         self.node_map.clear();
         self.node_map.resize(pong.len(), 0);
@@ -144,19 +150,18 @@ impl TemplateCapture {
             None => return Err(MutationError::InvalidCapture),
         };
         let mut newroot = oldroot;
-        let num_nodes = nodes.len();
         for ni in 0..pong.len() {
             match pong.node(ni) {
-                Constant(val) => self.add_node(&mut nodes, ni, Constant(*val)),
+                Constant(val) => self.add_node(tree.nodes_mut(), ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
                     None => return Err(MutationError::UnboundSymbol),
                 },
                 Unary(op, input) => {
-                    self.add_node(&mut nodes, ni, Unary(*op, self.node_map[*input]))
+                    self.add_node(tree.nodes_mut(), ni, Unary(*op, self.node_map[*input]))
                 }
                 Binary(op, lhs, rhs) => self.add_node(
-                    &mut nodes,
+                    tree.nodes_mut(),
                     ni,
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
                 ),
@@ -169,7 +174,7 @@ impl TemplateCapture {
         // iterate over the preexisting nodes, not the ones we just
         // added.
         for i in 0..num_nodes {
-            match nodes.get_mut(i) {
+            match tree.nodes_mut().get_mut(i) {
                 Some(node) => {
                     match node {
                         Constant(_) | Symbol(_) => {} // Do nothing.
@@ -191,13 +196,15 @@ impl TemplateCapture {
                 None => {}
             }
         }
-        let root_index = if oldroot == root_index {
-            newroot
-        } else {
-            root_index
-        };
         // Clean up and make a tree.
-        return self.make_compact_tree(nodes, root_index);
+        return self.make_compact_tree(
+            tree,
+            Some(if oldroot == root_index {
+                newroot
+            } else {
+                root_index
+            }),
+        );
     }
 
     fn match_node(&mut self, li: usize, ltree: &Tree, ri: usize, rtree: &Tree) -> bool {
