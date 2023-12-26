@@ -1,6 +1,5 @@
 use crate::{
     hash::hash_nodes,
-    prune::Pruner,
     tree::{Node, Node::*, Tree, TreeError},
     walk::{DepthWalker, NodeOrdering},
 };
@@ -140,12 +139,8 @@ pub fn equivalent(
 
 impl Tree {
     /// Deduplicate the common subtrees in this tree.
-    pub fn deduplicate(mut self) -> Result<Tree, TreeError> {
-        let mut dedup = Deduplicater::new();
-        let mut pruner = Pruner::new();
-        let root_index = self.root_index();
+    pub fn deduplicate(mut self, dedup: &mut Deduplicater) -> Result<Tree, TreeError> {
         dedup.run(self.nodes_mut());
-        pruner.run(self.nodes_mut(), root_index);
         return self.validated();
     }
 
@@ -166,7 +161,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, test::util::compare_trees, tree::BinaryOp::*};
+    use crate::{deftree, prune::Pruner, test::util::compare_trees, tree::BinaryOp::*};
 
     #[test]
     fn t_recursive_compare() {
@@ -283,9 +278,17 @@ mod test {
 
     #[test]
     fn t_recursive_compare_3() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         // Sanity check with the same tree.
-        let a = deftree!(/ (* k (+ x y)) (+ x y)).deduplicate().unwrap();
-        let b = deftree!(/ (* k (+ x y)) (+ x y)).deduplicate().unwrap();
+        let a = deftree!(/ (* k (+ x y)) (+ x y))
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
+        let b = deftree!(/ (* k (+ x y)) (+ x y))
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         let mut walker1 = DepthWalker::new();
         let mut walker2 = DepthWalker::new();
         assert!(equivalent(
@@ -301,13 +304,19 @@ mod test {
 
     #[test]
     fn t_deduplication_1() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let tree = deftree!(
             (max (min
                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
                   (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
              (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
         );
-        let nodup = tree.clone().deduplicate().unwrap();
+        let nodup = tree
+            .clone()
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 32);
         compare_trees(
@@ -321,8 +330,14 @@ mod test {
 
     #[test]
     fn t_deduplication_2() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let tree = deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.));
-        let nodup = tree.clone().deduplicate().unwrap();
+        let nodup = tree
+            .clone()
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 10);
         compare_trees(&tree, &nodup, &[('x', -10., 10.)], 400, 0.);
@@ -330,12 +345,18 @@ mod test {
 
     #[test]
     fn t_deduplication_3() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let tree = deftree!(
             (/
              (+ (pow (sin x) 2.) (+ (pow (cos x) 2.) (* 2. (* (sin x) (cos x)))))
              (+ (pow (sin y) 2.) (+ (pow (cos y) 2.) (* 2. (* (sin y) (cos y))))))
         );
-        let nodup = tree.clone().deduplicate().unwrap();
+        let nodup = tree
+            .clone()
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 20);
         compare_trees(&tree, &nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);

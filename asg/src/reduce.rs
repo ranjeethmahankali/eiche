@@ -179,42 +179,59 @@ pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, MutationError> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::deftree;
+    use crate::{dedup::Deduplicater, deftree, prune::Pruner};
 
     #[test]
     fn t_euler_walk_depth_1() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
-        let tree = deftree!(+ x x).deduplicate().unwrap();
+        let tree = deftree!(+ x x)
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 2);
     }
 
     #[test]
     fn t_euler_walk_depth_2() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
-        let tree = deftree!(+ (* 2 x) (* 3 x)).deduplicate().unwrap();
+        let tree = deftree!(+ (* 2 x) (* 3 x))
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 6);
     }
 
     #[test]
     fn t_euler_walk_multiple() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
         let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (* 4 x))
-            .deduplicate()
-            .unwrap();
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 13);
         // Make sure the same heuristic instance can be reused on other trees.
         let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (+ (* 4 x) 2))
-            .deduplicate()
-            .unwrap();
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 33);
     }
 
     #[test]
     fn t_euler_walk_non_leaf() {
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
         let tree = deftree!(+ (* 2 (+ x y)) (* (+ x y) 3))
-            .deduplicate()
-            .unwrap();
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 4);
     }
 
@@ -222,8 +239,10 @@ mod test {
         // Make sure the 'after' tree has lower cost than the 'before
         // tree. And that the 'after' tree is found exactly once
         // among the mutations of the 'before' tree.
-        let before = before.deduplicate().unwrap();
-        let after = after.deduplicate().unwrap();
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
+        let before = before.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        let after = after.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
         let mut h = Heuristic::new();
         let mut capture = TemplateCapture::new();
         assert!(h.cost(&before) > h.cost(&after));

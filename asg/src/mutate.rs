@@ -311,7 +311,12 @@ mod test {
             deftree!(/ (+ a b) a),
             deftree!(+ 1 (/ b a)),
         );
-        let tree = deftree!(/ (+ p q) q).deduplicate().unwrap();
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
+        let tree = deftree!(/ (+ p q) q)
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 3));
@@ -325,9 +330,12 @@ mod test {
             deftree!(/ (+ (+ a b) (+ c d)) (+ a b)),
             deftree!(+ 1 (/ (+ c d) (+ a b))),
         );
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
         let tree = deftree!(/ (+ (+ p q) (+ r s)) (+ r s))
-            .deduplicate()
-            .unwrap();
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner);
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 7));
@@ -335,7 +343,9 @@ mod test {
     }
 
     fn t_check_template(name: &str, tree: Tree, node_index: usize) {
-        let tree = tree.deduplicate().unwrap();
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
+        let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
         let mut capture = TemplateCapture::new();
         capture.node_index = None;
         capture.bindings.clear();
@@ -471,8 +481,10 @@ mod test {
     #[test]
     fn t_mutate_multiple_trees() {
         fn assert_one_match(tree: Tree, expected: Tree, capture: &mut TemplateCapture) {
-            let tree = tree.deduplicate().unwrap();
-            let expected = expected.deduplicate().unwrap();
+            let mut dedup = Deduplicater::new();
+            let mut pruner = Pruner::new();
+            let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+            let expected = expected.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
             assert_eq!(
                 1,
                 Mutations::of(&tree, capture)
@@ -507,8 +519,10 @@ mod test {
     }
 
     fn check_mutations(mut before: Tree, mut after: Tree) {
-        before = before.deduplicate().unwrap();
-        after = after.deduplicate().unwrap();
+        let mut dedup = Deduplicater::new();
+        let mut pruner = Pruner::new();
+        before = before.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        after = after.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
         let mut capture = TemplateCapture::new();

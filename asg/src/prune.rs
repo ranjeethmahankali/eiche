@@ -1,5 +1,5 @@
 use crate::{
-    tree::{Node, Node::*},
+    tree::{Node, Node::*, Tree},
     walk::{DepthWalker, NodeOrdering},
 };
 
@@ -65,6 +65,14 @@ impl Pruner {
             }
         }
         std::mem::swap(&mut self.pruned, nodes);
+    }
+}
+
+impl Tree {
+    pub fn prune(mut self, pruner: &mut Pruner) -> Tree {
+        let root_index = self.root_index();
+        pruner.run(self.nodes_mut(), root_index);
+        return self;
     }
 }
 
