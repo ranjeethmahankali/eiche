@@ -1,12 +1,10 @@
-use std::collections::{BinaryHeap, HashMap};
-
 use crate::{
-    hash::hash_tree,
     mutate::{MutationError, Mutations, TemplateCapture},
     template::get_templates,
     tree::Tree,
     tree::{Node, Node::*},
 };
+use std::collections::{BinaryHeap, HashMap};
 
 struct Heuristic {
     stack: Vec<(usize, usize)>, // index, depth
@@ -136,7 +134,7 @@ pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, MutationError> {
         complexity: start_complexity,
     });
     while let Some(cand) = heap.pop() {
-        let hash = hash_tree(&cand.tree, &mut hashbuf);
+        let hash = cand.tree.hash(&mut hashbuf);
         let index = explored.len();
         match indexmap.insert(hash, index) {
             Some(_old) => {

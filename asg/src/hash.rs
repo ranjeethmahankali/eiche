@@ -40,7 +40,9 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     }
 }
 
-pub fn hash_tree(tree: &Tree, hashbuf: &mut Vec<u64>) -> u64 {
-    hash_nodes(tree.nodes(), hashbuf);
-    return hashbuf[tree.root_index()];
+impl Tree {
+    pub fn hash(&self, hashbuf: &mut Vec<u64>) -> u64 {
+        hash_nodes(self.nodes(), hashbuf);
+        return hashbuf[self.root_index()];
+    }
 }
