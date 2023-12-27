@@ -210,16 +210,16 @@ impl Tree {
         return Ok(self);
     }
 
-    fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
+    fn binary_op(mut self, mut other: Tree, op: BinaryOp) -> Tree {
         let offset: usize = self.nodes.len();
+        self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
         self.nodes
-            .reserve(self.nodes.len() + other.nodes.len() + 1usize);
-        self.nodes.extend(other.nodes.iter().map(|node| match node {
-            ConstScalar(value) => ConstScalar(*value),
-            Symbol(label) => Symbol(label.clone()),
-            Unary(op, input) => Unary(*op, *input + offset),
-            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
-        }));
+            .extend(other.nodes.drain(..).map(|node| match node {
+                ConstScalar(value) => ConstScalar(value),
+                Symbol(label) => Symbol(label.clone()),
+                Unary(op, input) => Unary(op, input + offset),
+                Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
+            }));
         self.nodes
             .push(Binary(op, offset - 1, self.nodes.len() - 1));
         return self;
