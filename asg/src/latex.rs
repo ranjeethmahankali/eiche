@@ -8,7 +8,7 @@ impl Tree {
 
 fn to_latex(node: &Node, nodes: &[Node]) -> String {
     match node {
-        Constant(val) => val.to_string(),
+        ConstScalar(val) => val.to_string(),
         Symbol(label) => label.to_string(),
         Unary(op, i) => {
             let inode = &nodes[*i];
@@ -18,7 +18,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                     match inode {
                         // Special cases that require braces.
                         Binary(Add, ..) | Binary(Subtract, ..) => with_parens(ix),
-                        Constant(_) | Symbol(_) | Unary(..) | Binary(..) => ix,
+                        ConstScalar(_) | Symbol(_) | Unary(..) | Binary(..) => ix,
                     }
                 }),
                 Sqrt => format!("\\sqrt{{{}}}", ix),
@@ -29,7 +29,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 Log => format!("\\ln\\left({{{}}}\\right)", ix),
                 Exp => format!("e^{{{}}}", {
                     match inode {
-                        Constant(_) | Symbol(_) | Unary(..) | Binary(Min, ..) | Binary(Max, ..) => {
+                        ConstScalar(_) | Symbol(_) | Unary(..) | Binary(Min, ..) | Binary(Max, ..) => {
                             ix
                         }
                         Binary(..) => with_parens(ix),
@@ -82,14 +82,14 @@ fn parens_binary(
                     | Unary(Log, _)
                     | Unary(Exp, _)
                     | Binary(..) => with_parens(lx),
-                    Constant(_) if lx.len() > 1 => with_parens(lx),
-                    Constant(_) | Symbol(_) | Unary(_, _) => lx,
+                    ConstScalar(_) if lx.len() > 1 => with_parens(lx),
+                    ConstScalar(_) | Symbol(_) | Unary(_, _) => lx,
                 }
             },
             {
                 match rnode {
                     Binary(Add, ..) | Binary(Subtract, ..) => with_parens(rx),
-                    Constant(_) | Symbol(_) | Unary(_, _) | Binary(_, _, _) => rx,
+                    ConstScalar(_) | Symbol(_) | Unary(_, _) | Binary(_, _, _) => rx,
                 }
             },
         ),
@@ -109,14 +109,14 @@ fn parens_mul(node: &Node, latex: String) -> String {
         Binary(Add, ..) | Binary(Subtract, ..) | Binary(Multiply, ..) | Unary(Negate, ..) => {
             with_parens(latex)
         }
-        Binary(..) | Unary(..) | Symbol(_) | Constant(_) => latex,
+        Binary(..) | Unary(..) | Symbol(_) | ConstScalar(_) => latex,
     }
 }
 
 fn parens_add_sub(node: &Node, latex: String) -> String {
     match node {
         Binary(Add, ..) | Binary(Subtract, ..) | Unary(Negate, _) => with_parens(latex),
-        Binary(..) | Constant(_) | Symbol(_) | Unary(..) => latex,
+        Binary(..) | ConstScalar(_) | Symbol(_) | Unary(..) => latex,
     }
 }
 

@@ -6,30 +6,30 @@ use crate::tree::{BinaryOp::*, Node, Node::*, Tree, TreeError};
 pub fn fold_nodes(nodes: &mut Vec<Node>) {
     for index in 0..nodes.len() {
         let folded = match nodes[index] {
-            Constant(_) => None,
+            ConstScalar(_) => None,
             Symbol(_) => None,
             Unary(op, input) => {
-                if let Constant(value) = nodes[input] {
-                    Some(Constant(op.apply(value)))
+                if let ConstScalar(value) = nodes[input] {
+                    Some(ConstScalar(op.apply(value)))
                 } else {
                     None
                 }
             }
             Binary(op, lhs, rhs) => match (op, &nodes[lhs], &nodes[rhs]) {
                 // Constant folding.
-                (op, Constant(a), Constant(b)) => Some(Constant(op.apply(*a, *b))),
+                (op, ConstScalar(a), ConstScalar(b)) => Some(ConstScalar(op.apply(*a, *b))),
                 // Identity ops.
-                (Add, lhs, Constant(val)) if *val == 0. => Some(*lhs),
-                (Add, Constant(val), rhs) if *val == 0. => Some(*rhs),
-                (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
-                (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
-                (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
-                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
-                (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
+                (Add, lhs, ConstScalar(val)) if *val == 0. => Some(*lhs),
+                (Add, ConstScalar(val), rhs) if *val == 0. => Some(*rhs),
+                (Subtract, lhs, ConstScalar(val)) if *val == 0. => Some(*lhs),
+                (Multiply, lhs, ConstScalar(val)) if *val == 1. => Some(*lhs),
+                (Multiply, ConstScalar(val), rhs) if *val == 1. => Some(*rhs),
+                (Pow, base, ConstScalar(val)) if *val == 1. => Some(*base),
+                (Divide, numerator, ConstScalar(val)) if *val == 1. => Some(*numerator),
                 // Other ops.
-                (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(1.)),
-                (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(0.)),
-                (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(0.)),
+                (Pow, _base, ConstScalar(val)) if *val == 0. => Some(ConstScalar(1.)),
+                (Multiply, _lhs, ConstScalar(val)) if *val == 0. => Some(ConstScalar(0.)),
+                (Multiply, ConstScalar(val), _rhs) if *val == 0. => Some(ConstScalar(0.)),
                 _ => None,
             },
         };
@@ -62,7 +62,7 @@ mod test {
         let mut pruner = Pruner::new();
         let tree = deftree!(* 2. 3.).fold().unwrap().prune(&mut pruner);
         assert_eq!(tree.len(), 1usize);
-        assert_eq!(tree.root(), &Constant(2. * 3.));
+        assert_eq!(tree.root(), &ConstScalar(2. * 3.));
     }
 
     #[test]
