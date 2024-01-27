@@ -10,11 +10,3 @@ authors = ["Ranjeeth Mahankali <ranjeethmahankali@gmail.com>"]
 rand = "0.8"
 lazy_static = "1.4"
 regex = "1.10"
-
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] } # Benchmarking tool
-
-[[bench]]
-path = "src/benchmark.rs"
-name = "benchmark"
-harness = false

@@ -212,8 +212,7 @@ impl Tree {
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
         let offset: usize = self.nodes.len();
-        self.nodes
-            .reserve(self.nodes.len() + other.nodes.len() + 1usize);
+        self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
         self.nodes.extend(other.nodes.iter().map(|node| match node {
             Constant(value) => Constant(*value),
             Symbol(label) => Symbol(label.clone()),
