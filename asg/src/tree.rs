@@ -108,8 +108,10 @@ pub enum TreeError {
     ContainsNaN,
     /// Tree conains no nodes.
     EmptyTree,
-    /// Incorrect dimensions of a vector / matrix.
+    /// A mismatch between two dimensions, for example, during a reshape operation.
     DimensionMismatch((usize, usize), (usize, usize)),
+    /// Invalid dimensions.
+    InvalidDims((usize, usize)),
 }
 
 /// Represents a node in an abstract syntax `Tree`.
@@ -130,6 +132,10 @@ pub struct Tree {
     dims: (usize, usize),
 }
 
+fn matsize(dims: (usize, usize)) -> usize {
+    dims.0 * dims.1
+}
+
 impl Tree {
     /// Create a tree representing a constant value.
     pub fn constant(val: f64) -> Tree {
@@ -147,13 +153,39 @@ impl Tree {
         }
     }
 
+    pub fn compose(trees: &[Tree], dims: (usize, usize)) -> Result<Tree, TreeError> {
+        if trees.iter().map(|t| t.size()).sum::<usize>() != matsize(dims) {
+            return Err(TreeError::InvalidDims(dims));
+        }
+        let mut nodes = Vec::<Node>::with_capacity(trees.iter().map(|t| t.len() - t.size()).sum());
+        let mut roots = Vec::<Node>::with_capacity(trees.iter().map(|t| t.size()).sum());
+        for tree in trees {
+            let offset = nodes.len();
+            for i in 0..tree.nodes.len() {
+                let dst = if i < tree.len() - tree.size() {
+                    &mut nodes
+                } else {
+                    &mut roots
+                };
+                dst.push(match &tree.nodes[i] {
+                    Constant(val) => Constant(*val),
+                    Symbol(label) => Symbol(*label),
+                    Unary(op, input) => Unary(*op, *input + offset),
+                    Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
+                });
+            }
+        }
+        nodes.extend(roots.drain(..));
+        Ok(Tree { nodes, dims })
+    }
+
     /// The number of nodes in this tree.
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
     pub fn size(&self) -> usize {
-        self.dims.0 * self.dims.1
+        matsize(self.dims)
     }
 
     pub fn dims(&self) -> (usize, usize) {
@@ -161,7 +193,7 @@ impl Tree {
     }
 
     pub fn reshape(self, newdims: (usize, usize)) -> Result<Tree, TreeError> {
-        if newdims.0 * newdims.1 == self.size() {
+        if matsize(newdims) == self.size() {
             Ok(Tree {
                 nodes: self.nodes,
                 dims: newdims,
