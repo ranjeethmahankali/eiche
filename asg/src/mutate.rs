@@ -152,7 +152,7 @@ impl TemplateCapture {
         let mut newroot = oldroot;
         for ni in 0..pong.len() {
             match pong.node(ni) {
-                ConstScalar(val) => self.add_node(tree.nodes_mut(), ni, ConstScalar(*val)),
+                Constant(val) => self.add_node(tree.nodes_mut(), ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
                     None => return Err(MutationError::UnboundSymbol),
@@ -177,7 +177,7 @@ impl TemplateCapture {
             match tree.nodes_mut().get_mut(i) {
                 Some(node) => {
                     match node {
-                        ConstScalar(_) | Symbol(_) => {} // Do nothing.
+                        Constant(_) | Symbol(_) => {} // Do nothing.
                         Unary(_, input) => {
                             if *input == oldroot {
                                 *input = newroot;
@@ -230,8 +230,8 @@ impl TemplateCapture {
         commute: bool,
     ) -> (bool, bool) {
         match (ltree.node(li), rtree.node(ri)) {
-            (Node::ConstScalar(v1), Node::ConstScalar(v2)) => (v1 == v2, false),
-            (Node::ConstScalar(_), _) => return (false, false),
+            (Node::Constant(v1), Node::Constant(v2)) => (v1 == v2, false),
+            (Node::Constant(_), _) => return (false, false),
             (Node::Symbol(label), _) => return (self.bind(*label, ri), false),
             (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
                 if lop != rop {

@@ -8,7 +8,7 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     hashbuf.resize(nodes.len(), 0);
     for index in 0..nodes.len() {
         let hash: u64 = match nodes[index] {
-            ConstScalar(value) => value.to_bits().into(),
+            Constant(value) => value.to_bits().into(),
             Symbol(label) => {
                 let mut s: DefaultHasher = Default::default();
                 label.hash(&mut s);

@@ -64,7 +64,7 @@ impl<'a> Evaluator<'a> {
             self.write(
                 idx,
                 match &self.tree.node(idx) {
-                    ConstScalar(val) => *val,
+                    Constant(val) => *val,
                     Symbol(label) => match &self.regs[idx] {
                         None => return Err(EvaluationError::VariableNotFound(*label)),
                         Some(val) => *val,
@@ -111,7 +111,7 @@ mod test {
     #[test]
     fn t_constant() {
         let x = deftree!(const std::f64::consts::PI);
-        assert_eq!(x.root(), &ConstScalar(std::f64::consts::PI));
+        assert_eq!(x.root(), &Constant(std::f64::consts::PI));
         let mut eval = Evaluator::new(&x);
         match eval.run() {
             Ok(val) => assert_eq!(val, std::f64::consts::PI),

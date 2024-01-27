@@ -113,7 +113,7 @@ pub enum TreeError {
 /// Represents a node in an abstract syntax `Tree`.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
-    ConstScalar(f64),
+    Constant(f64),
     Symbol(char),
     Unary(UnaryOp, usize),
     Binary(BinaryOp, usize, usize),
@@ -131,7 +131,7 @@ impl Tree {
     /// Create a tree representing a constant value.
     pub fn constant(val: f64) -> Tree {
         Tree {
-            nodes: vec![ConstScalar(val)],
+            nodes: vec![Constant(val)],
         }
     }
 
@@ -200,7 +200,7 @@ impl Tree {
         }
         for i in 0..self.nodes.len() {
             match &self.nodes[i] {
-                ConstScalar(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
+                Constant(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
                 Unary(_, input) if *input >= i => return Err(TreeError::WrongNodeOrder),
                 Binary(_, l, r) if *l >= i || *r >= i => return Err(TreeError::WrongNodeOrder),
                 Symbol(_) | _ => {} // Do nothing.
@@ -210,16 +210,15 @@ impl Tree {
         return Ok(self);
     }
 
-    fn binary_op(mut self, mut other: Tree, op: BinaryOp) -> Tree {
+    fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
         let offset: usize = self.nodes.len();
         self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
-        self.nodes
-            .extend(other.nodes.drain(..).map(|node| match node {
-                ConstScalar(value) => ConstScalar(value),
-                Symbol(label) => Symbol(label.clone()),
-                Unary(op, input) => Unary(op, input + offset),
-                Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
-            }));
+        self.nodes.extend(other.nodes.iter().map(|node| match node {
+            Constant(value) => Constant(*value),
+            Symbol(label) => Symbol(label.clone()),
+            Unary(op, input) => Unary(*op, *input + offset),
+            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
+        }));
         self.nodes
             .push(Binary(op, offset - 1, self.nodes.len() - 1));
         return self;
@@ -342,22 +341,22 @@ impl PartialOrd for Node {
         use std::cmp::Ordering::*;
         match (self, other) {
             // Constant
-            (ConstScalar(a), ConstScalar(b)) => a.partial_cmp(b),
-            (ConstScalar(_), Symbol(_)) => Some(Less),
-            (ConstScalar(_), Unary(..)) => Some(Less),
-            (ConstScalar(_), Binary(..)) => Some(Less),
+            (Constant(a), Constant(b)) => a.partial_cmp(b),
+            (Constant(_), Symbol(_)) => Some(Less),
+            (Constant(_), Unary(..)) => Some(Less),
+            (Constant(_), Binary(..)) => Some(Less),
             // Symbol
-            (Symbol(_), ConstScalar(_)) => Some(Greater),
+            (Symbol(_), Constant(_)) => Some(Greater),
             (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
             (Symbol(_), Unary(..)) => Some(Less),
             (Symbol(_), Binary(..)) => Some(Less),
             // Unary
-            (Unary(..), ConstScalar(_)) => Some(Greater),
+            (Unary(..), Constant(_)) => Some(Greater),
             (Unary(..), Symbol(_)) => Some(Greater),
             (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
             (Unary(..), Binary(..)) => Some(Less),
             // Binary
-            (Binary(..), ConstScalar(_)) => Some(Greater),
+            (Binary(..), Constant(_)) => Some(Greater),
             (Binary(..), Symbol(_)) => Some(Greater),
             (Binary(..), Unary(..)) => Some(Greater),
             (Binary(op1, ..), Binary(op2, ..)) => Some(op1.index().cmp(&op2.index())),

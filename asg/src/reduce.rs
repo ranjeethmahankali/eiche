@@ -59,7 +59,7 @@ impl Heuristic {
                 Some(last) if prevdepth < depth => sum += counter - last,
                 // Push children if visiting for the first time.
                 None => match &nodes[i] {
-                    ConstScalar(_) | Symbol(_) => {} // No children to push.
+                    Constant(_) | Symbol(_) => {} // No children to push.
                     Unary(_, input) => self
                         .stack
                         .extend_from_slice(&[(i, depth), (*input, depth + 1)]),

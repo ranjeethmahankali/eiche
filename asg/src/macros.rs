@@ -66,7 +66,7 @@ mod test {
     fn t_constant_deftree() {
         let tree = deftree!(2.);
         assert_eq!(tree.len(), 1);
-        assert_eq!(tree.root(), &ConstScalar(2.));
+        assert_eq!(tree.root(), &Constant(2.));
     }
 
     #[test]
@@ -138,7 +138,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &vec![
-                ConstScalar(2.),
+                Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Add, 0, 2)
@@ -159,7 +159,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &vec![
-                ConstScalar(2.),
+                Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Subtract, 0, 2)
@@ -180,7 +180,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &vec![
-                ConstScalar(2.),
+                Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Multiply, 0, 2)
@@ -201,7 +201,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &vec![
-                ConstScalar(2.),
+                Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Divide, 0, 2)
@@ -222,7 +222,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &vec![
-                ConstScalar(2.),
+                Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Pow, 0, 2)
@@ -243,7 +243,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &vec![
-                ConstScalar(2.),
+                Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Min, 0, 2)
@@ -264,7 +264,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &vec![
-                ConstScalar(2.),
+                Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Max, 0, 2)

@@ -43,7 +43,7 @@ fn complete_capture(capture: &TemplateCapture, src: &Tree, dst: &Tree) -> bool {
     lhs.clear();
     lhs.extend(capture.bindings().iter().filter_map(|(_label, index)| {
         match &dst.nodes()[*index] {
-            ConstScalar(_) | Unary(_, _) | Binary(_, _, _) => None,
+            Constant(_) | Unary(_, _) | Binary(_, _, _) => None,
             Symbol(l) => Some(l),
         }
     }));

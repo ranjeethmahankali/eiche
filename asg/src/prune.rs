@@ -55,7 +55,7 @@ impl Pruner {
             if index > 0 && (i == 0 || self.indices[i - 1] < index) {
                 // We subtract 1 from all indices because we did an inclusive sum.
                 self.pruned.push(match nodes[i] {
-                    ConstScalar(val) => ConstScalar(val),
+                    Constant(val) => Constant(val),
                     Symbol(label) => Symbol(label),
                     Unary(op, input) => Unary(op, self.indices[input] - 1),
                     Binary(op, lhs, rhs) => {
@@ -89,8 +89,8 @@ mod test {
         let mut nodes = vec![
             Symbol('x'),       // 0
             Symbol('y'),       // 1
-            ConstScalar(2.),      // 2
-            ConstScalar(3.),      // 3
+            Constant(2.),      // 2
+            Constant(3.),      // 3
             Unary(Sqrt, 0),    // 4
             Unary(Sqrt, 3),    // 5
             Binary(Pow, 4, 5), // 6
@@ -103,7 +103,7 @@ mod test {
                 && nodes
                     == vec![
                         Symbol('x'),
-                        ConstScalar(3.),
+                        Constant(3.),
                         Unary(Sqrt, 0),
                         Unary(Sqrt, 1),
                         Binary(Pow, 2, 3),
@@ -117,8 +117,8 @@ mod test {
         let mut nodes = vec![
             Symbol('x'),       // 0
             Symbol('y'),       // 1
-            ConstScalar(2.),      // 2
-            ConstScalar(3.),      // 3
+            Constant(2.),      // 2
+            Constant(3.),      // 3
             Unary(Sqrt, 0),    // 4
             Unary(Sqrt, 3),    // 5
             Binary(Pow, 4, 5), // 6
