@@ -108,6 +108,8 @@ pub enum TreeError {
     ContainsNaN,
     /// Tree conains no nodes.
     EmptyTree,
+    /// Incorrect dimensions of a vector / matrix.
+    DimensionMismatch((usize, usize), (usize, usize)),
 }
 
 /// Represents a node in an abstract syntax `Tree`.
@@ -125,6 +127,7 @@ use Node::*;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
     nodes: Vec<Node>,
+    dims: (usize, usize),
 }
 
 impl Tree {
@@ -132,6 +135,7 @@ impl Tree {
     pub fn constant(val: f64) -> Tree {
         Tree {
             nodes: vec![Constant(val)],
+            dims: (1, 1),
         }
     }
 
@@ -139,12 +143,32 @@ impl Tree {
     pub fn symbol(label: char) -> Tree {
         Tree {
             nodes: vec![Symbol(label)],
+            dims: (1, 1),
         }
     }
 
     /// The number of nodes in this tree.
     pub fn len(&self) -> usize {
         self.nodes.len()
+    }
+
+    pub fn size(&self) -> usize {
+        self.dims.0 * self.dims.1
+    }
+
+    pub fn dims(&self) -> (usize, usize) {
+        self.dims
+    }
+
+    pub fn reshape(self, newdims: (usize, usize)) -> Result<Tree, TreeError> {
+        if newdims.0 * newdims.1 == self.size() {
+            Ok(Tree {
+                nodes: self.nodes,
+                dims: newdims,
+            })
+        } else {
+            Err(TreeError::DimensionMismatch(self.dims, newdims))
+        }
     }
 
     /// Get a reference to root of the tree. This is the last node of
