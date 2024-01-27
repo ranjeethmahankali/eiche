@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::{
     tree::{Node, Node::*, Tree},
     walk::{DepthWalker, NodeOrdering},
@@ -29,7 +31,7 @@ impl Pruner {
     /// and nodes that are not visited are filtered out. The filtered
     /// `nodes` are returned. You can minimize allocations by using
     /// the same pruner multiple times.
-    pub fn run(&mut self, nodes: &mut Vec<Node>, root_index: usize) {
+    pub fn run(&mut self, nodes: &mut Vec<Node>, root_indices: Range<usize>) {
         self.indices.clear();
         self.indices.resize(nodes.len(), 0);
         // Mark used nodes.

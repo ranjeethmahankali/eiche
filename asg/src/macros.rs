@@ -59,14 +59,14 @@ mod test {
     fn t_symbol_deftree() {
         let tree = deftree!(x);
         assert_eq!(tree.len(), 1);
-        assert_eq!(tree.root(), &Symbol('x'));
+        assert_eq!(tree.roots(), &[Symbol('x')]);
     }
 
     #[test]
     fn t_constant_deftree() {
         let tree = deftree!(2.);
         assert_eq!(tree.len(), 1);
-        assert_eq!(tree.root(), &Constant(2.));
+        assert_eq!(tree.roots(), &[Constant(2.)]);
     }
 
     #[test]

@@ -60,7 +60,9 @@ pub mod util {
                 continue;
             }
             // We set all the variables. Run the test.
-            assert_float_eq!(eval.run().unwrap(), expectedfn(&sample[..]).unwrap(), eps);
+            let results = eval.run().unwrap();
+            assert_eq!(results.len(), 1);
+            assert_float_eq!(results[0], expectedfn(&sample[..]).unwrap(), eps);
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -100,7 +102,12 @@ pub mod util {
             if vari < nvars - 1 {
                 continue;
             }
-            assert_float_eq!(eval1.run().unwrap(), eval2.run().unwrap(), eps);
+            let results1 = eval1.run().unwrap();
+            let results2 = eval2.run().unwrap();
+            assert_eq!(results1.len(), results2.len());
+            for (l, r) in results1.iter().zip(results2.iter()) {
+                assert_float_eq!(l, r, eps);
+            }
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;

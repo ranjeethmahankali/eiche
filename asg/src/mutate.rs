@@ -140,7 +140,7 @@ impl TemplateCapture {
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
         use crate::tree::Node::*;
         let mut tree = tree.clone();
-        let root_index = tree.root_index();
+        let root_indices = tree.root_indices();
         let num_nodes = tree.nodes().len();
         let pong = template.pong();
         self.node_map.clear();
@@ -166,7 +166,7 @@ impl TemplateCapture {
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
                 ),
             }
-            if ni == pong.root_index() {
+            if ni == pong.root_indices().start {
                 newroot = self.node_map[ni];
             }
         }

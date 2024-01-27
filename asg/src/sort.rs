@@ -48,7 +48,7 @@ impl TopoSorter {
         self.depths.resize(nodes.len(), 0);
         for (index, maybe_parent) in
             self.walker
-                .walk_nodes(&nodes, root_index, false, NodeOrdering::Original)
+                .walk_one(&nodes, root_index, false, NodeOrdering::Original)
         {
             if let Some(parent) = maybe_parent {
                 self.depths[index] = usize::max(self.depths[index], 1 + self.depths[parent]);

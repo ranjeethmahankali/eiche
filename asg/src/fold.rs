@@ -62,7 +62,7 @@ mod test {
         let mut pruner = Pruner::new();
         let tree = deftree!(* 2. 3.).fold().unwrap().prune(&mut pruner);
         assert_eq!(tree.len(), 1usize);
-        assert_eq!(tree.root(), &Constant(2. * 3.));
+        assert_eq!(tree.roots(), &[Constant(2. * 3.)]);
     }
 
     #[test]

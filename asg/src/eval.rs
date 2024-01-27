@@ -14,7 +14,7 @@ pub enum EvaluationError {
 /// This can be used to compute the value(s) of the tree.
 pub struct Evaluator<'a> {
     tree: &'a Tree,
-    regs: Box<[Option<f64>]>,
+    regs: Box<[f64]>,
 }
 
 impl<'a> Evaluator<'a> {
@@ -22,7 +22,7 @@ impl<'a> Evaluator<'a> {
     pub fn new(tree: &'a Tree) -> Evaluator {
         Evaluator {
             tree,
-            regs: vec![None; tree.len()].into_boxed_slice(),
+            regs: vec![f64::NAN; tree.len()].into_boxed_slice(),
         }
     }
 
@@ -33,48 +33,36 @@ impl<'a> Evaluator<'a> {
         for (node, reg) in self.tree.nodes().iter().zip(self.regs.iter_mut()) {
             match node {
                 Symbol(l) if *l == label => {
-                    *reg = Some(value);
+                    *reg = value;
                 }
                 _ => {}
             }
         }
     }
 
-    /// Read the value from the `index`-th register. Returns an error
-    /// if the register doesn't contain a value.
-    fn read(&self, index: usize) -> Result<f64, EvaluationError> {
-        match self.regs[index] {
-            Some(val) => Ok(val),
-            None => Err(EvaluationError::UninitializedValueRead),
-        }
-    }
-
     /// Write the `value` into the `index`-th register. The existing
     /// value is overwritten.
     fn write(&mut self, index: usize, value: f64) {
-        self.regs[index] = Some(value);
+        self.regs[index] = value;
     }
 
     /// Run the evaluator and return the result. The result may
     /// contain the output value, or an
     /// error. `Variablenotfound(label)` error means the variable
     /// matching `label` hasn't been assigned a value using `set_var`.
-    pub fn run(&mut self) -> Result<f64, EvaluationError> {
+    pub fn run(&mut self) -> Result<&[f64], EvaluationError> {
         for idx in 0..self.tree.len() {
             self.write(
                 idx,
                 match &self.tree.node(idx) {
                     Constant(val) => *val,
-                    Symbol(label) => match &self.regs[idx] {
-                        None => return Err(EvaluationError::VariableNotFound(*label)),
-                        Some(val) => *val,
-                    },
-                    Binary(op, lhs, rhs) => op.apply(self.read(*lhs)?, self.read(*rhs)?),
-                    Unary(op, input) => op.apply(self.read(*input)?),
+                    Symbol(label) => self.regs[idx],
+                    Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs]),
+                    Unary(op, input) => op.apply(self.regs[*input]),
                 },
             );
         }
-        return self.read(self.tree.root_index());
+        return Ok(&self.regs[self.tree.len() - self.tree.size()..]);
     }
 }
 
@@ -111,10 +99,10 @@ mod test {
     #[test]
     fn t_constant() {
         let x = deftree!(const std::f64::consts::PI);
-        assert_eq!(x.root(), &Constant(std::f64::consts::PI));
+        assert_eq!(x.roots(), &[Constant(std::f64::consts::PI)]);
         let mut eval = Evaluator::new(&x);
         match eval.run() {
-            Ok(val) => assert_eq!(val, std::f64::consts::PI),
+            Ok(val) => assert_eq!(val, &[std::f64::consts::PI]),
             _ => assert!(false),
         }
     }
@@ -135,7 +123,7 @@ mod test {
             eval.set_var('x', x);
             eval.set_var('y', y);
             match eval.run() {
-                Ok(val) => assert_eq!(val, expected),
+                Ok(val) => assert_eq!(val, &[expected]),
                 _ => assert!(false),
             }
         }
@@ -152,7 +140,10 @@ mod test {
             let x: f64 = PI_2 * rng.gen::<f64>();
             eval.set_var('x', x);
             match eval.run() {
-                Ok(val) => assert_float_eq!(val, 1.),
+                Ok(val) => {
+                    assert_float_eq!(val[0], 1.);
+                    assert_eq!(val.len(), 1);
+                }
                 _ => assert!(false),
             }
         }

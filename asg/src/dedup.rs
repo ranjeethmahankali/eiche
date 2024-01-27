@@ -3,7 +3,7 @@ use crate::{
     tree::{Node, Node::*, Tree, TreeError},
     walk::{DepthWalker, NodeOrdering},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 /// Helper struct for deduplicating common subtrees.
 ///
@@ -94,9 +94,9 @@ impl Deduplicater {
 /// This implementation avoids recursion by using `walker1` and
 /// `walker2` are used to traverse the tree depth wise and perform the
 /// comparison.
-pub fn equivalent(
-    left: usize,
-    right: usize,
+pub fn equivalent_many(
+    left: Range<usize>,
+    right: Range<usize>,
     lnodes: &[Node],
     rnodes: &[Node],
     lwalker: &mut DepthWalker,
@@ -104,8 +104,8 @@ pub fn equivalent(
 ) -> bool {
     {
         // Zip the depth first iterators and compare.
-        let mut liter = lwalker.walk_nodes(&lnodes, left, false, NodeOrdering::Deterministic);
-        let mut riter = rwalker.walk_nodes(&rnodes, right, false, NodeOrdering::Deterministic);
+        let mut liter = lwalker.walk_many(&lnodes, left, false, NodeOrdering::Deterministic);
+        let mut riter = rwalker.walk_many(&rnodes, right, false, NodeOrdering::Deterministic);
         loop {
             match (liter.next(), riter.next()) {
                 (None, None) => {
@@ -137,6 +137,24 @@ pub fn equivalent(
     }
 }
 
+pub fn equivalent(
+    left: usize,
+    right: usize,
+    lnodes: &[Node],
+    rnodes: &[Node],
+    lwalker: &mut DepthWalker,
+    rwalker: &mut DepthWalker,
+) -> bool {
+    equivalent_many(
+        left..(left + 1),
+        right..(right + 1),
+        lnodes,
+        rnodes,
+        lwalker,
+        rwalker,
+    )
+}
+
 impl Tree {
     /// Deduplicate the common subtrees in this tree.
     pub fn deduplicate(mut self, dedup: &mut Deduplicater) -> Result<Tree, TreeError> {
@@ -147,9 +165,9 @@ impl Tree {
     pub fn equivalent(&self, other: &Tree) -> bool {
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
-        equivalent(
-            self.root_index(),
-            other.root_index(),
+        equivalent_many(
+            self.root_indices(),
+            other.root_indices(),
             self.nodes(),
             other.nodes(),
             &mut lwalker,
@@ -266,9 +284,9 @@ mod test {
         let tree2 = deftree!(/ (+ (* y x) (+ a b)) (* (+ y x) (* b a)));
         let mut walker1 = DepthWalker::new();
         let mut walker2 = DepthWalker::new();
-        assert!(equivalent(
-            tree1.root_index(),
-            tree2.root_index(),
+        assert!(equivalent_many(
+            tree1.root_indices(),
+            tree2.root_indices(),
             tree1.nodes(),
             tree2.nodes(),
             &mut walker1,
@@ -291,9 +309,9 @@ mod test {
             .prune(&mut pruner);
         let mut walker1 = DepthWalker::new();
         let mut walker2 = DepthWalker::new();
-        assert!(equivalent(
-            a.root_index(),
-            b.root_index(),
+        assert!(equivalent_many(
+            a.root_indices(),
+            b.root_indices(),
             a.nodes(),
             b.nodes(),
             &mut walker1,

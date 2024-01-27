@@ -123,6 +123,8 @@ pub enum Node {
     Binary(BinaryOp, usize, usize),
 }
 
+use std::ops::Range;
+
 use Node::*;
 
 /// Represents an abstract syntax tree.
@@ -179,6 +181,11 @@ impl Tree {
         Ok(Tree { nodes, dims })
     }
 
+    pub fn transposed(mut self) -> Tree {
+        self.dims = (self.dims.1, self.dims.0);
+        return self;
+    }
+
     /// The number of nodes in this tree.
     pub fn len(&self) -> usize {
         self.nodes.len()
@@ -205,16 +212,16 @@ impl Tree {
 
     /// Get a reference to root of the tree. This is the last node of
     /// the tree.
-    pub fn root(&self) -> &Node {
+    pub fn roots(&self) -> &[Node] {
         // We can confidently unwrap because we should never create an
         // invalid tree in the first place.
-        self.nodes.last().unwrap()
+        &self.nodes[(self.nodes.len() - self.size())..]
     }
 
     /// Index of the root node. This will be the index of the last
     /// node of the tree.
-    pub fn root_index(&self) -> usize {
-        self.len() - 1
+    pub fn root_indices(&self) -> Range<usize> {
+        (self.len() - self.size())..self.len()
     }
 
     /// Get a reference to the node at `index`.
@@ -267,6 +274,9 @@ impl Tree {
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
+        if self.size() > other.size() {
+            return other.binary_op(self, op);
+        }
         let offset: usize = self.nodes.len();
         self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
         self.nodes.extend(other.nodes.iter().map(|node| match node {
@@ -275,13 +285,22 @@ impl Tree {
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
         }));
-        self.nodes
-            .push(Binary(op, offset - 1, self.nodes.len() - 1));
+        if self.size() == 1 {
+            for r in other.root_indices() {
+                self.nodes.push(Binary(op, offset - 1, r + offset));
+            }
+        } else {
+            for (l, r) in ((offset - self.size())..offset).zip(other.root_indices()) {
+                self.nodes.push(Binary(op, l, r + offset));
+            }
+        }
         return self;
     }
 
     fn unary_op(mut self, op: UnaryOp) -> Tree {
-        self.nodes.push(Unary(op, self.root_index()));
+        for root in self.root_indices() {
+            self.nodes.push(Unary(op, root));
+        }
         return self;
     }
 }
