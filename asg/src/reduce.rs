@@ -140,9 +140,7 @@ pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, MutationError> {
             Some(_old) => {
                 continue;
             }
-            None => {
-                explored.push(cand);
-            }
+            None => explored.push(cand),
         }
         let cand = explored.last().unwrap();
         if cand.complexity < min_complexity {

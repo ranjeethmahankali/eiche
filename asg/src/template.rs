@@ -135,6 +135,24 @@ lazy_static! {
                      ping (/ (* x y) z)
                      pong (* y (/ x z))
         ),
+        deftemplate!(rearrange_mul_1
+                     ping (* x (* y z))
+                     pong (* (* x z) y)),
+        deftemplate!(rearrange_mul_2
+                     ping (* x (* y z))
+                     pong (* (* x y) z)),
+        deftemplate!(rearrange_add_1
+                     ping (+ x (+ y z))
+                     pong (+ (+ x z) y)),
+        deftemplate!(rearrange_add_2
+                     ping (+ x (+ y z))
+                     pong (+ (+ x y) z)),
+        deftemplate!(rearrange_add_sub_1
+                     ping (- (+ x y) z)
+                     pong (+ (- x z) y)),
+        deftemplate!(rearrange_add_sub_2
+                     ping (- (+ x y) z)
+                     pong (+ x (- y z))),
         deftemplate!(divide_by_self
                      ping (/ a a)
                      pong (1.0)
@@ -284,6 +302,36 @@ pub mod test {
             );
             check_one(
                 "rearrange_mul_div_2",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "rearrange_mul_1",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "rearrange_mul_2",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "rearrange_add_1",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "rearrange_add_2",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "rearrange_add_sub_1",
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "rearrange_add_sub_2",
                 &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
                 1e-12,
             );
