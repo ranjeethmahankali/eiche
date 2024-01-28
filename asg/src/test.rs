@@ -77,6 +77,17 @@ pub mod util {
         }
     }
 
+    /// Compare `tree1` and `tree2` by evaluating them at randomly sampled
+    /// values. The `vardata` slice is expected to contain tuples in the format
+    /// (label, min, max), where the label is that of a variable in the tree,
+    /// and [min, max] represents the range from which the values for that
+    /// variable can be randomly sampled. Each variable will be sampled
+    /// `samples_per_var` times, and the trees will be compared at all
+    /// combinations of samples. That means, if the trees contain 2 variables
+    /// each and `samples_per_var` is 20, then the trees will be evaluated and
+    /// compared with 20 ^ 2 = 400 different samples. This test asserts that the
+    /// values of the two trees not differ by more than `eps` at all the
+    /// samples.
     pub fn compare_trees(
         tree1: &Tree,
         tree2: &Tree,

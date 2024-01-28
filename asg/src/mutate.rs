@@ -140,7 +140,7 @@ impl TemplateCapture {
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
         use crate::tree::Node::*;
         let mut tree = tree.clone();
-        let root_indices = tree.root_indices();
+        let root_index = tree.root_index();
         let num_nodes = tree.nodes().len();
         let pong = template.pong();
         self.node_map.clear();
@@ -149,7 +149,6 @@ impl TemplateCapture {
             Some(i) => i,
             None => return Err(MutationError::InvalidCapture),
         };
-        let mut newroot = oldroot;
         for ni in 0..pong.len() {
             match pong.node(ni) {
                 Constant(val) => self.add_node(tree.nodes_mut(), ni, Constant(*val)),
@@ -166,45 +165,42 @@ impl TemplateCapture {
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
                 ),
             }
-            if ni == pong.root_indices().start {
-                newroot = self.node_map[ni];
-            }
-        }
-        // Rewire old pattern root to the new pattern root. Only
-        // iterate over the preexisting nodes, not the ones we just
-        // added.
-        for i in 0..num_nodes {
-            match tree.nodes_mut().get_mut(i) {
-                Some(node) => {
-                    match node {
-                        Constant(_) | Symbol(_) => {} // Do nothing.
-                        Unary(_, input) => {
-                            if *input == oldroot {
-                                *input = newroot;
+            if ni == pong.root_index() {
+                let newroot = self.node_map[ni];
+                let nodes = tree.nodes_mut();
+                let copy = nodes[oldroot];
+                nodes[oldroot] = nodes[newroot];
+                nodes[newroot] = copy;
+                // Any node that is referecing newroot as an input should be
+                // rewired to oldroot to avoid broken topology. Only iterate
+                // over the preexisting nodes.
+                for i in 0..num_nodes {
+                    match tree.nodes_mut().get_mut(i) {
+                        Some(node) => {
+                            match node {
+                                Constant(_) | Symbol(_) => {} // Do nothing.
+                                Unary(_, input) => {
+                                    if *input == newroot {
+                                        *input = oldroot;
+                                    }
+                                }
+                                Binary(_, lhs, rhs) => {
+                                    if *lhs == newroot {
+                                        *lhs = oldroot;
+                                    }
+                                    if *rhs == newroot {
+                                        *rhs = oldroot;
+                                    }
+                                }
                             }
                         }
-                        Binary(_, lhs, rhs) => {
-                            if *lhs == oldroot {
-                                *lhs = newroot;
-                            }
-                            if *rhs == oldroot {
-                                *rhs = newroot;
-                            }
-                        }
+                        None => {}
                     }
                 }
-                None => {}
             }
         }
         // Clean up and make a tree.
-        return self.make_compact_tree(
-            tree,
-            Some(if oldroot == root_index {
-                newroot
-            } else {
-                root_index
-            }),
-        );
+        return self.make_compact_tree(tree, Some(root_index));
     }
 
     fn match_node(&mut self, li: usize, ltree: &Tree, ri: usize, rtree: &Tree) -> bool {
@@ -647,6 +643,20 @@ mod test {
         check_mutations(
             deftree!(exp (+ 1 (log (* (pow p (+ 2 m)) (pow p (/ q r)))))),
             deftree!(exp (+ 1 (log (pow p (+ (+ 2 m) (/ q r)))))),
+        );
+    }
+
+    #[test]
+    fn t_binomial_square() {
+        check_mutations(
+            deftree!(pow (+ (log (+ a 1)) (log (+ b 1))) 2.),
+            deftree!(+ (+ (pow (log (+ a 1)) 2.) (pow (log (+ b 1)) 2.))
+                     (* 2. (* (log (+ a 1)) (log (+ b 1))))),
+        );
+        check_mutations(
+            deftree!(pow (- (log (+ a 1)) (log (+ b 1))) 2.),
+            deftree!(- (+ (pow (log (+ a 1)) 2.) (pow (log (+ b 1)) 2.))
+                     (* 2. (* (log (+ a 1)) (log (+ b 1))))),
         );
     }
 }
