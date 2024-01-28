@@ -56,7 +56,7 @@ impl<'a> Evaluator<'a> {
                 idx,
                 match &self.tree.node(idx) {
                     Constant(val) => *val,
-                    Symbol(label) => self.regs[idx],
+                    Symbol(_) => self.regs[idx],
                     Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs]),
                     Unary(op, input) => op.apply(self.regs[*input]),
                 },

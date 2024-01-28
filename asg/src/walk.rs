@@ -64,16 +64,6 @@ impl DepthWalker {
             last_pushed: 0,
         }
     }
-
-    pub fn walk_one<'a>(
-        &'a mut self,
-        nodes: &'a [Node],
-        root: usize,
-        unique: bool,
-        ordering: NodeOrdering,
-    ) -> DepthIterator<'a> {
-        self.walk_many(nodes, root..(root + 1), unique, ordering)
-    }
 }
 
 /// When traversing a tree depth first, sometimes the subtrees
