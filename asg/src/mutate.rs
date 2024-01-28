@@ -85,7 +85,7 @@ impl TemplateCapture {
         for i in start..tree.len() {
             // Clear any previous bindings to start over fresh.
             self.bindings.clear();
-            if self.match_node(template.ping().root_index(), template.ping(), i, tree) {
+            if self.match_node(template.ping_root(), template.ping(), i, tree) {
                 self.node_index = Some(i);
                 return true;
             }
@@ -93,18 +93,11 @@ impl TemplateCapture {
         return false;
     }
 
-    pub fn make_compact_tree(
-        &mut self,
-        mut tree: Tree,
-        newroot: Option<usize>,
-    ) -> Result<Tree, MutationError> {
-        let root_index = match newroot {
-            Some(root) => root,
-            None => tree.root_index(),
-        };
+    pub fn make_compact_tree(&mut self, mut tree: Tree) -> Result<Tree, MutationError> {
+        let root_indices = tree.root_indices();
         let root_index = self
             .topo_sorter
-            .run(tree.nodes_mut(), root_index)
+            .run(tree.nodes_mut(), root_indices)
             .map_err(|e| MutationError::InvalidTopology(e))?;
         fold_nodes(tree.nodes_mut());
         self.deduper.run(tree.nodes_mut());
@@ -140,7 +133,6 @@ impl TemplateCapture {
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
         use crate::tree::Node::*;
         let mut tree = tree.clone();
-        let root_index = tree.root_index();
         let num_nodes = tree.nodes().len();
         let pong = template.pong();
         self.node_map.clear();
@@ -165,7 +157,7 @@ impl TemplateCapture {
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
                 ),
             }
-            if ni == pong.root_index() {
+            if pong.root_indices().contains(&ni) {
                 let newroot = self.node_map[ni];
                 let nodes = tree.nodes_mut();
                 let copy = nodes[oldroot];
@@ -200,7 +192,7 @@ impl TemplateCapture {
             }
         }
         // Clean up and make a tree.
-        return self.make_compact_tree(tree, Some(root_index));
+        return self.make_compact_tree(tree);
     }
 
     fn match_node(&mut self, li: usize, ltree: &Tree, ri: usize, rtree: &Tree) -> bool {
