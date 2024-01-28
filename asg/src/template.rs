@@ -186,8 +186,8 @@ lazy_static! {
                      pong (pow a (+ x y))
         ),
         deftemplate!(add_frac
-                     ping (+ (/ a d) (/ b d))
-                     pong (/ (+ a b) d)
+                     ping (+ (/ x z) (/ y z))
+                     pong (/ (+ x y) z)
         ),
 
         // ====== Min and max simplifications ======
@@ -203,16 +203,16 @@ lazy_static! {
 
         ),
         deftemplate!(min_of_sub_1
-                     ping (min (- a x) (- a y))
-                     pong (- a (max x y))
+                     ping (min (- z x) (- z y))
+                     pong (- z (max x y))
         ),
         deftemplate!(min_of_sub_2
-                     ping (min (- x c) (- y c))
-                     pong (- (min x y) c)
+                     ping (min (- x z) (- y z))
+                     pong (- (min x y) z)
         ),
         deftemplate!(min_of_add_1
-                     ping (min (+ a x) (+ b x))
-                     pong (+ x (min a b))
+                     ping (min (+ x z) (+ y z))
+                     pong (+ z (min x y))
         ),
 
         // ======== Polynomial simplifications ========
@@ -259,22 +259,39 @@ pub mod test {
         }
     }
 
+    fn check_one(
+        name: &'static str,
+        vardata: &[(char, f64, f64)],
+        eps: f64,
+        checked: &mut HashSet<&str>,
+    ) {
+        use crate::test::util::compare_trees;
+        // Find template by name.
+        let template = TEMPLATES.iter().find(|t| t.name == name).unwrap();
+        // Check if valid trees can be made from the templates.
+        print!("{}   ... ", name);
+        compare_trees(&template.ping, &template.pong, vardata, 20, eps);
+        println!("✔ Passed.");
+        assert!(
+            checked.insert(name),
+            "This template has already been checked. Remove this redundancy."
+        );
+    }
+
+    fn check_many(
+        names: &[&'static str],
+        vardata: &[(char, f64, f64)],
+        eps: f64,
+        checked: &mut HashSet<&str>,
+    ) {
+        for name in names {
+            check_one(*name, vardata, eps, checked);
+        }
+    }
+
     #[test]
     fn t_check_templates() {
         let mut checked: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
-        let mut check_one = |name: &'static str, vardata: &[(char, f64, f64)], eps: f64| {
-            use crate::test::util::compare_trees;
-            // Find template by name.
-            let template = TEMPLATES.iter().find(|t| t.name == name).unwrap();
-            // Check if valid trees can be made from the templates.
-            print!("{}   ... ", name);
-            compare_trees(&template.ping, &template.pong, vardata, 20, eps);
-            println!("✔ Passed.");
-            assert!(
-                checked.insert(name),
-                "This template has already been checked. Remove this redundancy."
-            );
-        };
         // Check each template. This is necessary they need different
         // vardata and ranges. e.g. You can't use negative values in
         // sqrt.
@@ -283,8 +300,14 @@ pub mod test {
                 "distribute_mul",
                 &[('k', -10., 10.), ('a', -10., 10.), ('b', -10., 10.)],
                 1e-12,
+                &mut checked,
             );
-            check_one("min_of_sqrt", &[('a', 0., 10.), ('b', 0., 10.)], 1e-12);
+            check_one(
+                "min_of_sqrt",
+                &[('a', 0., 10.), ('b', 0., 10.)],
+                1e-12,
+                &mut checked,
+            );
             check_one(
                 "rearrange_frac",
                 &[
@@ -294,108 +317,69 @@ pub mod test {
                     ('y', -10., 10.),
                 ],
                 1e-10,
+                &mut checked,
             );
-            check_one(
-                "rearrange_mul_div_1",
+            check_many(
+                &[
+                    "add_frac",
+                    "rearrange_mul_div_1",
+                    "rearrange_mul_div_2",
+                    "rearrange_mul_1",
+                    "rearrange_mul_2",
+                    "rearrange_add_1",
+                    "rearrange_add_2",
+                    "rearrange_add_sub_1",
+                    "rearrange_add_sub_2",
+                ],
                 &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
                 1e-12,
+                &mut checked,
             );
-            check_one(
-                "rearrange_mul_div_2",
-                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
-                1e-12,
-            );
-            check_one(
-                "rearrange_mul_1",
-                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
-                1e-12,
-            );
-            check_one(
-                "rearrange_mul_2",
-                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
-                1e-12,
-            );
-            check_one(
-                "rearrange_add_1",
-                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
-                1e-12,
-            );
-            check_one(
-                "rearrange_add_2",
-                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
-                1e-12,
-            );
-            check_one(
-                "rearrange_add_sub_1",
-                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
-                1e-12,
-            );
-            check_one(
-                "rearrange_add_sub_2",
-                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
-                1e-12,
-            );
-            check_one("divide_by_self", &[('a', -10., 10.)], 1e-12);
+            check_one("divide_by_self", &[('a', -10., 10.)], 1e-12, &mut checked);
             check_one(
                 "distribute_pow_div",
                 &[('a', 1., 10.), ('b', 1., 10.), ('k', 0.1, 5.)],
                 1e-10,
+                &mut checked,
             );
             check_one(
                 "distribute_pow_mul",
                 &[('a', 1., 5.), ('b', 1., 5.), ('k', 0.5, 3.)],
                 1e-10,
+                &mut checked,
             );
-            check_one("square_sqrt", &[('a', 0., 10.)], 1e-12);
-            check_one("sqrt_square", &[('a', -10., 10.)], 1e-12);
-            check_one("square_abs", &[('x', -10., 10.)], 0.);
-            check_one(
-                "mul_exponents",
+            check_one("square_sqrt", &[('a', 0., 10.)], 1e-12, &mut checked);
+            check_one("sqrt_square", &[('a', -10., 10.)], 1e-12, &mut checked);
+            check_one("square_abs", &[('x', -10., 10.)], 0., &mut checked);
+            check_many(
+                &["mul_exponents", "add_exponents"],
                 &[('a', 1., 5.), ('x', 0.5, 3.), ('y', 0.5, 2.)],
                 1e-9,
-            );
-            check_one(
-                "add_exponents",
-                &[('a', 1., 5.), ('x', 0.5, 3.), ('y', 0.5, 2.)],
-                1e-12,
-            );
-            check_one(
-                "add_frac",
-                &[('a', -10., 10.), ('b', -10., 10.), ('d', -10., 10.)],
-                1e-12,
+                &mut checked,
             );
         }
         {
             // === Other templates ===
-            check_one("min_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
-            check_one("max_expand", &[('a', -10., 10.), ('b', -10., 10.)], 1e-14);
-            check_one(
-                "min_of_sub_1",
-                &[('a', -10., 10.), ('x', -10., 10.), ('y', -10., 10.)],
-                0.,
+            check_many(
+                &["min_expand", "max_expand"],
+                &[('a', -10., 10.), ('b', -10., 10.)],
+                1e-14,
+                &mut checked,
             );
-            check_one(
-                "min_of_sub_2",
-                &[('x', -10., 10.), ('y', -10., 10.), ('c', -10., 10.)],
+            check_many(
+                &["min_of_sub_1", "min_of_sub_2", "min_of_add_1"],
+                &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
                 0.,
-            );
-            check_one(
-                "min_of_add_1",
-                &[('a', -10., 10.), ('x', -10., 10.), ('b', -10., 10.)],
-                0.,
+                &mut checked,
             );
         }
         {
             // === polynomial simplifications ===
-            check_one(
-                "x_plus_y_squared",
+            check_many(
+                &["x_plus_y_squared", "x_minus_y_squared"],
                 &[('x', -10., 10.), ('y', -10., 10.)],
                 1e-12,
-            );
-            check_one(
-                "x_minus_y_squared",
-                &[('x', -10., 10.), ('y', -10., 10.)],
-                1e-12,
+                &mut checked,
             );
         }
         {
