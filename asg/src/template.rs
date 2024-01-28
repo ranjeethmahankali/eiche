@@ -259,7 +259,7 @@ pub mod test {
         }
     }
 
-    fn check_one(
+    fn check_one_template(
         name: &'static str,
         vardata: &[(char, f64, f64)],
         eps: f64,
@@ -278,14 +278,14 @@ pub mod test {
         );
     }
 
-    fn check_many(
+    fn check_many_templates(
         names: &[&'static str],
         vardata: &[(char, f64, f64)],
         eps: f64,
         checked: &mut HashSet<&str>,
     ) {
         for name in names {
-            check_one(*name, vardata, eps, checked);
+            check_one_template(*name, vardata, eps, checked);
         }
     }
 
@@ -296,19 +296,19 @@ pub mod test {
         // vardata and ranges. e.g. You can't use negative values in
         // sqrt.
         {
-            check_one(
+            check_one_template(
                 "distribute_mul",
                 &[('k', -10., 10.), ('a', -10., 10.), ('b', -10., 10.)],
                 1e-12,
                 &mut checked,
             );
-            check_one(
+            check_one_template(
                 "min_of_sqrt",
                 &[('a', 0., 10.), ('b', 0., 10.)],
                 1e-12,
                 &mut checked,
             );
-            check_one(
+            check_one_template(
                 "rearrange_frac",
                 &[
                     ('a', -10., 10.),
@@ -319,7 +319,7 @@ pub mod test {
                 1e-10,
                 &mut checked,
             );
-            check_many(
+            check_many_templates(
                 &[
                     "add_frac",
                     "rearrange_mul_div_1",
@@ -335,23 +335,23 @@ pub mod test {
                 1e-12,
                 &mut checked,
             );
-            check_one("divide_by_self", &[('a', -10., 10.)], 1e-12, &mut checked);
-            check_one(
+            check_one_template("divide_by_self", &[('a', -10., 10.)], 1e-12, &mut checked);
+            check_one_template(
                 "distribute_pow_div",
                 &[('a', 1., 10.), ('b', 1., 10.), ('k', 0.1, 5.)],
                 1e-10,
                 &mut checked,
             );
-            check_one(
+            check_one_template(
                 "distribute_pow_mul",
                 &[('a', 1., 5.), ('b', 1., 5.), ('k', 0.5, 3.)],
                 1e-10,
                 &mut checked,
             );
-            check_one("square_sqrt", &[('a', 0., 10.)], 1e-12, &mut checked);
-            check_one("sqrt_square", &[('a', -10., 10.)], 1e-12, &mut checked);
-            check_one("square_abs", &[('x', -10., 10.)], 0., &mut checked);
-            check_many(
+            check_one_template("square_sqrt", &[('a', 0., 10.)], 1e-12, &mut checked);
+            check_one_template("sqrt_square", &[('a', -10., 10.)], 1e-12, &mut checked);
+            check_one_template("square_abs", &[('x', -10., 10.)], 0., &mut checked);
+            check_many_templates(
                 &["mul_exponents", "add_exponents"],
                 &[('a', 1., 5.), ('x', 0.5, 3.), ('y', 0.5, 2.)],
                 1e-9,
@@ -360,13 +360,13 @@ pub mod test {
         }
         {
             // === Other templates ===
-            check_many(
+            check_many_templates(
                 &["min_expand", "max_expand"],
                 &[('a', -10., 10.), ('b', -10., 10.)],
                 1e-14,
                 &mut checked,
             );
-            check_many(
+            check_many_templates(
                 &["min_of_sub_1", "min_of_sub_2", "min_of_add_1"],
                 &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
                 0.,
@@ -375,7 +375,7 @@ pub mod test {
         }
         {
             // === polynomial simplifications ===
-            check_many(
+            check_many_templates(
                 &["x_plus_y_squared", "x_minus_y_squared"],
                 &[('x', -10., 10.), ('y', -10., 10.)],
                 1e-12,
