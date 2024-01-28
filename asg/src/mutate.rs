@@ -645,4 +645,18 @@ mod test {
             deftree!(exp (+ 1 (log (pow p (+ (+ 2 m) (/ q r)))))),
         );
     }
+
+    #[test]
+    fn t_binomial_square() {
+        check_mutations(
+            deftree!(pow (+ (log (+ a 1)) (log (+ b 1))) 2.),
+            deftree!(+ (+ (pow (log (+ a 1)) 2.) (pow (log (+ b 1)) 2.))
+                     (* 2. (* (log (+ a 1)) (log (+ b 1))))),
+        );
+        check_mutations(
+            deftree!(pow (- (log (+ a 1)) (log (+ b 1))) 2.),
+            deftree!(- (+ (pow (log (+ a 1)) 2.) (pow (log (+ b 1)) 2.))
+                     (* 2. (* (log (+ a 1)) (log (+ b 1))))),
+        );
+    }
 }
