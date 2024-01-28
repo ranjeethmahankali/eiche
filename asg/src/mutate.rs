@@ -95,13 +95,13 @@ impl TemplateCapture {
 
     pub fn make_compact_tree(&mut self, mut tree: Tree) -> Result<Tree, MutationError> {
         let root_indices = tree.root_indices();
-        let root_index = self
+        let root_indices = self
             .topo_sorter
             .run(tree.nodes_mut(), root_indices)
             .map_err(|e| MutationError::InvalidTopology(e))?;
         fold_nodes(tree.nodes_mut());
         self.deduper.run(tree.nodes_mut());
-        self.pruner.run(tree.nodes_mut(), root_index);
+        self.pruner.run(tree.nodes_mut(), root_indices);
         return tree
             .validated()
             .map_err(|e| MutationError::TreeCreationError(e));
@@ -264,7 +264,7 @@ impl TemplateCapture {
 mod test {
     use super::*;
     use crate::{
-        dedup::equivalent, deftree, template::test::get_template_by_name, walk::DepthWalker,
+        dedup::equivalent_many, deftree, template::test::get_template_by_name, walk::DepthWalker,
     };
 
     fn t_check_bindings(capture: &TemplateCapture, template: &Template, tree: &Tree) {
@@ -524,9 +524,9 @@ mod test {
             Mutations::of(&before, &mut capture)
                 .filter_map(|t| {
                     let tree = t.unwrap();
-                    if equivalent(
-                        after.root_index(),
-                        tree.root_index(),
+                    if equivalent_many(
+                        after.root_indices(),
+                        tree.root_indices(),
                         after.nodes(),
                         tree.nodes(),
                         &mut lwalker,
