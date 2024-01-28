@@ -141,6 +141,7 @@ impl TemplateCapture {
         use crate::tree::Node::*;
         let mut tree = tree.clone();
         let root_index = tree.root_index();
+        let num_nodes = tree.nodes().len();
         let pong = template.pong();
         self.node_map.clear();
         self.node_map.resize(pong.len(), 0);
@@ -170,6 +171,32 @@ impl TemplateCapture {
                 let copy = nodes[oldroot];
                 nodes[oldroot] = nodes[newroot];
                 nodes[newroot] = copy;
+                // Any node that is referecing newroot as an input should be
+                // rewired to oldroot to avoid broken topology. Only iterate
+                // over the preexisting nodes.
+                for i in 0..num_nodes {
+                    match tree.nodes_mut().get_mut(i) {
+                        Some(node) => {
+                            match node {
+                                Constant(_) | Symbol(_) => {} // Do nothing.
+                                Unary(_, input) => {
+                                    if *input == newroot {
+                                        *input = oldroot;
+                                    }
+                                }
+                                Binary(_, lhs, rhs) => {
+                                    if *lhs == newroot {
+                                        *lhs = oldroot;
+                                    }
+                                    if *rhs == newroot {
+                                        *rhs = oldroot;
+                                    }
+                                }
+                            }
+                        }
+                        None => {}
+                    }
+                }
             }
         }
         // Clean up and make a tree.
