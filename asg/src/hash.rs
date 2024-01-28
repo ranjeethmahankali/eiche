@@ -42,7 +42,13 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
 
 impl Tree {
     pub fn hash(&self, hashbuf: &mut Vec<u64>) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
         hash_nodes(self.nodes(), hashbuf);
-        return hashbuf[self.root_index()];
+        let mut s: DefaultHasher = Default::default();
+        for ri in self.root_indices() {
+            ri.hash(&mut s);
+        }
+        return s.finish();
     }
 }
