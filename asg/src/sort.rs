@@ -71,7 +71,7 @@ impl TopoSorter {
         // Build a map from old indices to new indices.
         self.index_map.clear();
         self.index_map.resize(nodes.len(), 0);
-        for (index, i) in self.sorted_indices.iter().zip(0..self.sorted_indices.len()) {
+        for (i, index) in self.sorted_indices.iter().enumerate() {
             self.index_map[*index] = i;
             if *index == root_index {
                 root_index = i;
