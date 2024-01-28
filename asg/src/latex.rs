@@ -2,7 +2,13 @@ use crate::tree::{BinaryOp, BinaryOp::*, Node, Node::*, Tree, UnaryOp::*};
 
 impl Tree {
     pub fn to_latex(&self) -> String {
-        to_latex(self.root(), self.nodes())
+        let roots = self.roots();
+        let (rows, cols) = self.dims();
+        if rows == 1 && cols == 1 {
+            return to_latex(&roots[0], self.nodes());
+        } else {
+            todo!("Iterate over the nodes and produce latex output for the vector or matrix");
+        }
     }
 }
 
