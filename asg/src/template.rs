@@ -196,6 +196,14 @@ lazy_static! {
                      ping (min (+ a x) (+ b x))
                      pong (+ x (min a b))
         ),
+
+        // ======== Polynomial simplifications ========
+        deftemplate!(x_plus_y_squared
+                     ping (pow (+ x y) 2.)
+                     pong ((+ (+ (pow x 2.) (pow y 2.)) (* 2. (* x y))))),
+        deftemplate!(x_minus_y_squared
+                     ping (pow (- x y) 2.)
+                     pong ((- (+ (pow x 2.) (pow y 2.)) (* 2. (* x y))))),
     ];
 
     static ref MIRRORED_TEMPLATES: Vec<Template> = mirrored(&TEMPLATES);
@@ -327,6 +335,19 @@ pub mod test {
                 "min_of_add_1",
                 &[('a', -10., 10.), ('x', -10., 10.), ('b', -10., 10.)],
                 0.,
+            );
+        }
+        {
+            // === polynomial simplifications ===
+            check_one(
+                "x_plus_y_squared",
+                &[('x', -10., 10.), ('y', -10., 10.)],
+                1e-12,
+            );
+            check_one(
+                "x_minus_y_squared",
+                &[('x', -10., 10.), ('y', -10., 10.)],
+                1e-12,
             );
         }
         {
