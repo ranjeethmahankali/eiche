@@ -141,7 +141,6 @@ impl TemplateCapture {
         use crate::tree::Node::*;
         let mut tree = tree.clone();
         let root_index = tree.root_index();
-        let num_nodes = tree.nodes().len();
         let pong = template.pong();
         self.node_map.clear();
         self.node_map.resize(pong.len(), 0);
@@ -149,7 +148,6 @@ impl TemplateCapture {
             Some(i) => i,
             None => return Err(MutationError::InvalidCapture),
         };
-        let mut newroot = oldroot;
         for ni in 0..pong.len() {
             match pong.node(ni) {
                 Constant(val) => self.add_node(tree.nodes_mut(), ni, Constant(*val)),
@@ -167,44 +165,15 @@ impl TemplateCapture {
                 ),
             }
             if ni == pong.root_index() {
-                newroot = self.node_map[ni];
-            }
-        }
-        // Rewire old pattern root to the new pattern root. Only
-        // iterate over the preexisting nodes, not the ones we just
-        // added.
-        for i in 0..num_nodes {
-            match tree.nodes_mut().get_mut(i) {
-                Some(node) => {
-                    match node {
-                        Constant(_) | Symbol(_) => {} // Do nothing.
-                        Unary(_, input) => {
-                            if *input == oldroot {
-                                *input = newroot;
-                            }
-                        }
-                        Binary(_, lhs, rhs) => {
-                            if *lhs == oldroot {
-                                *lhs = newroot;
-                            }
-                            if *rhs == oldroot {
-                                *rhs = newroot;
-                            }
-                        }
-                    }
-                }
-                None => {}
+                let newroot = self.node_map[ni];
+                let nodes = tree.nodes_mut();
+                let copy = nodes[oldroot];
+                nodes[oldroot] = nodes[newroot];
+                nodes[newroot] = copy;
             }
         }
         // Clean up and make a tree.
-        return self.make_compact_tree(
-            tree,
-            Some(if oldroot == root_index {
-                newroot
-            } else {
-                root_index
-            }),
-        );
+        return self.make_compact_tree(tree, Some(root_index));
     }
 
     fn match_node(&mut self, li: usize, ltree: &Tree, ri: usize, rtree: &Tree) -> bool {
