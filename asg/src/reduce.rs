@@ -121,7 +121,7 @@ impl Eq for Candidate {}
 
 pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, MutationError> {
     let mut capture = TemplateCapture::new();
-    let tree = capture.make_compact_tree(tree)?;
+    let tree = capture.make_compact_tree(tree, None)?;
     let mut hfn = Heuristic::new();
     let mut explored = Vec::<Candidate>::with_capacity(max_iter);
     let mut indexmap = HashMap::<u64, usize>::new();

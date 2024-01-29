@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::{
     dedup::Deduplicater,
     fold::fold_nodes,
@@ -93,8 +95,15 @@ impl TemplateCapture {
         return false;
     }
 
-    pub fn make_compact_tree(&mut self, mut tree: Tree) -> Result<Tree, MutationError> {
-        let root_indices = tree.root_indices();
+    pub fn make_compact_tree(
+        &mut self,
+        mut tree: Tree,
+        newroots: Option<Range<usize>>,
+    ) -> Result<Tree, MutationError> {
+        let root_indices = match newroots {
+            Some(roots) => roots,
+            None => tree.root_indices(),
+        };
         let root_indices = self
             .topo_sorter
             .run(tree.nodes_mut(), root_indices)
@@ -133,6 +142,7 @@ impl TemplateCapture {
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
         use crate::tree::Node::*;
         let mut tree = tree.clone();
+        let root_indices = tree.root_indices();
         let num_nodes = tree.nodes().len();
         let pong = template.pong();
         self.node_map.clear();
@@ -192,7 +202,7 @@ impl TemplateCapture {
             }
         }
         // Clean up and make a tree.
-        return self.make_compact_tree(tree);
+        return self.make_compact_tree(tree, Some(root_indices));
     }
 
     fn match_node(&mut self, li: usize, ltree: &Tree, ri: usize, rtree: &Tree) -> bool {
