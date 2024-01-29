@@ -51,7 +51,8 @@ impl DepthWalker {
         // Prep the stack.
         self.stack.clear();
         self.stack.reserve(nodes.len());
-        self.stack.extend(root_indices.map(|r| (r, None)));
+        // Push the roots in reversed order to preserve their order in the output.
+        self.stack.extend(root_indices.map(|r| (r, None)).rev());
         // Reset the visited flags.
         self.visited.clear();
         self.visited.resize(nodes.len(), false);

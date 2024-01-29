@@ -563,4 +563,14 @@ mod test {
         let y = exp(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Exp, 0)]);
     }
+
+    #[test]
+    fn t_compose_vec2() {
+        let trees = [
+            pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into()),
+            pow('x'.into(), 2.0.into()) * pow('y'.into(), 2.0.into()),
+        ];
+        let v2 = Tree::compose(&trees, (2, 1)).unwrap();
+        assert_eq!(v2.len(), 14);
+    }
 }

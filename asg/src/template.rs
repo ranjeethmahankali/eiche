@@ -8,7 +8,7 @@ use crate::{
 /// This macro is only meant for use within this module.
 macro_rules! deftemplate {
     (($($tt:tt)*)) => { // Unwrap parens.
-        parsetemplate!($($tt)*)
+        deftemplate!($($tt)*)
     };
     ($name: ident ping ($($ping:tt) *) pong ($($pong:tt) *)) => {
         Template::from(
