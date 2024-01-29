@@ -46,8 +46,8 @@ impl Tree {
         use std::hash::{Hash, Hasher};
         hash_nodes(self.nodes(), hashbuf);
         let mut s: DefaultHasher = Default::default();
-        for ri in self.root_indices() {
-            ri.hash(&mut s);
+        for h in &hashbuf[self.root_indices()] {
+            h.hash(&mut s);
         }
         return s.finish();
     }
