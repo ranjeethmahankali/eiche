@@ -41,10 +41,11 @@ pub mod util {
         samples_per_var: usize,
         eps: f64,
     ) where
-        F: FnMut(&[f64]) -> Option<f64>,
+        F: FnMut(&[f64], &mut [f64]) -> (),
     {
         use rand::Rng;
         let mut eval = Evaluator::new(&tree);
+        let mut expected = vec![f64::NAN; tree.size()];
         let nvars = vardata.len();
         let mut indices = vec![0usize; nvars];
         let mut sample = Vec::<f64>::with_capacity(nvars);
@@ -61,8 +62,12 @@ pub mod util {
             }
             // We set all the variables. Run the test.
             let results = eval.run().unwrap();
-            assert_eq!(results.len(), 1);
-            assert_float_eq!(results[0], expectedfn(&sample[..]).unwrap(), eps);
+            assert_eq!(results.len(), expected.len());
+            expected.fill(f64::NAN);
+            expectedfn(&sample, &mut expected);
+            for (lhs, rhs) in expected.iter().zip(results.iter()) {
+                assert_float_eq!(lhs, rhs, eps);
+            }
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;

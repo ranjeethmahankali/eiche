@@ -153,11 +153,9 @@ mod test {
     fn t_sum_test() {
         check_tree_eval(
             deftree!(+ x y),
-            |vars: &[f64]| {
+            |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
-                    Some(x + y)
-                } else {
-                    None
+                    output[0] = x + y;
                 }
             },
             &[('x', -5., 5.), ('y', -5., 5.)],
@@ -170,14 +168,10 @@ mod test {
     fn t_evaluate_trees_1() {
         check_tree_eval(
             deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)),
-            |vars: &[f64]| {
+            |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
-                    Some(
-                        f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
-                            / (f64::cos(x) + 2.),
-                    )
-                } else {
-                    None
+                    output[0] = f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
+                        / (f64::cos(x) + 2.);
                 }
             },
             &[('x', -2.5, 2.5)],
@@ -195,7 +189,7 @@ mod test {
                       (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
             ),
-            |vars: &[f64]| {
+            |vars: &[f64], output: &mut [f64]| {
                 if let [x, y, z] = vars[..] {
                     let s1 = f64::sqrt(
                         f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
@@ -206,9 +200,7 @@ mod test {
                     let s3 = f64::sqrt(
                         f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
                     ) - 5.25;
-                    Some(f64::max(f64::min(s1, s2), s3))
-                } else {
-                    None
+                    output[0] = f64::max(f64::min(s1, s2), s3);
                 }
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
