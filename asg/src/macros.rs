@@ -27,7 +27,7 @@ macro_rules! deftree {
     ($a:block) => { // Block expressions.
         $a
     };
-    // Vectors
+    // Concat
     (concat $($trees:tt) +) => {
         $crate::concat_trees!($($trees) +)
     };

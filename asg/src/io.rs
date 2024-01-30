@@ -240,7 +240,7 @@ mod test {
     }
 
     #[test]
-    fn t_vec2_string_formatting() {
+    fn t_concat_string_formatting() {
         let v2 = deftree!(concat
                           (+ (pow x 2.) (pow y 2.))
                           (* (pow x 2.) (pow y 2.)));

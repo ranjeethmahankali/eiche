@@ -132,7 +132,7 @@ pub struct Tree {
     dims: (usize, usize),
 }
 
-fn matsize(dims: (usize, usize)) -> usize {
+const fn matsize(dims: (usize, usize)) -> usize {
     dims.0 * dims.1
 }
 
@@ -212,8 +212,8 @@ impl Tree {
         &self.nodes[(self.nodes.len() - self.num_roots())..]
     }
 
-    /// Index of the root node. This will be the index of the last
-    /// node of the tree.
+    /// Indices of the root nodes of the tree. These nodes will be at the end of
+    /// the tree.
     pub fn root_indices(&self) -> Range<usize> {
         (self.len() - self.num_roots())..self.len()
     }
@@ -251,6 +251,8 @@ impl Tree {
         return chars;
     }
 
+    /// Check the tree for errors and return a Result that contains the tree if
+    /// no errors were found, or the first error encountered with the tree.
     pub fn validated(self) -> Result<Tree, TreeError> {
         if self.nodes.is_empty() {
             return Err(TreeError::EmptyTree);
@@ -556,5 +558,15 @@ mod test {
         let x: Tree = 'x'.into();
         let y = exp(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Exp, 0)]);
+    }
+
+    #[test]
+    fn t_element_wise_unary_op() {
+        todo!("Add test for element wise unary op of a matrix");
+    }
+
+    #[test]
+    fn t_element_wise_binary_op() {
+        todo!("Binary op between a scalar and a matrix, two matrices of same sizes, and two matrices of different sizes");
     }
 }
