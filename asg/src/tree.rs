@@ -110,8 +110,6 @@ pub enum TreeError {
     EmptyTree,
     /// A mismatch between two dimensions, for example, during a reshape operation.
     DimensionMismatch((usize, usize), (usize, usize)),
-    /// Invalid dimensions.
-    InvalidDims((usize, usize)),
 }
 
 /// Represents a node in an abstract syntax `Tree`.
@@ -156,8 +154,8 @@ impl Tree {
     }
 
     pub fn concat(mut lhs: Tree, mut rhs: Tree) -> Tree {
-        let (llen, lsize) = (lhs.len(), lhs.size());
-        let (rlen, rsize) = (rhs.len(), rhs.size());
+        let (llen, lsize) = (lhs.len(), lhs.num_roots());
+        let (rlen, rsize) = (rhs.len(), rhs.num_roots());
         {
             // Copy nodes. We're ignoring the root nodes of `lhs` when
             // computing the offset. That is fine because these root nodes will
@@ -187,7 +185,7 @@ impl Tree {
         self.nodes.len()
     }
 
-    pub fn size(&self) -> usize {
+    pub fn num_roots(&self) -> usize {
         matsize(self.dims)
     }
 
@@ -196,7 +194,7 @@ impl Tree {
     }
 
     pub fn reshape(self, newdims: (usize, usize)) -> Result<Tree, TreeError> {
-        if matsize(newdims) == self.size() {
+        if matsize(newdims) == self.num_roots() {
             Ok(Tree {
                 nodes: self.nodes,
                 dims: newdims,
@@ -211,13 +209,13 @@ impl Tree {
     pub fn roots(&self) -> &[Node] {
         // We can confidently unwrap because we should never create an
         // invalid tree in the first place.
-        &self.nodes[(self.nodes.len() - self.size())..]
+        &self.nodes[(self.nodes.len() - self.num_roots())..]
     }
 
     /// Index of the root node. This will be the index of the last
     /// node of the tree.
     pub fn root_indices(&self) -> Range<usize> {
-        (self.len() - self.size())..self.len()
+        (self.len() - self.num_roots())..self.len()
     }
 
     /// Get a reference to the node at `index`.
@@ -270,7 +268,7 @@ impl Tree {
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
-        if self.size() > other.size() {
+        if self.num_roots() > other.num_roots() {
             return other.binary_op(self, op);
         }
         let offset: usize = self.nodes.len();
@@ -281,12 +279,12 @@ impl Tree {
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
         }));
-        if self.size() == 1 {
+        if self.num_roots() == 1 {
             for r in other.root_indices() {
                 self.nodes.push(Binary(op, offset - 1, r + offset));
             }
         } else {
-            for (l, r) in ((offset - self.size())..offset).zip(other.root_indices()) {
+            for (l, r) in ((offset - self.num_roots())..offset).zip(other.root_indices()) {
                 self.nodes.push(Binary(op, l, r + offset));
             }
         }

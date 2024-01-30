@@ -7,6 +7,16 @@ macro_rules! const_assert {
     }
 }
 
+#[macro_export]
+macro_rules! concat_trees {
+    ($tree:tt) => {
+        $crate::deftree!($tree)
+    };
+    ($lhs:tt $($rhs:tt) +) => {
+        $crate::tree::Tree::concat($crate::deftree!($lhs), $crate::concat_trees!($($rhs) +))
+    };
+}
+
 /// Construct a tree from the lisp expresion.
 #[macro_export]
 macro_rules! deftree {
@@ -16,6 +26,10 @@ macro_rules! deftree {
     };
     ($a:block) => { // Block expressions.
         $a
+    };
+    // Vectors
+    (concat $($trees:tt) +) => {
+        $crate::concat_trees!($($trees) +)
     };
     // Unary ops with functions names.
     ($unary_op:ident $a:tt) => {

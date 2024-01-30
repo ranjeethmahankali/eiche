@@ -45,7 +45,7 @@ pub mod util {
     {
         use rand::Rng;
         let mut eval = Evaluator::new(&tree);
-        let mut expected = vec![f64::NAN; tree.size()];
+        let mut expected = vec![f64::NAN; tree.num_roots()];
         let nvars = vardata.len();
         let mut indices = vec![0usize; nvars];
         let mut sample = Vec::<f64>::with_capacity(nvars);

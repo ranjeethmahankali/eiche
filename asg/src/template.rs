@@ -259,8 +259,8 @@ pub mod test {
         // Make sure templates have unique names.
         let mut names: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
         for t in TEMPLATES.iter() {
-            assert_eq!(t.ping.size(), 1);
-            assert_eq!(t.pong.size(), 1);
+            assert_eq!(t.ping.num_roots(), 1);
+            assert_eq!(t.pong.num_roots(), 1);
             assert!(names.insert(t.name.as_str()), "Duplicate template found.");
         }
     }

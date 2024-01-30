@@ -90,7 +90,7 @@ impl std::fmt::Display for Node {
 
 #[cfg(test)]
 mod test {
-    use crate::{dedup::Deduplicater, deftree, prune::Pruner, tree::Tree};
+    use crate::{dedup::Deduplicater, deftree, prune::Pruner};
 
     #[test]
     fn t_tree_string_formatting() {
@@ -241,10 +241,9 @@ mod test {
 
     #[test]
     fn t_vec2_string_formatting() {
-        let v2 = Tree::concat(
-            deftree!(+ (pow x 2.) (pow y 2.)),
-            deftree!(* (pow x 2.) (pow y 2.)),
-        );
+        let v2 = deftree!(concat
+                          (+ (pow x 2.) (pow y 2.))
+                          (* (pow x 2.) (pow y 2.)));
         assert_eq!(
             format!("{}", v2).trim(),
             "

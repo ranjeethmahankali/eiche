@@ -62,7 +62,7 @@ impl<'a> Evaluator<'a> {
                 },
             );
         }
-        return Ok(&self.regs[self.tree.len() - self.tree.size()..]);
+        return Ok(&self.regs[self.tree.len() - self.tree.num_roots()..]);
     }
 }
 
