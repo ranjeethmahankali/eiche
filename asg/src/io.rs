@@ -241,11 +241,10 @@ mod test {
 
     #[test]
     fn t_vec2_string_formatting() {
-        let trees = [
+        let v2 = Tree::concat(
             deftree!(+ (pow x 2.) (pow y 2.)),
             deftree!(* (pow x 2.) (pow y 2.)),
-        ];
-        let v2 = Tree::compose(&trees, (2, 1)).unwrap();
+        );
         assert_eq!(
             format!("{}", v2).trim(),
             "

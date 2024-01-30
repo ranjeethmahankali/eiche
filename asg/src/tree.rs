@@ -155,30 +155,26 @@ impl Tree {
         }
     }
 
-    pub fn compose(trees: &[Tree], dims: (usize, usize)) -> Result<Tree, TreeError> {
-        if trees.iter().map(|t| t.size()).sum::<usize>() != matsize(dims) {
-            return Err(TreeError::InvalidDims(dims));
+    pub fn concat(mut lhs: Tree, mut rhs: Tree) -> Tree {
+        let (llen, lsize) = (lhs.len(), lhs.size());
+        let (rlen, rsize) = (rhs.len(), rhs.size());
+        {
+            // Copy nodes. We're ignoring the root nodes of `lhs` when
+            // computing the offset. That is fine because these root nodes will
+            // later be rotated to the end of the buffer.
+            let offset = llen - lsize;
+            lhs.nodes.extend(rhs.nodes.drain(..).map(|n| match n {
+                Constant(_) => n,
+                Symbol(_) => n,
+                Unary(op, input) => Unary(op, input + offset),
+                Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
+            }));
         }
-        let mut nodes = Vec::<Node>::with_capacity(trees.iter().map(|t| t.len() - t.size()).sum());
-        let mut roots = Vec::<Node>::with_capacity(trees.iter().map(|t| t.size()).sum());
-        for tree in trees {
-            let offset = nodes.len();
-            for i in 0..tree.nodes.len() {
-                let dst = if i < tree.len() - tree.size() {
-                    &mut nodes
-                } else {
-                    &mut roots
-                };
-                dst.push(match &tree.nodes[i] {
-                    Constant(val) => Constant(*val),
-                    Symbol(label) => Symbol(*label),
-                    Unary(op, input) => Unary(*op, *input + offset),
-                    Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
-                });
-            }
-        }
-        nodes.extend(roots.drain(..));
-        Ok(Tree { nodes, dims })
+        // After we just concatenated the nodes as is. This rotation after the
+        // concatenations makes sure all the root nodes are at the end.
+        lhs.nodes[(llen - lsize)..(llen + rlen - rsize)].rotate_left(lsize);
+        lhs.dims = (lsize + rsize, 1);
+        return lhs;
     }
 
     pub fn transposed(mut self) -> Tree {
@@ -562,15 +558,5 @@ mod test {
         let x: Tree = 'x'.into();
         let y = exp(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Exp, 0)]);
-    }
-
-    #[test]
-    fn t_compose_vec2() {
-        let trees = [
-            pow('x'.into(), 2.0.into()) + pow('y'.into(), 2.0.into()),
-            pow('x'.into(), 2.0.into()) * pow('y'.into(), 2.0.into()),
-        ];
-        let v2 = Tree::compose(&trees, (2, 1)).unwrap();
-        assert_eq!(v2.len(), 14);
     }
 }
