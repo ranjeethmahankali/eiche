@@ -193,14 +193,14 @@ impl Tree {
         self.dims
     }
 
-    pub fn reshape(self, newdims: (usize, usize)) -> Result<Tree, TreeError> {
-        if matsize(newdims) == self.num_roots() {
+    pub fn reshape(self, rows: usize, cols: usize) -> Result<Tree, TreeError> {
+        if matsize((rows, cols)) == self.num_roots() {
             Ok(Tree {
                 nodes: self.nodes,
-                dims: newdims,
+                dims: (rows, cols),
             })
         } else {
-            Err(TreeError::DimensionMismatch(self.dims, newdims))
+            Err(TreeError::DimensionMismatch(self.dims, (rows, cols)))
         }
     }
 
