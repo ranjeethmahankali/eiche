@@ -206,4 +206,36 @@ mod test {
             Err(TopologicalError::CyclicGraph)
         ));
     }
+
+    #[test]
+    fn t_sort_concat() {
+        let mut sorter = TopoSorter::new();
+        let mut nodes = vec![
+            Symbol('p'),
+            Symbol('x'),
+            Binary(Multiply, 0, 1),
+            Symbol('y'),
+            Binary(Multiply, 0, 3),
+            Binary(Multiply, 0, 7),
+            Constant(1.0),
+            Binary(Add, 1, 3),
+            Binary(Add, 2, 4),
+        ];
+        let roots = sorter.run(&mut nodes, 5..7).unwrap();
+        assert_eq!(roots, 6..8);
+        assert_eq!(
+            nodes,
+            vec![
+                Symbol('x'),
+                Symbol('y'),
+                Symbol('p'),
+                Binary(Add, 0, 1),
+                Binary(Multiply, 2, 0),
+                Binary(Multiply, 2, 1),
+                Binary(Multiply, 2, 3),
+                Constant(1.0),
+                Binary(Add, 4, 5)
+            ]
+        );
+    }
 }
