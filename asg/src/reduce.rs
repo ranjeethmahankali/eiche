@@ -287,4 +287,18 @@ mod test {
         let steps = reduce(tree, 8).unwrap();
         assert!(steps.last().unwrap().equivalent(&deftree!(1)));
     }
+
+    #[test]
+    fn t_reduce_concat_1() {
+        let tree = deftree!(concat
+                            (/ (+ (* p x) (* p y)) (+ x y))
+                            1.
+        );
+        println!("${}$\n==========\n", tree.to_latex());
+        let steps = reduce(tree, 12).unwrap();
+        for step in &steps {
+            println!("${}$\n", step.to_latex());
+        }
+        assert!(steps.last().unwrap().equivalent(&deftree!(concat p 1)));
+    }
 }
