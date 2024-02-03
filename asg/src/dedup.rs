@@ -282,16 +282,25 @@ mod test {
     fn t_recursive_compare_2() {
         let tree1 = deftree!(/ (+ (* x y) (+ b a)) (* (+ y x) (* a b)));
         let tree2 = deftree!(/ (+ (* y x) (+ a b)) (* (+ y x) (* b a)));
-        let mut walker1 = DepthWalker::new();
-        let mut walker2 = DepthWalker::new();
-        assert!(equivalent_many(
-            tree1.root_indices(),
-            tree2.root_indices(),
-            tree1.nodes(),
-            tree2.nodes(),
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(tree1.equivalent(&tree2));
+    }
+
+    #[test]
+    fn t_recursive_compare_concat() {
+        let tree1 = deftree!(concat (+ x y) (* y x));
+        let tree2 = deftree!(concat (+ y x) (* x y));
+        assert!(tree1.equivalent(&tree2));
+        let tree1 = deftree!(concat
+                             (/ 1 (log (+ x y)))
+                             (/ (+ (* x y) (+ b a)) (* (+ y x) (* a b))));
+        let tree2 = deftree!(concat
+                             (/ 1 (log (+ x y)))
+                             (/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))));
+        assert!(tree1.equivalent(&tree2));
+        let tree2 = deftree!(concat
+                             (/ 1 (log (* x y)))
+                             (/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))));
+        assert!(!tree1.equivalent(&tree2));
     }
 
     #[test]
