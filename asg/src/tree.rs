@@ -437,6 +437,8 @@ impl PartialOrd for Node {
 
 #[cfg(test)]
 mod test {
+    use crate::deftree;
+
     use super::*;
 
     #[test]
@@ -648,5 +650,17 @@ mod test {
         let tree = Tree::concat('a'.into(), 'b'.into())
             * Tree::concat('x'.into(), Tree::concat('y'.into(), 'z'.into()));
         assert_eq!(tree.nodes, expected);
+    }
+
+    #[test]
+    fn t_reshape() {
+        let mat = deftree!(concat a b c p q r x y z).reshape(3, 3).unwrap();
+        assert_eq!(mat.dims(), (3, 3));
+        let mat = mat.reshape(1, 9).unwrap();
+        assert_eq!(mat.dims(), (1, 9));
+        let mat = mat.reshape(9, 1).unwrap();
+        assert_eq!(mat.dims(), (9, 1));
+        let result = mat.reshape(7, 3);
+        matches!(result, Err(TreeError::DimensionMismatch((9, 1), (7, 3))));
     }
 }
