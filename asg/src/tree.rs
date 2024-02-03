@@ -582,6 +582,71 @@ mod test {
 
     #[test]
     fn t_element_wise_binary_op() {
-        todo!("Binary op between a scalar and a matrix, two matrices of same sizes, and two matrices of different sizes");
+        // Matrix and a scalar.
+        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into()) * 2.0.into();
+        let expected = vec![
+            Constant(2.),
+            Symbol('x'),
+            Symbol('y'),
+            Symbol('z'),
+            Binary(Multiply, 0, 1),
+            Binary(Multiply, 0, 2),
+            Binary(Multiply, 0, 3),
+        ];
+        assert_eq!(tree.nodes, expected);
+        // Scalar and a matrix
+        let tree =
+            Tree::constant(2.) * Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into());
+        assert_eq!(tree.nodes, expected);
+        // Matrix and a matrix - multiply
+        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
+            * Tree::concat(Tree::concat('a'.into(), 'b'.into()), 'c'.into());
+        assert_eq!(
+            tree.nodes,
+            vec![
+                Symbol('x'),
+                Symbol('y'),
+                Symbol('z'),
+                Symbol('a'),
+                Symbol('b'),
+                Symbol('c'),
+                Binary(Multiply, 0, 3),
+                Binary(Multiply, 1, 4),
+                Binary(Multiply, 2, 5),
+            ]
+        );
+        // Matrix and a matrix - add.
+        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
+            + Tree::concat(Tree::concat('a'.into(), 'b'.into()), 'c'.into());
+        assert_eq!(
+            tree.nodes,
+            vec![
+                Symbol('x'),
+                Symbol('y'),
+                Symbol('z'),
+                Symbol('a'),
+                Symbol('b'),
+                Symbol('c'),
+                Binary(Add, 0, 3),
+                Binary(Add, 1, 4),
+                Binary(Add, 2, 5),
+            ]
+        );
+        // Matrices of different sizes.
+        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
+            * Tree::concat('a'.into(), 'b'.into());
+        let expected = vec![
+            Symbol('a'),
+            Symbol('b'),
+            Symbol('x'),
+            Symbol('y'),
+            Symbol('z'),
+            Binary(Multiply, 0, 2),
+            Binary(Multiply, 1, 3),
+        ];
+        assert_eq!(tree.nodes, expected);
+        let tree = Tree::concat('a'.into(), 'b'.into())
+            * Tree::concat('x'.into(), Tree::concat('y'.into(), 'z'.into()));
+        assert_eq!(tree.nodes, expected);
     }
 }
