@@ -8,6 +8,7 @@ use crate::{
 #[derive(Debug)]
 pub enum TopologicalError {
     CyclicGraph,
+    MisplacedTreeRoots,
 }
 
 /// Topological sorter.
@@ -48,7 +49,6 @@ impl TopoSorter {
         // Compute depths of all nodes.
         self.depths.clear();
         self.depths.resize(nodes.len(), 0);
-        let mut root_start = root_indices.start;
         let num_roots = root_indices.end - root_indices.start;
         for (index, maybe_parent) in
             self.walker
@@ -75,12 +75,17 @@ impl TopoSorter {
         // Build a map from old indices to new indices.
         self.index_map.clear();
         self.index_map.resize(nodes.len(), 0);
+        let mut newroots = None;
         for (i, index) in self.sorted_indices.iter().enumerate() {
             self.index_map[*index] = i;
-            if *index == root_start {
-                root_start = i;
+            if *index == root_indices.start && newroots.is_none() {
+                newroots = Some(i..(i + num_roots));
             }
         }
+        let newroots = match newroots {
+            Some(val) => val,
+            None => return Err(TopologicalError::MisplacedTreeRoots),
+        };
         // Gather the sorted nodes.
         self.sorted.clear();
         self.sorted
@@ -94,7 +99,7 @@ impl TopoSorter {
             }));
         // Swap the sorted nodes and the incoming nodes.
         std::mem::swap(&mut self.sorted, nodes);
-        return Ok(root_start..(root_start + num_roots));
+        return Ok(newroots);
     }
 }
 

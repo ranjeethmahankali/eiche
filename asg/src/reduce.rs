@@ -294,11 +294,27 @@ mod test {
                             (/ (+ (* p x) (* p y)) (+ x y))
                             1.
         );
-        println!("${}$\n==========\n", tree.to_latex());
-        let steps = reduce(tree, 12).unwrap();
-        for step in &steps {
-            println!("${}$\n", step.to_latex());
-        }
+        let steps = reduce(tree, 8).unwrap();
         assert!(steps.last().unwrap().equivalent(&deftree!(concat p 1)));
+    }
+
+    #[test]
+    fn t_reduce_concat_2() {
+        let tree = deftree!(concat
+                            (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
+                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
+                            42.);
+        let steps = reduce(tree, 8).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(concat 1. 42.)));
+    }
+
+    #[test]
+    fn t_reduce_concat_3() {
+        let tree = deftree!(concat
+                            (/ (+ (* p x) (* p y)) (+ x y))
+                            (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
+                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2))));
+        let steps = reduce(tree, 12).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(concat p 1.)));
     }
 }

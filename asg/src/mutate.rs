@@ -661,4 +661,14 @@ mod test {
                      (* 2. (* (log (+ a 1)) (log (+ b 1))))),
         );
     }
+
+    #[test]
+    fn t_mutate_concat() {
+        check_mutations(
+            deftree!(concat (+ (* p x) (* p y)) 1.)
+                .reshape(1, 2)
+                .unwrap(),
+            deftree!(concat (* p (+ x y)) 1.).reshape(1, 2).unwrap(),
+        );
+    }
 }
