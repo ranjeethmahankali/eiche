@@ -562,7 +562,22 @@ mod test {
 
     #[test]
     fn t_element_wise_unary_op() {
-        todo!("Add test for element wise unary op of a matrix");
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let p = Tree::concat(x, y);
+        assert_eq!(p.dims, (2, 1));
+        assert_eq!(p.nodes, vec![Symbol('x'), Symbol('y')]);
+        let p = p * 2.0.into();
+        assert_eq!(
+            p.nodes,
+            vec![
+                Constant(2.),
+                Symbol('x'),
+                Symbol('y'),
+                Binary(Multiply, 0, 1),
+                Binary(Multiply, 0, 2)
+            ]
+        );
     }
 
     #[test]
