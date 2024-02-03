@@ -62,7 +62,7 @@ mod test {
         let mut pruner = Pruner::new();
         let tree = deftree!(* 2. 3.).fold().unwrap().prune(&mut pruner);
         assert_eq!(tree.len(), 1usize);
-        assert_eq!(tree.root(), &Constant(2. * 3.));
+        assert_eq!(tree.roots(), &[Constant(2. * 3.)]);
     }
 
     #[test]
@@ -73,6 +73,29 @@ mod test {
              (log (+ x (/ 2. (min 5. (max 3. (- 9. 5.)))))))
         );
         let expected = deftree!(/ (+ x 6.) (log (+ x 0.5)));
+        assert!(tree.len() > expected.len());
+        let mut pruner = Pruner::new();
+        let tree = tree.fold().unwrap().prune(&mut pruner);
+        assert_eq!(tree, expected);
+        compare_trees(&tree, &expected, &[('x', 0.1, 10.)], 100, 0.);
+    }
+
+    #[test]
+    fn t_constant_folding_concat() {
+        let tree = deftree!(
+            concat
+                (/
+                 (+ x (* 2. 3.))
+                 (log (+ x (/ 2. (min 5. (max 3. (- 9. 5.)))))))
+                (/
+                 (+ x (* 3. 3.))
+                 (log (+ x (/ 8. (min 5. (max 3. (- 9. 5.)))))))
+        );
+        let expected = deftree!(
+            concat
+                (/ (+ x 6.) (log (+ x 0.5)))
+                (/ (+ x 9.) (log (+ x 2.)))
+        );
         assert!(tree.len() > expected.len());
         let mut pruner = Pruner::new();
         let tree = tree.fold().unwrap().prune(&mut pruner);

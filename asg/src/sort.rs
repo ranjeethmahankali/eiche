@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::{
     tree::{Node, Node::*},
     walk::{DepthWalker, NodeOrdering},
@@ -6,6 +8,7 @@ use crate::{
 #[derive(Debug)]
 pub enum TopologicalError {
     CyclicGraph,
+    MisplacedTreeRoots,
 }
 
 /// Topological sorter.
@@ -41,14 +44,15 @@ impl TopoSorter {
     pub fn run(
         &mut self,
         nodes: &mut Vec<Node>,
-        mut root_index: usize,
-    ) -> Result<usize, TopologicalError> {
+        root_indices: Range<usize>,
+    ) -> Result<Range<usize>, TopologicalError> {
         // Compute depths of all nodes.
         self.depths.clear();
         self.depths.resize(nodes.len(), 0);
+        let num_roots = root_indices.end - root_indices.start;
         for (index, maybe_parent) in
             self.walker
-                .walk_nodes(&nodes, root_index, false, NodeOrdering::Original)
+                .walk_many(&nodes, root_indices.clone(), false, NodeOrdering::Original)
         {
             if let Some(parent) = maybe_parent {
                 self.depths[index] = usize::max(self.depths[index], 1 + self.depths[parent]);
@@ -71,12 +75,17 @@ impl TopoSorter {
         // Build a map from old indices to new indices.
         self.index_map.clear();
         self.index_map.resize(nodes.len(), 0);
-        for (index, i) in self.sorted_indices.iter().zip(0..self.sorted_indices.len()) {
+        let mut newroots = None;
+        for (i, index) in self.sorted_indices.iter().enumerate() {
             self.index_map[*index] = i;
-            if *index == root_index {
-                root_index = i;
+            if *index == root_indices.start && newroots.is_none() {
+                newroots = Some(i..(i + num_roots));
             }
         }
+        let newroots = match newroots {
+            Some(val) => val,
+            None => return Err(TopologicalError::MisplacedTreeRoots),
+        };
         // Gather the sorted nodes.
         self.sorted.clear();
         self.sorted
@@ -90,7 +99,7 @@ impl TopoSorter {
             }));
         // Swap the sorted nodes and the incoming nodes.
         std::mem::swap(&mut self.sorted, nodes);
-        return Ok(root_index);
+        return Ok(newroots);
     }
 }
 
@@ -108,8 +117,8 @@ mod test {
     fn t_topological_sorting_0() {
         let mut sorter = TopoSorter::new();
         let mut nodes = vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')];
-        let root = sorter.run(&mut nodes, 1).unwrap();
-        assert_eq!(root, 2);
+        let root = sorter.run(&mut nodes, 1..2).unwrap();
+        assert_eq!(root, 2..3);
         assert_eq!(nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
     }
 
@@ -124,8 +133,8 @@ mod test {
             Symbol('y'),            // 5
         ];
         let mut sorter = TopoSorter::new();
-        let root = sorter.run(&mut nodes, 4).unwrap();
-        assert_eq!(root, 5);
+        let root = sorter.run(&mut nodes, 4..5).unwrap();
+        assert_eq!(root, 5..6);
         assert_eq!(
             nodes,
             vec![
@@ -156,8 +165,8 @@ mod test {
             Binary(Multiply, 3, 1), // 11
         ];
         let mut sorter = TopoSorter::new();
-        let root = sorter.run(&mut nodes, 10).unwrap();
-        assert_eq!(root, 11);
+        let root = sorter.run(&mut nodes, 10..11).unwrap();
+        assert_eq!(root, 11..12);
         assert_eq!(
             nodes,
             vec![
@@ -193,8 +202,40 @@ mod test {
             Constant(2.0),          // 9
         ];
         assert!(matches!(
-            sorter.run(&mut nodes, 0,),
+            sorter.run(&mut nodes, 0..1),
             Err(TopologicalError::CyclicGraph)
         ));
+    }
+
+    #[test]
+    fn t_sort_concat() {
+        let mut sorter = TopoSorter::new();
+        let mut nodes = vec![
+            Symbol('p'),
+            Symbol('x'),
+            Binary(Multiply, 0, 1),
+            Symbol('y'),
+            Binary(Multiply, 0, 3),
+            Binary(Multiply, 0, 7),
+            Constant(1.0),
+            Binary(Add, 1, 3),
+            Binary(Add, 2, 4),
+        ];
+        let roots = sorter.run(&mut nodes, 5..7).unwrap();
+        assert_eq!(roots, 6..8);
+        assert_eq!(
+            nodes,
+            vec![
+                Symbol('x'),
+                Symbol('y'),
+                Symbol('p'),
+                Binary(Add, 0, 1),
+                Binary(Multiply, 2, 0),
+                Binary(Multiply, 2, 1),
+                Binary(Multiply, 2, 3),
+                Constant(1.0),
+                Binary(Add, 4, 5)
+            ]
+        );
     }
 }

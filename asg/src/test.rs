@@ -41,10 +41,11 @@ pub mod util {
         samples_per_var: usize,
         eps: f64,
     ) where
-        F: FnMut(&[f64]) -> Option<f64>,
+        F: FnMut(&[f64], &mut [f64]) -> (),
     {
         use rand::Rng;
         let mut eval = Evaluator::new(&tree);
+        let mut expected = vec![f64::NAN; tree.num_roots()];
         let nvars = vardata.len();
         let mut indices = vec![0usize; nvars];
         let mut sample = Vec::<f64>::with_capacity(nvars);
@@ -60,7 +61,13 @@ pub mod util {
                 continue;
             }
             // We set all the variables. Run the test.
-            assert_float_eq!(eval.run().unwrap(), expectedfn(&sample[..]).unwrap(), eps);
+            let results = eval.run().unwrap();
+            assert_eq!(results.len(), expected.len());
+            expected.fill(f64::NAN);
+            expectedfn(&sample, &mut expected);
+            for (lhs, rhs) in expected.iter().zip(results.iter()) {
+                assert_float_eq!(lhs, rhs, eps);
+            }
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;
@@ -111,7 +118,12 @@ pub mod util {
             if vari < nvars - 1 {
                 continue;
             }
-            assert_float_eq!(eval1.run().unwrap(), eval2.run().unwrap(), eps);
+            let results1 = eval1.run().unwrap();
+            let results2 = eval2.run().unwrap();
+            assert_eq!(results1.len(), results2.len());
+            for (l, r) in results1.iter().zip(results2.iter()) {
+                assert_float_eq!(l, r, eps);
+            }
             // Clean up the index stack.
             sample.pop();
             let mut vari = vari;

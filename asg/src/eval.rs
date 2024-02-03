@@ -14,7 +14,7 @@ pub enum EvaluationError {
 /// This can be used to compute the value(s) of the tree.
 pub struct Evaluator<'a> {
     tree: &'a Tree,
-    regs: Box<[Option<f64>]>,
+    regs: Box<[f64]>,
 }
 
 impl<'a> Evaluator<'a> {
@@ -22,7 +22,7 @@ impl<'a> Evaluator<'a> {
     pub fn new(tree: &'a Tree) -> Evaluator {
         Evaluator {
             tree,
-            regs: vec![None; tree.len()].into_boxed_slice(),
+            regs: vec![f64::NAN; tree.len()].into_boxed_slice(),
         }
     }
 
@@ -33,48 +33,36 @@ impl<'a> Evaluator<'a> {
         for (node, reg) in self.tree.nodes().iter().zip(self.regs.iter_mut()) {
             match node {
                 Symbol(l) if *l == label => {
-                    *reg = Some(value);
+                    *reg = value;
                 }
                 _ => {}
             }
         }
     }
 
-    /// Read the value from the `index`-th register. Returns an error
-    /// if the register doesn't contain a value.
-    fn read(&self, index: usize) -> Result<f64, EvaluationError> {
-        match self.regs[index] {
-            Some(val) => Ok(val),
-            None => Err(EvaluationError::UninitializedValueRead),
-        }
-    }
-
     /// Write the `value` into the `index`-th register. The existing
     /// value is overwritten.
     fn write(&mut self, index: usize, value: f64) {
-        self.regs[index] = Some(value);
+        self.regs[index] = value;
     }
 
     /// Run the evaluator and return the result. The result may
     /// contain the output value, or an
     /// error. `Variablenotfound(label)` error means the variable
     /// matching `label` hasn't been assigned a value using `set_var`.
-    pub fn run(&mut self) -> Result<f64, EvaluationError> {
+    pub fn run(&mut self) -> Result<&[f64], EvaluationError> {
         for idx in 0..self.tree.len() {
             self.write(
                 idx,
                 match &self.tree.node(idx) {
                     Constant(val) => *val,
-                    Symbol(label) => match &self.regs[idx] {
-                        None => return Err(EvaluationError::VariableNotFound(*label)),
-                        Some(val) => *val,
-                    },
-                    Binary(op, lhs, rhs) => op.apply(self.read(*lhs)?, self.read(*rhs)?),
-                    Unary(op, input) => op.apply(self.read(*input)?),
+                    Symbol(_) => self.regs[idx],
+                    Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs]),
+                    Unary(op, input) => op.apply(self.regs[*input]),
                 },
             );
         }
-        return self.read(self.tree.root_index());
+        return Ok(&self.regs[self.tree.len() - self.tree.num_roots()..]);
     }
 }
 
@@ -111,10 +99,10 @@ mod test {
     #[test]
     fn t_constant() {
         let x = deftree!(const std::f64::consts::PI);
-        assert_eq!(x.root(), &Constant(std::f64::consts::PI));
+        assert_eq!(x.roots(), &[Constant(std::f64::consts::PI)]);
         let mut eval = Evaluator::new(&x);
         match eval.run() {
-            Ok(val) => assert_eq!(val, std::f64::consts::PI),
+            Ok(val) => assert_eq!(val, &[std::f64::consts::PI]),
             _ => assert!(false),
         }
     }
@@ -135,7 +123,7 @@ mod test {
             eval.set_var('x', x);
             eval.set_var('y', y);
             match eval.run() {
-                Ok(val) => assert_eq!(val, expected),
+                Ok(val) => assert_eq!(val, &[expected]),
                 _ => assert!(false),
             }
         }
@@ -152,7 +140,10 @@ mod test {
             let x: f64 = PI_2 * rng.gen::<f64>();
             eval.set_var('x', x);
             match eval.run() {
-                Ok(val) => assert_float_eq!(val, 1.),
+                Ok(val) => {
+                    assert_float_eq!(val[0], 1.);
+                    assert_eq!(val.len(), 1);
+                }
                 _ => assert!(false),
             }
         }
@@ -162,11 +153,9 @@ mod test {
     fn t_sum_test() {
         check_tree_eval(
             deftree!(+ x y),
-            |vars: &[f64]| {
+            |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
-                    Some(x + y)
-                } else {
-                    None
+                    output[0] = x + y;
                 }
             },
             &[('x', -5., 5.), ('y', -5., 5.)],
@@ -179,14 +168,10 @@ mod test {
     fn t_evaluate_trees_1() {
         check_tree_eval(
             deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)),
-            |vars: &[f64]| {
+            |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
-                    Some(
-                        f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
-                            / (f64::cos(x) + 2.),
-                    )
-                } else {
-                    None
+                    output[0] = f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
+                        / (f64::cos(x) + 2.);
                 }
             },
             &[('x', -2.5, 2.5)],
@@ -204,7 +189,7 @@ mod test {
                       (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
             ),
-            |vars: &[f64]| {
+            |vars: &[f64], output: &mut [f64]| {
                 if let [x, y, z] = vars[..] {
                     let s1 = f64::sqrt(
                         f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
@@ -215,9 +200,43 @@ mod test {
                     let s3 = f64::sqrt(
                         f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
                     ) - 5.25;
-                    Some(f64::max(f64::min(s1, s2), s3))
-                } else {
-                    None
+                    output[0] = f64::max(f64::min(s1, s2), s3);
+                }
+            },
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_evaluate_trees_concat_1() {
+        check_tree_eval(
+            deftree!(concat
+            (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
+            (+ x y)
+            ((max (min
+                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                   (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+              (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            )),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x, y, z] = vars[..] {
+                    output[0] = f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
+                        / (f64::cos(x) + 2.);
+                    output[1] = x + y;
+                    output[2] = {
+                        let s1 = f64::sqrt(
+                            f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
+                        ) - 2.75;
+                        let s2 = f64::sqrt(
+                            f64::powf(x + 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
+                        ) - 4.;
+                        let s3 = f64::sqrt(
+                            f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
+                        ) - 5.25;
+                        f64::max(f64::min(s1, s2), s3)
+                    };
                 }
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],

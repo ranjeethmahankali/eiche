@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::tree::{Node, Node::*, Tree};
 
 /// Helper struct for traversing the tree depth first.
@@ -30,7 +32,7 @@ impl DepthWalker {
         unique: bool,
         ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
-        self.walk_nodes(&tree.nodes(), tree.root_index(), unique, ordering)
+        self.walk_many(&tree.nodes(), tree.root_indices(), unique, ordering)
     }
 
     /// Get an iterator that walks the given `nodes` starting from the
@@ -39,17 +41,18 @@ impl DepthWalker {
     /// order in which the children of certain nodes are
     /// traversed. See the documentation of `NodeOrdering` for more
     /// details.
-    pub fn walk_nodes<'a>(
+    pub fn walk_many<'a>(
         &'a mut self,
         nodes: &'a [Node],
-        root_index: usize,
+        root_indices: Range<usize>,
         unique: bool,
         ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
         // Prep the stack.
         self.stack.clear();
         self.stack.reserve(nodes.len());
-        self.stack.push((root_index, None));
+        // Push the roots in reversed order to preserve their order in the output.
+        self.stack.extend(root_indices.map(|r| (r, None)).rev());
         // Reset the visited flags.
         self.visited.clear();
         self.visited.resize(nodes.len(), false);

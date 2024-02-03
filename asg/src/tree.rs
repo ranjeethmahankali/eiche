@@ -108,6 +108,8 @@ pub enum TreeError {
     ContainsNaN,
     /// Tree conains no nodes.
     EmptyTree,
+    /// A mismatch between two dimensions, for example, during a reshape operation.
+    DimensionMismatch((usize, usize), (usize, usize)),
 }
 
 /// Represents a node in an abstract syntax `Tree`.
@@ -119,12 +121,19 @@ pub enum Node {
     Binary(BinaryOp, usize, usize),
 }
 
+use std::ops::Range;
+
 use Node::*;
 
 /// Represents an abstract syntax tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
     nodes: Vec<Node>,
+    dims: (usize, usize),
+}
+
+const fn matsize(dims: (usize, usize)) -> usize {
+    dims.0 * dims.1
 }
 
 impl Tree {
@@ -132,6 +141,7 @@ impl Tree {
     pub fn constant(val: f64) -> Tree {
         Tree {
             nodes: vec![Constant(val)],
+            dims: (1, 1),
         }
     }
 
@@ -139,7 +149,35 @@ impl Tree {
     pub fn symbol(label: char) -> Tree {
         Tree {
             nodes: vec![Symbol(label)],
+            dims: (1, 1),
         }
+    }
+
+    pub fn concat(mut lhs: Tree, mut rhs: Tree) -> Tree {
+        let (llen, lsize) = (lhs.len(), lhs.num_roots());
+        let (rlen, rsize) = (rhs.len(), rhs.num_roots());
+        {
+            // Copy nodes. We're ignoring the root nodes of `lhs` when
+            // computing the offset. That is fine because these root nodes will
+            // later be rotated to the end of the buffer.
+            let offset = llen - lsize;
+            lhs.nodes.extend(rhs.nodes.drain(..).map(|n| match n {
+                Constant(_) => n,
+                Symbol(_) => n,
+                Unary(op, input) => Unary(op, input + offset),
+                Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
+            }));
+        }
+        // After we just concatenated the nodes as is. This rotation after the
+        // concatenations makes sure all the root nodes are at the end.
+        lhs.nodes[(llen - lsize)..(llen + rlen - rsize)].rotate_left(lsize);
+        lhs.dims = (lsize + rsize, 1);
+        return lhs;
+    }
+
+    pub fn transposed(mut self) -> Tree {
+        self.dims = (self.dims.1, self.dims.0);
+        return self;
     }
 
     /// The number of nodes in this tree.
@@ -147,18 +185,37 @@ impl Tree {
         self.nodes.len()
     }
 
-    /// Get a reference to root of the tree. This is the last node of
-    /// the tree.
-    pub fn root(&self) -> &Node {
-        // We can confidently unwrap because we should never create an
-        // invalid tree in the first place.
-        self.nodes.last().unwrap()
+    pub fn num_roots(&self) -> usize {
+        matsize(self.dims)
     }
 
-    /// Index of the root node. This will be the index of the last
-    /// node of the tree.
-    pub fn root_index(&self) -> usize {
-        self.len() - 1
+    pub fn dims(&self) -> (usize, usize) {
+        self.dims
+    }
+
+    pub fn reshape(self, rows: usize, cols: usize) -> Result<Tree, TreeError> {
+        if matsize((rows, cols)) == self.num_roots() {
+            Ok(Tree {
+                nodes: self.nodes,
+                dims: (rows, cols),
+            })
+        } else {
+            Err(TreeError::DimensionMismatch(self.dims, (rows, cols)))
+        }
+    }
+
+    /// Get a reference to root of the tree. This is the last node of
+    /// the tree.
+    pub fn roots(&self) -> &[Node] {
+        // We can confidently unwrap because we should never create an
+        // invalid tree in the first place.
+        &self.nodes[(self.nodes.len() - self.num_roots())..]
+    }
+
+    /// Indices of the root nodes of the tree. These nodes will be at the end of
+    /// the tree.
+    pub fn root_indices(&self) -> Range<usize> {
+        (self.len() - self.num_roots())..self.len()
     }
 
     /// Get a reference to the node at `index`.
@@ -194,6 +251,8 @@ impl Tree {
         return chars;
     }
 
+    /// Check the tree for errors and return a Result that contains the tree if
+    /// no errors were found, or the first error encountered with the tree.
     pub fn validated(self) -> Result<Tree, TreeError> {
         if self.nodes.is_empty() {
             return Err(TreeError::EmptyTree);
@@ -211,6 +270,9 @@ impl Tree {
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
+        if self.num_roots() > other.num_roots() {
+            return other.binary_op(self, op);
+        }
         let offset: usize = self.nodes.len();
         self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
         self.nodes.extend(other.nodes.iter().map(|node| match node {
@@ -219,13 +281,22 @@ impl Tree {
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
         }));
-        self.nodes
-            .push(Binary(op, offset - 1, self.nodes.len() - 1));
+        if self.num_roots() == 1 {
+            for r in other.root_indices() {
+                self.nodes.push(Binary(op, offset - 1, r + offset));
+            }
+        } else {
+            for (l, r) in ((offset - self.num_roots())..offset).zip(other.root_indices()) {
+                self.nodes.push(Binary(op, l, r + offset));
+            }
+        }
         return self;
     }
 
     fn unary_op(mut self, op: UnaryOp) -> Tree {
-        self.nodes.push(Unary(op, self.root_index()));
+        for root in self.root_indices() {
+            self.nodes.push(Unary(op, root));
+        }
         return self;
     }
 }
@@ -366,6 +437,8 @@ impl PartialOrd for Node {
 
 #[cfg(test)]
 mod test {
+    use crate::deftree;
+
     use super::*;
 
     #[test]
@@ -487,5 +560,107 @@ mod test {
         let x: Tree = 'x'.into();
         let y = exp(x);
         assert_eq!(y.nodes, vec![Symbol('x'), Unary(Exp, 0)]);
+    }
+
+    #[test]
+    fn t_element_wise_unary_op() {
+        let x: Tree = 'x'.into();
+        let y: Tree = 'y'.into();
+        let p = Tree::concat(x, y);
+        assert_eq!(p.dims, (2, 1));
+        assert_eq!(p.nodes, vec![Symbol('x'), Symbol('y')]);
+        let p = p * 2.0.into();
+        assert_eq!(
+            p.nodes,
+            vec![
+                Constant(2.),
+                Symbol('x'),
+                Symbol('y'),
+                Binary(Multiply, 0, 1),
+                Binary(Multiply, 0, 2)
+            ]
+        );
+    }
+
+    #[test]
+    fn t_element_wise_binary_op() {
+        // Matrix and a scalar.
+        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into()) * 2.0.into();
+        let expected = vec![
+            Constant(2.),
+            Symbol('x'),
+            Symbol('y'),
+            Symbol('z'),
+            Binary(Multiply, 0, 1),
+            Binary(Multiply, 0, 2),
+            Binary(Multiply, 0, 3),
+        ];
+        assert_eq!(tree.nodes, expected);
+        // Scalar and a matrix
+        let tree =
+            Tree::constant(2.) * Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into());
+        assert_eq!(tree.nodes, expected);
+        // Matrix and a matrix - multiply
+        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
+            * Tree::concat(Tree::concat('a'.into(), 'b'.into()), 'c'.into());
+        assert_eq!(
+            tree.nodes,
+            vec![
+                Symbol('x'),
+                Symbol('y'),
+                Symbol('z'),
+                Symbol('a'),
+                Symbol('b'),
+                Symbol('c'),
+                Binary(Multiply, 0, 3),
+                Binary(Multiply, 1, 4),
+                Binary(Multiply, 2, 5),
+            ]
+        );
+        // Matrix and a matrix - add.
+        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
+            + Tree::concat(Tree::concat('a'.into(), 'b'.into()), 'c'.into());
+        assert_eq!(
+            tree.nodes,
+            vec![
+                Symbol('x'),
+                Symbol('y'),
+                Symbol('z'),
+                Symbol('a'),
+                Symbol('b'),
+                Symbol('c'),
+                Binary(Add, 0, 3),
+                Binary(Add, 1, 4),
+                Binary(Add, 2, 5),
+            ]
+        );
+        // Matrices of different sizes.
+        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
+            * Tree::concat('a'.into(), 'b'.into());
+        let expected = vec![
+            Symbol('a'),
+            Symbol('b'),
+            Symbol('x'),
+            Symbol('y'),
+            Symbol('z'),
+            Binary(Multiply, 0, 2),
+            Binary(Multiply, 1, 3),
+        ];
+        assert_eq!(tree.nodes, expected);
+        let tree = Tree::concat('a'.into(), 'b'.into())
+            * Tree::concat('x'.into(), Tree::concat('y'.into(), 'z'.into()));
+        assert_eq!(tree.nodes, expected);
+    }
+
+    #[test]
+    fn t_reshape() {
+        let mat = deftree!(concat a b c p q r x y z).reshape(3, 3).unwrap();
+        assert_eq!(mat.dims(), (3, 3));
+        let mat = mat.reshape(1, 9).unwrap();
+        assert_eq!(mat.dims(), (1, 9));
+        let mat = mat.reshape(9, 1).unwrap();
+        assert_eq!(mat.dims(), (9, 1));
+        let result = mat.reshape(7, 3);
+        matches!(result, Err(TreeError::DimensionMismatch((9, 1), (7, 3))));
     }
 }

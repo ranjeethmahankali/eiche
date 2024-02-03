@@ -4,7 +4,10 @@ use crate::{
     tree::Tree,
     tree::{Node, Node::*},
 };
-use std::collections::{BinaryHeap, HashMap};
+use std::{
+    collections::{BinaryHeap, HashMap},
+    ops::Range,
+};
 
 struct Heuristic {
     stack: Vec<(usize, usize)>, // index, depth
@@ -42,14 +45,14 @@ impl Heuristic {
     /// we've detected a diamond shaped loop, and the number of nodes
     /// traversed since the last visit roughly correlates to the size
     /// of the diamond shaped loop.
-    fn euler_walk_cost(&mut self, nodes: &[Node], root: usize) -> usize {
+    fn euler_walk_cost(&mut self, nodes: &[Node], roots: Range<usize>) -> usize {
         // Reset all buffers.
         self.stack.clear();
         self.stack.reserve(nodes.len());
         self.last_visit.clear();
         self.last_visit.resize(nodes.len(), None);
         // Start the Euler walk.
-        self.stack.push((root, 0));
+        self.stack.extend(roots.map(|r| (r, 0)));
         let mut prevdepth: usize = 0;
         let mut counter: usize = 0;
         let mut sum: usize = 0;
@@ -81,7 +84,7 @@ impl Heuristic {
     }
 
     fn cost(&mut self, tree: &Tree) -> usize {
-        tree.len() + self.euler_walk_cost(tree.nodes(), tree.root_index())
+        tree.len() + self.euler_walk_cost(tree.nodes(), tree.root_indices())
     }
 }
 
@@ -186,7 +189,7 @@ mod test {
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
-        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 2);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 2);
     }
 
     #[test]
@@ -198,7 +201,7 @@ mod test {
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
-        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 6);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 6);
     }
 
     #[test]
@@ -210,13 +213,13 @@ mod test {
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
-        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 13);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 13);
         // Make sure the same heuristic instance can be reused on other trees.
         let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (+ (* 4 x) 2))
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
-        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 33);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 33);
     }
 
     #[test]
@@ -228,7 +231,7 @@ mod test {
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
-        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_index()), 4);
+        assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 4);
     }
 
     fn check_heuristic_and_mutations(before: Tree, after: Tree) {
@@ -283,5 +286,35 @@ mod test {
                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)));
         let steps = reduce(tree, 8).unwrap();
         assert!(steps.last().unwrap().equivalent(&deftree!(1)));
+    }
+
+    #[test]
+    fn t_reduce_concat_1() {
+        let tree = deftree!(concat
+                            (/ (+ (* p x) (* p y)) (+ x y))
+                            1.
+        );
+        let steps = reduce(tree, 8).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(concat p 1)));
+    }
+
+    #[test]
+    fn t_reduce_concat_2() {
+        let tree = deftree!(concat
+                            (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
+                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
+                            42.);
+        let steps = reduce(tree, 8).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(concat 1. 42.)));
+    }
+
+    #[test]
+    fn t_reduce_concat_3() {
+        let tree = deftree!(concat
+                            (/ (+ (* p x) (* p y)) (+ x y))
+                            (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
+                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2))));
+        let steps = reduce(tree, 12).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(concat p 1.)));
     }
 }

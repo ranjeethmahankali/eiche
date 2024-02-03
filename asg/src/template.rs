@@ -8,7 +8,7 @@ use crate::{
 /// This macro is only meant for use within this module.
 macro_rules! deftemplate {
     (($($tt:tt)*)) => { // Unwrap parens.
-        parsetemplate!($($tt)*)
+        deftemplate!($($tt)*)
     };
     ($name: ident ping ($($ping:tt) *) pong ($($pong:tt) *)) => {
         Template::from(
@@ -110,6 +110,10 @@ impl Template {
 
     pub fn pong(&self) -> &Tree {
         &self.pong
+    }
+
+    pub fn ping_root(&self) -> usize {
+        self.ping.root_indices().start
     }
 }
 
@@ -255,6 +259,11 @@ pub mod test {
         // Make sure templates have unique names.
         let mut names: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
         for t in TEMPLATES.iter() {
+            // I can't see a sensible case for simplifying matrices, that is
+            // different from simplifying the elements of the matrix. So the
+            // templates are resitricted to have at most 1 root.
+            assert_eq!(t.ping.num_roots(), 1);
+            assert_eq!(t.pong.num_roots(), 1);
             assert!(names.insert(t.name.as_str()), "Duplicate template found.");
         }
     }

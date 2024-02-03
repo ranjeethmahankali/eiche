@@ -7,6 +7,16 @@ macro_rules! const_assert {
     }
 }
 
+#[macro_export]
+macro_rules! concat_trees {
+    ($tree:tt) => {
+        $crate::deftree!($tree)
+    };
+    ($lhs:tt $($rhs:tt) +) => {
+        $crate::tree::Tree::concat($crate::deftree!($lhs), $crate::concat_trees!($($rhs) +))
+    };
+}
+
 /// Construct a tree from the lisp expresion.
 #[macro_export]
 macro_rules! deftree {
@@ -16,6 +26,10 @@ macro_rules! deftree {
     };
     ($a:block) => { // Block expressions.
         $a
+    };
+    // Concat
+    (concat $($trees:tt) +) => {
+        $crate::concat_trees!($($trees) +)
     };
     // Unary ops with functions names.
     ($unary_op:ident $a:tt) => {
@@ -59,85 +73,82 @@ mod test {
     fn t_symbol_deftree() {
         let tree = deftree!(x);
         assert_eq!(tree.len(), 1);
-        assert_eq!(tree.root(), &Symbol('x'));
+        assert_eq!(tree.roots(), &[Symbol('x')]);
     }
 
     #[test]
     fn t_constant_deftree() {
         let tree = deftree!(2.);
         assert_eq!(tree.len(), 1);
-        assert_eq!(tree.root(), &Constant(2.));
+        assert_eq!(tree.roots(), &[Constant(2.)]);
     }
 
     #[test]
     fn t_negate_deftree() {
         let tree = deftree!(-x);
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Negate, 0)]);
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Negate, 0)]);
     }
 
     #[test]
     fn t_sqrt_deftree() {
         let tree = deftree!(sqrt x);
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Sqrt, 0)]);
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Sqrt, 0)]);
     }
 
     #[test]
     fn t_abs_deftree() {
         let tree = deftree!(abs x);
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Abs, 0)]);
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Abs, 0)]);
     }
 
     #[test]
     fn t_sin_deftree() {
         let tree = deftree!(sin x);
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Sin, 0)]);
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Sin, 0)]);
     }
 
     #[test]
     fn t_cos_deftree() {
         let tree = deftree!(cos x);
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Cos, 0)]);
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Cos, 0)]);
     }
 
     #[test]
     fn t_tan_deftree() {
         let tree = deftree!(tan x);
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Tan, 0)]);
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Tan, 0)]);
     }
 
     #[test]
     fn t_log_deftree() {
         let tree = deftree!(log x);
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Log, 0)]);
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Log, 0)]);
     }
 
     #[test]
     fn t_exp_deftree() {
         let tree = deftree!(exp x);
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.nodes(), &vec![Symbol('x'), Unary(Exp, 0)]);
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Exp, 0)]);
     }
 
     #[test]
     fn t_add_deftree() {
         let tree = deftree!(+ x y);
         assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]
-        );
+        assert_eq!(tree.nodes(), &[Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
         let tree = deftree!(+ 2. (-x));
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &vec![
+            &[
                 Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
@@ -152,13 +163,13 @@ mod test {
         assert_eq!(tree.len(), 3);
         assert_eq!(
             tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Subtract, 0, 1)]
+            &[Symbol('x'), Symbol('y'), Binary(Subtract, 0, 1)]
         );
         let tree = deftree!(-2.(-x));
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &vec![
+            &[
                 Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
@@ -173,13 +184,13 @@ mod test {
         assert_eq!(tree.len(), 3);
         assert_eq!(
             tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Multiply, 0, 1)]
+            &[Symbol('x'), Symbol('y'), Binary(Multiply, 0, 1)]
         );
         let tree = deftree!(*(2.)(-x));
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &vec![
+            &[
                 Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
@@ -194,13 +205,13 @@ mod test {
         assert_eq!(tree.len(), 3);
         assert_eq!(
             tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Divide, 0, 1)]
+            &[Symbol('x'), Symbol('y'), Binary(Divide, 0, 1)]
         );
         let tree = deftree!(/ 2. (-x));
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &vec![
+            &[
                 Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
@@ -213,15 +224,12 @@ mod test {
     fn t_pow_deftree() {
         let tree = deftree!(pow x y);
         assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Pow, 0, 1)]
-        );
+        assert_eq!(tree.nodes(), &[Symbol('x'), Symbol('y'), Binary(Pow, 0, 1)]);
         let tree = deftree!(pow 2. (-x));
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &vec![
+            &[
                 Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
@@ -234,15 +242,12 @@ mod test {
     fn t_min_deftree() {
         let tree = deftree!(min x y);
         assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Min, 0, 1)]
-        );
+        assert_eq!(tree.nodes(), &[Symbol('x'), Symbol('y'), Binary(Min, 0, 1)]);
         let tree = deftree!(min 2. (-x));
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &vec![
+            &[
                 Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
@@ -255,20 +260,27 @@ mod test {
     fn t_max_deftree() {
         let tree = deftree!(max x y);
         assert_eq!(tree.len(), 3);
-        assert_eq!(
-            tree.nodes(),
-            &vec![Symbol('x'), Symbol('y'), Binary(Max, 0, 1)]
-        );
+        assert_eq!(tree.nodes(), &[Symbol('x'), Symbol('y'), Binary(Max, 0, 1)]);
         let tree = deftree!(max 2. (-x));
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &vec![
+            &[
                 Constant(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Max, 0, 2)
             ]
         );
+    }
+
+    #[test]
+    fn t_concat_deftree() {
+        let tree = deftree!(concat a b c d);
+        assert_eq!(
+            tree.nodes(),
+            &[Symbol('a'), Symbol('b'), Symbol('c'), Symbol('d')]
+        );
+        assert_eq!(tree.dims(), (4, 1));
     }
 }

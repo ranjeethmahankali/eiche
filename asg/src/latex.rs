@@ -2,7 +2,28 @@ use crate::tree::{BinaryOp, BinaryOp::*, Node, Node::*, Tree, UnaryOp::*};
 
 impl Tree {
     pub fn to_latex(&self) -> String {
-        to_latex(self.root(), self.nodes())
+        let roots = self.roots();
+        let (rows, cols) = self.dims();
+        if rows == 1 && cols == 1 {
+            return to_latex(&roots[0], self.nodes());
+        } else {
+            let mut lx = "\\begin{bmatrix}".to_string();
+            for row in 0..rows {
+                for col in 0..cols {
+                    lx.push('{');
+                    lx.push_str(&to_latex(&roots[col * rows + row], self.nodes()));
+                    lx.push('}');
+                    if col < cols - 1 {
+                        lx.push_str(" & ");
+                    }
+                }
+                if row < rows - 1 {
+                    lx.push_str(" \\\\ ");
+                }
+            }
+            lx.push_str("\\end{bmatrix}");
+            return lx;
+        }
     }
 }
 
@@ -126,12 +147,7 @@ fn with_parens(latex: String) -> String {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        dedup::Deduplicater,
-        deftree,
-        mutate::{Mutations, TemplateCapture},
-        prune::Pruner,
-    };
+    use crate::deftree;
 
     #[test]
     fn t_negate() {
@@ -240,21 +256,44 @@ mod test {
     }
 
     #[test]
-    fn t_mutations_latex() {
-        let mut dedup = Deduplicater::new();
-        let mut pruner = Pruner::new();
-        let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y))
-            .deduplicate(&mut dedup)
-            .unwrap()
-            .prune(&mut pruner);
-        let mut capture = TemplateCapture::new();
-        for m in Mutations::of(&tree, &mut capture) {
-            match m {
-                Ok(mutated) => {
-                    assert_ne!(mutated, tree);
-                }
-                Err(_) => assert!(false),
-            }
-        }
+    fn t_mat2x2() {
+        assert_eq!(
+            "\\begin{bmatrix}{a} & {c} \\\\ {b} & {d}\\end{bmatrix}",
+            deftree!(concat a b c d).reshape(2, 2).unwrap().to_latex()
+        );
+        assert_eq!(
+            "\\begin{bmatrix}{{x} + {y}} & {{x} - {y}} \\\\ {{x}.{y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
+            deftree!(concat (+ x y) (* x y) (- x y) (/ x y))
+                .reshape(2, 2)
+                .unwrap()
+                .to_latex()
+        );
+    }
+
+    #[test]
+    fn t_column_vector() {
+        assert_eq!(
+            "\\begin{bmatrix}{a} \\\\ {b} \\\\ {c} \\\\ {d}\\end{bmatrix}",
+            deftree!(concat a b c d).to_latex()
+        );
+        assert_eq!(
+            "\\begin{bmatrix}{{x} + {y}} \\\\ {{x}.{y}} \\\\ {{x} - {y}} \\\\ {\\dfrac{x}{y}}\\end{bmatrix}",
+            deftree!(concat (+ x y) (* x y) (- x y) (/ x y)).to_latex()
+        );
+    }
+
+    #[test]
+    fn t_row_vector() {
+        assert_eq!(
+            "\\begin{bmatrix}{a} & {b} & {c} & {d}\\end{bmatrix}",
+            deftree!(concat a b c d).reshape(1, 4).unwrap().to_latex()
+        );
+        assert_eq!(
+            "\\begin{bmatrix}{{x} + {y}} & {{x}.{y}} & {{x} - {y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
+            deftree!(concat (+ x y) (* x y) (- x y) (/ x y))
+                .reshape(1, 4)
+                .unwrap()
+                .to_latex()
+        );
     }
 }

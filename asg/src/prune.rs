@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::{
     tree::{Node, Node::*, Tree},
     walk::{DepthWalker, NodeOrdering},
@@ -29,12 +31,12 @@ impl Pruner {
     /// and nodes that are not visited are filtered out. The filtered
     /// `nodes` are returned. You can minimize allocations by using
     /// the same pruner multiple times.
-    pub fn run(&mut self, nodes: &mut Vec<Node>, root_index: usize) {
+    pub fn run(&mut self, nodes: &mut Vec<Node>, root_indices: Range<usize>) {
         self.indices.clear();
         self.indices.resize(nodes.len(), 0);
         // Mark used nodes.
         self.walker
-            .walk_nodes(&nodes, root_index, true, NodeOrdering::Original)
+            .walk_many(&nodes, root_indices, true, NodeOrdering::Original)
             .for_each(|(index, _parent)| {
                 self.indices[index] = 1;
             });
@@ -70,8 +72,8 @@ impl Pruner {
 
 impl Tree {
     pub fn prune(mut self, pruner: &mut Pruner) -> Tree {
-        let root_index = self.root_index();
-        pruner.run(self.nodes_mut(), root_index);
+        let root_indices = self.root_indices();
+        pruner.run(self.nodes_mut(), root_indices);
         return self;
     }
 }
@@ -98,7 +100,7 @@ mod test {
         ];
         assert!({
             // Prune with #6 as the root.
-            pruner.run(&mut nodes, 6);
+            pruner.run(&mut nodes, 6..7);
             nodes.len() == 5
                 && nodes
                     == vec![
@@ -126,7 +128,7 @@ mod test {
         ];
         assert!({
             // Prune with #7 as the root.
-            pruner.run(&mut nodes, 7);
+            pruner.run(&mut nodes, 7..8);
             nodes.len() == 3 && nodes == vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]
         });
     }
