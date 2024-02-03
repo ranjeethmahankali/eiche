@@ -208,4 +208,40 @@ mod test {
             1e-14,
         );
     }
+
+    #[test]
+    fn t_evaluate_trees_concat_1() {
+        check_tree_eval(
+            deftree!(concat
+            (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
+            (+ x y)
+            ((max (min
+                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                   (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+              (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            )),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x, y, z] = vars[..] {
+                    output[0] = f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
+                        / (f64::cos(x) + 2.);
+                    output[1] = x + y;
+                    output[2] = {
+                        let s1 = f64::sqrt(
+                            f64::powf(x - 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
+                        ) - 2.75;
+                        let s2 = f64::sqrt(
+                            f64::powf(x + 2., 2.) + f64::powf(y - 3., 2.) + f64::powf(z - 4., 2.),
+                        ) - 4.;
+                        let s3 = f64::sqrt(
+                            f64::powf(x + 2., 2.) + f64::powf(y + 3., 2.) + f64::powf(z - 4., 2.),
+                        ) - 5.25;
+                        f64::max(f64::min(s1, s2), s3)
+                    };
+                }
+            },
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            1e-14,
+        );
+    }
 }
