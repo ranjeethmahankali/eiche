@@ -1,4 +1,4 @@
-use crate::tree::{BinaryOp::*, Node, Node::*, Tree, TreeError};
+use crate::tree::{BinaryOp::*, MaybeTree, Node, Node::*, Tree};
 
 /// Compute the results of operations on constants and fold those into
 /// constant nodes. The unused nodes after folding are not
@@ -46,7 +46,7 @@ impl Tree {
     /// folded. The resulting tree is pruned and checked for validity
     /// befoore it is returned. If the resulting tree is not valid,
     /// the appropriate `TreeError` is returned.
-    pub fn fold(mut self) -> Result<Tree, TreeError> {
+    pub fn fold(mut self) -> MaybeTree {
         fold_nodes(self.nodes_mut());
         return self.validated();
     }

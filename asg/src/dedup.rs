@@ -1,6 +1,6 @@
 use crate::{
     hash::hash_nodes,
-    tree::{Node, Node::*, Tree, TreeError},
+    tree::{MaybeTree, Node, Node::*, Tree},
     walk::{DepthWalker, NodeOrdering},
 };
 use std::{collections::HashMap, ops::Range};
@@ -157,7 +157,7 @@ pub fn equivalent(
 
 impl Tree {
     /// Deduplicate the common subtrees in this tree.
-    pub fn deduplicate(mut self, dedup: &mut Deduplicater) -> Result<Tree, TreeError> {
+    pub fn deduplicate(mut self, dedup: &mut Deduplicater) -> MaybeTree {
         dedup.run(self.nodes_mut());
         return self.validated();
     }
