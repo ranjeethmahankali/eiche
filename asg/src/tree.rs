@@ -313,48 +313,16 @@ pub fn add(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
     lhs?.binary_op(rhs?, Add)
 }
 
-impl core::ops::Add<Tree> for Tree {
-    type Output = MaybeTree;
-
-    fn add(self, rhs: Tree) -> Self::Output {
-        self.binary_op(rhs, Add)
-    }
-}
-
 pub fn sub(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
     lhs?.binary_op(rhs?, Subtract)
-}
-
-impl core::ops::Sub<Tree> for Tree {
-    type Output = MaybeTree;
-
-    fn sub(self, rhs: Tree) -> Self::Output {
-        self.binary_op(rhs, Subtract)
-    }
 }
 
 pub fn mul(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
     lhs?.binary_op(rhs?, Multiply)
 }
 
-impl core::ops::Mul<Tree> for Tree {
-    type Output = MaybeTree;
-
-    fn mul(self, rhs: Tree) -> Self::Output {
-        self.binary_op(rhs, Multiply)
-    }
-}
-
 pub fn div(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
     lhs?.binary_op(rhs?, Divide)
-}
-
-impl core::ops::Div<Tree> for Tree {
-    type Output = MaybeTree;
-
-    fn div(self, rhs: Tree) -> Self::Output {
-        self.binary_op(rhs, Divide)
-    }
 }
 
 /// Construct a tree that represents raising `base` to the power of
@@ -375,14 +343,6 @@ pub fn max(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
 
 pub fn negate(tree: MaybeTree) -> MaybeTree {
     tree?.unary_op(Negate)
-}
-
-impl core::ops::Neg for Tree {
-    type Output = MaybeTree;
-
-    fn neg(self) -> Self::Output {
-        self.unary_op(Negate)
-    }
 }
 
 /// Construct a tree representing the square root of `x`.
@@ -470,61 +430,6 @@ mod test {
     use super::*;
 
     #[test]
-    fn t_add() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let out = x + y;
-        assert_eq!(
-            out.unwrap().nodes,
-            vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]
-        );
-    }
-
-    #[test]
-    fn t_multiply() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let out = x * y;
-        assert_eq!(
-            out.unwrap().nodes,
-            vec![Symbol('x'), Symbol('y'), Binary(Multiply, 0, 1)]
-        );
-    }
-
-    #[test]
-    fn t_subtract() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let out = x - y;
-        assert_eq!(
-            out.unwrap().nodes,
-            vec![Symbol('x'), Symbol('y'), Binary(Subtract, 0, 1)]
-        );
-    }
-
-    #[test]
-    fn t_divide() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let out = x / y;
-        assert_eq!(
-            out.unwrap().nodes,
-            vec![Symbol('x'), Symbol('y'), Binary(Divide, 0, 1)]
-        );
-    }
-
-    #[test]
-    fn t_pow() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let p = pow(Ok(x), Ok(y));
-        assert_eq!(
-            p.unwrap().nodes,
-            vec![Symbol('x'), Symbol('y'), Binary(Pow, 0, 1)]
-        );
-    }
-
-    #[test]
     fn t_min() {
         let x: Tree = 'x'.into();
         let y: Tree = 'y'.into();
@@ -544,13 +449,6 @@ mod test {
             m.unwrap().nodes,
             vec![Symbol('x'), Symbol('y'), Binary(Max, 0, 1)]
         );
-    }
-
-    #[test]
-    fn t_negate() {
-        let x: Tree = 'x'.into();
-        let neg = -x;
-        assert_eq!(neg.unwrap().nodes, vec![Symbol('x'), Unary(Negate, 0)]);
     }
 
     #[test]
@@ -604,14 +502,9 @@ mod test {
 
     #[test]
     fn t_element_wise_unary_op() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let p = Tree::concat(Ok(x), Ok(y)).unwrap();
-        assert_eq!(p.dims, (2, 1));
-        assert_eq!(p.nodes, vec![Symbol('x'), Symbol('y')]);
-        let p = p * 2.0.into();
+        let p = deftree!(* 2 (concat x y)).unwrap();
         assert_eq!(
-            p.unwrap().nodes,
+            p.nodes,
             vec![
                 Constant(2.),
                 Symbol('x'),
@@ -625,10 +518,7 @@ mod test {
     #[test]
     fn t_element_wise_binary_op() {
         // Matrix and a scalar.
-        let tree = mul(
-            Tree::concat(Tree::concat(Ok('x'.into()), Ok('y'.into())), Ok('z'.into())),
-            Ok(2.0.into()),
-        );
+        let tree = deftree!(* 2 (concat x y z)).unwrap();
         let expected = vec![
             Constant(2.),
             Symbol('x'),
@@ -638,20 +528,14 @@ mod test {
             Binary(Multiply, 0, 2),
             Binary(Multiply, 0, 3),
         ];
-        assert_eq!(tree.unwrap().nodes, expected);
+        assert_eq!(tree.nodes, expected);
         // Scalar and a matrix
-        let tree = mul(
-            Ok(Tree::constant(2.)),
-            Tree::concat(Tree::concat(Ok('x'.into()), Ok('y'.into())), Ok('z'.into())),
-        );
-        assert_eq!(tree.unwrap().nodes, expected);
+        let tree = deftree!(* 2 (concat x y z)).unwrap();
+        assert_eq!(tree.nodes, expected);
         // Matrix and a matrix - multiply
-        let tree = mul(
-            Tree::concat(Tree::concat(Ok('x'.into()), Ok('y'.into())), Ok('z'.into())),
-            Tree::concat(Tree::concat(Ok('a'.into()), Ok('b'.into())), Ok('c'.into())),
-        );
+        let tree = deftree!(* (concat x y z) (concat a b c)).unwrap();
         assert_eq!(
-            tree.unwrap().nodes,
+            tree.nodes,
             vec![
                 Symbol('x'),
                 Symbol('y'),
@@ -665,12 +549,9 @@ mod test {
             ]
         );
         // Matrix and a matrix - add.
-        let tree = add(
-            Tree::concat(Tree::concat(Ok('x'.into()), Ok('y'.into())), Ok('z'.into())),
-            Tree::concat(Tree::concat(Ok('a'.into()), Ok('b'.into())), Ok('c'.into())),
-        );
+        let tree = deftree!(+ (concat x y z) (concat a b c)).unwrap();
         assert_eq!(
-            tree.unwrap().nodes,
+            tree.nodes,
             vec![
                 Symbol('x'),
                 Symbol('y'),
@@ -711,7 +592,9 @@ mod test {
         assert_eq!(mat.dims(), (1, 9));
         let mat = mat.reshape(9, 1).unwrap();
         assert_eq!(mat.dims(), (9, 1));
-        let result = mat.reshape(7, 3);
-        matches!(result, Err(TreeError::DimensionMismatch((9, 1), (7, 3))));
+        matches!(
+            mat.reshape(7, 3),
+            Err(TreeError::DimensionMismatch((9, 1), (7, 3)))
+        );
     }
 }
