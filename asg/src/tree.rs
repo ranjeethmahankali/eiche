@@ -1,3 +1,13 @@
+use crate::error::Error;
+use std::ops::Range;
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum Value {
+    Bool(bool),
+    Scalar(f64),
+}
+use Value::*;
+
 /// Represents an operation with one input.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum UnaryOp {
@@ -24,20 +34,6 @@ pub enum BinaryOp {
 }
 
 impl UnaryOp {
-    /// Compute the result of the operation on `value`.
-    pub fn apply(&self, value: f64) -> f64 {
-        match self {
-            Negate => -value,
-            Sqrt => f64::sqrt(value),
-            Abs => f64::abs(value),
-            Sin => f64::sin(value),
-            Cos => f64::cos(value),
-            Tan => f64::tan(value),
-            Log => f64::log(value, std::f64::consts::E),
-            Exp => f64::exp(value),
-        }
-    }
-
     /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use UnaryOp::*;
@@ -55,19 +51,6 @@ impl UnaryOp {
 }
 
 impl BinaryOp {
-    /// Compute the result of the operation on `lhs` and `rhs`.
-    pub fn apply(&self, lhs: f64, rhs: f64) -> f64 {
-        match self {
-            Add => lhs + rhs,
-            Subtract => lhs - rhs,
-            Multiply => lhs * rhs,
-            Divide => lhs / rhs,
-            Pow => f64::powf(lhs, rhs),
-            Min => f64::min(lhs, rhs),
-            Max => f64::max(lhs, rhs),
-        }
-    }
-
     /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use BinaryOp::*;
@@ -99,29 +82,14 @@ impl BinaryOp {
 
 use {BinaryOp::*, UnaryOp::*};
 
-/// Errors that can occur when constructing a tree.
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub enum TreeError {
-    /// Nodes are not in a valid topological order.
-    WrongNodeOrder,
-    /// A constant node contains NaN.
-    ContainsNaN,
-    /// Tree conains no nodes.
-    EmptyTree,
-    /// A mismatch between two dimensions, for example, during a reshape operation.
-    DimensionMismatch((usize, usize), (usize, usize)),
-}
-
 /// Represents a node in an abstract syntax `Tree`.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
-    Scalar(f64),
+    Constant(Value),
     Symbol(char),
     Unary(UnaryOp, usize),
     Binary(BinaryOp, usize, usize),
 }
-
-use std::ops::Range;
 
 use Node::*;
 
@@ -132,7 +100,7 @@ pub struct Tree {
     dims: (usize, usize),
 }
 
-pub type MaybeTree = Result<Tree, TreeError>;
+pub type MaybeTree = Result<Tree, Error>;
 
 const fn matsize(dims: (usize, usize)) -> usize {
     dims.0 * dims.1
@@ -142,7 +110,7 @@ impl Tree {
     /// Create a tree representing a constant value.
     pub fn constant(val: f64) -> Tree {
         Tree {
-            nodes: vec![Scalar(val)],
+            nodes: vec![Constant(Scalar(val))],
             dims: (1, 1),
         }
     }
@@ -166,7 +134,7 @@ impl Tree {
             // later be rotated to the end of the buffer.
             let offset = llen - lsize;
             lhs.nodes.extend(rhs.nodes.drain(..).map(|n| match n {
-                Scalar(_) => n,
+                Constant(_) => n,
                 Symbol(_) => n,
                 Unary(op, input) => Unary(op, input + offset),
                 Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
@@ -204,7 +172,7 @@ impl Tree {
                 dims: (rows, cols),
             })
         } else {
-            Err(TreeError::DimensionMismatch(self.dims, (rows, cols)))
+            Err(Error::DimensionMismatch(self.dims, (rows, cols)))
         }
     }
 
@@ -259,13 +227,16 @@ impl Tree {
     /// no errors were found, or the first error encountered with the tree.
     pub fn validated(self) -> MaybeTree {
         if self.nodes.is_empty() {
-            return Err(TreeError::EmptyTree);
+            return Err(Error::EmptyTree);
         }
         for i in 0..self.nodes.len() {
             match &self.nodes[i] {
-                Scalar(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
-                Unary(_, input) if *input >= i => return Err(TreeError::WrongNodeOrder),
-                Binary(_, l, r) if *l >= i || *r >= i => return Err(TreeError::WrongNodeOrder),
+                Constant(val) => match val {
+                    Scalar(val) if f64::is_nan(*val) => return Err(Error::ContainsNaN),
+                    _ => {} // Do nothing.
+                },
+                Unary(_, input) if *input >= i => return Err(Error::WrongNodeOrder),
+                Binary(_, l, r) if *l >= i || *r >= i => return Err(Error::WrongNodeOrder),
                 Symbol(_) | _ => {} // Do nothing.
             }
         }
@@ -279,12 +250,12 @@ impl Tree {
         if nroots > other_nroots {
             return other.binary_op(self, op);
         } else if nroots != 1 && nroots != other_nroots {
-            return Err(TreeError::DimensionMismatch(self.dims, other.dims));
+            return Err(Error::DimensionMismatch(self.dims, other.dims));
         }
         let offset: usize = self.nodes.len();
         self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
         self.nodes.extend(other.nodes.iter().map(|node| match node {
-            Scalar(value) => Scalar(*value),
+            Constant(value) => Constant(*value),
             Symbol(label) => Symbol(label.clone()),
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
@@ -392,6 +363,18 @@ impl From<char> for Tree {
     }
 }
 
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => l.partial_cmp(r),
+            (Bool(_), Scalar(_)) => Some(Less),
+            (Scalar(_), Bool(_)) => Some(Greater),
+            (Scalar(l), Scalar(r)) => l.partial_cmp(r),
+        }
+    }
+}
+
 impl PartialOrd for Node {
     /// This implementation only accounts for the node, its type and
     /// the data held inside the node. It DOES NOT take into account
@@ -400,22 +383,22 @@ impl PartialOrd for Node {
         use std::cmp::Ordering::*;
         match (self, other) {
             // Scalar
-            (Scalar(a), Scalar(b)) => a.partial_cmp(b),
-            (Scalar(_), Symbol(_)) => Some(Less),
-            (Scalar(_), Unary(..)) => Some(Less),
-            (Scalar(_), Binary(..)) => Some(Less),
+            (Constant(a), Constant(b)) => a.partial_cmp(b),
+            (Constant(_), Symbol(_)) => Some(Less),
+            (Constant(_), Unary(..)) => Some(Less),
+            (Constant(_), Binary(..)) => Some(Less),
             // Symbol
-            (Symbol(_), Scalar(_)) => Some(Greater),
+            (Symbol(_), Constant(_)) => Some(Greater),
             (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
             (Symbol(_), Unary(..)) => Some(Less),
             (Symbol(_), Binary(..)) => Some(Less),
             // Unary
-            (Unary(..), Scalar(_)) => Some(Greater),
+            (Unary(..), Constant(_)) => Some(Greater),
             (Unary(..), Symbol(_)) => Some(Greater),
             (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
             (Unary(..), Binary(..)) => Some(Less),
             // Binary
-            (Binary(..), Scalar(_)) => Some(Greater),
+            (Binary(..), Constant(_)) => Some(Greater),
             (Binary(..), Symbol(_)) => Some(Greater),
             (Binary(..), Unary(..)) => Some(Greater),
             (Binary(op1, ..), Binary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
@@ -434,7 +417,7 @@ mod test {
         assert_eq!(
             p.nodes,
             vec![
-                Scalar(2.),
+                Constant(Scalar(2.)),
                 Symbol('x'),
                 Symbol('y'),
                 Binary(Multiply, 0, 1),
@@ -448,7 +431,7 @@ mod test {
         // Matrix and a scalar.
         let tree = deftree!(* 2 (concat x y z)).unwrap();
         let expected = vec![
-            Scalar(2.),
+            Constant(Scalar(2.)),
             Symbol('x'),
             Symbol('y'),
             Symbol('z'),
@@ -498,14 +481,14 @@ mod test {
                 Tree::concat(Tree::concat(Ok('x'.into()), Ok('y'.into())), Ok('z'.into())),
                 Tree::concat(Ok('a'.into()), Ok('b'.into())),
             ),
-            Err(TreeError::DimensionMismatch((2, 1), (3, 1)))
+            Err(Error::DimensionMismatch((2, 1), (3, 1)))
         );
         matches!(
             mul(
                 Tree::concat(Ok('a'.into()), Ok('b'.into())),
                 Tree::concat(Ok('x'.into()), Tree::concat(Ok('y'.into()), Ok('z'.into()))),
             ),
-            Err(TreeError::DimensionMismatch((2, 1), (3, 1)))
+            Err(Error::DimensionMismatch((2, 1), (3, 1)))
         );
     }
 
@@ -522,7 +505,7 @@ mod test {
         assert_eq!(mat.dims(), (9, 1));
         matches!(
             mat.reshape(7, 3),
-            Err(TreeError::DimensionMismatch((9, 1), (7, 3)))
+            Err(Error::DimensionMismatch((9, 1), (7, 3)))
         );
     }
 }

@@ -2,20 +2,13 @@ use std::ops::Range;
 
 use crate::{
     dedup::Deduplicater,
+    error::Error,
     fold::fold_nodes,
     prune::Pruner,
-    sort::{TopoSorter, TopologicalError},
+    sort::TopoSorter,
     template::{get_templates, Template},
-    tree::{Node, Tree, TreeError},
+    tree::{MaybeTree, Node, Tree},
 };
-
-#[derive(Debug)]
-pub enum MutationError {
-    InvalidCapture,
-    UnboundSymbol,
-    InvalidTopology(TopologicalError),
-    TreeCreationError(TreeError),
-}
 
 pub struct Mutations<'a> {
     tree: &'a Tree,
@@ -34,7 +27,7 @@ impl<'a> Mutations<'a> {
 }
 
 impl<'a> Iterator for Mutations<'a> {
-    type Item = Result<Tree, MutationError>;
+    type Item = Result<Tree, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let templates = get_templates();
@@ -99,21 +92,16 @@ impl TemplateCapture {
         &mut self,
         mut tree: Tree,
         newroots: Option<Range<usize>>,
-    ) -> Result<Tree, MutationError> {
+    ) -> MaybeTree {
         let root_indices = match newroots {
             Some(roots) => roots,
             None => tree.root_indices(),
         };
-        let root_indices = self
-            .topo_sorter
-            .run(tree.nodes_mut(), root_indices)
-            .map_err(|e| MutationError::InvalidTopology(e))?;
-        fold_nodes(tree.nodes_mut());
+        let root_indices = self.topo_sorter.run(tree.nodes_mut(), root_indices)?;
+        fold_nodes(tree.nodes_mut())?;
         self.deduper.run(tree.nodes_mut());
         self.pruner.run(tree.nodes_mut(), root_indices);
-        return tree
-            .validated()
-            .map_err(|e| MutationError::TreeCreationError(e));
+        return tree.validated();
     }
 
     fn bind(&mut self, label: char, index: usize) -> bool {
@@ -139,7 +127,7 @@ impl TemplateCapture {
         self.bindings.truncate(state);
     }
 
-    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
+    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, Error> {
         use crate::tree::Node::*;
         let mut tree = tree.clone();
         let root_indices = tree.root_indices();
@@ -149,14 +137,14 @@ impl TemplateCapture {
         self.node_map.resize(pong.len(), 0);
         let oldroot = match self.node_index {
             Some(i) => i,
-            None => return Err(MutationError::InvalidCapture),
+            None => return Err(Error::InvalidTemplateCapture),
         };
         for ni in 0..pong.len() {
             match pong.node(ni) {
-                Scalar(val) => self.add_node(tree.nodes_mut(), ni, Scalar(*val)),
+                Constant(val) => self.add_node(tree.nodes_mut(), ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
-                    None => return Err(MutationError::UnboundSymbol),
+                    None => return Err(Error::UnboundTemplateSymbol),
                 },
                 Unary(op, input) => {
                     self.add_node(tree.nodes_mut(), ni, Unary(*op, self.node_map[*input]))
@@ -180,7 +168,7 @@ impl TemplateCapture {
                     match tree.nodes_mut().get_mut(i) {
                         Some(node) => {
                             match node {
-                                Scalar(_) | Symbol(_) => {} // Do nothing.
+                                Constant(_) | Symbol(_) => {} // Do nothing.
                                 Unary(_, input) => {
                                     if *input == newroot {
                                         *input = oldroot;
@@ -228,8 +216,8 @@ impl TemplateCapture {
         commute: bool,
     ) -> (bool, bool) {
         match (ltree.node(li), rtree.node(ri)) {
-            (Node::Scalar(v1), Node::Scalar(v2)) => (v1 == v2, false),
-            (Node::Scalar(_), _) => return (false, false),
+            (Node::Constant(v1), Node::Constant(v2)) => (v1 == v2, false),
+            (Node::Constant(_), _) => return (false, false),
             (Node::Symbol(label), _) => return (self.bind(*label, ri), false),
             (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
                 if lop != rop {

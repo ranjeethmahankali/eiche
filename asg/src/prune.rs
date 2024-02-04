@@ -57,7 +57,7 @@ impl Pruner {
             if index > 0 && (i == 0 || self.indices[i - 1] < index) {
                 // We subtract 1 from all indices because we did an inclusive sum.
                 self.pruned.push(match nodes[i] {
-                    Scalar(val) => Scalar(val),
+                    Constant(val) => Constant(val),
                     Symbol(label) => Symbol(label),
                     Unary(op, input) => Unary(op, self.indices[input] - 1),
                     Binary(op, lhs, rhs) => {
@@ -82,21 +82,21 @@ impl Tree {
 mod test {
     use crate::{
         prune::Pruner,
-        tree::{BinaryOp::*, Node::*, UnaryOp::*},
+        tree::{BinaryOp::*, Node::*, UnaryOp::*, Value::*},
     };
 
     #[test]
     fn t_prune_0() {
         let mut pruner = Pruner::new();
         let mut nodes = vec![
-            Symbol('x'),       // 0
-            Symbol('y'),       // 1
-            Scalar(2.),        // 2
-            Scalar(3.),        // 3
-            Unary(Sqrt, 0),    // 4
-            Unary(Sqrt, 3),    // 5
-            Binary(Pow, 4, 5), // 6
-            Binary(Add, 0, 1), // 7
+            Symbol('x'),          // 0
+            Symbol('y'),          // 1
+            Constant(Scalar(2.)), // 2
+            Constant(Scalar(3.)), // 3
+            Unary(Sqrt, 0),       // 4
+            Unary(Sqrt, 3),       // 5
+            Binary(Pow, 4, 5),    // 6
+            Binary(Add, 0, 1),    // 7
         ];
         assert!({
             // Prune with #6 as the root.
@@ -105,7 +105,7 @@ mod test {
                 && nodes
                     == vec![
                         Symbol('x'),
-                        Scalar(3.),
+                        Constant(Scalar(3.)),
                         Unary(Sqrt, 0),
                         Unary(Sqrt, 1),
                         Binary(Pow, 2, 3),
@@ -117,14 +117,14 @@ mod test {
     fn t_prune_1() {
         let mut pruner = Pruner::new();
         let mut nodes = vec![
-            Symbol('x'),       // 0
-            Symbol('y'),       // 1
-            Scalar(2.),        // 2
-            Scalar(3.),        // 3
-            Unary(Sqrt, 0),    // 4
-            Unary(Sqrt, 3),    // 5
-            Binary(Pow, 4, 5), // 6
-            Binary(Add, 0, 1), // 7
+            Symbol('x'),          // 0
+            Symbol('y'),          // 1
+            Constant(Scalar(2.)), // 2
+            Constant(Scalar(3.)), // 3
+            Unary(Sqrt, 0),       // 4
+            Unary(Sqrt, 3),       // 5
+            Binary(Pow, 4, 5),    // 6
+            Binary(Add, 0, 1),    // 7
         ];
         assert!({
             // Prune with #7 as the root.

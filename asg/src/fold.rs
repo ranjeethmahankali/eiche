@@ -1,35 +1,38 @@
-use crate::tree::{BinaryOp::*, MaybeTree, Node, Node::*, Tree};
+use crate::{
+    error::Error,
+    tree::{BinaryOp::*, MaybeTree, Node, Node::*, Tree, Value},
+};
 
 /// Compute the results of operations on constants and fold those into
 /// constant nodes. The unused nodes after folding are not
 /// pruned. Use a pruner for that.
-pub fn fold_nodes(nodes: &mut Vec<Node>) {
+pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
     for index in 0..nodes.len() {
         let folded = match nodes[index] {
-            Scalar(_) => None,
+            Constant(_) => None,
             Symbol(_) => None,
             Unary(op, input) => {
-                if let Scalar(value) = nodes[input] {
-                    Some(Scalar(op.apply(value)))
+                if let Constant(value) = nodes[input] {
+                    Some(Constant(op.apply(value)?))
                 } else {
                     None
                 }
             }
             Binary(op, lhs, rhs) => match (op, &nodes[lhs], &nodes[rhs]) {
                 // Constant folding.
-                (op, Scalar(a), Scalar(b)) => Some(Scalar(op.apply(*a, *b))),
+                (op, Constant(a), Constant(b)) => Some(Constant(op.apply(*a, *b)?)),
                 // Identity ops.
-                (Add, lhs, Scalar(val)) if *val == 0. => Some(*lhs),
-                (Add, Scalar(val), rhs) if *val == 0. => Some(*rhs),
-                (Subtract, lhs, Scalar(val)) if *val == 0. => Some(*lhs),
-                (Multiply, lhs, Scalar(val)) if *val == 1. => Some(*lhs),
-                (Multiply, Scalar(val), rhs) if *val == 1. => Some(*rhs),
-                (Pow, base, Scalar(val)) if *val == 1. => Some(*base),
-                (Divide, numerator, Scalar(val)) if *val == 1. => Some(*numerator),
+                (Add, lhs, Constant(val)) if *val == 0. => Some(*lhs),
+                (Add, Constant(val), rhs) if *val == 0. => Some(*rhs),
+                (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
+                (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
+                (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
+                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
+                (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
                 // Other ops.
-                (Pow, _base, Scalar(val)) if *val == 0. => Some(Scalar(1.)),
-                (Multiply, _lhs, Scalar(val)) if *val == 0. => Some(Scalar(0.)),
-                (Multiply, Scalar(val), _rhs) if *val == 0. => Some(Scalar(0.)),
+                (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(Value::Scalar(1.))),
+                (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(Value::Scalar(0.))),
+                (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(Value::Scalar(0.))),
                 _ => None,
             },
         };
@@ -37,6 +40,7 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) {
             nodes[index] = node;
         }
     }
+    return Ok(());
 }
 
 impl Tree {
@@ -45,9 +49,9 @@ impl Tree {
     /// values can be inferred without evaluating the tree are also
     /// folded. The resulting tree is pruned and checked for validity
     /// befoore it is returned. If the resulting tree is not valid,
-    /// the appropriate `TreeError` is returned.
+    /// the appropriate `Error` is returned.
     pub fn fold(mut self) -> MaybeTree {
-        fold_nodes(self.nodes_mut());
+        fold_nodes(self.nodes_mut())?;
         return self.validated();
     }
 }
@@ -66,7 +70,7 @@ mod test {
             .unwrap()
             .prune(&mut pruner);
         assert_eq!(tree.len(), 1usize);
-        assert_eq!(tree.roots(), &[Scalar(2. * 3.)]);
+        assert_eq!(tree.roots(), &[Constant(Value::Scalar(2. * 3.))]);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::tree::{Node, Node::*, Tree};
+use crate::tree::{Node, Node::*, Tree, Value::*};
 
 pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     use std::collections::hash_map::DefaultHasher;
@@ -8,7 +8,10 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     hashbuf.resize(nodes.len(), 0);
     for index in 0..nodes.len() {
         let hash: u64 = match nodes[index] {
-            Scalar(value) => value.to_bits().into(),
+            Constant(value) => match value {
+                Scalar(value) => value.to_bits().into(),
+                Bool(value) => value as u64,
+            },
             Symbol(label) => {
                 let mut s: DefaultHasher = Default::default();
                 label.hash(&mut s);
