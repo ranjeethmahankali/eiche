@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug)]
 pub enum Error {
     /// Nodes are not in a valid topological order.
     WrongNodeOrder,
