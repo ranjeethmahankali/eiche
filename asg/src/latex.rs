@@ -92,6 +92,8 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 NotEqual => format!("{{{}}} \\neq {{{}}}", lx, rx),
                 Greater => format!("{{{}}} > {{{}}}", lx, rx),
                 GreaterOrEqual => format!("{{{}}} \\geq {{{}}}", lx, rx),
+                And => format!("{{{}}} and {{{}}}", lx, rx),
+                Or => format!("{{{}}} or {{{}}}", lx, rx),
             }
         }
         Ternary(op, _a, _b, _c) => match op {
@@ -143,6 +145,7 @@ fn parens_binary(
         ),
         Min | Max => (lx, rx),
         Less | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => (lx, rx),
+        And | Or => (with_parens(lx), with_parens(rx)),
     }
 }
 

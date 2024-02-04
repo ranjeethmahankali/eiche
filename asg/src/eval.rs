@@ -57,6 +57,8 @@ impl BinaryOp {
             NotEqual => Bool(lhs.scalar()? != rhs.scalar()?),
             Greater => Bool(lhs.scalar()? > rhs.scalar()?),
             GreaterOrEqual => Bool(lhs.scalar()? >= rhs.scalar()?),
+            And => Bool(lhs.boolean()? && rhs.boolean()?),
+            Or => Bool(lhs.boolean()? || rhs.boolean()?),
         })
     }
 }

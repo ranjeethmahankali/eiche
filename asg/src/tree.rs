@@ -42,6 +42,8 @@ pub enum BinaryOp {
     NotEqual,
     Greater,
     GreaterOrEqual,
+    And,
+    Or,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
@@ -89,6 +91,8 @@ impl BinaryOp {
             NotEqual => 10,
             Greater => 11,
             GreaterOrEqual => 12,
+            And => 13,
+            Or => 14,
         }
     }
 
@@ -111,6 +115,8 @@ impl BinaryOp {
             NotEqual => true,
             Greater => false,
             GreaterOrEqual => false,
+            And => true,
+            Or => true,
         }
     }
 }
