@@ -56,6 +56,15 @@ macro_rules! deftree {
     ($op:tt $lhs:tt $rhs:tt) => {
         $crate::deftree!($lhs) $op $crate::deftree!($rhs)
     };
+    // Constants.
+    (const $tt:expr) => {{
+        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant({$tt}.into()));
+        out
+    }};
+    ($a:literal) => {{
+        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant(($a).into()));
+        out
+    }};
     // Symbols.
     ($a:ident) => {{
         const LABEL: &str = stringify!($a);
@@ -64,15 +73,6 @@ macro_rules! deftree {
             LABEL.len() == 1
         );
         let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::symbol(LABEL.chars().next().unwrap()));
-        out
-    }};
-    // Float constants.
-    (const $tt:expr) => {{
-        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant({$tt}.into()));
-        out
-    }};
-    ($a:literal) => {{
-        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant(($a).into()));
         out
     }};
 }
@@ -294,5 +294,11 @@ mod test {
             &[Symbol('a'), Symbol('b'), Symbol('c'), Symbol('d')]
         );
         assert_eq!(tree.dims(), (4, 1));
+    }
+
+    #[test]
+    fn t_deftree_bool() {
+        let tree = deftree!(concat true false).unwrap();
+        assert_eq!(tree.nodes(), &[Constant(Bool(true)), Constant(Bool(false))]);
     }
 }
