@@ -35,6 +35,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
             let inode = &nodes[*i];
             let ix = to_latex(inode, nodes);
             match op {
+                // Scalar
                 Negate => format!("-{{{}}}", {
                     match inode {
                         // Special cases that require braces.
@@ -61,6 +62,8 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                         Binary(..) => with_parens(ix),
                     }
                 }),
+                // Boolean
+                Not => format!("not {{{}}}", ix),
             }
         }
         Binary(op, lhs, rhs) => {
@@ -74,6 +77,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 to_latex(rnode, nodes),
             );
             match op {
+                // Scalar.
                 Add => format!("{{{}}} + {{{}}}", lx, rx),
                 Subtract => format!("{{{}}} - {{{}}}", lx, rx),
                 Multiply => format!("{{{}}}.{{{}}}", lx, rx),
@@ -81,6 +85,13 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 Pow => format!("{{{}}}^{{{}}}", lx, rx),
                 Min => format!("\\min\\left({{{}}}, {{{}}}\\right)", lx, rx),
                 Max => format!("\\max\\left({{{}}}, {{{}}}\\right)", lx, rx),
+                // Boolean.
+                Less => format!("{{{}}} < {{{}}}", lx, rx),
+                LessOrEqual => format!("{{{}}} \\leq {{{}}}", lx, rx),
+                Equal => format!("{{{}}} = {{{}}}", lx, rx),
+                NotEqual => format!("{{{}}} \\neq {{{}}}", lx, rx),
+                Greater => format!("{{{}}} > {{{}}}", lx, rx),
+                GreaterOrEqual => format!("{{{}}} \\geq {{{}}}", lx, rx),
             }
         }
         Ternary(op, _a, _b, _c) => match op {
@@ -131,6 +142,7 @@ fn parens_binary(
             },
         ),
         Min | Max => (lx, rx),
+        Less | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => (lx, rx),
     }
 }
 
@@ -341,5 +353,15 @@ mod test {
                 .unwrap()
                 .to_latex()
         );
+    }
+
+    #[test]
+    fn t_boolean() {
+        todo!("Test the latex generation for boolean expressions.");
+    }
+
+    #[test]
+    fn t_piecewise() {
+        todo!("Test the latex generation for piecewise function.");
     }
 }

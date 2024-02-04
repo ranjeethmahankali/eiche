@@ -11,6 +11,7 @@ use Value::*;
 /// Represents an operation with one input.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum UnaryOp {
+    // Scalar
     Negate,
     Sqrt,
     Abs,
@@ -19,11 +20,14 @@ pub enum UnaryOp {
     Tan,
     Log,
     Exp,
+    // Boolean
+    Not,
 }
 
 /// Represents an operation with two inputs.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum BinaryOp {
+    // Scalar
     Add,
     Subtract,
     Multiply,
@@ -31,6 +35,13 @@ pub enum BinaryOp {
     Pow,
     Min,
     Max,
+    // Boolean
+    Less,
+    LessOrEqual,
+    Equal,
+    NotEqual,
+    Greater,
+    GreaterOrEqual,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
@@ -43,6 +54,7 @@ impl UnaryOp {
     pub fn index(&self) -> u8 {
         use UnaryOp::*;
         match self {
+            // Scalar
             Negate => 0,
             Sqrt => 1,
             Abs => 2,
@@ -51,6 +63,8 @@ impl UnaryOp {
             Tan => 5,
             Log => 6,
             Exp => 7,
+            // Boolean
+            Not => 8,
         }
     }
 }
@@ -60,6 +74,7 @@ impl BinaryOp {
     pub fn index(&self) -> u8 {
         use BinaryOp::*;
         match self {
+            // Scalar
             Add => 0,
             Subtract => 1,
             Multiply => 2,
@@ -67,6 +82,13 @@ impl BinaryOp {
             Pow => 4,
             Min => 5,
             Max => 6,
+            // Boolean
+            Less => 7,
+            LessOrEqual => 8,
+            Equal => 9,
+            NotEqual => 10,
+            Greater => 11,
+            GreaterOrEqual => 12,
         }
     }
 
@@ -74,6 +96,7 @@ impl BinaryOp {
     pub fn is_commutative(&self) -> bool {
         use BinaryOp::*;
         match self {
+            // Scalar
             Add => true,
             Subtract => false,
             Multiply => true,
@@ -81,6 +104,13 @@ impl BinaryOp {
             Pow => false,
             Min => true,
             Max => true,
+            // Boolean
+            Less => false,
+            LessOrEqual => false,
+            Equal => true,
+            NotEqual => true,
+            Greater => false,
+            GreaterOrEqual => false,
         }
     }
 }

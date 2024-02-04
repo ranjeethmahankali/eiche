@@ -23,6 +23,7 @@ impl UnaryOp {
     /// Compute the result of the operation on `value`.
     pub fn apply(&self, value: Value) -> Result<Value, Error> {
         Ok(match self {
+            // Scalar
             Negate => Scalar(-value.scalar()?),
             Sqrt => Scalar(f64::sqrt(value.scalar()?)),
             Abs => Scalar(f64::abs(value.scalar()?)),
@@ -31,6 +32,8 @@ impl UnaryOp {
             Tan => Scalar(f64::tan(value.scalar()?)),
             Log => Scalar(f64::log(value.scalar()?, std::f64::consts::E)),
             Exp => Scalar(f64::exp(value.scalar()?)),
+            // Boolean
+            Not => Bool(!value.boolean()?),
         })
     }
 }
@@ -39,6 +42,7 @@ impl BinaryOp {
     /// Compute the result of the operation on `lhs` and `rhs`.
     pub fn apply(&self, lhs: Value, rhs: Value) -> Result<Value, Error> {
         Ok(match self {
+            // Scalar.
             Add => Scalar(lhs.scalar()? + rhs.scalar()?),
             Subtract => Scalar(lhs.scalar()? - rhs.scalar()?),
             Multiply => Scalar(lhs.scalar()? * rhs.scalar()?),
@@ -46,6 +50,13 @@ impl BinaryOp {
             Pow => Scalar(f64::powf(lhs.scalar()?, rhs.scalar()?)),
             Min => Scalar(f64::min(lhs.scalar()?, rhs.scalar()?)),
             Max => Scalar(f64::max(lhs.scalar()?, rhs.scalar()?)),
+            // Boolean.
+            Less => Bool(lhs.scalar()? < rhs.scalar()?),
+            LessOrEqual => Bool(lhs.scalar()? <= rhs.scalar()?),
+            Equal => Bool(lhs.scalar()? == rhs.scalar()?),
+            NotEqual => Bool(lhs.scalar()? != rhs.scalar()?),
+            Greater => Bool(lhs.scalar()? > rhs.scalar()?),
+            GreaterOrEqual => Bool(lhs.scalar()? >= rhs.scalar()?),
         })
     }
 }
