@@ -108,9 +108,9 @@ const fn matsize(dims: (usize, usize)) -> usize {
 
 impl Tree {
     /// Create a tree representing a constant value.
-    pub fn constant(val: f64) -> Tree {
+    pub fn constant(val: Value) -> Tree {
         Tree {
-            nodes: vec![Constant(Scalar(val))],
+            nodes: vec![Constant(val)],
             dims: (1, 1),
         }
     }
@@ -351,9 +351,33 @@ pub fn exp(x: MaybeTree) -> MaybeTree {
     x?.unary_op(Exp)
 }
 
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Scalar(value)
+    }
+}
+
+impl From<i32> for Value {
+    fn from(value: i32) -> Self {
+        Scalar(value as f64)
+    }
+}
+
+impl From<bool> for Value {
+    fn from(value: bool) -> Self {
+        Bool(value)
+    }
+}
+
 impl From<f64> for Tree {
     fn from(value: f64) -> Self {
-        return Self::constant(value);
+        Self::constant(Scalar(value))
+    }
+}
+
+impl From<bool> for Tree {
+    fn from(value: bool) -> Self {
+        Self::constant(Bool(value))
     }
 }
 

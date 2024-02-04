@@ -68,11 +68,11 @@ macro_rules! deftree {
     }};
     // Float constants.
     (const $tt:expr) => {{
-        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant($tt));
+        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant({$tt}.into()));
         out
     }};
     ($a:literal) => {{
-        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant($a as f64));
+        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant(($a).into()));
         out
     }};
 }
