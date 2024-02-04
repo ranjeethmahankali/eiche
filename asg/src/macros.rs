@@ -160,12 +160,7 @@ mod test {
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &[
-                Scalar(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Add, 0, 2)
-            ]
+            &[Scalar(2.), Symbol('x'), Unary(Negate, 1), Binary(Add, 0, 2)]
         );
     }
 
@@ -241,12 +236,7 @@ mod test {
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &[
-                Scalar(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Pow, 0, 2)
-            ]
+            &[Scalar(2.), Symbol('x'), Unary(Negate, 1), Binary(Pow, 0, 2)]
         );
     }
 
@@ -259,12 +249,7 @@ mod test {
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &[
-                Scalar(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Min, 0, 2)
-            ]
+            &[Scalar(2.), Symbol('x'), Unary(Negate, 1), Binary(Min, 0, 2)]
         );
     }
 
@@ -277,12 +262,7 @@ mod test {
         assert_eq!(tree.len(), 4);
         assert_eq!(
             tree.nodes(),
-            &[
-                Scalar(2.),
-                Symbol('x'),
-                Unary(Negate, 1),
-                Binary(Max, 0, 2)
-            ]
+            &[Scalar(2.), Symbol('x'), Unary(Negate, 1), Binary(Max, 0, 2)]
         );
     }
 

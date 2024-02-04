@@ -91,8 +91,8 @@ mod test {
         let mut nodes = vec![
             Symbol('x'),       // 0
             Symbol('y'),       // 1
-            Scalar(2.),      // 2
-            Scalar(3.),      // 3
+            Scalar(2.),        // 2
+            Scalar(3.),        // 3
             Unary(Sqrt, 0),    // 4
             Unary(Sqrt, 3),    // 5
             Binary(Pow, 4, 5), // 6
@@ -119,8 +119,8 @@ mod test {
         let mut nodes = vec![
             Symbol('x'),       // 0
             Symbol('y'),       // 1
-            Scalar(2.),      // 2
-            Scalar(3.),      // 3
+            Scalar(2.),        // 2
+            Scalar(3.),        // 3
             Unary(Sqrt, 0),    // 4
             Unary(Sqrt, 3),    // 5
             Binary(Pow, 4, 5), // 6

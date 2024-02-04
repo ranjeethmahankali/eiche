@@ -127,7 +127,7 @@ mod test {
         let mut nodes = vec![
             Symbol('x'),            // 0
             Binary(Add, 0, 2),      // 1
-            Scalar(2.245),        // 2
+            Scalar(2.245),          // 2
             Binary(Multiply, 1, 5), // 3
             Unary(Sqrt, 3),         // 4 - root
             Symbol('y'),            // 5
@@ -199,7 +199,7 @@ mod test {
             Binary(Add, 1, 3),      // 6
             Binary(Divide, 5, 6),   // 7
             Unary(Sqrt, 0),         // 8
-            Scalar(2.0),          // 9
+            Scalar(2.0),            // 9
         ];
         assert!(matches!(
             sorter.run(&mut nodes, 0..1),

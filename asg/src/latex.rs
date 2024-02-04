@@ -50,9 +50,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 Log => format!("\\ln\\left({{{}}}\\right)", ix),
                 Exp => format!("e^{{{}}}", {
                     match inode {
-                        Scalar(_) | Symbol(_) | Unary(..) | Binary(Min, ..) | Binary(Max, ..) => {
-                            ix
-                        }
+                        Scalar(_) | Symbol(_) | Unary(..) | Binary(Min, ..) | Binary(Max, ..) => ix,
                         Binary(..) => with_parens(ix),
                     }
                 }),
