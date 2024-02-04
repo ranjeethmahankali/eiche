@@ -425,9 +425,8 @@ impl PartialOrd for Node {
 
 #[cfg(test)]
 mod test {
-    use crate::deftree;
-
     use super::*;
+    use crate::deftree;
 
     #[test]
     fn t_element_wise_unary_op() {
