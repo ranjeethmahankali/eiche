@@ -66,7 +66,7 @@ impl Deduplicater {
         // Update nodes.
         for node in nodes.iter_mut() {
             match node {
-                Constant(_) => {}
+                Scalar(_) => {}
                 Symbol(_) => {}
                 Unary(_, input) => {
                     *input = self.indices[*input];
@@ -123,7 +123,7 @@ pub fn equivalent_many(
                         continue;
                     }
                     if !match (lnodes[li], rnodes[ri]) {
-                        (Constant(v1), Constant(v2)) => v1 == v2,
+                        (Scalar(v1), Scalar(v2)) => v1 == v2,
                         (Symbol(c1), Symbol(c2)) => c1 == c2,
                         (Unary(op1, _input1), Unary(op2, _input2)) => op1 == op2,
                         (Binary(op1, _lhs1, _rhs1), Binary(op2, _lhs2, _rhs2)) => op1 == op2,

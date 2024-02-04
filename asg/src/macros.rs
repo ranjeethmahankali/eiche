@@ -92,7 +92,7 @@ mod test {
     fn t_constant_deftree() {
         let tree = deftree!(2.).unwrap();
         assert_eq!(tree.len(), 1);
-        assert_eq!(tree.roots(), &[Constant(2.)]);
+        assert_eq!(tree.roots(), &[Scalar(2.)]);
     }
 
     #[test]
@@ -161,7 +161,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &[
-                Constant(2.),
+                Scalar(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Add, 0, 2)
@@ -182,7 +182,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &[
-                Constant(2.),
+                Scalar(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Subtract, 0, 2)
@@ -203,7 +203,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &[
-                Constant(2.),
+                Scalar(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Multiply, 0, 2)
@@ -224,7 +224,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &[
-                Constant(2.),
+                Scalar(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Divide, 0, 2)
@@ -242,7 +242,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &[
-                Constant(2.),
+                Scalar(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Pow, 0, 2)
@@ -260,7 +260,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &[
-                Constant(2.),
+                Scalar(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Min, 0, 2)
@@ -278,7 +278,7 @@ mod test {
         assert_eq!(
             tree.nodes(),
             &[
-                Constant(2.),
+                Scalar(2.),
                 Symbol('x'),
                 Unary(Negate, 1),
                 Binary(Max, 0, 2)

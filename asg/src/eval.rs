@@ -55,7 +55,7 @@ impl<'a> Evaluator<'a> {
             self.write(
                 idx,
                 match &self.tree.node(idx) {
-                    Constant(val) => *val,
+                    Scalar(val) => *val,
                     Symbol(_) => self.regs[idx],
                     Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs]),
                     Unary(op, input) => op.apply(self.regs[*input]),
@@ -77,7 +77,7 @@ mod test {
     #[test]
     fn t_constant() {
         let x = deftree!(const std::f64::consts::PI).unwrap();
-        assert_eq!(x.roots(), &[Constant(std::f64::consts::PI)]);
+        assert_eq!(x.roots(), &[Scalar(std::f64::consts::PI)]);
         let mut eval = Evaluator::new(&x);
         match eval.run() {
             Ok(val) => assert_eq!(val, &[std::f64::consts::PI]),

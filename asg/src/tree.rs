@@ -115,7 +115,7 @@ pub enum TreeError {
 /// Represents a node in an abstract syntax `Tree`.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
-    Constant(f64),
+    Scalar(f64),
     Symbol(char),
     Unary(UnaryOp, usize),
     Binary(BinaryOp, usize, usize),
@@ -142,7 +142,7 @@ impl Tree {
     /// Create a tree representing a constant value.
     pub fn constant(val: f64) -> Tree {
         Tree {
-            nodes: vec![Constant(val)],
+            nodes: vec![Scalar(val)],
             dims: (1, 1),
         }
     }
@@ -166,7 +166,7 @@ impl Tree {
             // later be rotated to the end of the buffer.
             let offset = llen - lsize;
             lhs.nodes.extend(rhs.nodes.drain(..).map(|n| match n {
-                Constant(_) => n,
+                Scalar(_) => n,
                 Symbol(_) => n,
                 Unary(op, input) => Unary(op, input + offset),
                 Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
@@ -263,7 +263,7 @@ impl Tree {
         }
         for i in 0..self.nodes.len() {
             match &self.nodes[i] {
-                Constant(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
+                Scalar(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
                 Unary(_, input) if *input >= i => return Err(TreeError::WrongNodeOrder),
                 Binary(_, l, r) if *l >= i || *r >= i => return Err(TreeError::WrongNodeOrder),
                 Symbol(_) | _ => {} // Do nothing.
@@ -284,7 +284,7 @@ impl Tree {
         let offset: usize = self.nodes.len();
         self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
         self.nodes.extend(other.nodes.iter().map(|node| match node {
-            Constant(value) => Constant(*value),
+            Scalar(value) => Scalar(*value),
             Symbol(label) => Symbol(label.clone()),
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
@@ -399,23 +399,23 @@ impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering::*;
         match (self, other) {
-            // Constant
-            (Constant(a), Constant(b)) => a.partial_cmp(b),
-            (Constant(_), Symbol(_)) => Some(Less),
-            (Constant(_), Unary(..)) => Some(Less),
-            (Constant(_), Binary(..)) => Some(Less),
+            // Scalar
+            (Scalar(a), Scalar(b)) => a.partial_cmp(b),
+            (Scalar(_), Symbol(_)) => Some(Less),
+            (Scalar(_), Unary(..)) => Some(Less),
+            (Scalar(_), Binary(..)) => Some(Less),
             // Symbol
-            (Symbol(_), Constant(_)) => Some(Greater),
+            (Symbol(_), Scalar(_)) => Some(Greater),
             (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
             (Symbol(_), Unary(..)) => Some(Less),
             (Symbol(_), Binary(..)) => Some(Less),
             // Unary
-            (Unary(..), Constant(_)) => Some(Greater),
+            (Unary(..), Scalar(_)) => Some(Greater),
             (Unary(..), Symbol(_)) => Some(Greater),
             (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
             (Unary(..), Binary(..)) => Some(Less),
             // Binary
-            (Binary(..), Constant(_)) => Some(Greater),
+            (Binary(..), Scalar(_)) => Some(Greater),
             (Binary(..), Symbol(_)) => Some(Greater),
             (Binary(..), Unary(..)) => Some(Greater),
             (Binary(op1, ..), Binary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
@@ -434,7 +434,7 @@ mod test {
         assert_eq!(
             p.nodes,
             vec![
-                Constant(2.),
+                Scalar(2.),
                 Symbol('x'),
                 Symbol('y'),
                 Binary(Multiply, 0, 1),
@@ -448,7 +448,7 @@ mod test {
         // Matrix and a scalar.
         let tree = deftree!(* 2 (concat x y z)).unwrap();
         let expected = vec![
-            Constant(2.),
+            Scalar(2.),
             Symbol('x'),
             Symbol('y'),
             Symbol('z'),

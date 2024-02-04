@@ -91,7 +91,7 @@ impl TopoSorter {
         self.sorted
             .extend(self.sorted_indices.iter().map(|index| -> Node {
                 match nodes[*index] {
-                    Constant(v) => Constant(v),
+                    Scalar(v) => Scalar(v),
                     Symbol(label) => Symbol(label),
                     Unary(op, input) => Unary(op, self.index_map[input]),
                     Binary(op, lhs, rhs) => Binary(op, self.index_map[lhs], self.index_map[rhs]),
@@ -127,7 +127,7 @@ mod test {
         let mut nodes = vec![
             Symbol('x'),            // 0
             Binary(Add, 0, 2),      // 1
-            Constant(2.245),        // 2
+            Scalar(2.245),        // 2
             Binary(Multiply, 1, 5), // 3
             Unary(Sqrt, 3),         // 4 - root
             Symbol('y'),            // 5
@@ -139,7 +139,7 @@ mod test {
             nodes,
             vec![
                 Symbol('x'),
-                Constant(2.245),
+                Scalar(2.245),
                 Binary(Add, 0, 1),
                 Symbol('y'),
                 Binary(Multiply, 2, 3),
@@ -199,7 +199,7 @@ mod test {
             Binary(Add, 1, 3),      // 6
             Binary(Divide, 5, 6),   // 7
             Unary(Sqrt, 0),         // 8
-            Constant(2.0),          // 9
+            Scalar(2.0),          // 9
         ];
         assert!(matches!(
             sorter.run(&mut nodes, 0..1),
@@ -217,7 +217,7 @@ mod test {
             Symbol('y'),
             Binary(Multiply, 0, 3),
             Binary(Multiply, 0, 7),
-            Constant(1.0),
+            Scalar(1.0),
             Binary(Add, 1, 3),
             Binary(Add, 2, 4),
         ];
@@ -233,7 +233,7 @@ mod test {
                 Binary(Multiply, 2, 0),
                 Binary(Multiply, 2, 1),
                 Binary(Multiply, 2, 3),
-                Constant(1.0),
+                Scalar(1.0),
                 Binary(Add, 4, 5)
             ]
         );

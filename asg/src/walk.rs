@@ -103,7 +103,7 @@ impl<'a> DepthIterator<'a> {
         }
         match parent {
             // Nothing to do when number children is 1 or less.
-            Constant(_) | Symbol(_) | Unary(..) => {}
+            Scalar(_) | Symbol(_) | Unary(..) => {}
             Binary(op, ..) => {
                 match self.ordering {
                     Original => {} // Do nothing.
@@ -153,7 +153,7 @@ impl<'a> Iterator for DepthIterator<'a> {
         // Push the children on to the stack.
         let node = &self.nodes[index];
         match node {
-            Constant(_) | Symbol(_) => {
+            Scalar(_) | Symbol(_) => {
                 self.last_pushed = 0;
             }
             Unary(_op, input) => {
