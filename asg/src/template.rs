@@ -13,8 +13,8 @@ macro_rules! deftemplate {
     ($name: ident ping ($($ping:tt) *) pong ($($pong:tt) *)) => {
         Template::from(
             stringify!($name),
-            $crate::deftree!(($($ping) *)),
-            $crate::deftree!(($($pong) *))
+            $crate::deftree!(($($ping) *)).unwrap(),
+            $crate::deftree!(($($pong) *)).unwrap()
         )
     };
 }

@@ -70,35 +70,13 @@ impl<'a> Evaluator<'a> {
 mod test {
     use super::*;
     use crate::deftree;
-    use crate::test::util::{assert_float_eq, check_tree_eval, compare_trees};
+    use crate::test::util::{assert_float_eq, check_tree_eval};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
     #[test]
-    fn t_variable_in_deftree() {
-        let lisp = deftree!(+ 1. (+ (cos x) (pow (cos x) 2.)));
-        let cx = deftree!(cos x);
-        let with_vars = deftree!(+ 1. (+ {cx.clone()} (pow {cx} 2.)));
-        assert_eq!(lisp, with_vars);
-        compare_trees(&lisp, &with_vars, &[('x', -5., 5.)], 100, 0.);
-        // More complex expressions.
-        use crate::tree::pow;
-        let tree: Tree = deftree!(
-            (+
-             {
-                 let three: Tree = 3.0.into();
-                 three * pow('x'.into(), 2.0.into())
-             }
-             (+ (* 2. x) 1.))
-        );
-        let expected = deftree!(+ (* 3. (pow x 2.)) (+ (* 2. x) 1.));
-        assert_eq!(tree, expected);
-        compare_trees(&expected, &tree, &[('x', -5., 5.)], 100, 0.);
-    }
-
-    #[test]
     fn t_constant() {
-        let x = deftree!(const std::f64::consts::PI);
+        let x = deftree!(const std::f64::consts::PI).unwrap();
         assert_eq!(x.roots(), &[Constant(std::f64::consts::PI)]);
         let mut eval = Evaluator::new(&x);
         match eval.run() {
@@ -117,7 +95,7 @@ mod test {
             (20., 21., 29.),
             (12., 35., 37.),
         ];
-        let h = deftree!(sqrt (+ (pow x 2.) (pow y 2.)));
+        let h = deftree!(sqrt (+ (pow x 2.) (pow y 2.))).unwrap();
         let mut eval = Evaluator::new(&h);
         for (x, y, expected) in TRIPLETS {
             eval.set_var('x', x);
@@ -133,7 +111,7 @@ mod test {
     fn t_trig_identity() {
         use rand::Rng;
         const PI_2: f64 = 2.0 * std::f64::consts::TAU;
-        let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.));
+        let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.)).unwrap();
         let mut eval = Evaluator::new(&sum);
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
@@ -152,7 +130,7 @@ mod test {
     #[test]
     fn t_sum_test() {
         check_tree_eval(
-            deftree!(+ x y),
+            deftree!(+ x y).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
                     output[0] = x + y;
@@ -167,7 +145,7 @@ mod test {
     #[test]
     fn t_evaluate_trees_1() {
         check_tree_eval(
-            deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)),
+            deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
                     output[0] = f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
@@ -188,7 +166,8 @@ mod test {
                       (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
                       (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
-            ),
+            )
+            .unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y, z] = vars[..] {
                     let s1 = f64::sqrt(
@@ -213,13 +192,13 @@ mod test {
     fn t_evaluate_trees_concat_1() {
         check_tree_eval(
             deftree!(concat
-            (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
-            (+ x y)
-            ((max (min
-                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                   (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-              (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
-            )),
+                     (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
+                     (+ x y)
+                     ((max (min
+                            (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                            (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+                       (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            )).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y, z] = vars[..] {
                     output[0] = f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
