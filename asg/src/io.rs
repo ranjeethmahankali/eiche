@@ -93,6 +93,7 @@ impl std::fmt::Display for Node {
             Symbol(label) => write!(f, "Symbol({})", label),
             Unary(op, input) => write!(f, "{:?}({})", op, input),
             Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
+            Ternary(op, a, b, c) => write!(f, "{:?}({}, {}, {})", op, a, b, c),
         }
     }
 }

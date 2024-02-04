@@ -1,4 +1,4 @@
-use crate::tree::{BinaryOp, BinaryOp::*, Node, Node::*, Tree, UnaryOp::*};
+use crate::tree::{BinaryOp, BinaryOp::*, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*};
 
 impl Tree {
     pub fn to_latex(&self) -> String {
@@ -38,7 +38,9 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 Negate => format!("-{{{}}}", {
                     match inode {
                         // Special cases that require braces.
-                        Binary(Add, ..) | Binary(Subtract, ..) => with_parens(ix),
+                        Binary(Add, ..) | Binary(Subtract, ..) | Ternary(Choose, ..) => {
+                            with_parens(ix)
+                        }
                         Constant(_) | Symbol(_) | Unary(..) | Binary(..) => ix,
                     }
                 }),
@@ -50,9 +52,12 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 Log => format!("\\ln\\left({{{}}}\\right)", ix),
                 Exp => format!("e^{{{}}}", {
                     match inode {
-                        Constant(_) | Symbol(_) | Unary(..) | Binary(Min, ..) | Binary(Max, ..) => {
-                            ix
-                        }
+                        Constant(_)
+                        | Symbol(_)
+                        | Unary(..)
+                        | Binary(Min, ..)
+                        | Binary(Max, ..)
+                        | Ternary(Choose, ..) => ix,
                         Binary(..) => with_parens(ix),
                     }
                 }),
@@ -78,9 +83,16 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 Max => format!("\\max\\left({{{}}}, {{{}}}\\right)", lx, rx),
             }
         }
+        Ternary(op, _a, _b, _c) => match op {
+            Choose => todo!("Implement the piecewise function notation."),
+        },
     }
 }
 
+/// Look at the two operands (`lnode` and `rnode`) of a binary op, and decide if
+/// the latex strings of the operands (`lx` and `rx` respectively) should be
+/// wrapped in parentheses. Wrap `lx` and `rx` as necessary and return them as a
+/// tuple.
 fn parens_binary(
     op: BinaryOp,
     lnode: &Node,
@@ -104,13 +116,17 @@ fn parens_binary(
                     | Unary(Exp, _)
                     | Binary(..) => with_parens(lx),
                     Constant(_) if lx.len() > 1 => with_parens(lx),
-                    Constant(_) | Symbol(_) | Unary(_, _) => lx,
+                    Constant(_) | Symbol(_) | Unary(_, _) | Ternary(Choose, ..) => lx,
                 }
             },
             {
                 match rnode {
                     Binary(Add, ..) | Binary(Subtract, ..) => with_parens(rx),
-                    Constant(_) | Symbol(_) | Unary(_, _) | Binary(_, _, _) => rx,
+                    Constant(_)
+                    | Symbol(_)
+                    | Unary(_, _)
+                    | Binary(_, _, _)
+                    | Ternary(Choose, ..) => rx,
                 }
             },
         ),
@@ -118,6 +134,8 @@ fn parens_binary(
     }
 }
 
+/// Given `node` that is an operand of a division, either a numerator or a
+/// denominator, wrap its `latex` string in parentheses if necessary.
 fn parens_div(node: &Node, latex: String) -> String {
     match node {
         Binary(Divide, ..) => with_parens(latex),
@@ -125,19 +143,23 @@ fn parens_div(node: &Node, latex: String) -> String {
     }
 }
 
+/// Given `node` that is an operand of a multiplication and wrap its `latex`
+/// string in parentheses if necessary.
 fn parens_mul(node: &Node, latex: String) -> String {
     match node {
         Binary(Add, ..) | Binary(Subtract, ..) | Binary(Multiply, ..) | Unary(Negate, ..) => {
             with_parens(latex)
         }
-        Binary(..) | Unary(..) | Symbol(_) | Constant(_) => latex,
+        Binary(..) | Unary(..) | Symbol(_) | Constant(_) | Ternary(Choose, ..) => latex,
     }
 }
 
+/// Given a `node` that is an operand of an addition or subtraction, wrap its
+/// `latex` string in parentheses if necessary.
 fn parens_add_sub(node: &Node, latex: String) -> String {
     match node {
         Binary(Add, ..) | Binary(Subtract, ..) | Unary(Negate, _) => with_parens(latex),
-        Binary(..) | Constant(_) | Symbol(_) | Unary(..) => latex,
+        Binary(..) | Constant(_) | Symbol(_) | Unary(..) | Ternary(Choose, ..) => latex,
     }
 }
 

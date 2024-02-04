@@ -7,7 +7,7 @@ use crate::{
     prune::Pruner,
     sort::TopoSorter,
     template::{get_templates, Template},
-    tree::{MaybeTree, Node, Tree},
+    tree::{MaybeTree, Node, Node::*, Tree},
 };
 
 pub struct Mutations<'a> {
@@ -128,7 +128,6 @@ impl TemplateCapture {
     }
 
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, Error> {
-        use crate::tree::Node::*;
         let mut tree = tree.clone();
         let root_indices = tree.root_indices();
         let num_nodes = tree.nodes().len();
@@ -153,6 +152,11 @@ impl TemplateCapture {
                     tree.nodes_mut(),
                     ni,
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
+                ),
+                Ternary(op, a, b, c) => self.add_node(
+                    tree.nodes_mut(),
+                    ni,
+                    Ternary(*op, self.node_map[*a], self.node_map[*b], self.node_map[*c]),
                 ),
             }
             if pong.root_indices().contains(&ni) {
@@ -180,6 +184,17 @@ impl TemplateCapture {
                                     }
                                     if *rhs == newroot {
                                         *rhs = oldroot;
+                                    }
+                                }
+                                Ternary(_, a, b, c) => {
+                                    if *a == newroot {
+                                        *a = oldroot;
+                                    }
+                                    if *b == newroot {
+                                        *b = oldroot;
+                                    }
+                                    if *c == newroot {
+                                        *c = oldroot;
                                     }
                                 }
                             }
@@ -216,18 +231,18 @@ impl TemplateCapture {
         commute: bool,
     ) -> (bool, bool) {
         match (ltree.node(li), rtree.node(ri)) {
-            (Node::Constant(v1), Node::Constant(v2)) => (v1 == v2, false),
-            (Node::Constant(_), _) => return (false, false),
-            (Node::Symbol(label), _) => return (self.bind(*label, ri), false),
-            (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
+            (Constant(v1), Constant(v2)) => (v1 == v2, false),
+            (Constant(_), _) => return (false, false),
+            (Symbol(label), _) => return (self.bind(*label, ri), false),
+            (Unary(lop, input1), Unary(rop, input2)) => {
                 if lop != rop {
                     return (false, false);
                 } else {
                     return self.match_node_commute(*input1, ltree, *input2, rtree, commute);
                 }
             }
-            (Node::Unary(..), _) => return (false, false),
-            (Node::Binary(lop, mut l1, mut r1), Node::Binary(rop, l2, r2)) => {
+            (Unary(..), _) => return (false, false),
+            (Binary(lop, mut l1, mut r1), Binary(rop, l2, r2)) => {
                 if lop != rop {
                     return (false, false);
                 }
@@ -253,7 +268,18 @@ impl TemplateCapture {
                     lop.is_commutative() || comm_left || comm_right,
                 );
             }
-            (Node::Binary(..), _) => return (false, false),
+            (Binary(..), _) => return (false, false),
+            (Ternary(lop, la, lb, lc), Ternary(rop, ra, rb, rc)) => {
+                if lop != rop {
+                    return (false, false);
+                } else {
+                    let (amatch, acomm) = self.match_node_commute(*la, ltree, *ra, rtree, commute);
+                    let (bmatch, bcomm) = self.match_node_commute(*lb, ltree, *rb, rtree, commute);
+                    let (cmatch, ccomm) = self.match_node_commute(*lc, ltree, *rc, rtree, commute);
+                    return (amatch && bmatch && cmatch, acomm || bcomm || ccomm);
+                }
+            }
+            (Ternary(..), _) => return (false, false),
         }
     }
 }

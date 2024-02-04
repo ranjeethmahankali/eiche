@@ -63,6 +63,12 @@ impl Pruner {
                     Binary(op, lhs, rhs) => {
                         Binary(op, self.indices[lhs] - 1, self.indices[rhs] - 1)
                     }
+                    Ternary(op, a, b, c) => Ternary(
+                        op,
+                        self.indices[a] - 1,
+                        self.indices[b] - 1,
+                        self.indices[c] - 1,
+                    ),
                 });
             }
         }

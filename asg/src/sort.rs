@@ -90,6 +90,9 @@ impl TopoSorter {
                     Symbol(label) => Symbol(label),
                     Unary(op, input) => Unary(op, self.index_map[input]),
                     Binary(op, lhs, rhs) => Binary(op, self.index_map[lhs], self.index_map[rhs]),
+                    Ternary(op, a, b, c) => {
+                        Ternary(op, self.index_map[a], self.index_map[b], self.index_map[c])
+                    }
                 }
             }));
         // Swap the sorted nodes and the incoming nodes.

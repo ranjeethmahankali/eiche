@@ -33,6 +33,11 @@ pub enum BinaryOp {
     Max,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+pub enum TernaryOp {
+    Choose,
+}
+
 impl UnaryOp {
     /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
@@ -80,6 +85,15 @@ impl BinaryOp {
     }
 }
 
+impl TernaryOp {
+    pub fn index(&self) -> u8 {
+        use TernaryOp::*;
+        match self {
+            Choose => 0,
+        }
+    }
+}
+
 use {BinaryOp::*, UnaryOp::*};
 
 /// Represents a node in an abstract syntax `Tree`.
@@ -89,6 +103,7 @@ pub enum Node {
     Symbol(char),
     Unary(UnaryOp, usize),
     Binary(BinaryOp, usize, usize),
+    Ternary(TernaryOp, usize, usize, usize),
 }
 
 use Node::*;
@@ -138,6 +153,7 @@ impl Tree {
                 Symbol(_) => n,
                 Unary(op, input) => Unary(op, input + offset),
                 Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
+                Ternary(op, a, b, c) => Ternary(op, a + offset, b + offset, c + offset),
             }));
         }
         // After we just concatenated the nodes as is. This rotation after the
@@ -145,11 +161,6 @@ impl Tree {
         lhs.nodes[(llen - lsize)..(llen + rlen - rsize)].rotate_left(lsize);
         lhs.dims = (lsize + rsize, 1);
         return Ok(lhs);
-    }
-
-    pub fn transposed(mut self) -> Tree {
-        self.dims = (self.dims.1, self.dims.0);
-        return self;
     }
 
     /// The number of nodes in this tree.
@@ -259,6 +270,7 @@ impl Tree {
             Symbol(label) => Symbol(label.clone()),
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
+            Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
         }));
         if nroots == 1 {
             for r in other.root_indices() {
@@ -411,21 +423,31 @@ impl PartialOrd for Node {
             (Constant(_), Symbol(_)) => Some(Less),
             (Constant(_), Unary(..)) => Some(Less),
             (Constant(_), Binary(..)) => Some(Less),
+            (Constant(_), Ternary(..)) => Some(Less),
             // Symbol
             (Symbol(_), Constant(_)) => Some(Greater),
             (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
             (Symbol(_), Unary(..)) => Some(Less),
             (Symbol(_), Binary(..)) => Some(Less),
+            (Symbol(_), Ternary(..)) => Some(Less),
             // Unary
             (Unary(..), Constant(_)) => Some(Greater),
             (Unary(..), Symbol(_)) => Some(Greater),
             (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
             (Unary(..), Binary(..)) => Some(Less),
+            (Unary(..), Ternary(..)) => Some(Less),
             // Binary
             (Binary(..), Constant(_)) => Some(Greater),
             (Binary(..), Symbol(_)) => Some(Greater),
             (Binary(..), Unary(..)) => Some(Greater),
             (Binary(op1, ..), Binary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
+            (Binary(..), Ternary(..)) => Some(Less),
+            // Ternary
+            (Ternary(..), Constant(_)) => Some(Greater),
+            (Ternary(..), Symbol(_)) => Some(Greater),
+            (Ternary(..), Unary(_, _)) => Some(Greater),
+            (Ternary(..), Binary(_, _, _)) => Some(Greater),
+            (Ternary(op1, ..), Ternary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
         }
     }
 }

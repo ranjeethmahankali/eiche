@@ -72,6 +72,14 @@ impl Heuristic {
                         (i, depth),
                         (*lhs, depth + 1),
                     ]),
+                    Ternary(_, a, b, c) => self.stack.extend_from_slice(&[
+                        (i, depth),
+                        (*a, depth + 1),
+                        (i, depth),
+                        (*b, depth + 1),
+                        (i, depth),
+                        (*c, depth + 1),
+                    ]),
                 },
                 _ => {} // Do nothing.
             }

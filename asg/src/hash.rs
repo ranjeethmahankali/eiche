@@ -38,6 +38,16 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
                 hash2.hash(&mut s);
                 s.finish()
             }
+            Ternary(op, a, b, c) => {
+                // There are not order agnostic ternary operators at this time.
+                // Reconsider below code in the future if you add order agnostic ternary ops.
+                let mut s: DefaultHasher = Default::default();
+                op.hash(&mut s);
+                hashbuf[a].hash(&mut s);
+                hashbuf[b].hash(&mut s);
+                hashbuf[c].hash(&mut s);
+                s.finish()
+            }
         };
         hashbuf[index] = hash;
     }

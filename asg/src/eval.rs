@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    tree::{BinaryOp, BinaryOp::*, Node::*, Tree, UnaryOp, UnaryOp::*, Value, Value::*},
+    tree::{BinaryOp, BinaryOp::*, Node::*, TernaryOp, Tree, UnaryOp, UnaryOp::*, Value, Value::*},
 };
 
 impl Value {
@@ -19,6 +19,22 @@ impl Value {
     }
 }
 
+impl UnaryOp {
+    /// Compute the result of the operation on `value`.
+    pub fn apply(&self, value: Value) -> Result<Value, Error> {
+        Ok(match self {
+            Negate => Scalar(-value.scalar()?),
+            Sqrt => Scalar(f64::sqrt(value.scalar()?)),
+            Abs => Scalar(f64::abs(value.scalar()?)),
+            Sin => Scalar(f64::sin(value.scalar()?)),
+            Cos => Scalar(f64::cos(value.scalar()?)),
+            Tan => Scalar(f64::tan(value.scalar()?)),
+            Log => Scalar(f64::log(value.scalar()?, std::f64::consts::E)),
+            Exp => Scalar(f64::exp(value.scalar()?)),
+        })
+    }
+}
+
 impl BinaryOp {
     /// Compute the result of the operation on `lhs` and `rhs`.
     pub fn apply(&self, lhs: Value, rhs: Value) -> Result<Value, Error> {
@@ -34,18 +50,16 @@ impl BinaryOp {
     }
 }
 
-impl UnaryOp {
-    /// Compute the result of the operation on `value`.
-    pub fn apply(&self, value: Value) -> Result<Value, Error> {
+impl TernaryOp {
+    pub fn apply(&self, a: Value, b: Value, c: Value) -> Result<Value, Error> {
         Ok(match self {
-            Negate => Scalar(-value.scalar()?),
-            Sqrt => Scalar(f64::sqrt(value.scalar()?)),
-            Abs => Scalar(f64::abs(value.scalar()?)),
-            Sin => Scalar(f64::sin(value.scalar()?)),
-            Cos => Scalar(f64::cos(value.scalar()?)),
-            Tan => Scalar(f64::tan(value.scalar()?)),
-            Log => Scalar(f64::log(value.scalar()?, std::f64::consts::E)),
-            Exp => Scalar(f64::exp(value.scalar()?)),
+            TernaryOp::Choose => {
+                if a.boolean()? {
+                    b
+                } else {
+                    c
+                }
+            }
         })
     }
 }
@@ -118,8 +132,11 @@ impl<'a> Evaluator<'a> {
                 match &self.tree.node(idx) {
                     Constant(val) => *val,
                     Symbol(_) => self.regs[idx],
-                    Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs])?,
                     Unary(op, input) => op.apply(self.regs[*input])?,
+                    Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs])?,
+                    Ternary(op, a, b, c) => {
+                        op.apply(self.regs[*a], self.regs[*b], self.regs[*c])?
+                    }
                 },
             );
         }

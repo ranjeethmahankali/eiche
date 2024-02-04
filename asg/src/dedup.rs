@@ -72,8 +72,17 @@ impl Deduplicater {
                     *input = self.indices[*input];
                 }
                 Binary(_, lhs, rhs) => {
-                    *lhs = self.indices[*lhs];
-                    *rhs = self.indices[*rhs];
+                    // Copy to temporary buffer to avoid side effects if lhs and rhs are the same.
+                    let mapped = [self.indices[*lhs], self.indices[*rhs]];
+                    *lhs = mapped[0];
+                    *rhs = mapped[1];
+                }
+                Ternary(_, a, b, c) => {
+                    // Copy to temporary buffer to avoid side effects when a, b, c are not unique.
+                    let mapped = [self.indices[*a], self.indices[*b], self.indices[*c]];
+                    *a = mapped[0];
+                    *b = mapped[1];
+                    *c = mapped[2];
                 }
             }
         }
