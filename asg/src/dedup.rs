@@ -280,26 +280,29 @@ mod test {
 
     #[test]
     fn t_recursive_compare_2() {
-        let tree1 = deftree!(/ (+ (* x y) (+ b a)) (* (+ y x) (* a b)));
-        let tree2 = deftree!(/ (+ (* y x) (+ a b)) (* (+ y x) (* b a)));
+        let tree1 = deftree!(/ (+ (* x y) (+ b a)) (* (+ y x) (* a b))).unwrap();
+        let tree2 = deftree!(/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))).unwrap();
         assert!(tree1.equivalent(&tree2));
     }
 
     #[test]
     fn t_recursive_compare_concat() {
-        let tree1 = deftree!(concat (+ x y) (* y x));
-        let tree2 = deftree!(concat (+ y x) (* x y));
+        let tree1 = deftree!(concat (+ x y) (* y x)).unwrap();
+        let tree2 = deftree!(concat (+ y x) (* x y)).unwrap();
         assert!(tree1.equivalent(&tree2));
         let tree1 = deftree!(concat
                              (/ 1 (log (+ x y)))
-                             (/ (+ (* x y) (+ b a)) (* (+ y x) (* a b))));
+                             (/ (+ (* x y) (+ b a)) (* (+ y x) (* a b))))
+        .unwrap();
         let tree2 = deftree!(concat
                              (/ 1 (log (+ x y)))
-                             (/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))));
+                             (/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))))
+        .unwrap();
         assert!(tree1.equivalent(&tree2));
         let tree2 = deftree!(concat
                              (/ 1 (log (* x y)))
-                             (/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))));
+                             (/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))))
+        .unwrap();
         assert!(!tree1.equivalent(&tree2));
     }
 
@@ -309,10 +312,12 @@ mod test {
         let mut pruner = Pruner::new();
         // Sanity check with the same tree.
         let a = deftree!(/ (* k (+ x y)) (+ x y))
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
         let b = deftree!(/ (* k (+ x y)) (+ x y))
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
@@ -338,7 +343,8 @@ mod test {
                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
                   (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
              (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
-        );
+        )
+        .unwrap();
         let nodup = tree
             .clone()
             .deduplicate(&mut dedup)
@@ -359,7 +365,7 @@ mod test {
     fn t_deduplication_2() {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
-        let tree = deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.));
+        let tree = deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap();
         let nodup = tree
             .clone()
             .deduplicate(&mut dedup)
@@ -378,7 +384,8 @@ mod test {
             (/
              (+ (pow (sin x) 2.) (+ (pow (cos x) 2.) (* 2. (* (sin x) (cos x)))))
              (+ (pow (sin y) 2.) (+ (pow (cos y) 2.) (* 2. (* (sin y) (cos y))))))
-        );
+        )
+        .unwrap();
         let nodup = tree
             .clone()
             .deduplicate(&mut dedup)

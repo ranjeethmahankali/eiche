@@ -152,98 +152,113 @@ mod test {
     #[test]
     fn t_negate() {
         // Symbol
-        assert_eq!("-{x}", deftree!(-x).to_latex());
+        assert_eq!("-{x}", deftree!(-x).unwrap().to_latex());
         // Unary
-        assert_eq!("-{\\sqrt{2}}", deftree!(- (sqrt 2.)).to_latex());
+        assert_eq!("-{\\sqrt{2}}", deftree!(- (sqrt 2.)).unwrap().to_latex());
         assert_eq!(
             "-{\\left|{{x} + {y}}\\right|}",
-            deftree!(- (abs (+ x y))).to_latex()
+            deftree!(- (abs (+ x y))).unwrap().to_latex()
         );
         assert_eq!(
             "-{\\sin\\left({{2}.{x}}\\right)}",
-            deftree!(- (sin (* 2 x))).to_latex()
+            deftree!(- (sin (* 2 x))).unwrap().to_latex()
         );
         assert_eq!(
             "-{\\cos\\left({{x}^{2}}\\right)}",
-            deftree!(- (cos (pow x 2))).to_latex()
+            deftree!(- (cos (pow x 2))).unwrap().to_latex()
         );
         assert_eq!(
             "-{\\tan\\left({{x}^{2}}\\right)}",
-            deftree!(- (tan (pow x 2))).to_latex()
+            deftree!(- (tan (pow x 2))).unwrap().to_latex()
         );
         assert_eq!(
             "-{\\ln\\left({{x}^{2}}\\right)}",
-            deftree!(- (log (pow x 2))).to_latex()
+            deftree!(- (log (pow x 2))).unwrap().to_latex()
         );
         assert_eq!(
             "-{e^{\\left({x}^{2}\\right)}}",
-            deftree!(- (exp (pow x 2))).to_latex()
+            deftree!(- (exp (pow x 2))).unwrap().to_latex()
         );
         // Binary
         assert_eq!(
             "-{\\left({x} + {y}\\right)}",
-            deftree!(- (+ x y)).to_latex()
+            deftree!(- (+ x y)).unwrap().to_latex()
         );
         assert_eq!(
             "-{\\left({x} - {y}\\right)}",
-            deftree!(- (- x y)).to_latex()
+            deftree!(- (- x y)).unwrap().to_latex()
         );
-        assert_eq!("-{{x}.{y}}", deftree!(- (* x y)).to_latex());
-        assert_eq!("-{\\dfrac{x}{y}}", deftree!(- (/ x y)).to_latex());
-        assert_eq!("-{{x}^{y}}", deftree!(- (pow x y)).to_latex());
+        assert_eq!("-{{x}.{y}}", deftree!(- (* x y)).unwrap().to_latex());
+        assert_eq!("-{\\dfrac{x}{y}}", deftree!(- (/ x y)).unwrap().to_latex());
+        assert_eq!("-{{x}^{y}}", deftree!(- (pow x y)).unwrap().to_latex());
         assert_eq!(
             "-{\\min\\left({x}, {y}\\right)}",
-            deftree!(- (min x y)).to_latex()
+            deftree!(- (min x y)).unwrap().to_latex()
         );
         assert_eq!(
             "-{\\max\\left({x}, {y}\\right)}",
-            deftree!(- (max x y)).to_latex()
+            deftree!(- (max x y)).unwrap().to_latex()
         );
     }
 
     #[test]
     fn t_sqrt() {
         // Symbol
-        assert_eq!("\\sqrt{x}", deftree!(sqrt x).to_latex());
+        assert_eq!("\\sqrt{x}", deftree!(sqrt x).unwrap().to_latex());
         // Unary
-        assert_eq!("\\sqrt{-{x}}", deftree!(sqrt(-x)).to_latex());
+        assert_eq!("\\sqrt{-{x}}", deftree!(sqrt(-x)).unwrap().to_latex());
         assert_eq!(
             "\\sqrt{\\left|{{x} + {y}}\\right|}",
-            deftree!(sqrt (abs (+ x y))).to_latex()
+            deftree!(sqrt (abs (+ x y))).unwrap().to_latex()
         );
         assert_eq!(
             "\\sqrt{\\sin\\left({{2}.{x}}\\right)}",
-            deftree!(sqrt (sin (* 2 x))).to_latex()
+            deftree!(sqrt (sin (* 2 x))).unwrap().to_latex()
         );
         assert_eq!(
             "\\sqrt{\\cos\\left({{x}^{2}}\\right)}",
-            deftree!(sqrt (cos (pow x 2))).to_latex()
+            deftree!(sqrt (cos (pow x 2))).unwrap().to_latex()
         );
         assert_eq!(
             "\\sqrt{\\tan\\left({{x}^{2}}\\right)}",
-            deftree!(sqrt (tan (pow x 2))).to_latex()
+            deftree!(sqrt (tan (pow x 2))).unwrap().to_latex()
         );
         assert_eq!(
             "\\sqrt{\\ln\\left({{x}^{2}}\\right)}",
-            deftree!(sqrt(log (pow x 2))).to_latex()
+            deftree!(sqrt(log (pow x 2))).unwrap().to_latex()
         );
         assert_eq!(
             "\\sqrt{e^{\\left({x}^{2}\\right)}}",
-            deftree!(sqrt(exp (pow x 2))).to_latex()
+            deftree!(sqrt(exp (pow x 2))).unwrap().to_latex()
         );
         // Binary
-        assert_eq!("\\sqrt{{x} + {y}}", deftree!(sqrt (+ x y)).to_latex());
-        assert_eq!("\\sqrt{{x} - {y}}", deftree!(sqrt (- x y)).to_latex());
-        assert_eq!("\\sqrt{{x}.{y}}", deftree!(sqrt (* x y)).to_latex());
-        assert_eq!("\\sqrt{\\dfrac{x}{y}}", deftree!(sqrt (/ x y)).to_latex());
-        assert_eq!("\\sqrt{{x}^{y}}", deftree!(sqrt (pow x y)).to_latex());
+        assert_eq!(
+            "\\sqrt{{x} + {y}}",
+            deftree!(sqrt (+ x y)).unwrap().to_latex()
+        );
+        assert_eq!(
+            "\\sqrt{{x} - {y}}",
+            deftree!(sqrt (- x y)).unwrap().to_latex()
+        );
+        assert_eq!(
+            "\\sqrt{{x}.{y}}",
+            deftree!(sqrt (* x y)).unwrap().to_latex()
+        );
+        assert_eq!(
+            "\\sqrt{\\dfrac{x}{y}}",
+            deftree!(sqrt (/ x y)).unwrap().to_latex()
+        );
+        assert_eq!(
+            "\\sqrt{{x}^{y}}",
+            deftree!(sqrt (pow x y)).unwrap().to_latex()
+        );
         assert_eq!(
             "\\sqrt{\\min\\left({x}, {y}\\right)}",
-            deftree!(sqrt (min x y)).to_latex()
+            deftree!(sqrt (min x y)).unwrap().to_latex()
         );
         assert_eq!(
             "\\sqrt{\\max\\left({x}, {y}\\right)}",
-            deftree!(sqrt (max x y)).to_latex()
+            deftree!(sqrt (max x y)).unwrap().to_latex()
         );
     }
 
@@ -251,7 +266,7 @@ mod test {
     fn t_abs() {
         assert_eq!(
             "\\left|{\\dfrac{x}{y}}\\right|",
-            deftree!(abs (/ x y)).to_latex()
+            deftree!(abs (/ x y)).unwrap().to_latex()
         );
     }
 
@@ -259,11 +274,15 @@ mod test {
     fn t_mat2x2() {
         assert_eq!(
             "\\begin{bmatrix}{a} & {c} \\\\ {b} & {d}\\end{bmatrix}",
-            deftree!(concat a b c d).reshape(2, 2).unwrap().to_latex()
+            deftree!(concat a b c d)
+                .unwrap()
+                .reshape(2, 2)
+                .unwrap()
+                .to_latex()
         );
         assert_eq!(
             "\\begin{bmatrix}{{x} + {y}} & {{x} - {y}} \\\\ {{x}.{y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
-            deftree!(concat (+ x y) (* x y) (- x y) (/ x y))
+            deftree!(concat (+ x y) (* x y) (- x y) (/ x y)).unwrap()
                 .reshape(2, 2)
                 .unwrap()
                 .to_latex()
@@ -274,11 +293,11 @@ mod test {
     fn t_column_vector() {
         assert_eq!(
             "\\begin{bmatrix}{a} \\\\ {b} \\\\ {c} \\\\ {d}\\end{bmatrix}",
-            deftree!(concat a b c d).to_latex()
+            deftree!(concat a b c d).unwrap().to_latex()
         );
         assert_eq!(
             "\\begin{bmatrix}{{x} + {y}} \\\\ {{x}.{y}} \\\\ {{x} - {y}} \\\\ {\\dfrac{x}{y}}\\end{bmatrix}",
-            deftree!(concat (+ x y) (* x y) (- x y) (/ x y)).to_latex()
+            deftree!(concat (+ x y) (* x y) (- x y) (/ x y)).unwrap().to_latex()
         );
     }
 
@@ -286,11 +305,16 @@ mod test {
     fn t_row_vector() {
         assert_eq!(
             "\\begin{bmatrix}{a} & {b} & {c} & {d}\\end{bmatrix}",
-            deftree!(concat a b c d).reshape(1, 4).unwrap().to_latex()
+            deftree!(concat a b c d)
+                .unwrap()
+                .reshape(1, 4)
+                .unwrap()
+                .to_latex()
         );
         assert_eq!(
             "\\begin{bmatrix}{{x} + {y}} & {{x}.{y}} & {{x} - {y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
             deftree!(concat (+ x y) (* x y) (- x y) (/ x y))
+                .unwrap()
                 .reshape(1, 4)
                 .unwrap()
                 .to_latex()

@@ -186,6 +186,7 @@ mod test {
         let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
         let tree = deftree!(+ x x)
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
@@ -198,6 +199,7 @@ mod test {
         let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
         let tree = deftree!(+ (* 2 x) (* 3 x))
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
@@ -210,12 +212,14 @@ mod test {
         let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
         let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (* 4 x))
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 13);
         // Make sure the same heuristic instance can be reused on other trees.
         let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (+ (* 4 x) 2))
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
@@ -228,6 +232,7 @@ mod test {
         let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
         let tree = deftree!(+ (* 2 (+ x y)) (* (+ x y) 3))
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
@@ -260,32 +265,33 @@ mod test {
     #[test]
     fn t_heuristic_cost_1() {
         check_heuristic_and_mutations(
-            deftree!(/ (+ (* p x) (* p y)) (+ x y)),
-            deftree!(/ (* p (+ x y)) (+ x y)),
+            deftree!(/ (+ (* p x) (* p y)) (+ x y)).unwrap(),
+            deftree!(/ (* p (+ x y)) (+ x y)).unwrap(),
         );
     }
 
     #[test]
     fn t_heuristic_cost_2() {
         check_heuristic_and_mutations(
-            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
-            deftree!(log (+ 1 (exp (sqrt (min x y))))),
+            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))).unwrap(),
+            deftree!(log (+ 1 (exp (sqrt (min x y))))).unwrap(),
         );
     }
 
     #[test]
     fn t_reduce_0() {
-        let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y));
+        let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y)).unwrap();
         let steps = reduce(tree, 8).unwrap();
-        assert!(steps.last().unwrap().equivalent(&deftree!(p)));
+        assert!(steps.last().unwrap().equivalent(&deftree!(p).unwrap()));
     }
 
     #[test]
     fn t_reduce_1() {
         let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
-                                  (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)));
+                                  (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
+        .unwrap();
         let steps = reduce(tree, 8).unwrap();
-        assert!(steps.last().unwrap().equivalent(&deftree!(1)));
+        assert!(steps.last().unwrap().equivalent(&deftree!(1).unwrap()));
     }
 
     #[test]
@@ -293,9 +299,13 @@ mod test {
         let tree = deftree!(concat
                             (/ (+ (* p x) (* p y)) (+ x y))
                             1.
-        );
+        )
+        .unwrap();
         let steps = reduce(tree, 8).unwrap();
-        assert!(steps.last().unwrap().equivalent(&deftree!(concat p 1)));
+        assert!(steps
+            .last()
+            .unwrap()
+            .equivalent(&deftree!(concat p 1).unwrap()));
     }
 
     #[test]
@@ -303,9 +313,13 @@ mod test {
         let tree = deftree!(concat
                             (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
                                    (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
-                            42.);
+                            42.)
+        .unwrap();
         let steps = reduce(tree, 8).unwrap();
-        assert!(steps.last().unwrap().equivalent(&deftree!(concat 1. 42.)));
+        assert!(steps
+            .last()
+            .unwrap()
+            .equivalent(&deftree!(concat 1. 42.).unwrap()));
     }
 
     #[test]
@@ -313,8 +327,12 @@ mod test {
         let tree = deftree!(concat
                             (/ (+ (* p x) (* p y)) (+ x y))
                             (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
-                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2))));
+                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2))))
+        .unwrap();
         let steps = reduce(tree, 12).unwrap();
-        assert!(steps.last().unwrap().equivalent(&deftree!(concat p 1.)));
+        assert!(steps
+            .last()
+            .unwrap()
+            .equivalent(&deftree!(concat p 1.).unwrap()));
     }
 }

@@ -101,7 +101,8 @@ mod test {
                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
                   (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
              (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
-        );
+        )
+        .unwrap();
         assert_eq!(
             format!("{}", tree).trim(),
             "
@@ -243,7 +244,8 @@ mod test {
     fn t_concat_string_formatting() {
         let v2 = deftree!(concat
                           (+ (pow x 2.) (pow y 2.))
-                          (* (pow x 2.) (pow y 2.)));
+                          (* (pow x 2.) (pow y 2.)))
+        .unwrap();
         assert_eq!(
             format!("{}", v2).trim(),
             "

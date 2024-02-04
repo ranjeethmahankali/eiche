@@ -60,7 +60,11 @@ mod test {
     #[test]
     fn t_sconstant_folding_0() {
         let mut pruner = Pruner::new();
-        let tree = deftree!(* 2. 3.).fold().unwrap().prune(&mut pruner);
+        let tree = deftree!(* 2. 3.)
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner);
         assert_eq!(tree.len(), 1usize);
         assert_eq!(tree.roots(), &[Constant(2. * 3.)]);
     }
@@ -71,8 +75,9 @@ mod test {
             (/
              (+ x (* 2. 3.))
              (log (+ x (/ 2. (min 5. (max 3. (- 9. 5.)))))))
-        );
-        let expected = deftree!(/ (+ x 6.) (log (+ x 0.5)));
+        )
+        .unwrap();
+        let expected = deftree!(/ (+ x 6.) (log (+ x 0.5))).unwrap();
         assert!(tree.len() > expected.len());
         let mut pruner = Pruner::new();
         let tree = tree.fold().unwrap().prune(&mut pruner);
@@ -90,12 +95,14 @@ mod test {
                 (/
                  (+ x (* 3. 3.))
                  (log (+ x (/ 8. (min 5. (max 3. (- 9. 5.)))))))
-        );
+        )
+        .unwrap();
         let expected = deftree!(
             concat
                 (/ (+ x 6.) (log (+ x 0.5)))
                 (/ (+ x 9.) (log (+ x 2.)))
-        );
+        )
+        .unwrap();
         assert!(tree.len() > expected.len());
         let mut pruner = Pruner::new();
         let tree = tree.fold().unwrap().prune(&mut pruner);
@@ -108,17 +115,19 @@ mod test {
         let mut pruner = Pruner::new();
         assert_eq!(
             deftree!(+ (pow x (+ y 0)) 0)
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow x y)
+            deftree!(pow x y).unwrap()
         );
         assert_eq!(
             deftree!(pow (+ (+ (cos (+ x 0)) (/ 1 (+ (sin y) 0))) 0) (* 2 (+ (+ x 0) y)))
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()
         );
     }
 
@@ -127,17 +136,19 @@ mod test {
         let mut pruner = Pruner::new();
         assert_eq!(
             deftree!(- (pow (- x 0) (+ y 0)) 0)
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow x y)
+            deftree!(pow x y).unwrap()
         );
         assert_eq!(
             deftree!(pow (+ (cos (+ (- x 0) 0)) (/ 1 (- (sin (- y 0)) 0))) (* 2 (+ x (- y 0))))
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()
         );
     }
 
@@ -146,16 +157,17 @@ mod test {
         let mut pruner = Pruner::new();
         assert_eq!(
             deftree!(+ (pow (* 1 x) (* y 1)) 0)
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow x y)
+            deftree!(pow x y).unwrap()
         );
         assert_eq!(
-            deftree!(pow (+ (cos (* x (* 1 (+ 1 (* 0 x))))) (/ 1 (* (sin (- y 0)) 1))) (* (* (+ 2 0) (+ x y)) 1))
+            deftree!(pow (+ (cos (* x (* 1 (+ 1 (* 0 x))))) (/ 1 (* (sin (- y 0)) 1))) (* (* (+ 2 0) (+ x y)) 1)).unwrap()
                 .fold()
                 .unwrap().prune(&mut pruner),
-            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()
         );
     }
 
@@ -164,17 +176,19 @@ mod test {
         let mut pruner = Pruner::new();
         assert_eq!(
             deftree!(pow (pow (pow x 1) (pow y 1)) (pow 1 1))
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow x y)
+            deftree!(pow x y).unwrap()
         );
         assert_eq!(
             deftree!(pow (+ (cos (pow x (pow x (* 0 x)))) (/ 1 (sin y))) (* 2 (+ x (pow y 1))))
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()
         );
     }
 
@@ -183,17 +197,19 @@ mod test {
         let mut pruner = Pruner::new();
         assert_eq!(
             deftree!(pow (/ x 1) (/ y (pow x (* t 0))))
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow x y)
+            deftree!(pow x y).unwrap()
         );
         assert_eq!(
             deftree!(pow (+ (cos (/ x 1)) (/ 1 (sin (/ y (pow t (* 0 p)))))) (* 2 (+ x y)))
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()
         );
     }
 
@@ -202,18 +218,20 @@ mod test {
         let mut pruner = Pruner::new();
         assert_eq!(
             deftree!(pow (+ x (* t 0)) (+ y (* t 0)))
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow x y)
+            deftree!(pow x y).unwrap()
         );
         assert_eq!(
             deftree!(pow (+ (cos (+ x (* 0 t))) (/ 1 (sin (- y (* t 0)))))
                      (* 2 (* (+ x y) (pow t (* 0 t)))))
+            .unwrap()
             .fold()
             .unwrap()
             .prune(&mut pruner),
-            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()
         );
     }
 
@@ -222,18 +240,20 @@ mod test {
         let mut pruner = Pruner::new();
         assert_eq!(
             deftree!(* (pow x (* t 0)) (pow (* x (pow t 0)) y))
+                .unwrap()
                 .fold()
                 .unwrap()
                 .prune(&mut pruner),
-            deftree!(pow x y)
+            deftree!(pow x y).unwrap()
         );
         assert_eq!(
             deftree!(pow (+ (cos (* x (pow t 0))) (/ 1 (sin (* y (pow t (* x 0))))))
                      (* 2 (+ x (* y (pow x 0)))))
+            .unwrap()
             .fold()
             .unwrap()
             .prune(&mut pruner),
-            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y)))
+            deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()
         );
     }
 }
