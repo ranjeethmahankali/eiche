@@ -65,6 +65,10 @@ macro_rules! deftree {
         let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant(($a).into()));
         out
     }};
+    // Conditional / piecewise
+    (if $cond:tt $a:tt $b:tt) => {
+        $crate::tree::Tree::piecewise($crate::deftree!($cond), $crate::deftree!($a), $crate::deftree!($b))
+    };
     // Symbols.
     ($a:ident) => {{
         const LABEL: &str = stringify!($a);

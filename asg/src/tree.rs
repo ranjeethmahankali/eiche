@@ -130,7 +130,7 @@ impl TernaryOp {
     }
 }
 
-use {BinaryOp::*, UnaryOp::*};
+use {BinaryOp::*, TernaryOp::*, UnaryOp::*};
 
 /// Represents a node in an abstract syntax `Tree`.
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -197,6 +197,10 @@ impl Tree {
         lhs.nodes[(llen - lsize)..(llen + rlen - rsize)].rotate_left(lsize);
         lhs.dims = (lsize + rsize, 1);
         return Ok(lhs);
+    }
+
+    pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
+        return cond?.ternary_op(iftrue?, iffalse?, Choose);
     }
 
     /// The number of nodes in this tree.
@@ -291,6 +295,13 @@ impl Tree {
         return Ok(self);
     }
 
+    fn unary_op(mut self, op: UnaryOp) -> MaybeTree {
+        for root in self.root_indices() {
+            self.nodes.push(Unary(op, root));
+        }
+        return Ok(self);
+    }
+
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> MaybeTree {
         let nroots = self.num_roots();
         let other_nroots = other.num_roots();
@@ -299,18 +310,13 @@ impl Tree {
         } else if nroots != 1 && nroots != other_nroots {
             return Err(Error::DimensionMismatch(self.dims, other.dims));
         }
-        let offset: usize = self.nodes.len();
-        self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
-        self.nodes.extend(other.nodes.iter().map(|node| match node {
-            Constant(value) => Constant(*value),
-            Symbol(label) => Symbol(label.clone()),
-            Unary(op, input) => Unary(*op, *input + offset),
-            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
-            Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
-        }));
+        self.nodes
+            .reserve(self.nodes.len() + other.nodes.len() + usize::max(nroots, other_nroots));
+        let offset = self.push_nodes(&other);
         if nroots == 1 {
+            let root = offset - 1;
             for r in other.root_indices() {
-                self.nodes.push(Binary(op, offset - 1, r + offset));
+                self.nodes.push(Binary(op, root, r + offset));
             }
         } else {
             for (l, r) in ((offset - nroots)..offset).zip(other.root_indices()) {
@@ -320,11 +326,48 @@ impl Tree {
         return Ok(self);
     }
 
-    fn unary_op(mut self, op: UnaryOp) -> MaybeTree {
-        for root in self.root_indices() {
-            self.nodes.push(Unary(op, root));
+    fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> MaybeTree {
+        let anroots = a.num_roots();
+        let bnroots = b.num_roots();
+        if anroots != bnroots {
+            return Err(Error::DimensionMismatch(a.dims, b.dims));
+        }
+        let nroots = self.num_roots();
+        if nroots != 1 && nroots != anroots {
+            return Err(Error::DimensionMismatch(self.dims, a.dims));
+        }
+        self.nodes
+            .reserve(self.nodes.len() + a.nodes.len() + b.nodes.len() + 1);
+        let a_offset = self.push_nodes(&a);
+        let b_offset = self.push_nodes(&b);
+        if nroots == 1 {
+            let root = a_offset - 1;
+            for (ar, br) in a.root_indices().zip(b.root_indices()) {
+                self.nodes
+                    .push(Ternary(op, root, ar + a_offset, br + b_offset));
+            }
+        } else {
+            for (r, (ar, br)) in self
+                .root_indices()
+                .zip(a.root_indices().zip(b.root_indices()))
+            {
+                self.nodes
+                    .push(Ternary(op, r, ar + a_offset, br + b_offset));
+            }
         }
         return Ok(self);
+    }
+
+    fn push_nodes(&mut self, other: &Tree) -> usize {
+        let offset: usize = self.nodes.len();
+        self.nodes.extend(other.nodes.iter().map(|node| match node {
+            Constant(value) => Constant(*value),
+            Symbol(label) => Symbol(label.clone()),
+            Unary(op, input) => Unary(*op, *input + offset),
+            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
+            Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
+        }));
+        return offset;
     }
 }
 
