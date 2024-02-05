@@ -1,8 +1,8 @@
 use crate::{
-    mutate::{MutationError, Mutations, TemplateCapture},
+    error::Error,
+    mutate::{Mutations, TemplateCapture},
     template::get_templates,
-    tree::Tree,
-    tree::{Node, Node::*},
+    tree::{Node, Node::*, Tree},
 };
 use std::{
     collections::{BinaryHeap, HashMap},
@@ -72,6 +72,14 @@ impl Heuristic {
                         (i, depth),
                         (*lhs, depth + 1),
                     ]),
+                    Ternary(_, a, b, c) => self.stack.extend_from_slice(&[
+                        (i, depth),
+                        (*a, depth + 1),
+                        (i, depth),
+                        (*b, depth + 1),
+                        (i, depth),
+                        (*c, depth + 1),
+                    ]),
                 },
                 _ => {} // Do nothing.
             }
@@ -119,7 +127,7 @@ impl Ord for Candidate {
 }
 impl Eq for Candidate {}
 
-pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, MutationError> {
+pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
     let mut capture = TemplateCapture::new();
     let tree = capture.make_compact_tree(tree, None)?;
     let mut hfn = Heuristic::new();

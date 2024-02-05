@@ -1,4 +1,5 @@
 pub mod util {
+    use crate::tree::Value;
     use crate::{eval::Evaluator, tree::Tree};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -55,7 +56,7 @@ pub mod util {
             let (label, lower, upper) = vardata[vari];
             let value = lower + rng.gen::<f64>() * (upper - lower);
             sample.push(value);
-            eval.set_var(label, value);
+            eval.set_scalar(label, value);
             indices[vari] += 1;
             if vari < nvars - 1 {
                 continue;
@@ -66,7 +67,10 @@ pub mod util {
             expected.fill(f64::NAN);
             expectedfn(&sample, &mut expected);
             for (lhs, rhs) in expected.iter().zip(results.iter()) {
-                assert_float_eq!(lhs, rhs, eps);
+                match rhs {
+                    Value::Bool(_) => assert!(false, "Found a boolean when expecting a scalar"),
+                    Value::Scalar(rhs) => assert_float_eq!(lhs, rhs, eps),
+                }
             }
             // Clean up the index stack.
             sample.pop();
@@ -112,8 +116,8 @@ pub mod util {
             let (label, lower, upper) = vardata[vari];
             let value = lower + rng.gen::<f64>() * (upper - lower);
             sample.push(value);
-            eval1.set_var(label, value);
-            eval2.set_var(label, value);
+            eval1.set_scalar(label, value);
+            eval2.set_scalar(label, value);
             indices[vari] += 1;
             if vari < nvars - 1 {
                 continue;
@@ -122,7 +126,11 @@ pub mod util {
             let results2 = eval2.run().unwrap();
             assert_eq!(results1.len(), results2.len());
             for (l, r) in results1.iter().zip(results2.iter()) {
-                assert_float_eq!(l, r, eps);
+                match (l, r) {
+                    (Value::Scalar(a), Value::Scalar(b)) => assert_float_eq!(a, b, eps),
+                    (Value::Bool(a), Value::Bool(b)) => assert_eq!(a, b),
+                    _ => assert!(false, "Mismatched types"),
+                }
             }
             // Clean up the index stack.
             sample.pop();

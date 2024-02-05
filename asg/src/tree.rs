@@ -1,6 +1,17 @@
+use crate::error::Error;
+use std::ops::Range;
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum Value {
+    Bool(bool),
+    Scalar(f64),
+}
+use Value::*;
+
 /// Represents an operation with one input.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum UnaryOp {
+    // Scalar
     Negate,
     Sqrt,
     Abs,
@@ -9,11 +20,14 @@ pub enum UnaryOp {
     Tan,
     Log,
     Exp,
+    // Boolean
+    Not,
 }
 
 /// Represents an operation with two inputs.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum BinaryOp {
+    // Scalar
     Add,
     Subtract,
     Multiply,
@@ -21,27 +35,28 @@ pub enum BinaryOp {
     Pow,
     Min,
     Max,
+    // Boolean
+    Less,
+    LessOrEqual,
+    Equal,
+    NotEqual,
+    Greater,
+    GreaterOrEqual,
+    And,
+    Or,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+pub enum TernaryOp {
+    Choose,
 }
 
 impl UnaryOp {
-    /// Compute the result of the operation on `value`.
-    pub fn apply(&self, value: f64) -> f64 {
-        match self {
-            Negate => -value,
-            Sqrt => f64::sqrt(value),
-            Abs => f64::abs(value),
-            Sin => f64::sin(value),
-            Cos => f64::cos(value),
-            Tan => f64::tan(value),
-            Log => f64::log(value, std::f64::consts::E),
-            Exp => f64::exp(value),
-        }
-    }
-
     /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use UnaryOp::*;
         match self {
+            // Scalar
             Negate => 0,
             Sqrt => 1,
             Abs => 2,
@@ -50,28 +65,18 @@ impl UnaryOp {
             Tan => 5,
             Log => 6,
             Exp => 7,
+            // Boolean
+            Not => 8,
         }
     }
 }
 
 impl BinaryOp {
-    /// Compute the result of the operation on `lhs` and `rhs`.
-    pub fn apply(&self, lhs: f64, rhs: f64) -> f64 {
-        match self {
-            Add => lhs + rhs,
-            Subtract => lhs - rhs,
-            Multiply => lhs * rhs,
-            Divide => lhs / rhs,
-            Pow => f64::powf(lhs, rhs),
-            Min => f64::min(lhs, rhs),
-            Max => f64::max(lhs, rhs),
-        }
-    }
-
     /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use BinaryOp::*;
         match self {
+            // Scalar
             Add => 0,
             Subtract => 1,
             Multiply => 2,
@@ -79,6 +84,15 @@ impl BinaryOp {
             Pow => 4,
             Min => 5,
             Max => 6,
+            // Boolean
+            Less => 7,
+            LessOrEqual => 8,
+            Equal => 9,
+            NotEqual => 10,
+            Greater => 11,
+            GreaterOrEqual => 12,
+            And => 13,
+            Or => 14,
         }
     }
 
@@ -86,6 +100,7 @@ impl BinaryOp {
     pub fn is_commutative(&self) -> bool {
         use BinaryOp::*;
         match self {
+            // Scalar
             Add => true,
             Subtract => false,
             Multiply => true,
@@ -93,35 +108,39 @@ impl BinaryOp {
             Pow => false,
             Min => true,
             Max => true,
+            // Boolean
+            Less => false,
+            LessOrEqual => false,
+            Equal => true,
+            NotEqual => true,
+            Greater => false,
+            GreaterOrEqual => false,
+            And => true,
+            Or => true,
         }
     }
 }
 
-use {BinaryOp::*, UnaryOp::*};
-
-/// Errors that can occur when constructing a tree.
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub enum TreeError {
-    /// Nodes are not in a valid topological order.
-    WrongNodeOrder,
-    /// A constant node contains NaN.
-    ContainsNaN,
-    /// Tree conains no nodes.
-    EmptyTree,
-    /// A mismatch between two dimensions, for example, during a reshape operation.
-    DimensionMismatch((usize, usize), (usize, usize)),
+impl TernaryOp {
+    pub fn index(&self) -> u8 {
+        use TernaryOp::*;
+        match self {
+            Choose => 0,
+        }
+    }
 }
+
+use {BinaryOp::*, TernaryOp::*, UnaryOp::*};
 
 /// Represents a node in an abstract syntax `Tree`.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
-    Constant(f64),
+    Constant(Value),
     Symbol(char),
     Unary(UnaryOp, usize),
     Binary(BinaryOp, usize, usize),
+    Ternary(TernaryOp, usize, usize, usize),
 }
-
-use std::ops::Range;
 
 use Node::*;
 
@@ -132,7 +151,7 @@ pub struct Tree {
     dims: (usize, usize),
 }
 
-pub type MaybeTree = Result<Tree, TreeError>;
+pub type MaybeTree = Result<Tree, Error>;
 
 const fn matsize(dims: (usize, usize)) -> usize {
     dims.0 * dims.1
@@ -140,7 +159,7 @@ const fn matsize(dims: (usize, usize)) -> usize {
 
 impl Tree {
     /// Create a tree representing a constant value.
-    pub fn constant(val: f64) -> Tree {
+    pub fn constant(val: Value) -> Tree {
         Tree {
             nodes: vec![Constant(val)],
             dims: (1, 1),
@@ -170,6 +189,7 @@ impl Tree {
                 Symbol(_) => n,
                 Unary(op, input) => Unary(op, input + offset),
                 Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
+                Ternary(op, a, b, c) => Ternary(op, a + offset, b + offset, c + offset),
             }));
         }
         // After we just concatenated the nodes as is. This rotation after the
@@ -179,9 +199,8 @@ impl Tree {
         return Ok(lhs);
     }
 
-    pub fn transposed(mut self) -> Tree {
-        self.dims = (self.dims.1, self.dims.0);
-        return self;
+    pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
+        return cond?.ternary_op(iftrue?, iffalse?, Choose);
     }
 
     /// The number of nodes in this tree.
@@ -204,7 +223,7 @@ impl Tree {
                 dims: (rows, cols),
             })
         } else {
-            Err(TreeError::DimensionMismatch(self.dims, (rows, cols)))
+            Err(Error::DimensionMismatch(self.dims, (rows, cols)))
         }
     }
 
@@ -259,45 +278,20 @@ impl Tree {
     /// no errors were found, or the first error encountered with the tree.
     pub fn validated(self) -> MaybeTree {
         if self.nodes.is_empty() {
-            return Err(TreeError::EmptyTree);
+            return Err(Error::EmptyTree);
         }
         for i in 0..self.nodes.len() {
             match &self.nodes[i] {
-                Constant(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
-                Unary(_, input) if *input >= i => return Err(TreeError::WrongNodeOrder),
-                Binary(_, l, r) if *l >= i || *r >= i => return Err(TreeError::WrongNodeOrder),
+                Constant(val) => match val {
+                    Scalar(val) if f64::is_nan(*val) => return Err(Error::ContainsNaN),
+                    _ => {} // Do nothing.
+                },
+                Unary(_, input) if *input >= i => return Err(Error::WrongNodeOrder),
+                Binary(_, l, r) if *l >= i || *r >= i => return Err(Error::WrongNodeOrder),
                 Symbol(_) | _ => {} // Do nothing.
             }
         }
         // Maybe add more checks later.
-        return Ok(self);
-    }
-
-    fn binary_op(mut self, other: Tree, op: BinaryOp) -> MaybeTree {
-        let nroots = self.num_roots();
-        let other_nroots = other.num_roots();
-        if nroots > other_nroots {
-            return other.binary_op(self, op);
-        } else if nroots != 1 && nroots != other_nroots {
-            return Err(TreeError::DimensionMismatch(self.dims, other.dims));
-        }
-        let offset: usize = self.nodes.len();
-        self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
-        self.nodes.extend(other.nodes.iter().map(|node| match node {
-            Constant(value) => Constant(*value),
-            Symbol(label) => Symbol(label.clone()),
-            Unary(op, input) => Unary(*op, *input + offset),
-            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
-        }));
-        if nroots == 1 {
-            for r in other.root_indices() {
-                self.nodes.push(Binary(op, offset - 1, r + offset));
-            }
-        } else {
-            for (l, r) in ((offset - nroots)..offset).zip(other.root_indices()) {
-                self.nodes.push(Binary(op, l, r + offset));
-            }
-        }
         return Ok(self);
     }
 
@@ -307,88 +301,163 @@ impl Tree {
         }
         return Ok(self);
     }
+
+    fn binary_op(mut self, other: Tree, op: BinaryOp) -> MaybeTree {
+        let nroots = self.num_roots();
+        let other_nroots = other.num_roots();
+        if nroots > other_nroots {
+            return other.binary_op(self, op);
+        } else if nroots != 1 && nroots != other_nroots {
+            return Err(Error::DimensionMismatch(self.dims, other.dims));
+        }
+        self.nodes
+            .reserve(self.nodes.len() + other.nodes.len() + usize::max(nroots, other_nroots));
+        let offset = self.push_nodes(&other);
+        if nroots == 1 {
+            let root = offset - 1;
+            for r in other.root_indices() {
+                self.nodes.push(Binary(op, root, r + offset));
+            }
+        } else {
+            for (l, r) in ((offset - nroots)..offset).zip(other.root_indices()) {
+                self.nodes.push(Binary(op, l, r + offset));
+            }
+        }
+        return Ok(self);
+    }
+
+    fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> MaybeTree {
+        let anroots = a.num_roots();
+        let bnroots = b.num_roots();
+        if anroots != bnroots {
+            return Err(Error::DimensionMismatch(a.dims, b.dims));
+        }
+        let nroots = self.num_roots();
+        if nroots != 1 && nroots != anroots {
+            return Err(Error::DimensionMismatch(self.dims, a.dims));
+        }
+        self.nodes
+            .reserve(self.nodes.len() + a.nodes.len() + b.nodes.len() + 1);
+        let a_offset = self.push_nodes(&a);
+        let b_offset = self.push_nodes(&b);
+        if nroots == 1 {
+            let root = a_offset - 1;
+            for (ar, br) in a.root_indices().zip(b.root_indices()) {
+                self.nodes
+                    .push(Ternary(op, root, ar + a_offset, br + b_offset));
+            }
+        } else {
+            for (r, (ar, br)) in self
+                .root_indices()
+                .zip(a.root_indices().zip(b.root_indices()))
+            {
+                self.nodes
+                    .push(Ternary(op, r, ar + a_offset, br + b_offset));
+            }
+        }
+        return Ok(self);
+    }
+
+    fn push_nodes(&mut self, other: &Tree) -> usize {
+        let offset: usize = self.nodes.len();
+        self.nodes.extend(other.nodes.iter().map(|node| match node {
+            Constant(value) => Constant(*value),
+            Symbol(label) => Symbol(label.clone()),
+            Unary(op, input) => Unary(*op, *input + offset),
+            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
+            Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
+        }));
+        return offset;
+    }
 }
 
-pub fn add(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Add)
+macro_rules! unary_func {
+    ($name:ident, $op:ident) => {
+        pub fn $name(tree: MaybeTree) -> MaybeTree {
+            tree?.unary_op($op)
+        }
+    };
 }
 
-pub fn sub(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Subtract)
+unary_func!(negate, Negate);
+unary_func!(sqrt, Sqrt);
+unary_func!(abs, Abs);
+unary_func!(sin, Sin);
+unary_func!(cos, Cos);
+unary_func!(tan, Tan);
+unary_func!(log, Log);
+unary_func!(exp, Exp);
+unary_func!(not, Not);
+
+macro_rules! binary_func {
+    ($name:ident, $op:ident) => {
+        pub fn $name(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
+            lhs?.binary_op(rhs?, $op)
+        }
+    };
 }
 
-pub fn mul(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Multiply)
+binary_func!(add, Add);
+binary_func!(sub, Subtract);
+binary_func!(mul, Multiply);
+binary_func!(div, Divide);
+binary_func!(pow, Pow);
+binary_func!(min, Min);
+binary_func!(max, Max);
+binary_func!(less, Less);
+binary_func!(greater, Greater);
+binary_func!(equals, Equal);
+binary_func!(neq, NotEqual);
+binary_func!(leq, LessOrEqual);
+binary_func!(geq, GreaterOrEqual);
+binary_func!(and, And);
+binary_func!(or, Or);
+
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Scalar(value)
+    }
 }
 
-pub fn div(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Divide)
+impl From<i32> for Value {
+    fn from(value: i32) -> Self {
+        Scalar(value as f64)
+    }
 }
 
-/// Construct a tree that represents raising `base` to the power of
-/// `exponent`.
-pub fn pow(base: MaybeTree, exponent: MaybeTree) -> MaybeTree {
-    base?.binary_op(exponent?, Pow)
-}
-
-/// Construct a tree that represents the smaller of `lhs` and `rhs`.
-pub fn min(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Min)
-}
-
-/// Construct a tree that represents the larger of `lhs` and `rhs`.
-pub fn max(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Max)
-}
-
-pub fn negate(tree: MaybeTree) -> MaybeTree {
-    tree?.unary_op(Negate)
-}
-
-/// Construct a tree representing the square root of `x`.
-pub fn sqrt(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Sqrt)
-}
-
-/// Construct a tree representing the absolute value of `x`.
-pub fn abs(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Abs)
-}
-
-/// Construct a tree representing the sine of `x`.
-pub fn sin(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Sin)
-}
-
-/// Construct a tree representing the cosine of `x`.
-pub fn cos(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Cos)
-}
-
-/// Construct a tree representing the tangent of 'x'.
-pub fn tan(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Tan)
-}
-
-/// Construct a tree representing the natural logarithm of `x`.
-pub fn log(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Log)
-}
-
-/// Construct a tree representing `e` raised to the power of `x`.
-pub fn exp(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Exp)
+impl From<bool> for Value {
+    fn from(value: bool) -> Self {
+        Bool(value)
+    }
 }
 
 impl From<f64> for Tree {
     fn from(value: f64) -> Self {
-        return Self::constant(value);
+        Self::constant(Scalar(value))
+    }
+}
+
+impl From<bool> for Tree {
+    fn from(value: bool) -> Self {
+        Self::constant(Bool(value))
     }
 }
 
 impl From<char> for Tree {
     fn from(c: char) -> Self {
         return Self::symbol(c);
+    }
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => l.partial_cmp(r),
+            (Bool(_), Scalar(_)) => Some(Less),
+            (Scalar(_), Bool(_)) => Some(Greater),
+            (Scalar(l), Scalar(r)) => l.partial_cmp(r),
+        }
     }
 }
 
@@ -399,35 +468,44 @@ impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering::*;
         match (self, other) {
-            // Constant
+            // Scalar
             (Constant(a), Constant(b)) => a.partial_cmp(b),
             (Constant(_), Symbol(_)) => Some(Less),
             (Constant(_), Unary(..)) => Some(Less),
             (Constant(_), Binary(..)) => Some(Less),
+            (Constant(_), Ternary(..)) => Some(Less),
             // Symbol
             (Symbol(_), Constant(_)) => Some(Greater),
             (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
             (Symbol(_), Unary(..)) => Some(Less),
             (Symbol(_), Binary(..)) => Some(Less),
+            (Symbol(_), Ternary(..)) => Some(Less),
             // Unary
             (Unary(..), Constant(_)) => Some(Greater),
             (Unary(..), Symbol(_)) => Some(Greater),
             (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
             (Unary(..), Binary(..)) => Some(Less),
+            (Unary(..), Ternary(..)) => Some(Less),
             // Binary
             (Binary(..), Constant(_)) => Some(Greater),
             (Binary(..), Symbol(_)) => Some(Greater),
             (Binary(..), Unary(..)) => Some(Greater),
             (Binary(op1, ..), Binary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
+            (Binary(..), Ternary(..)) => Some(Less),
+            // Ternary
+            (Ternary(..), Constant(_)) => Some(Greater),
+            (Ternary(..), Symbol(_)) => Some(Greater),
+            (Ternary(..), Unary(_, _)) => Some(Greater),
+            (Ternary(..), Binary(_, _, _)) => Some(Greater),
+            (Ternary(op1, ..), Ternary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::deftree;
-
     use super::*;
+    use crate::deftree;
 
     #[test]
     fn t_element_wise_unary_op() {
@@ -435,7 +513,7 @@ mod test {
         assert_eq!(
             p.nodes,
             vec![
-                Constant(2.),
+                Constant(Scalar(2.)),
                 Symbol('x'),
                 Symbol('y'),
                 Binary(Multiply, 0, 1),
@@ -449,7 +527,7 @@ mod test {
         // Matrix and a scalar.
         let tree = deftree!(* 2 (concat x y z)).unwrap();
         let expected = vec![
-            Constant(2.),
+            Constant(Scalar(2.)),
             Symbol('x'),
             Symbol('y'),
             Symbol('z'),
@@ -499,14 +577,14 @@ mod test {
                 Tree::concat(Tree::concat(Ok('x'.into()), Ok('y'.into())), Ok('z'.into())),
                 Tree::concat(Ok('a'.into()), Ok('b'.into())),
             ),
-            Err(TreeError::DimensionMismatch((2, 1), (3, 1)))
+            Err(Error::DimensionMismatch((2, 1), (3, 1)))
         );
         matches!(
             mul(
                 Tree::concat(Ok('a'.into()), Ok('b'.into())),
                 Tree::concat(Ok('x'.into()), Tree::concat(Ok('y'.into()), Ok('z'.into()))),
             ),
-            Err(TreeError::DimensionMismatch((2, 1), (3, 1)))
+            Err(Error::DimensionMismatch((2, 1), (3, 1)))
         );
     }
 
@@ -523,7 +601,41 @@ mod test {
         assert_eq!(mat.dims(), (9, 1));
         matches!(
             mat.reshape(7, 3),
-            Err(TreeError::DimensionMismatch((9, 1), (7, 3)))
+            Err(Error::DimensionMismatch((9, 1), (7, 3)))
+        );
+    }
+
+    #[test]
+    fn t_choose_greater() {
+        let tree = deftree!(if (> x 0) x (- x)).unwrap();
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Symbol('x'),
+                Constant(Scalar(0.0)),
+                Binary(Greater, 0, 1),
+                Symbol('x'),
+                Symbol('x'),
+                Unary(Negate, 4),
+                Ternary(Choose, 2, 3, 5)
+            ]
+        );
+    }
+
+    #[test]
+    fn t_choose_geq() {
+        let tree = deftree!(if (>= x 0) x (- x)).unwrap();
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Symbol('x'),
+                Constant(Scalar(0.0)),
+                Binary(GreaterOrEqual, 0, 1),
+                Symbol('x'),
+                Symbol('x'),
+                Unary(Negate, 4),
+                Ternary(Choose, 2, 3, 5)
+            ]
         );
     }
 }

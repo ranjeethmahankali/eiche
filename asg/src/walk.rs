@@ -125,6 +125,10 @@ impl<'a> DepthIterator<'a> {
                     }
                 }
             }
+            Ternary(..) => {
+                // There might be ternary ops in the future that are order
+                // agnostic. That is not the case right now.
+            }
         }
     }
 
@@ -168,6 +172,14 @@ impl<'a> Iterator for DepthIterator<'a> {
                 for child in children {
                     self.walker.stack.push((child, Some(index)));
                 }
+                self.last_pushed = children.len();
+            }
+            Ternary(_opp, a, b, c) => {
+                // Push in reverse order because last in first out.
+                let children = [*c, *b, *a];
+                self.walker
+                    .stack
+                    .extend(children.iter().map(|child| (*child, Some(index))));
                 self.last_pushed = children.len();
             }
         }

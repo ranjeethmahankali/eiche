@@ -2,20 +2,13 @@ use std::ops::Range;
 
 use crate::{
     dedup::Deduplicater,
+    error::Error,
     fold::fold_nodes,
     prune::Pruner,
-    sort::{TopoSorter, TopologicalError},
+    sort::TopoSorter,
     template::{get_templates, Template},
-    tree::{Node, Tree, TreeError},
+    tree::{MaybeTree, Node, Node::*, Tree},
 };
-
-#[derive(Debug)]
-pub enum MutationError {
-    InvalidCapture,
-    UnboundSymbol,
-    InvalidTopology(TopologicalError),
-    TreeCreationError(TreeError),
-}
 
 pub struct Mutations<'a> {
     tree: &'a Tree,
@@ -34,7 +27,7 @@ impl<'a> Mutations<'a> {
 }
 
 impl<'a> Iterator for Mutations<'a> {
-    type Item = Result<Tree, MutationError>;
+    type Item = Result<Tree, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let templates = get_templates();
@@ -99,21 +92,16 @@ impl TemplateCapture {
         &mut self,
         mut tree: Tree,
         newroots: Option<Range<usize>>,
-    ) -> Result<Tree, MutationError> {
+    ) -> MaybeTree {
         let root_indices = match newroots {
             Some(roots) => roots,
             None => tree.root_indices(),
         };
-        let root_indices = self
-            .topo_sorter
-            .run(tree.nodes_mut(), root_indices)
-            .map_err(|e| MutationError::InvalidTopology(e))?;
-        fold_nodes(tree.nodes_mut());
+        let root_indices = self.topo_sorter.run(tree.nodes_mut(), root_indices)?;
+        fold_nodes(tree.nodes_mut())?;
         self.deduper.run(tree.nodes_mut());
         self.pruner.run(tree.nodes_mut(), root_indices);
-        return tree
-            .validated()
-            .map_err(|e| MutationError::TreeCreationError(e));
+        return tree.validated();
     }
 
     fn bind(&mut self, label: char, index: usize) -> bool {
@@ -139,8 +127,7 @@ impl TemplateCapture {
         self.bindings.truncate(state);
     }
 
-    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
-        use crate::tree::Node::*;
+    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, Error> {
         let mut tree = tree.clone();
         let root_indices = tree.root_indices();
         let num_nodes = tree.nodes().len();
@@ -149,14 +136,14 @@ impl TemplateCapture {
         self.node_map.resize(pong.len(), 0);
         let oldroot = match self.node_index {
             Some(i) => i,
-            None => return Err(MutationError::InvalidCapture),
+            None => return Err(Error::InvalidTemplateCapture),
         };
         for ni in 0..pong.len() {
             match pong.node(ni) {
                 Constant(val) => self.add_node(tree.nodes_mut(), ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
-                    None => return Err(MutationError::UnboundSymbol),
+                    None => return Err(Error::UnboundTemplateSymbol),
                 },
                 Unary(op, input) => {
                     self.add_node(tree.nodes_mut(), ni, Unary(*op, self.node_map[*input]))
@@ -165,6 +152,11 @@ impl TemplateCapture {
                     tree.nodes_mut(),
                     ni,
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
+                ),
+                Ternary(op, a, b, c) => self.add_node(
+                    tree.nodes_mut(),
+                    ni,
+                    Ternary(*op, self.node_map[*a], self.node_map[*b], self.node_map[*c]),
                 ),
             }
             if pong.root_indices().contains(&ni) {
@@ -192,6 +184,17 @@ impl TemplateCapture {
                                     }
                                     if *rhs == newroot {
                                         *rhs = oldroot;
+                                    }
+                                }
+                                Ternary(_, a, b, c) => {
+                                    if *a == newroot {
+                                        *a = oldroot;
+                                    }
+                                    if *b == newroot {
+                                        *b = oldroot;
+                                    }
+                                    if *c == newroot {
+                                        *c = oldroot;
                                     }
                                 }
                             }
@@ -228,18 +231,18 @@ impl TemplateCapture {
         commute: bool,
     ) -> (bool, bool) {
         match (ltree.node(li), rtree.node(ri)) {
-            (Node::Constant(v1), Node::Constant(v2)) => (v1 == v2, false),
-            (Node::Constant(_), _) => return (false, false),
-            (Node::Symbol(label), _) => return (self.bind(*label, ri), false),
-            (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
+            (Constant(v1), Constant(v2)) => (v1 == v2, false),
+            (Constant(_), _) => return (false, false),
+            (Symbol(label), _) => return (self.bind(*label, ri), false),
+            (Unary(lop, input1), Unary(rop, input2)) => {
                 if lop != rop {
                     return (false, false);
                 } else {
                     return self.match_node_commute(*input1, ltree, *input2, rtree, commute);
                 }
             }
-            (Node::Unary(..), _) => return (false, false),
-            (Node::Binary(lop, mut l1, mut r1), Node::Binary(rop, l2, r2)) => {
+            (Unary(..), _) => return (false, false),
+            (Binary(lop, mut l1, mut r1), Binary(rop, l2, r2)) => {
                 if lop != rop {
                     return (false, false);
                 }
@@ -265,7 +268,18 @@ impl TemplateCapture {
                     lop.is_commutative() || comm_left || comm_right,
                 );
             }
-            (Node::Binary(..), _) => return (false, false),
+            (Binary(..), _) => return (false, false),
+            (Ternary(lop, la, lb, lc), Ternary(rop, ra, rb, rc)) => {
+                if lop != rop {
+                    return (false, false);
+                } else {
+                    let (amatch, acomm) = self.match_node_commute(*la, ltree, *ra, rtree, commute);
+                    let (bmatch, bcomm) = self.match_node_commute(*lb, ltree, *rb, rtree, commute);
+                    let (cmatch, ccomm) = self.match_node_commute(*lc, ltree, *rc, rtree, commute);
+                    return (amatch && bmatch && cmatch, acomm || bcomm || ccomm);
+                }
+            }
+            (Ternary(..), _) => return (false, false),
         }
     }
 }

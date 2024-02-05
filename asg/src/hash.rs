@@ -1,4 +1,4 @@
-use crate::tree::{Node, Node::*, Tree};
+use crate::tree::{Node, Node::*, Tree, Value::*};
 
 pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     use std::collections::hash_map::DefaultHasher;
@@ -8,7 +8,10 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     hashbuf.resize(nodes.len(), 0);
     for index in 0..nodes.len() {
         let hash: u64 = match nodes[index] {
-            Constant(value) => value.to_bits().into(),
+            Constant(value) => match value {
+                Scalar(value) => value.to_bits().into(),
+                Bool(value) => value as u64,
+            },
             Symbol(label) => {
                 let mut s: DefaultHasher = Default::default();
                 label.hash(&mut s);
@@ -33,6 +36,16 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
                 op.hash(&mut s);
                 hash1.hash(&mut s);
                 hash2.hash(&mut s);
+                s.finish()
+            }
+            Ternary(op, a, b, c) => {
+                // There are not order agnostic ternary operators at this time.
+                // Reconsider below code in the future if you add order agnostic ternary ops.
+                let mut s: DefaultHasher = Default::default();
+                op.hash(&mut s);
+                hashbuf[a].hash(&mut s);
+                hashbuf[b].hash(&mut s);
+                hashbuf[c].hash(&mut s);
                 s.finish()
             }
         };

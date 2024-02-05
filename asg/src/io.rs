@@ -1,7 +1,16 @@
 use crate::{
-    tree::{Node, Node::*, Tree},
+    tree::{Node, Node::*, Tree, Value, Value::*},
     walk::{DepthWalker, NodeOrdering},
 };
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Scalar(val) => write!(f, "{}", val),
+            Bool(val) => write!(f, "{}", val),
+        }
+    }
+}
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -84,6 +93,7 @@ impl std::fmt::Display for Node {
             Symbol(label) => write!(f, "Symbol({})", label),
             Unary(op, input) => write!(f, "{:?}({})", op, input),
             Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
+            Ternary(op, a, b, c) => write!(f, "{:?}({}, {}, {})", op, a, b, c),
         }
     }
 }
