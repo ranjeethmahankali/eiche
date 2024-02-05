@@ -36,7 +36,7 @@ macro_rules! deftree {
     ($binary_op:ident $a:tt $b:tt) => {
         $crate::tree::$binary_op($crate::deftree!($a), $crate::deftree!($b))
     };
-    // Negate operator
+    // Operators.
     (- $a:tt) => {
         $crate::tree::negate($crate::deftree!($a))
     };
@@ -52,9 +52,23 @@ macro_rules! deftree {
     (* $a:tt $b:tt) => {
         $crate::tree::mul($crate::deftree!($a), $crate::deftree!($b))
     };
-    // Binary ops with operators
-    ($op:tt $lhs:tt $rhs:tt) => {
-        $crate::deftree!($lhs) $op $crate::deftree!($rhs)
+    (< $a:tt $b:tt) => {
+      $crate::tree::less($crate::deftree!($a), $crate::deftree!($b))
+    };
+    (<= $a:tt $b:tt) => {
+      $crate::tree::leq($crate::deftree!($a), $crate::deftree!($b))
+    };
+    (== $a:tt $b:tt) => {
+      $crate::tree::equals($crate::deftree!($a), $crate::deftree!($b))
+    };
+    (!= $a:tt $b:tt) => {
+      $crate::tree::neq($crate::deftree!($a), $crate::deftree!($b))
+    };
+    (> $a:tt $b:tt) => {
+      $crate::tree::greater($crate::deftree!($a), $crate::deftree!($b))
+    };
+    (>= $a:tt $b:tt) => {
+      $crate::tree::geq($crate::deftree!($a), $crate::deftree!($b))
     };
     // Constants.
     (const $tt:expr) => {{

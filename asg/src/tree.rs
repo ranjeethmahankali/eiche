@@ -371,76 +371,47 @@ impl Tree {
     }
 }
 
-pub fn add(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Add)
+macro_rules! unary_func {
+    ($name:ident, $op:ident) => {
+        pub fn $name(tree: MaybeTree) -> MaybeTree {
+            tree?.unary_op($op)
+        }
+    };
 }
 
-pub fn sub(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Subtract)
+unary_func!(negate, Negate);
+unary_func!(sqrt, Sqrt);
+unary_func!(abs, Abs);
+unary_func!(sin, Sin);
+unary_func!(cos, Cos);
+unary_func!(tan, Tan);
+unary_func!(log, Log);
+unary_func!(exp, Exp);
+unary_func!(not, Not);
+
+macro_rules! binary_func {
+    ($name:ident, $op:ident) => {
+        pub fn $name(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
+            lhs?.binary_op(rhs?, $op)
+        }
+    };
 }
 
-pub fn mul(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Multiply)
-}
-
-pub fn div(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Divide)
-}
-
-/// Construct a tree that represents raising `base` to the power of
-/// `exponent`.
-pub fn pow(base: MaybeTree, exponent: MaybeTree) -> MaybeTree {
-    base?.binary_op(exponent?, Pow)
-}
-
-/// Construct a tree that represents the smaller of `lhs` and `rhs`.
-pub fn min(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Min)
-}
-
-/// Construct a tree that represents the larger of `lhs` and `rhs`.
-pub fn max(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
-    lhs?.binary_op(rhs?, Max)
-}
-
-pub fn negate(tree: MaybeTree) -> MaybeTree {
-    tree?.unary_op(Negate)
-}
-
-/// Construct a tree representing the square root of `x`.
-pub fn sqrt(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Sqrt)
-}
-
-/// Construct a tree representing the absolute value of `x`.
-pub fn abs(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Abs)
-}
-
-/// Construct a tree representing the sine of `x`.
-pub fn sin(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Sin)
-}
-
-/// Construct a tree representing the cosine of `x`.
-pub fn cos(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Cos)
-}
-
-/// Construct a tree representing the tangent of 'x'.
-pub fn tan(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Tan)
-}
-
-/// Construct a tree representing the natural logarithm of `x`.
-pub fn log(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Log)
-}
-
-/// Construct a tree representing `e` raised to the power of `x`.
-pub fn exp(x: MaybeTree) -> MaybeTree {
-    x?.unary_op(Exp)
-}
+binary_func!(add, Add);
+binary_func!(sub, Subtract);
+binary_func!(mul, Multiply);
+binary_func!(div, Divide);
+binary_func!(pow, Pow);
+binary_func!(min, Min);
+binary_func!(max, Max);
+binary_func!(less, Less);
+binary_func!(greater, Greater);
+binary_func!(equals, Equal);
+binary_func!(neq, NotEqual);
+binary_func!(leq, LessOrEqual);
+binary_func!(geq, GreaterOrEqual);
+binary_func!(and, And);
+binary_func!(or, Or);
 
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
@@ -632,5 +603,10 @@ mod test {
             mat.reshape(7, 3),
             Err(Error::DimensionMismatch((9, 1), (7, 3)))
         );
+    }
+
+    #[test]
+    fn t_choose_1() {
+        // let tree = deftree!(if (> x 0) x (- x));
     }
 }
