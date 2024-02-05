@@ -1,15 +1,10 @@
 use std::ops::Range;
 
 use crate::{
+    error::Error,
     tree::{Node, Node::*},
     walk::{DepthWalker, NodeOrdering},
 };
-
-#[derive(Debug)]
-pub enum TopologicalError {
-    CyclicGraph,
-    MisplacedTreeRoots,
-}
 
 /// Topological sorter.
 ///
@@ -45,7 +40,7 @@ impl TopoSorter {
         &mut self,
         nodes: &mut Vec<Node>,
         root_indices: Range<usize>,
-    ) -> Result<Range<usize>, TopologicalError> {
+    ) -> Result<Range<usize>, Error> {
         // Compute depths of all nodes.
         self.depths.clear();
         self.depths.resize(nodes.len(), 0);
@@ -62,7 +57,7 @@ impl TopoSorter {
                     // cycle many times to reach this
                     // condition. Implement proper cycle detection
                     // later.
-                    return Err(TopologicalError::CyclicGraph);
+                    return Err(Error::CyclicGraph);
                 }
             }
         }
@@ -84,7 +79,7 @@ impl TopoSorter {
         }
         let newroots = match newroots {
             Some(val) => val,
-            None => return Err(TopologicalError::MisplacedTreeRoots),
+            None => return Err(Error::InvalidTopology),
         };
         // Gather the sorted nodes.
         self.sorted.clear();
@@ -95,6 +90,9 @@ impl TopoSorter {
                     Symbol(label) => Symbol(label),
                     Unary(op, input) => Unary(op, self.index_map[input]),
                     Binary(op, lhs, rhs) => Binary(op, self.index_map[lhs], self.index_map[rhs]),
+                    Ternary(op, a, b, c) => {
+                        Ternary(op, self.index_map[a], self.index_map[b], self.index_map[c])
+                    }
                 }
             }));
         // Swap the sorted nodes and the incoming nodes.
@@ -107,10 +105,7 @@ impl TopoSorter {
 mod test {
     use {
         super::*,
-        crate::{
-            sort::{TopoSorter, TopologicalError},
-            tree::{BinaryOp::*, UnaryOp::*},
-        },
+        crate::tree::{BinaryOp::*, UnaryOp::*, Value::*},
     };
 
     #[test]
@@ -125,12 +120,12 @@ mod test {
     #[test]
     fn t_topological_sorting_1() {
         let mut nodes = vec![
-            Symbol('x'),            // 0
-            Binary(Add, 0, 2),      // 1
-            Constant(2.245),        // 2
-            Binary(Multiply, 1, 5), // 3
-            Unary(Sqrt, 3),         // 4 - root
-            Symbol('y'),            // 5
+            Symbol('x'),             // 0
+            Binary(Add, 0, 2),       // 1
+            Constant(Scalar(2.245)), // 2
+            Binary(Multiply, 1, 5),  // 3
+            Unary(Sqrt, 3),          // 4 - root
+            Symbol('y'),             // 5
         ];
         let mut sorter = TopoSorter::new();
         let root = sorter.run(&mut nodes, 4..5).unwrap();
@@ -139,7 +134,7 @@ mod test {
             nodes,
             vec![
                 Symbol('x'),
-                Constant(2.245),
+                Constant(Scalar(2.245)),
                 Binary(Add, 0, 1),
                 Symbol('y'),
                 Binary(Multiply, 2, 3),
@@ -199,11 +194,11 @@ mod test {
             Binary(Add, 1, 3),      // 6
             Binary(Divide, 5, 6),   // 7
             Unary(Sqrt, 0),         // 8
-            Constant(2.0),          // 9
+            Constant(Scalar(2.0)),  // 9
         ];
         assert!(matches!(
             sorter.run(&mut nodes, 0..1),
-            Err(TopologicalError::CyclicGraph)
+            Err(Error::CyclicGraph)
         ));
     }
 
@@ -217,7 +212,7 @@ mod test {
             Symbol('y'),
             Binary(Multiply, 0, 3),
             Binary(Multiply, 0, 7),
-            Constant(1.0),
+            Constant(Scalar(1.0)),
             Binary(Add, 1, 3),
             Binary(Add, 2, 4),
         ];
@@ -233,7 +228,7 @@ mod test {
                 Binary(Multiply, 2, 0),
                 Binary(Multiply, 2, 1),
                 Binary(Multiply, 2, 3),
-                Constant(1.0),
+                Constant(Scalar(1.0)),
                 Binary(Add, 4, 5)
             ]
         );

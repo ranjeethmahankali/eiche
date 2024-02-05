@@ -2,20 +2,13 @@ use std::ops::Range;
 
 use crate::{
     dedup::Deduplicater,
+    error::Error,
     fold::fold_nodes,
     prune::Pruner,
-    sort::{TopoSorter, TopologicalError},
+    sort::TopoSorter,
     template::{get_templates, Template},
-    tree::{Node, Tree, TreeError},
+    tree::{MaybeTree, Node, Node::*, Tree},
 };
-
-#[derive(Debug)]
-pub enum MutationError {
-    InvalidCapture,
-    UnboundSymbol,
-    InvalidTopology(TopologicalError),
-    TreeCreationError(TreeError),
-}
 
 pub struct Mutations<'a> {
     tree: &'a Tree,
@@ -34,7 +27,7 @@ impl<'a> Mutations<'a> {
 }
 
 impl<'a> Iterator for Mutations<'a> {
-    type Item = Result<Tree, MutationError>;
+    type Item = Result<Tree, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let templates = get_templates();
@@ -99,21 +92,16 @@ impl TemplateCapture {
         &mut self,
         mut tree: Tree,
         newroots: Option<Range<usize>>,
-    ) -> Result<Tree, MutationError> {
+    ) -> MaybeTree {
         let root_indices = match newroots {
             Some(roots) => roots,
             None => tree.root_indices(),
         };
-        let root_indices = self
-            .topo_sorter
-            .run(tree.nodes_mut(), root_indices)
-            .map_err(|e| MutationError::InvalidTopology(e))?;
-        fold_nodes(tree.nodes_mut());
+        let root_indices = self.topo_sorter.run(tree.nodes_mut(), root_indices)?;
+        fold_nodes(tree.nodes_mut())?;
         self.deduper.run(tree.nodes_mut());
         self.pruner.run(tree.nodes_mut(), root_indices);
-        return tree
-            .validated()
-            .map_err(|e| MutationError::TreeCreationError(e));
+        return tree.validated();
     }
 
     fn bind(&mut self, label: char, index: usize) -> bool {
@@ -139,8 +127,7 @@ impl TemplateCapture {
         self.bindings.truncate(state);
     }
 
-    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, MutationError> {
-        use crate::tree::Node::*;
+    fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, Error> {
         let mut tree = tree.clone();
         let root_indices = tree.root_indices();
         let num_nodes = tree.nodes().len();
@@ -149,14 +136,14 @@ impl TemplateCapture {
         self.node_map.resize(pong.len(), 0);
         let oldroot = match self.node_index {
             Some(i) => i,
-            None => return Err(MutationError::InvalidCapture),
+            None => return Err(Error::InvalidTemplateCapture),
         };
         for ni in 0..pong.len() {
             match pong.node(ni) {
                 Constant(val) => self.add_node(tree.nodes_mut(), ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
-                    None => return Err(MutationError::UnboundSymbol),
+                    None => return Err(Error::UnboundTemplateSymbol),
                 },
                 Unary(op, input) => {
                     self.add_node(tree.nodes_mut(), ni, Unary(*op, self.node_map[*input]))
@@ -165,6 +152,11 @@ impl TemplateCapture {
                     tree.nodes_mut(),
                     ni,
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
+                ),
+                Ternary(op, a, b, c) => self.add_node(
+                    tree.nodes_mut(),
+                    ni,
+                    Ternary(*op, self.node_map[*a], self.node_map[*b], self.node_map[*c]),
                 ),
             }
             if pong.root_indices().contains(&ni) {
@@ -192,6 +184,17 @@ impl TemplateCapture {
                                     }
                                     if *rhs == newroot {
                                         *rhs = oldroot;
+                                    }
+                                }
+                                Ternary(_, a, b, c) => {
+                                    if *a == newroot {
+                                        *a = oldroot;
+                                    }
+                                    if *b == newroot {
+                                        *b = oldroot;
+                                    }
+                                    if *c == newroot {
+                                        *c = oldroot;
                                     }
                                 }
                             }
@@ -228,18 +231,18 @@ impl TemplateCapture {
         commute: bool,
     ) -> (bool, bool) {
         match (ltree.node(li), rtree.node(ri)) {
-            (Node::Constant(v1), Node::Constant(v2)) => (v1 == v2, false),
-            (Node::Constant(_), _) => return (false, false),
-            (Node::Symbol(label), _) => return (self.bind(*label, ri), false),
-            (Node::Unary(lop, input1), Node::Unary(rop, input2)) => {
+            (Constant(v1), Constant(v2)) => (v1 == v2, false),
+            (Constant(_), _) => return (false, false),
+            (Symbol(label), _) => return (self.bind(*label, ri), false),
+            (Unary(lop, input1), Unary(rop, input2)) => {
                 if lop != rop {
                     return (false, false);
                 } else {
                     return self.match_node_commute(*input1, ltree, *input2, rtree, commute);
                 }
             }
-            (Node::Unary(..), _) => return (false, false),
-            (Node::Binary(lop, mut l1, mut r1), Node::Binary(rop, l2, r2)) => {
+            (Unary(..), _) => return (false, false),
+            (Binary(lop, mut l1, mut r1), Binary(rop, l2, r2)) => {
                 if lop != rop {
                     return (false, false);
                 }
@@ -265,7 +268,18 @@ impl TemplateCapture {
                     lop.is_commutative() || comm_left || comm_right,
                 );
             }
-            (Node::Binary(..), _) => return (false, false),
+            (Binary(..), _) => return (false, false),
+            (Ternary(lop, la, lb, lc), Ternary(rop, ra, rb, rc)) => {
+                if lop != rop {
+                    return (false, false);
+                } else {
+                    let (amatch, acomm) = self.match_node_commute(*la, ltree, *ra, rtree, commute);
+                    let (bmatch, bcomm) = self.match_node_commute(*lb, ltree, *rb, rtree, commute);
+                    let (cmatch, ccomm) = self.match_node_commute(*lc, ltree, *rc, rtree, commute);
+                    return (amatch && bmatch && cmatch, acomm || bcomm || ccomm);
+                }
+            }
+            (Ternary(..), _) => return (false, false),
         }
     }
 }
@@ -293,9 +307,8 @@ mod test {
 
     #[test]
     fn t_match_with_dofs_1() {
-        let template = Template::from("add_zero", deftree!(+ x 0.), deftree!(x));
-        let two: Tree = (-2.0).into();
-        let tree = deftree!(+ 0 {two});
+        let template = Template::from("add_zero", deftree!(+ x 0.).unwrap(), deftree!(x).unwrap());
+        let tree = deftree!(+ 0 2).unwrap();
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 2));
@@ -306,12 +319,13 @@ mod test {
     fn t_match_with_dofs_2() {
         let template = Template::from(
             "fraction_rearrange",
-            deftree!(/ (+ a b) a),
-            deftree!(+ 1 (/ b a)),
+            deftree!(/ (+ a b) a).unwrap(),
+            deftree!(+ 1 (/ b a)).unwrap(),
         );
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let tree = deftree!(/ (+ p q) q)
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
@@ -325,12 +339,13 @@ mod test {
     fn t_match_with_dofs_3() {
         let template = Template::from(
             "test",
-            deftree!(/ (+ (+ a b) (+ c d)) (+ a b)),
-            deftree!(+ 1 (/ (+ c d) (+ a b))),
+            deftree!(/ (+ (+ a b) (+ c d)) (+ a b)).unwrap(),
+            deftree!(+ 1 (/ (+ c d) (+ a b))).unwrap(),
         );
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let tree = deftree!(/ (+ (+ p q) (+ r s)) (+ r s))
+            .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner);
@@ -361,14 +376,18 @@ mod test {
 
     #[test]
     fn t_match_distribute_mul() {
-        t_check_template("distribute_mul", deftree!(* 0.5 (+ (* x 2.5) (* x 1.5))), 6);
+        t_check_template(
+            "distribute_mul",
+            deftree!(* 0.5 (+ (* x 2.5) (* x 1.5))).unwrap(),
+            6,
+        );
     }
 
     #[test]
     fn t_match_min_of_sqrt() {
         t_check_template(
             "min_of_sqrt",
-            deftree!(+ 2.57 (* 1.23 (min (sqrt 2) (sqrt 3)))),
+            deftree!(+ 2.57 (* 1.23 (min (sqrt 2) (sqrt 3)))).unwrap(),
             6,
         );
     }
@@ -377,31 +396,39 @@ mod test {
     fn t_match_rearrange_frac() {
         t_check_template(
             "rearrange_frac",
-            deftree!(sqrt (log (* (/ x 2) (/ 2 x)))),
+            deftree!(sqrt (log (* (/ x 2) (/ 2 x)))).unwrap(),
             4,
         );
     }
 
     #[test]
     fn t_match_divide_by_self() {
-        t_check_template("divide_by_self", deftree!(+ 1 (/ p p)), 2);
+        t_check_template("divide_by_self", deftree!(+ 1 (/ p p)).unwrap(), 2);
     }
 
     #[test]
     fn t_match_distribute_pow_div() {
-        t_check_template("distribute_pow_div", deftree!(pow (pow (/ 2 3) 2) 2.5), 3);
+        t_check_template(
+            "distribute_pow_div",
+            deftree!(pow (pow (/ 2 3) 2) 2.5).unwrap(),
+            3,
+        );
     }
 
     #[test]
     fn t_match_distribute_pow_mul() {
-        t_check_template("distribute_pow_mul", deftree!(pow (pow (* 2 3) 2) 2.5), 3);
+        t_check_template(
+            "distribute_pow_mul",
+            deftree!(pow (pow (* 2 3) 2) 2.5).unwrap(),
+            3,
+        );
     }
 
     #[test]
     fn t_match_square_sqrt() {
         t_check_template(
             "square_sqrt",
-            deftree!(log (+ 1 (exp (pow (sqrt 3.2556) 2)))),
+            deftree!(log (+ 1 (exp (pow (sqrt 3.2556) 2)))).unwrap(),
             4,
         );
     }
@@ -410,21 +437,25 @@ mod test {
     fn t_match_sqrt_square() {
         t_check_template(
             "sqrt_square",
-            deftree!(log (+ 1 (exp (sqrt (pow 3.2345 2.))))),
+            deftree!(log (+ 1 (exp (sqrt (pow 3.2345 2.))))).unwrap(),
             4,
         );
     }
 
     #[test]
     fn t_match_square_abs() {
-        t_check_template("square_abs", deftree!(log (+ 1 (exp (pow (abs 2) 2.)))), 3);
+        t_check_template(
+            "square_abs",
+            deftree!(log (+ 1 (exp (pow (abs 2) 2.)))).unwrap(),
+            3,
+        );
     }
 
     #[test]
     fn t_match_mul_exponents() {
         t_check_template(
             "mul_exponents",
-            deftree!(log (+ 1 (exp (pow (pow x 3.) 2.)))),
+            deftree!(log (+ 1 (exp (pow (pow x 3.) 2.)))).unwrap(),
             5,
         );
     }
@@ -433,7 +464,7 @@ mod test {
     fn t_match_add_exponents() {
         t_check_template(
             "add_exponents",
-            deftree!(log (+ 1 (exp (* (pow (log x) 2) (pow (log x) 3))))),
+            deftree!(log (+ 1 (exp (* (pow (log x) 2) (pow (log x) 3))))).unwrap(),
             7,
         );
     }
@@ -442,26 +473,34 @@ mod test {
     fn t_match_add_frac() {
         t_check_template(
             "add_frac",
-            deftree!(log (+ 1 (exp (+ (/ 2 (sqrt (+ 2 x))) (/ 3 (sqrt (+ x 2))))))),
+            deftree!(log (+ 1 (exp (+ (/ 2 (sqrt (+ 2 x))) (/ 3 (sqrt (+ x 2))))))).unwrap(),
             8,
         );
     }
 
     #[test]
     fn t_match_min_expand() {
-        t_check_template("min_expand", deftree!(log (+ 1 (exp (min x 2)))), 3);
+        t_check_template(
+            "min_expand",
+            deftree!(log (+ 1 (exp (min x 2)))).unwrap(),
+            3,
+        );
     }
 
     #[test]
     fn t_match_max_expand() {
-        t_check_template("max_expand", deftree!(log (+ 1 (exp (max x 2)))), 3);
+        t_check_template(
+            "max_expand",
+            deftree!(log (+ 1 (exp (max x 2)))).unwrap(),
+            3,
+        );
     }
 
     #[test]
     fn t_match_min_of_sub_1() {
         t_check_template(
             "min_of_sub_1",
-            deftree!(log (+ 1 (exp (min (- x 2) (- x 3))))),
+            deftree!(log (+ 1 (exp (min (- x 2) (- x 3))))).unwrap(),
             6,
         );
     }
@@ -470,10 +509,10 @@ mod test {
     fn t_match_min_of_add_1() {
         const NAME: &str = "min_of_add_1";
         // Make sure all permutations work.
-        t_check_template(NAME, deftree!(min (+ x z) (+ x y)), 5);
-        t_check_template(NAME, deftree!(min (+ z x) (+ x y)), 5);
-        t_check_template(NAME, deftree!(min (+ z x) (+ y x)), 5);
-        t_check_template(NAME, deftree!(min (+ x z) (+ y x)), 5);
+        t_check_template(NAME, deftree!(min (+ x z) (+ x y)).unwrap(), 5);
+        t_check_template(NAME, deftree!(min (+ z x) (+ x y)).unwrap(), 5);
+        t_check_template(NAME, deftree!(min (+ z x) (+ y x)).unwrap(), 5);
+        t_check_template(NAME, deftree!(min (+ x z) (+ y x)).unwrap(), 5);
     }
 
     #[test]
@@ -498,20 +537,20 @@ mod test {
         // Ensure the same template capture can be used to mutate
         // multiple trees without having to reallocate.
         assert_one_match(
-            deftree!(/ (+ (* p x) (* p y)) (+ x y)),
-            deftree!(/ (* p (+ x y)) (+ x y)),
+            deftree!(/ (+ (* p x) (* p y)) (+ x y)).unwrap(),
+            deftree!(/ (* p (+ x y)) (+ x y)).unwrap(),
             &mut capture,
         );
         // Use same capture for a second set of trees.
         assert_one_match(
-            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
-            deftree!(log (+ 1 (exp (sqrt (min x y))))),
+            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))).unwrap(),
+            deftree!(log (+ 1 (exp (sqrt (min x y))))).unwrap(),
             &mut capture,
         );
         // Use the same capture on a third set of trees.
         assert_one_match(
-            deftree!(/ (* (pow a b) (pow b c)) (pow c a)),
-            deftree!(* (pow a b) (/ (pow b c) (pow c a))),
+            deftree!(/ (* (pow a b) (pow b c)) (pow c a)).unwrap(),
+            deftree!(* (pow a b) (/ (pow b c) (pow c a))).unwrap(),
             &mut capture,
         );
     }
@@ -554,111 +593,116 @@ mod test {
     #[test]
     fn t_mul_add() {
         check_mutations(
-            deftree!(/ (+ (* p x) (* p y)) (+ x y)),
-            deftree!(/ (* p (+ x y)) (+ x y)),
+            deftree!(/ (+ (* p x) (* p y)) (+ x y)).unwrap(),
+            deftree!(/ (* p (+ x y)) (+ x y)).unwrap(),
         );
     }
 
     #[test]
     fn t_min_sqrt() {
         check_mutations(
-            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))),
-            deftree!(log (+ 1 (exp (sqrt (min x y))))),
+            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))).unwrap(),
+            deftree!(log (+ 1 (exp (sqrt (min x y))))).unwrap(),
         );
     }
 
     #[test]
     fn t_rearrange_frac() {
         check_mutations(
-            deftree!(* (/ (+ a b) (pow x y)) (/ (+ x y) (pow a b))),
-            deftree!(* (/ (+ a b) (pow a b)) (/ (+ x y) (pow x y))),
+            deftree!(* (/ (+ a b) (pow x y)) (/ (+ x y) (pow a b))).unwrap(),
+            deftree!(* (/ (+ a b) (pow a b)) (/ (+ x y) (pow x y))).unwrap(),
         );
     }
 
     #[test]
     fn t_rearrage_mul_div() {
         check_mutations(
-            deftree!(/ (* (pow a b) (pow b c)) (pow c a)),
-            deftree!(* (pow b c) (/ (pow a b) (pow c a))),
+            deftree!(/ (* (pow a b) (pow b c)) (pow c a)).unwrap(),
+            deftree!(* (pow b c) (/ (pow a b) (pow c a))).unwrap(),
         );
         check_mutations(
-            deftree!(/ (* (pow a b) (pow b c)) (pow c a)),
-            deftree!(* (pow a b) (/ (pow b c) (pow c a))),
+            deftree!(/ (* (pow a b) (pow b c)) (pow c a)).unwrap(),
+            deftree!(* (pow a b) (/ (pow b c) (pow c a))).unwrap(),
         );
     }
 
     #[test]
     fn t_divide_by_self() {
-        check_mutations(deftree!(/ (+ x (pow y z)) (+ (pow y z) x)), deftree!(1));
+        check_mutations(
+            deftree!(/ (+ x (pow y z)) (+ (pow y z) x)).unwrap(),
+            deftree!(1).unwrap(),
+        );
     }
 
     #[test]
     fn t_distribute_pow_div() {
         check_mutations(
-            deftree!(pow (/ (* x y) (* 2 3)) 5),
-            deftree!(/ (pow (* x y) 5) (pow (* 2 3) 5)),
+            deftree!(pow (/ (* x y) (* 2 3)) 5).unwrap(),
+            deftree!(/ (pow (* x y) 5) (pow (* 2 3) 5)).unwrap(),
         );
     }
 
     #[test]
     fn t_distribute_pow_mul() {
         check_mutations(
-            deftree!(pow (* (* x y) (* 2 3)) 5),
-            deftree!(* (pow (* x y) 5) (pow (* 2 3) 5)),
+            deftree!(pow (* (* x y) (* 2 3)) 5).unwrap(),
+            deftree!(* (pow (* x y) 5) (pow (* 2 3) 5)).unwrap(),
         );
     }
 
     #[test]
     fn t_square_sqrt() {
         check_mutations(
-            deftree!(+ 1 (log (pow (sqrt (+ 2 (exp (/ x 2)))) 2))),
-            deftree!(+ 1 (log (+ 2 (exp (/ x 2))))),
+            deftree!(+ 1 (log (pow (sqrt (+ 2 (exp (/ x 2)))) 2))).unwrap(),
+            deftree!(+ 1 (log (+ 2 (exp (/ x 2))))).unwrap(),
         );
     }
 
     #[test]
     fn t_sqrt_square() {
         check_mutations(
-            deftree!(+ 1 (log (sqrt (pow (+ 2 (exp (/ x 2))) 2)))),
-            deftree!(+ 1 (log (abs (+ 2 (exp (/ x 2)))))),
+            deftree!(+ 1 (log (sqrt (pow (+ 2 (exp (/ x 2))) 2)))).unwrap(),
+            deftree!(+ 1 (log (abs (+ 2 (exp (/ x 2)))))).unwrap(),
         );
     }
 
     #[test]
     fn t_square_abs() {
         check_mutations(
-            deftree!(exp (+ 1 (log (pow (abs (* p q)) 2)))),
-            deftree!(exp (+ 1 (log (pow (* p q) 2)))),
+            deftree!(exp (+ 1 (log (pow (abs (* p q)) 2)))).unwrap(),
+            deftree!(exp (+ 1 (log (pow (* p q) 2)))).unwrap(),
         );
     }
 
     #[test]
     fn t_mul_exponents() {
         check_mutations(
-            deftree!(exp (+ 1 (log (pow (pow p (+ 2 m)) (/ q r))))),
-            deftree!(exp (+ 1 (log (pow p (* (+ 2 m) (/ q r)))))),
+            deftree!(exp (+ 1 (log (pow (pow p (+ 2 m)) (/ q r))))).unwrap(),
+            deftree!(exp (+ 1 (log (pow p (* (+ 2 m) (/ q r)))))).unwrap(),
         );
     }
 
     #[test]
     fn t_add_exponents() {
         check_mutations(
-            deftree!(exp (+ 1 (log (* (pow p (+ 2 m)) (pow p (/ q r)))))),
-            deftree!(exp (+ 1 (log (pow p (+ (+ 2 m) (/ q r)))))),
+            deftree!(exp (+ 1 (log (* (pow p (+ 2 m)) (pow p (/ q r)))))).unwrap(),
+            deftree!(exp (+ 1 (log (pow p (+ (+ 2 m) (/ q r)))))).unwrap(),
         );
     }
 
     #[test]
     fn t_binomial_square() {
         check_mutations(
-            deftree!(pow (+ (log (+ a 1)) (log (+ b 1))) 2.),
+            deftree!(pow (+ (log (+ a 1)) (log (+ b 1))) 2.).unwrap(),
             deftree!(+ (+ (pow (log (+ a 1)) 2.) (pow (log (+ b 1)) 2.))
-                     (* 2. (* (log (+ a 1)) (log (+ b 1))))),
+                     (* 2. (* (log (+ a 1)) (log (+ b 1)))))
+            .unwrap(),
         );
         check_mutations(
-            deftree!(pow (- (log (+ a 1)) (log (+ b 1))) 2.),
+            deftree!(pow (- (log (+ a 1)) (log (+ b 1))) 2.).unwrap(),
             deftree!(- (+ (pow (log (+ a 1)) 2.) (pow (log (+ b 1)) 2.))
-                     (* 2. (* (log (+ a 1)) (log (+ b 1))))),
+                     (* 2. (* (log (+ a 1)) (log (+ b 1)))))
+            .unwrap(),
         );
     }
 
@@ -666,9 +710,13 @@ mod test {
     fn t_mutate_concat() {
         check_mutations(
             deftree!(concat (+ (* p x) (* p y)) 1.)
+                .unwrap()
                 .reshape(1, 2)
                 .unwrap(),
-            deftree!(concat (* p (+ x y)) 1.).reshape(1, 2).unwrap(),
+            deftree!(concat (* p (+ x y)) 1.)
+                .unwrap()
+                .reshape(1, 2)
+                .unwrap(),
         );
     }
 }

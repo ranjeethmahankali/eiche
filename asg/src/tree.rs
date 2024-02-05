@@ -1,6 +1,17 @@
+use crate::error::Error;
+use std::ops::Range;
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum Value {
+    Bool(bool),
+    Scalar(f64),
+}
+use Value::*;
+
 /// Represents an operation with one input.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum UnaryOp {
+    // Scalar
     Negate,
     Sqrt,
     Abs,
@@ -9,11 +20,14 @@ pub enum UnaryOp {
     Tan,
     Log,
     Exp,
+    // Boolean
+    Not,
 }
 
 /// Represents an operation with two inputs.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum BinaryOp {
+    // Scalar
     Add,
     Subtract,
     Multiply,
@@ -21,27 +35,28 @@ pub enum BinaryOp {
     Pow,
     Min,
     Max,
+    // Boolean
+    Less,
+    LessOrEqual,
+    Equal,
+    NotEqual,
+    Greater,
+    GreaterOrEqual,
+    And,
+    Or,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+pub enum TernaryOp {
+    Choose,
 }
 
 impl UnaryOp {
-    /// Compute the result of the operation on `value`.
-    pub fn apply(&self, value: f64) -> f64 {
-        match self {
-            Negate => -value,
-            Sqrt => f64::sqrt(value),
-            Abs => f64::abs(value),
-            Sin => f64::sin(value),
-            Cos => f64::cos(value),
-            Tan => f64::tan(value),
-            Log => f64::log(value, std::f64::consts::E),
-            Exp => f64::exp(value),
-        }
-    }
-
     /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use UnaryOp::*;
         match self {
+            // Scalar
             Negate => 0,
             Sqrt => 1,
             Abs => 2,
@@ -50,28 +65,18 @@ impl UnaryOp {
             Tan => 5,
             Log => 6,
             Exp => 7,
+            // Boolean
+            Not => 8,
         }
     }
 }
 
 impl BinaryOp {
-    /// Compute the result of the operation on `lhs` and `rhs`.
-    pub fn apply(&self, lhs: f64, rhs: f64) -> f64 {
-        match self {
-            Add => lhs + rhs,
-            Subtract => lhs - rhs,
-            Multiply => lhs * rhs,
-            Divide => lhs / rhs,
-            Pow => f64::powf(lhs, rhs),
-            Min => f64::min(lhs, rhs),
-            Max => f64::max(lhs, rhs),
-        }
-    }
-
     /// The index of the variant for comparison and sorting.
     pub fn index(&self) -> u8 {
         use BinaryOp::*;
         match self {
+            // Scalar
             Add => 0,
             Subtract => 1,
             Multiply => 2,
@@ -79,6 +84,15 @@ impl BinaryOp {
             Pow => 4,
             Min => 5,
             Max => 6,
+            // Boolean
+            Less => 7,
+            LessOrEqual => 8,
+            Equal => 9,
+            NotEqual => 10,
+            Greater => 11,
+            GreaterOrEqual => 12,
+            And => 13,
+            Or => 14,
         }
     }
 
@@ -86,6 +100,7 @@ impl BinaryOp {
     pub fn is_commutative(&self) -> bool {
         use BinaryOp::*;
         match self {
+            // Scalar
             Add => true,
             Subtract => false,
             Multiply => true,
@@ -93,35 +108,39 @@ impl BinaryOp {
             Pow => false,
             Min => true,
             Max => true,
+            // Boolean
+            Less => false,
+            LessOrEqual => false,
+            Equal => true,
+            NotEqual => true,
+            Greater => false,
+            GreaterOrEqual => false,
+            And => true,
+            Or => true,
         }
     }
 }
 
-use {BinaryOp::*, UnaryOp::*};
-
-/// Errors that can occur when constructing a tree.
-#[derive(Debug)]
-pub enum TreeError {
-    /// Nodes are not in a valid topological order.
-    WrongNodeOrder,
-    /// A constant node contains NaN.
-    ContainsNaN,
-    /// Tree conains no nodes.
-    EmptyTree,
-    /// A mismatch between two dimensions, for example, during a reshape operation.
-    DimensionMismatch((usize, usize), (usize, usize)),
+impl TernaryOp {
+    pub fn index(&self) -> u8 {
+        use TernaryOp::*;
+        match self {
+            Choose => 0,
+        }
+    }
 }
+
+use {BinaryOp::*, TernaryOp::*, UnaryOp::*};
 
 /// Represents a node in an abstract syntax `Tree`.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Node {
-    Constant(f64),
+    Constant(Value),
     Symbol(char),
     Unary(UnaryOp, usize),
     Binary(BinaryOp, usize, usize),
+    Ternary(TernaryOp, usize, usize, usize),
 }
-
-use std::ops::Range;
 
 use Node::*;
 
@@ -132,13 +151,15 @@ pub struct Tree {
     dims: (usize, usize),
 }
 
+pub type MaybeTree = Result<Tree, Error>;
+
 const fn matsize(dims: (usize, usize)) -> usize {
     dims.0 * dims.1
 }
 
 impl Tree {
     /// Create a tree representing a constant value.
-    pub fn constant(val: f64) -> Tree {
+    pub fn constant(val: Value) -> Tree {
         Tree {
             nodes: vec![Constant(val)],
             dims: (1, 1),
@@ -153,7 +174,9 @@ impl Tree {
         }
     }
 
-    pub fn concat(mut lhs: Tree, mut rhs: Tree) -> Tree {
+    pub fn concat(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
+        let mut lhs = lhs?;
+        let mut rhs = rhs?;
         let (llen, lsize) = (lhs.len(), lhs.num_roots());
         let (rlen, rsize) = (rhs.len(), rhs.num_roots());
         {
@@ -166,18 +189,18 @@ impl Tree {
                 Symbol(_) => n,
                 Unary(op, input) => Unary(op, input + offset),
                 Binary(op, lhs, rhs) => Binary(op, lhs + offset, rhs + offset),
+                Ternary(op, a, b, c) => Ternary(op, a + offset, b + offset, c + offset),
             }));
         }
         // After we just concatenated the nodes as is. This rotation after the
         // concatenations makes sure all the root nodes are at the end.
         lhs.nodes[(llen - lsize)..(llen + rlen - rsize)].rotate_left(lsize);
         lhs.dims = (lsize + rsize, 1);
-        return lhs;
+        return Ok(lhs);
     }
 
-    pub fn transposed(mut self) -> Tree {
-        self.dims = (self.dims.1, self.dims.0);
-        return self;
+    pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
+        return cond?.ternary_op(iftrue?, iffalse?, Choose);
     }
 
     /// The number of nodes in this tree.
@@ -193,14 +216,14 @@ impl Tree {
         self.dims
     }
 
-    pub fn reshape(self, rows: usize, cols: usize) -> Result<Tree, TreeError> {
+    pub fn reshape(self, rows: usize, cols: usize) -> MaybeTree {
         if matsize((rows, cols)) == self.num_roots() {
             Ok(Tree {
                 nodes: self.nodes,
                 dims: (rows, cols),
             })
         } else {
-            Err(TreeError::DimensionMismatch(self.dims, (rows, cols)))
+            Err(Error::DimensionMismatch(self.dims, (rows, cols)))
         }
     }
 
@@ -253,15 +276,18 @@ impl Tree {
 
     /// Check the tree for errors and return a Result that contains the tree if
     /// no errors were found, or the first error encountered with the tree.
-    pub fn validated(self) -> Result<Tree, TreeError> {
+    pub fn validated(self) -> MaybeTree {
         if self.nodes.is_empty() {
-            return Err(TreeError::EmptyTree);
+            return Err(Error::EmptyTree);
         }
         for i in 0..self.nodes.len() {
             match &self.nodes[i] {
-                Constant(val) if f64::is_nan(*val) => return Err(TreeError::ContainsNaN),
-                Unary(_, input) if *input >= i => return Err(TreeError::WrongNodeOrder),
-                Binary(_, l, r) if *l >= i || *r >= i => return Err(TreeError::WrongNodeOrder),
+                Constant(val) => match val {
+                    Scalar(val) if f64::is_nan(*val) => return Err(Error::ContainsNaN),
+                    _ => {} // Do nothing.
+                },
+                Unary(_, input) if *input >= i => return Err(Error::WrongNodeOrder),
+                Binary(_, l, r) if *l >= i || *r >= i => return Err(Error::WrongNodeOrder),
                 Symbol(_) | _ => {} // Do nothing.
             }
         }
@@ -269,138 +295,169 @@ impl Tree {
         return Ok(self);
     }
 
-    fn binary_op(mut self, other: Tree, op: BinaryOp) -> Tree {
-        if self.num_roots() > other.num_roots() {
-            return other.binary_op(self, op);
+    fn unary_op(mut self, op: UnaryOp) -> MaybeTree {
+        for root in self.root_indices() {
+            self.nodes.push(Unary(op, root));
         }
+        return Ok(self);
+    }
+
+    fn binary_op(mut self, other: Tree, op: BinaryOp) -> MaybeTree {
+        let nroots = self.num_roots();
+        let other_nroots = other.num_roots();
+        if nroots > other_nroots {
+            return other.binary_op(self, op);
+        } else if nroots != 1 && nroots != other_nroots {
+            return Err(Error::DimensionMismatch(self.dims, other.dims));
+        }
+        self.nodes
+            .reserve(self.nodes.len() + other.nodes.len() + usize::max(nroots, other_nroots));
+        let offset = self.push_nodes(&other);
+        if nroots == 1 {
+            let root = offset - 1;
+            for r in other.root_indices() {
+                self.nodes.push(Binary(op, root, r + offset));
+            }
+        } else {
+            for (l, r) in ((offset - nroots)..offset).zip(other.root_indices()) {
+                self.nodes.push(Binary(op, l, r + offset));
+            }
+        }
+        return Ok(self);
+    }
+
+    fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> MaybeTree {
+        let anroots = a.num_roots();
+        let bnroots = b.num_roots();
+        if anroots != bnroots {
+            return Err(Error::DimensionMismatch(a.dims, b.dims));
+        }
+        let nroots = self.num_roots();
+        if nroots != 1 && nroots != anroots {
+            return Err(Error::DimensionMismatch(self.dims, a.dims));
+        }
+        self.nodes
+            .reserve(self.nodes.len() + a.nodes.len() + b.nodes.len() + 1);
+        let a_offset = self.push_nodes(&a);
+        let b_offset = self.push_nodes(&b);
+        if nroots == 1 {
+            let root = a_offset - 1;
+            for (ar, br) in a.root_indices().zip(b.root_indices()) {
+                self.nodes
+                    .push(Ternary(op, root, ar + a_offset, br + b_offset));
+            }
+        } else {
+            for (r, (ar, br)) in self
+                .root_indices()
+                .zip(a.root_indices().zip(b.root_indices()))
+            {
+                self.nodes
+                    .push(Ternary(op, r, ar + a_offset, br + b_offset));
+            }
+        }
+        return Ok(self);
+    }
+
+    fn push_nodes(&mut self, other: &Tree) -> usize {
         let offset: usize = self.nodes.len();
-        self.nodes.reserve(self.nodes.len() + other.nodes.len() + 1);
         self.nodes.extend(other.nodes.iter().map(|node| match node {
             Constant(value) => Constant(*value),
             Symbol(label) => Symbol(label.clone()),
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
+            Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
         }));
-        if self.num_roots() == 1 {
-            for r in other.root_indices() {
-                self.nodes.push(Binary(op, offset - 1, r + offset));
-            }
-        } else {
-            for (l, r) in ((offset - self.num_roots())..offset).zip(other.root_indices()) {
-                self.nodes.push(Binary(op, l, r + offset));
-            }
+        return offset;
+    }
+}
+
+macro_rules! unary_func {
+    ($name:ident, $op:ident) => {
+        pub fn $name(tree: MaybeTree) -> MaybeTree {
+            tree?.unary_op($op)
         }
-        return self;
-    }
+    };
+}
 
-    fn unary_op(mut self, op: UnaryOp) -> Tree {
-        for root in self.root_indices() {
-            self.nodes.push(Unary(op, root));
+unary_func!(negate, Negate);
+unary_func!(sqrt, Sqrt);
+unary_func!(abs, Abs);
+unary_func!(sin, Sin);
+unary_func!(cos, Cos);
+unary_func!(tan, Tan);
+unary_func!(log, Log);
+unary_func!(exp, Exp);
+unary_func!(not, Not);
+
+macro_rules! binary_func {
+    ($name:ident, $op:ident) => {
+        pub fn $name(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
+            lhs?.binary_op(rhs?, $op)
         }
-        return self;
+    };
+}
+
+binary_func!(add, Add);
+binary_func!(sub, Subtract);
+binary_func!(mul, Multiply);
+binary_func!(div, Divide);
+binary_func!(pow, Pow);
+binary_func!(min, Min);
+binary_func!(max, Max);
+binary_func!(less, Less);
+binary_func!(greater, Greater);
+binary_func!(equals, Equal);
+binary_func!(neq, NotEqual);
+binary_func!(leq, LessOrEqual);
+binary_func!(geq, GreaterOrEqual);
+binary_func!(and, And);
+binary_func!(or, Or);
+
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Scalar(value)
     }
 }
 
-impl core::ops::Add<Tree> for Tree {
-    type Output = Tree;
-
-    fn add(self, rhs: Tree) -> Tree {
-        self.binary_op(rhs, Add)
+impl From<i32> for Value {
+    fn from(value: i32) -> Self {
+        Scalar(value as f64)
     }
 }
 
-impl core::ops::Sub<Tree> for Tree {
-    type Output = Tree;
-
-    fn sub(self, rhs: Tree) -> Self::Output {
-        self.binary_op(rhs, Subtract)
+impl From<bool> for Value {
+    fn from(value: bool) -> Self {
+        Bool(value)
     }
-}
-
-impl core::ops::Mul<Tree> for Tree {
-    type Output = Tree;
-
-    fn mul(self, rhs: Tree) -> Tree {
-        self.binary_op(rhs, Multiply)
-    }
-}
-
-impl core::ops::Div<Tree> for Tree {
-    type Output = Tree;
-
-    fn div(self, rhs: Tree) -> Self::Output {
-        self.binary_op(rhs, Divide)
-    }
-}
-
-/// Construct a tree that represents raising `base` to the power of
-/// `exponent`.
-pub fn pow(base: Tree, exponent: Tree) -> Tree {
-    base.binary_op(exponent, Pow)
-}
-
-/// Construct a tree that represents the smaller of `lhs` and `rhs`.
-pub fn min(lhs: Tree, rhs: Tree) -> Tree {
-    lhs.binary_op(rhs, Min)
-}
-
-/// Construct a tree that represents the larger of `lhs` and `rhs`.
-pub fn max(lhs: Tree, rhs: Tree) -> Tree {
-    lhs.binary_op(rhs, Max)
-}
-
-impl core::ops::Neg for Tree {
-    type Output = Tree;
-
-    fn neg(self) -> Self::Output {
-        self.unary_op(Negate)
-    }
-}
-
-/// Construct a tree representing the square root of `x`.
-pub fn sqrt(x: Tree) -> Tree {
-    x.unary_op(Sqrt)
-}
-
-/// Construct a tree representing the absolute value of `x`.
-pub fn abs(x: Tree) -> Tree {
-    x.unary_op(Abs)
-}
-
-/// Construct a tree representing the sine of `x`.
-pub fn sin(x: Tree) -> Tree {
-    x.unary_op(Sin)
-}
-
-/// Construct a tree representing the cosine of `x`.
-pub fn cos(x: Tree) -> Tree {
-    x.unary_op(Cos)
-}
-
-/// Construct a tree representing the tangent of 'x'.
-pub fn tan(x: Tree) -> Tree {
-    x.unary_op(Tan)
-}
-
-/// Construct a tree representing the natural logarithm of `x`.
-pub fn log(x: Tree) -> Tree {
-    x.unary_op(Log)
-}
-
-/// Construct a tree representing `e` raised to the power of `x`.
-pub fn exp(x: Tree) -> Tree {
-    x.unary_op(Exp)
 }
 
 impl From<f64> for Tree {
     fn from(value: f64) -> Self {
-        return Self::constant(value);
+        Self::constant(Scalar(value))
+    }
+}
+
+impl From<bool> for Tree {
+    fn from(value: bool) -> Self {
+        Self::constant(Bool(value))
     }
 }
 
 impl From<char> for Tree {
     fn from(c: char) -> Self {
         return Self::symbol(c);
+    }
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => l.partial_cmp(r),
+            (Bool(_), Scalar(_)) => Some(Less),
+            (Scalar(_), Bool(_)) => Some(Greater),
+            (Scalar(l), Scalar(r)) => l.partial_cmp(r),
+        }
     }
 }
 
@@ -411,169 +468,52 @@ impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering::*;
         match (self, other) {
-            // Constant
+            // Scalar
             (Constant(a), Constant(b)) => a.partial_cmp(b),
             (Constant(_), Symbol(_)) => Some(Less),
             (Constant(_), Unary(..)) => Some(Less),
             (Constant(_), Binary(..)) => Some(Less),
+            (Constant(_), Ternary(..)) => Some(Less),
             // Symbol
             (Symbol(_), Constant(_)) => Some(Greater),
             (Symbol(a), Symbol(b)) => Some(a.cmp(b)),
             (Symbol(_), Unary(..)) => Some(Less),
             (Symbol(_), Binary(..)) => Some(Less),
+            (Symbol(_), Ternary(..)) => Some(Less),
             // Unary
             (Unary(..), Constant(_)) => Some(Greater),
             (Unary(..), Symbol(_)) => Some(Greater),
             (Unary(op1, _), Unary(op2, _)) => Some(op1.index().cmp(&op2.index())),
             (Unary(..), Binary(..)) => Some(Less),
+            (Unary(..), Ternary(..)) => Some(Less),
             // Binary
             (Binary(..), Constant(_)) => Some(Greater),
             (Binary(..), Symbol(_)) => Some(Greater),
             (Binary(..), Unary(..)) => Some(Greater),
             (Binary(op1, ..), Binary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
+            (Binary(..), Ternary(..)) => Some(Less),
+            // Ternary
+            (Ternary(..), Constant(_)) => Some(Greater),
+            (Ternary(..), Symbol(_)) => Some(Greater),
+            (Ternary(..), Unary(_, _)) => Some(Greater),
+            (Ternary(..), Binary(_, _, _)) => Some(Greater),
+            (Ternary(op1, ..), Ternary(op2, ..)) => Some(op1.index().cmp(&op2.index())),
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::deftree;
-
     use super::*;
-
-    #[test]
-    fn t_add() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let sum = x + y;
-        assert_eq!(sum.nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
-    }
-
-    #[test]
-    fn t_multiply() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let sum = x * y;
-        assert_eq!(
-            sum.nodes,
-            vec![Symbol('x'), Symbol('y'), Binary(Multiply, 0, 1)]
-        );
-    }
-
-    #[test]
-    fn t_subtract() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let sum = x - y;
-        assert_eq!(
-            sum.nodes,
-            vec![Symbol('x'), Symbol('y'), Binary(Subtract, 0, 1)]
-        );
-    }
-
-    #[test]
-    fn t_divide() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let sum = x / y;
-        assert_eq!(
-            sum.nodes,
-            vec![Symbol('x'), Symbol('y'), Binary(Divide, 0, 1)]
-        );
-    }
-
-    #[test]
-    fn t_pow() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let p = pow(x, y);
-        assert_eq!(p.nodes, vec![Symbol('x'), Symbol('y'), Binary(Pow, 0, 1)]);
-    }
-
-    #[test]
-    fn t_min() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let m = min(x, y);
-        assert_eq!(m.nodes, vec![Symbol('x'), Symbol('y'), Binary(Min, 0, 1)]);
-    }
-
-    #[test]
-    fn t_max() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let m = max(x, y);
-        assert_eq!(m.nodes, vec![Symbol('x'), Symbol('y'), Binary(Max, 0, 1)]);
-    }
-
-    #[test]
-    fn t_negate() {
-        let x: Tree = 'x'.into();
-        let neg = -x;
-        assert_eq!(neg.nodes, vec![Symbol('x'), Unary(Negate, 0)]);
-    }
-
-    #[test]
-    fn t_sqrt_test() {
-        let x: Tree = 'x'.into();
-        let y = sqrt(x);
-        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Sqrt, 0)]);
-    }
-
-    #[test]
-    fn t_abs_test() {
-        let x: Tree = 'x'.into();
-        let y = abs(x);
-        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Abs, 0)]);
-    }
-
-    #[test]
-    fn t_sin_test() {
-        let x: Tree = 'x'.into();
-        let y = sin(x);
-        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Sin, 0)]);
-    }
-
-    #[test]
-    fn t_cos_test() {
-        let x: Tree = 'x'.into();
-        let y = cos(x);
-        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Cos, 0)]);
-    }
-
-    #[test]
-    fn t_tan_test() {
-        let x: Tree = 'x'.into();
-        let y = tan(x);
-        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Tan, 0)]);
-    }
-
-    #[test]
-    fn t_log_test() {
-        let x: Tree = 'x'.into();
-        let y = log(x);
-        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Log, 0)]);
-    }
-
-    #[test]
-    fn t_exp_test() {
-        let x: Tree = 'x'.into();
-        let y = exp(x);
-        assert_eq!(y.nodes, vec![Symbol('x'), Unary(Exp, 0)]);
-    }
+    use crate::deftree;
 
     #[test]
     fn t_element_wise_unary_op() {
-        let x: Tree = 'x'.into();
-        let y: Tree = 'y'.into();
-        let p = Tree::concat(x, y);
-        assert_eq!(p.dims, (2, 1));
-        assert_eq!(p.nodes, vec![Symbol('x'), Symbol('y')]);
-        let p = p * 2.0.into();
+        let p = deftree!(* 2 (concat x y)).unwrap();
         assert_eq!(
             p.nodes,
             vec![
-                Constant(2.),
+                Constant(Scalar(2.)),
                 Symbol('x'),
                 Symbol('y'),
                 Binary(Multiply, 0, 1),
@@ -585,9 +525,9 @@ mod test {
     #[test]
     fn t_element_wise_binary_op() {
         // Matrix and a scalar.
-        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into()) * 2.0.into();
+        let tree = deftree!(* 2 (concat x y z)).unwrap();
         let expected = vec![
-            Constant(2.),
+            Constant(Scalar(2.)),
             Symbol('x'),
             Symbol('y'),
             Symbol('z'),
@@ -597,12 +537,10 @@ mod test {
         ];
         assert_eq!(tree.nodes, expected);
         // Scalar and a matrix
-        let tree =
-            Tree::constant(2.) * Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into());
+        let tree = deftree!(* 2 (concat x y z)).unwrap();
         assert_eq!(tree.nodes, expected);
         // Matrix and a matrix - multiply
-        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
-            * Tree::concat(Tree::concat('a'.into(), 'b'.into()), 'c'.into());
+        let tree = deftree!(* (concat x y z) (concat a b c)).unwrap();
         assert_eq!(
             tree.nodes,
             vec![
@@ -618,8 +556,7 @@ mod test {
             ]
         );
         // Matrix and a matrix - add.
-        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
-            + Tree::concat(Tree::concat('a'.into(), 'b'.into()), 'c'.into());
+        let tree = deftree!(+ (concat x y z) (concat a b c)).unwrap();
         assert_eq!(
             tree.nodes,
             vec![
@@ -635,32 +572,70 @@ mod test {
             ]
         );
         // Matrices of different sizes.
-        let tree = Tree::concat(Tree::concat('x'.into(), 'y'.into()), 'z'.into())
-            * Tree::concat('a'.into(), 'b'.into());
-        let expected = vec![
-            Symbol('a'),
-            Symbol('b'),
-            Symbol('x'),
-            Symbol('y'),
-            Symbol('z'),
-            Binary(Multiply, 0, 2),
-            Binary(Multiply, 1, 3),
-        ];
-        assert_eq!(tree.nodes, expected);
-        let tree = Tree::concat('a'.into(), 'b'.into())
-            * Tree::concat('x'.into(), Tree::concat('y'.into(), 'z'.into()));
-        assert_eq!(tree.nodes, expected);
+        matches!(
+            mul(
+                Tree::concat(Tree::concat(Ok('x'.into()), Ok('y'.into())), Ok('z'.into())),
+                Tree::concat(Ok('a'.into()), Ok('b'.into())),
+            ),
+            Err(Error::DimensionMismatch((2, 1), (3, 1)))
+        );
+        matches!(
+            mul(
+                Tree::concat(Ok('a'.into()), Ok('b'.into())),
+                Tree::concat(Ok('x'.into()), Tree::concat(Ok('y'.into()), Ok('z'.into()))),
+            ),
+            Err(Error::DimensionMismatch((2, 1), (3, 1)))
+        );
     }
 
     #[test]
     fn t_reshape() {
-        let mat = deftree!(concat a b c p q r x y z).reshape(3, 3).unwrap();
+        let mat = deftree!(concat a b c p q r x y z)
+            .unwrap()
+            .reshape(3, 3)
+            .unwrap();
         assert_eq!(mat.dims(), (3, 3));
         let mat = mat.reshape(1, 9).unwrap();
         assert_eq!(mat.dims(), (1, 9));
         let mat = mat.reshape(9, 1).unwrap();
         assert_eq!(mat.dims(), (9, 1));
-        let result = mat.reshape(7, 3);
-        matches!(result, Err(TreeError::DimensionMismatch((9, 1), (7, 3))));
+        matches!(
+            mat.reshape(7, 3),
+            Err(Error::DimensionMismatch((9, 1), (7, 3)))
+        );
+    }
+
+    #[test]
+    fn t_choose_greater() {
+        let tree = deftree!(if (> x 0) x (- x)).unwrap();
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Symbol('x'),
+                Constant(Scalar(0.0)),
+                Binary(Greater, 0, 1),
+                Symbol('x'),
+                Symbol('x'),
+                Unary(Negate, 4),
+                Ternary(Choose, 2, 3, 5)
+            ]
+        );
+    }
+
+    #[test]
+    fn t_choose_geq() {
+        let tree = deftree!(if (>= x 0) x (- x)).unwrap();
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Symbol('x'),
+                Constant(Scalar(0.0)),
+                Binary(GreaterOrEqual, 0, 1),
+                Symbol('x'),
+                Symbol('x'),
+                Unary(Negate, 4),
+                Ternary(Choose, 2, 3, 5)
+            ]
+        );
     }
 }

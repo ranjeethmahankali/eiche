@@ -1,7 +1,16 @@
 use crate::{
-    tree::{Node, Node::*, Tree},
+    tree::{Node, Node::*, Tree, Value, Value::*},
     walk::{DepthWalker, NodeOrdering},
 };
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Scalar(val) => write!(f, "{}", val),
+            Bool(val) => write!(f, "{}", val),
+        }
+    }
+}
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -84,6 +93,7 @@ impl std::fmt::Display for Node {
             Symbol(label) => write!(f, "Symbol({})", label),
             Unary(op, input) => write!(f, "{:?}({})", op, input),
             Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
+            Ternary(op, a, b, c) => write!(f, "{:?}({}, {}, {})", op, a, b, c),
         }
     }
 }
@@ -101,7 +111,8 @@ mod test {
                   (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
                   (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
              (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
-        );
+        )
+        .unwrap();
         assert_eq!(
             format!("{}", tree).trim(),
             "
@@ -243,7 +254,8 @@ mod test {
     fn t_concat_string_formatting() {
         let v2 = deftree!(concat
                           (+ (pow x 2.) (pow y 2.))
-                          (* (pow x 2.) (pow y 2.)));
+                          (* (pow x 2.) (pow y 2.)))
+        .unwrap();
         assert_eq!(
             format!("{}", v2).trim(),
             "
