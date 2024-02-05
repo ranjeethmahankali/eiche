@@ -63,7 +63,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                     }
                 }),
                 // Boolean
-                Not => format!("not {{{}}}", ix),
+                Not => format!("\\text{{not }}{{{}}}", with_parens(ix)),
             }
         }
         Binary(op, lhs, rhs) => {
@@ -92,13 +92,23 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 NotEqual => format!("{{{}}} \\neq {{{}}}", lx, rx),
                 Greater => format!("{{{}}} > {{{}}}", lx, rx),
                 GreaterOrEqual => format!("{{{}}} \\geq {{{}}}", lx, rx),
-                And => format!("{{{}}} and {{{}}}", lx, rx),
-                Or => format!("{{{}}} or {{{}}}", lx, rx),
+                And => format!("{{{}}} \\text{{ and }} {{{}}}", lx, rx),
+                Or => format!("{{{}}} \\text{{ or }} {{{}}}", lx, rx),
             }
         }
-        Ternary(op, _a, _b, _c) => match op {
-            Choose => todo!("Implement the piecewise function notation."),
-        },
+        Ternary(op, a, b, c) => {
+            let (anode, bnode, cnode) = (&nodes[*a], &nodes[*b], &nodes[*c]);
+            let (ax, bx, cx) = (
+                to_latex(anode, nodes),
+                to_latex(bnode, nodes),
+                to_latex(cnode, nodes),
+            );
+            match op {
+                Choose => format!(
+                    "\\left\\{{ \\begin{{array}}{{lr}} {{{bx}}}, & \\text{{if }} {{{ax}}}\\\\ {{{cx}}}, \\end{{array}} \\right\\}}"
+                ),
+            }
+        }
     }
 }
 
@@ -359,12 +369,36 @@ mod test {
     }
 
     #[test]
+    fn t_comparison() {
+        assert_eq!("{x} < {y}", deftree!(< x y).unwrap().to_latex());
+        assert_eq!("{x} \\leq {y}", deftree!(<= x y).unwrap().to_latex());
+        assert_eq!("{x} > {y}", deftree!(> x y).unwrap().to_latex());
+        assert_eq!("{x} \\geq {y}", deftree!(>= x y).unwrap().to_latex());
+        assert_eq!("{x} = {y}", deftree!(== x y).unwrap().to_latex());
+        assert_eq!("{x} \\neq {y}", deftree!(!= x y).unwrap().to_latex());
+    }
+
+    #[test]
     fn t_boolean() {
-        todo!("Test the latex generation for boolean expressions.");
+        assert_eq!(
+            "{\\left({x} < {0}\\right)} \\text{ and } {\\left({y} < {0}\\right)}",
+            deftree!(and (< x 0) (< y 0)).unwrap().to_latex()
+        );
+        assert_eq!(
+            "{\\left({x} < {0}\\right)} \\text{ or } {\\left({y} < {0}\\right)}",
+            deftree!(or (< x 0) (< y 0)).unwrap().to_latex()
+        );
+        assert_eq!(
+            "\\text{not }{\\left({x} < {0}\\right)}",
+            deftree!(not (< x 0)).unwrap().to_latex()
+        );
     }
 
     #[test]
     fn t_piecewise() {
-        todo!("Test the latex generation for piecewise function.");
+        assert_eq!(
+            "\\left\\{ \\begin{array}{lr} {-{x}}, & \\text{if } {{x} < {0}}\\\\ {x}, \\end{array} \\right\\}",
+            deftree!(if (< x 0) (-x) x).unwrap().to_latex()
+        );
     }
 }

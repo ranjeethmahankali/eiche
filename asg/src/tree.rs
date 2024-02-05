@@ -606,7 +606,36 @@ mod test {
     }
 
     #[test]
-    fn t_choose_1() {
-        // let tree = deftree!(if (> x 0) x (- x));
+    fn t_choose_greater() {
+        let tree = deftree!(if (> x 0) x (- x)).unwrap();
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Symbol('x'),
+                Constant(Scalar(0.0)),
+                Binary(Greater, 0, 1),
+                Symbol('x'),
+                Symbol('x'),
+                Unary(Negate, 4),
+                Ternary(Choose, 2, 3, 5)
+            ]
+        );
+    }
+
+    #[test]
+    fn t_choose_geq() {
+        let tree = deftree!(if (>= x 0) x (- x)).unwrap();
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Symbol('x'),
+                Constant(Scalar(0.0)),
+                Binary(GreaterOrEqual, 0, 1),
+                Symbol('x'),
+                Symbol('x'),
+                Unary(Negate, 4),
+                Ternary(Choose, 2, 3, 5)
+            ]
+        );
     }
 }
