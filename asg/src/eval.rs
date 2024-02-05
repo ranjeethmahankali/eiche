@@ -219,7 +219,7 @@ mod test {
     }
 
     #[test]
-    fn t_sum_test() {
+    fn t_sum() {
         check_tree_eval(
             deftree!(+ x y).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
@@ -234,7 +234,7 @@ mod test {
     }
 
     #[test]
-    fn t_evaluate_trees_1() {
+    fn t_tree_1() {
         check_tree_eval(
             deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
@@ -250,7 +250,7 @@ mod test {
     }
 
     #[test]
-    fn t_evaluate_trees_2() {
+    fn t_tree_2() {
         check_tree_eval(
             deftree!(
                 (max (min
@@ -280,7 +280,7 @@ mod test {
     }
 
     #[test]
-    fn t_evaluate_trees_concat_1() {
+    fn t_trees_concat_1() {
         check_tree_eval(
             deftree!(concat
                      (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
@@ -312,6 +312,32 @@ mod test {
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
             1e-14,
+        );
+    }
+
+    #[test]
+    fn t_choose() {
+        check_tree_eval(
+            deftree!(if (> x 0) x (-x)).unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x] = vars[..] {
+                    output[0] = if x < 0. { -x } else { x };
+                }
+            },
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+        check_tree_eval(
+            deftree!(if (< x 0) (- x) x).unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x] = vars[..] {
+                    output[0] = if x < 0. { -x } else { x };
+                }
+            },
+            &[('x', -10., 10.)],
+            100,
+            0.,
         );
     }
 }
