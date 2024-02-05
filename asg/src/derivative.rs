@@ -1,4 +1,4 @@
-use crate::tree::{BinaryOp::*, Node, Node::*, Tree, UnaryOp::*};
+use crate::tree::{BinaryOp::*, Node, Node::*, Tree, UnaryOp::*, Value::*};
 
 impl Tree {}
 
@@ -7,13 +7,13 @@ fn deriv_wrt_one(nodes: &[Node], param: char) -> Vec<Node> {
     let mut out = Vec::<Node>::with_capacity(nodes.len());
     for ni in 0..nodes.len() {
         let deriv = match &nodes[ni] {
-            Constant(_val) => Constant(0.),
-            Symbol(label) => Constant(if *label == param { 1. } else { 0. }),
+            Constant(_val) => Constant(Scalar(0.)),
+            Symbol(label) => Constant(Scalar(if *label == param { 1. } else { 0. })),
             Unary(op, input) => match op {
                 Negate => Unary(Negate, derivmap[*input]),
                 Sqrt => {
                     let sf = push_node(Unary(Sqrt, *input), &mut out);
-                    let c2 = push_node(Constant(2.), &mut out);
+                    let c2 = push_node(Constant(Scalar(2.)), &mut out);
                     let sf2 = push_node(Binary(Multiply, sf, c2), &mut out);
                     Binary(Divide, derivmap[*input], sf2)
                 }
@@ -23,8 +23,10 @@ fn deriv_wrt_one(nodes: &[Node], param: char) -> Vec<Node> {
                 Tan => todo!(),
                 Log => todo!(),
                 Exp => todo!(),
+                Not => todo!(),
             },
             Binary(_, _, _) => todo!(),
+            Ternary(..) => todo!(),
         };
     }
     todo!();
