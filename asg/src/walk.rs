@@ -21,27 +21,25 @@ impl DepthWalker {
         }
     }
 
-    /// Get an iterator that walks the nodes of `tree`. If `unique` is
-    /// true, no node will be visited more than once. The choice of
-    /// `order` will affect the order in which the children of certain
-    /// nodes are traversed. See the documentation of `NodeOrdering`
-    /// for more details.
+    /// Get an iterator that walks the nodes of `tree`. If `unique` is true, no
+    /// node will be visited more than once. The choice of `order` will affect
+    /// the order in which the children of certain nodes are traversed. See the
+    /// documentation of `NodeOrdering` for more details.
     pub fn walk_tree<'a>(
         &'a mut self,
         tree: &'a Tree,
         unique: bool,
         ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
-        self.walk_many(&tree.nodes(), tree.root_indices(), unique, ordering)
+        self.walk_from_range(&tree.nodes(), tree.root_indices(), unique, ordering)
     }
 
-    /// Get an iterator that walks the given `nodes` starting from the
-    /// node at `root_index`. If `unique` is true, no node will be
-    /// visited more than once. The choice of `order` will affect the
-    /// order in which the children of certain nodes are
-    /// traversed. See the documentation of `NodeOrdering` for more
-    /// details.
-    pub fn walk_many<'a>(
+    /// Get an iterator that walks the given `nodes` starting from the nodes in
+    /// the range `root_indices`. If `unique` is true, no node will be visited
+    /// more than once. The choice of `order` will affect the order in which the
+    /// children of certain nodes are traversed. See the documentation of
+    /// `NodeOrdering` for more details.
+    pub fn walk_from_range<'a>(
         &'a mut self,
         nodes: &'a [Node],
         root_indices: Range<usize>,
@@ -51,8 +49,33 @@ impl DepthWalker {
         // Prep the stack.
         self.stack.clear();
         self.stack.reserve(nodes.len());
-        // Push the roots in reversed order to preserve their order in the output.
+        // Push the roots in reversed order to preserve their order in the traversal.
         self.stack.extend(root_indices.map(|r| (r, None)).rev());
+        // Reset the visited flags.
+        self.visited.clear();
+        self.visited.resize(nodes.len(), false);
+        // Create the iterator.
+        DepthIterator {
+            unique,
+            ordering,
+            walker: self,
+            nodes: &nodes,
+            last_pushed: 0,
+        }
+    }
+
+    pub fn walk_from_slice<'a>(
+        &'a mut self,
+        nodes: &'a [Node],
+        roots: &[usize],
+        unique: bool,
+        ordering: NodeOrdering,
+    ) -> DepthIterator<'a> {
+        // Prep the stack.
+        self.stack.clear();
+        self.stack.reserve(nodes.len());
+        // Push the roots in reverse orderr ot preserve their order in the traversal.
+        self.stack.extend(roots.iter().map(|r| (*r, None)).rev());
         // Reset the visited flags.
         self.visited.clear();
         self.visited.resize(nodes.len(), false);

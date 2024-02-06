@@ -36,7 +36,7 @@ impl Pruner {
         self.indices.resize(nodes.len(), 0);
         // Mark used nodes.
         self.walker
-            .walk_many(&nodes, root_indices, true, NodeOrdering::Original)
+            .walk_from_range(&nodes, root_indices, true, NodeOrdering::Original)
             .for_each(|(index, _parent)| {
                 self.indices[index] = 1;
             });
