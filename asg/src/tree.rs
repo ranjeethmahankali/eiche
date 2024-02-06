@@ -174,6 +174,13 @@ impl Tree {
         }
     }
 
+    pub fn create(nodes: Vec<Node>, dims: (usize, usize)) -> MaybeTree {
+        if matsize(dims) > nodes.len() {
+            return Err(Error::InvalidDimensions);
+        }
+        Tree { nodes, dims }.validated()
+    }
+
     pub fn concat(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
         let mut lhs = lhs?;
         let mut rhs = rhs?;
@@ -253,6 +260,10 @@ impl Tree {
 
     pub fn nodes_mut(&mut self) -> &mut Vec<Node> {
         &mut self.nodes
+    }
+
+    pub fn take_nodes(self) -> Vec<Node> {
+        self.nodes
     }
 
     /// Get a unique list of all symbols in this tree. The list of

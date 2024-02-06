@@ -1,5 +1,6 @@
 use crate::{
     error::Error,
+    fold::fold_nodes,
     prune::Pruner,
     sort::TopoSorter,
     tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
@@ -7,24 +8,19 @@ use crate::{
 use std::ops::Range;
 
 impl Tree {
-    pub fn symbolic_derivative(mut self, params: &[char]) -> MaybeTree {
+    pub fn symbolic_derivative(self, params: &str) -> MaybeTree {
         let num_nodes = self.len();
         let (root_start, root_end) = {
             let root_indices = self.root_indices();
             (root_indices.start, root_indices.end)
         };
+        let mut nodes = self.take_nodes();
         let mut derivs = Vec::<Node>::new();
         let mut derivmap = Vec::<Option<usize>>::new();
         let mut rootnodes = Vec::<usize>::new();
-        for param in params {
-            compute_symbolic_deriv(
-                self.nodes(),
-                0..num_nodes,
-                *param,
-                &mut derivs,
-                &mut derivmap,
-            );
-            self.nodes_mut().extend(derivs.drain(..));
+        for param in params.chars() {
+            compute_symbolic_deriv(&nodes, 0..num_nodes, param, &mut derivs, &mut derivmap);
+            nodes.extend(derivs.drain(..));
             for ri in root_start..root_end {
                 rootnodes.push(match derivmap[ri] {
                     Some(deriv) => deriv,
@@ -32,11 +28,17 @@ impl Tree {
                 });
             }
         }
+        // Below operations all perform allocations. I am assuming symbolic
+        // derivatives won't be computed in a hot path so it may not be a big
+        // deal. But in the future, I might consider putting these resources in
+        // an object that the caller can pass in. That would allow the caller to
+        // reuse the resources and avoid repeated allocations.
         let mut sorter = TopoSorter::new();
-        sorter.run_from_slice(self.nodes_mut(), &mut rootnodes)?;
+        sorter.run_from_slice(&mut nodes, &mut rootnodes)?;
         let mut pruner = Pruner::new();
-        pruner.run_from_slice(self.nodes_mut(), &rootnodes);
-        return self.validated();
+        pruner.run_from_slice(&mut nodes, &rootnodes);
+        fold_nodes(&mut nodes)?;
+        return Tree::create(nodes, (root_end - root_start, params.len()));
     }
 }
 
@@ -175,4 +177,56 @@ fn push_node(node: Node, dst: &mut Vec<Node>) -> usize {
     let idx = dst.len();
     dst.push(node);
     return idx;
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{deftree, test::util::compare_trees};
+
+    #[test]
+    fn t_polynomial() {
+        assert_eq!(
+            deftree!(x).unwrap().symbolic_derivative("x").unwrap(),
+            deftree!(1).unwrap()
+        );
+        // Our symbolic derivative implementation is super general. For that
+        // reason, when we differentiate something like x^2, instead of getting
+        // back 2x, we'll get something that is mathematically equivalent to it,
+        // but more complex. So instead of comparing trees directly, we compare
+        // them numerically.
+        compare_trees(
+            &deftree!(pow x 2).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(* 2 x).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            1e-14,
+        );
+        compare_trees(
+            &deftree!(pow x 3).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(* 3 (pow x 2)).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            1e-13,
+        );
+        compare_trees(
+            &deftree!(+ (* 1.5 (pow x 2)) (+ (* 2.3 x) 3.46))
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(+ (* 3 x) 2.3).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            1e-14,
+        );
+        compare_trees(
+            &deftree!(+ (* 1.2 (pow x 3)) (+ (* 2.3 (pow x 2)) (+ (* 3.4 x) 4.5)))
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(+ (* 3.6 (pow x 2)) (+ (* 4.6 x) 3.4)).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            1e-12,
+        );
+    }
 }

@@ -8,6 +8,7 @@ pub enum Error {
     EmptyTree,
     /// A mismatch between two dimensions, for example, during a reshape operation.
     DimensionMismatch((usize, usize), (usize, usize)),
+    InvalidDimensions,
     TypeMismatch,
 
     // Evaluation related errors
