@@ -37,6 +37,7 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
                 (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(Scalar(1.))),
                 (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(Scalar(0.))),
                 (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
+                (Divide, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
                 (Or, _lhs, Constant(rhs)) if *rhs == true => Some(Constant(Bool(true))),
                 (Or, Constant(lhs), _rhs) if *lhs == true => Some(Constant(Bool(true))),
                 (And, _lhs, Constant(rhs)) if *rhs == false => Some(Constant(Bool(false))),

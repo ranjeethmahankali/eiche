@@ -229,4 +229,18 @@ mod test {
             1e-12,
         );
     }
+
+    #[test]
+    fn t_gradient_2d() {
+        compare_trees(
+            &deftree!(- (+ (pow x 2) (pow y 2)) 5)
+                .unwrap()
+                .symbolic_derivative("xy")
+                .unwrap(),
+            &deftree!(concat (* 2 x) (* 2 y)).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            20,
+            1e-14,
+        );
+    }
 }
