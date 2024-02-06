@@ -1,5 +1,6 @@
 use crate::{
     error::Error,
+    sort::TopoSorter,
     tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 use std::ops::Range;
@@ -30,6 +31,8 @@ impl Tree {
                 });
             }
         }
+        let mut sorter = TopoSorter::new();
+        sorter.run_from_slice(self.nodes_mut(), &mut rootnodes)?;
         todo!()
     }
 }

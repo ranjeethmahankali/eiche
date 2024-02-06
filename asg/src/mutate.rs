@@ -97,7 +97,7 @@ impl TemplateCapture {
             Some(roots) => roots,
             None => tree.root_indices(),
         };
-        let root_indices = self.topo_sorter.run(tree.nodes_mut(), root_indices)?;
+        let root_indices = self.topo_sorter.run_from_range(tree.nodes_mut(), root_indices)?;
         fold_nodes(tree.nodes_mut())?;
         self.deduper.run(tree.nodes_mut());
         self.pruner.run(tree.nodes_mut(), root_indices);
