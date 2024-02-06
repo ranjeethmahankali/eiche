@@ -73,7 +73,7 @@ impl TopoSorter {
             nodes,
             &mut self.depths,
             self.walker
-                .walk_from_slice(&nodes, roots, false, NodeOrdering::Original),
+                .walk_from_slice(nodes, roots, false, NodeOrdering::Original),
         )?;
         self.sort_by_depth(nodes);
         // Update roots

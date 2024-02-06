@@ -31,15 +31,40 @@ impl Pruner {
     /// and nodes that are not visited are filtered out. The filtered
     /// `nodes` are returned. You can minimize allocations by using
     /// the same pruner multiple times.
-    pub fn run(&mut self, nodes: &mut Vec<Node>, root_indices: Range<usize>) {
-        self.indices.clear();
-        self.indices.resize(nodes.len(), 0);
+    pub fn run_from_range(&mut self, nodes: &mut Vec<Node>, root_indices: Range<usize>) {
+        Self::mark_used_nodes(
+            nodes,
+            &mut self.indices,
+            self.walker
+                .walk_from_range(&nodes, root_indices, true, NodeOrdering::Original),
+        );
+        self.prune_unused(nodes);
+    }
+
+    pub fn run_from_slice(&mut self, nodes: &mut Vec<Node>, roots: &[usize]) {
+        Self::mark_used_nodes(
+            nodes,
+            &mut self.indices,
+            self.walker
+                .walk_from_slice(nodes, roots, true, NodeOrdering::Original),
+        );
+        self.prune_unused(nodes);
+    }
+
+    fn mark_used_nodes<I: Iterator<Item = (usize, Option<usize>)>>(
+        nodes: &[Node],
+        indices: &mut Vec<usize>,
+        roots: I,
+    ) {
+        indices.clear();
+        indices.resize(nodes.len(), 0);
         // Mark used nodes.
-        self.walker
-            .walk_from_range(&nodes, root_indices, true, NodeOrdering::Original)
-            .for_each(|(index, _parent)| {
-                self.indices[index] = 1;
-            });
+        roots.for_each(|(index, _parent)| {
+            indices[index] = 1;
+        });
+    }
+
+    fn prune_unused(&mut self, nodes: &mut Vec<Node>) {
         // Reserve space for new nodes.
         self.pruned.clear();
         self.pruned.reserve(self.indices.iter().sum());
@@ -79,7 +104,7 @@ impl Pruner {
 impl Tree {
     pub fn prune(mut self, pruner: &mut Pruner) -> Tree {
         let root_indices = self.root_indices();
-        pruner.run(self.nodes_mut(), root_indices);
+        pruner.run_from_range(self.nodes_mut(), root_indices);
         return self;
     }
 }
@@ -106,7 +131,7 @@ mod test {
         ];
         assert!({
             // Prune with #6 as the root.
-            pruner.run(&mut nodes, 6..7);
+            pruner.run_from_range(&mut nodes, 6..7);
             nodes.len() == 5
                 && nodes
                     == vec![
@@ -134,7 +159,7 @@ mod test {
         ];
         assert!({
             // Prune with #7 as the root.
-            pruner.run(&mut nodes, 7..8);
+            pruner.run_from_range(&mut nodes, 7..8);
             nodes.len() == 3 && nodes == vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]
         });
     }

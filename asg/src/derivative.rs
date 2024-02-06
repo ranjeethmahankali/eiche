@@ -1,5 +1,6 @@
 use crate::{
     error::Error,
+    prune::Pruner,
     sort::TopoSorter,
     tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
@@ -33,7 +34,9 @@ impl Tree {
         }
         let mut sorter = TopoSorter::new();
         sorter.run_from_slice(self.nodes_mut(), &mut rootnodes)?;
-        todo!()
+        let mut pruner = Pruner::new();
+        pruner.run_from_slice(self.nodes_mut(), &rootnodes);
+        return self.validated();
     }
 }
 
