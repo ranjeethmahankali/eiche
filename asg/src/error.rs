@@ -27,4 +27,7 @@ pub enum Error {
     // Mutations and templates.
     InvalidTemplateCapture,
     UnboundTemplateSymbol,
+
+    // Derivatives.
+    CannotComputeSymbolicDerivative,
 }

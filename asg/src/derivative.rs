@@ -1,9 +1,40 @@
-use crate::tree::{BinaryOp::*, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
+use crate::{
+    error::Error,
+    tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
+};
 use std::ops::Range;
 
-impl Tree {}
+impl Tree {
+    pub fn symbolic_derivative(mut self, params: &[char]) -> MaybeTree {
+        let num_nodes = self.len();
+        let (root_start, root_end) = {
+            let root_indices = self.root_indices();
+            (root_indices.start, root_indices.end)
+        };
+        let mut derivs = Vec::<Node>::new();
+        let mut derivmap = Vec::<Option<usize>>::new();
+        let mut rootnodes = Vec::<usize>::new();
+        for param in params {
+            compute_symbolic_deriv(
+                self.nodes(),
+                0..num_nodes,
+                *param,
+                &mut derivs,
+                &mut derivmap,
+            );
+            self.nodes_mut().extend(derivs.drain(..));
+            for ri in root_start..root_end {
+                rootnodes.push(match derivmap[ri] {
+                    Some(deriv) => deriv,
+                    None => return Err(Error::CannotComputeSymbolicDerivative),
+                });
+            }
+        }
+        todo!()
+    }
+}
 
-fn deriv_helper(
+fn compute_symbolic_deriv(
     nodes: &[Node],
     input_range: Range<usize>,
     param: char,
@@ -11,6 +42,7 @@ fn deriv_helper(
     derivmap: &mut Vec<Option<usize>>,
 ) {
     let offset = nodes.len();
+    dst.clear();
     derivmap.clear();
     derivmap.resize(nodes.len(), None);
     for ni in input_range {
@@ -82,7 +114,7 @@ fn deriv_helper(
                         let lr = push_node(Binary(Multiply, *lhs, rderiv), dst) + offset;
                         let rl = push_node(Binary(Multiply, *rhs, lderiv), dst) + offset;
                         Binary(Add, lr, rl)
-                    },
+                    }
                     Divide => {
                         let lr = push_node(Binary(Multiply, lderiv, *rhs), dst) + offset;
                         let rl = push_node(Binary(Multiply, rderiv, *lhs), dst) + offset;
@@ -90,18 +122,28 @@ fn deriv_helper(
                         let two = push_node(Constant(Scalar(2.)), dst) + offset;
                         let r2 = push_node(Binary(Pow, *rhs, two), dst) + offset;
                         Binary(Divide, sub, r2)
-                    },
-                    Pow => todo!(),
-                    Min => todo!(),
-                    Max => todo!(),
-                    Less => todo!(),
-                    LessOrEqual => todo!(),
-                    Equal => todo!(),
-                    NotEqual => todo!(),
-                    Greater => todo!(),
-                    GreaterOrEqual => todo!(),
-                    And => todo!(),
-                    Or => todo!(),
+                    }
+                    Pow => {
+                        // https://www.physicsforums.com/threads/derivative-of-f-x-to-the-power-of-g-x-and-algebra-problem.273333/
+                        let logf = push_node(Unary(Log, *lhs), dst) + offset;
+                        let gderiv_logf = push_node(Binary(Multiply, rderiv, logf), dst) + offset;
+                        let fderiv_over_f = push_node(Binary(Divide, lderiv, *lhs), dst) + offset;
+                        let second_term =
+                            push_node(Binary(Multiply, *rhs, fderiv_over_f), dst) + offset;
+                        let sum = push_node(Binary(Add, gderiv_logf, second_term), dst) + offset;
+                        Binary(Multiply, ni, sum)
+                    }
+                    Min => {
+                        let cond = push_node(Binary(Less, *lhs, *rhs), dst) + offset;
+                        Ternary(Choose, cond, lderiv, rderiv)
+                    }
+                    Max => {
+                        let cond = push_node(Binary(Greater, *lhs, *rhs), dst) + offset;
+                        Ternary(Choose, cond, lderiv, rderiv)
+                    }
+                    Less | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual | And | Or => {
+                        continue
+                    }
                 }
             }
             Ternary(op, a, b, c) => match op {
@@ -115,11 +157,12 @@ fn deriv_helper(
                         None => continue,
                     };
                     Ternary(Choose, *a, bderiv, cderiv)
-                },
+                }
             },
         };
+        derivmap[ni] = Some(offset + dst.len());
+        dst.push(deriv);
     }
-    todo!();
 }
 
 fn push_node(node: Node, dst: &mut Vec<Node>) -> usize {
