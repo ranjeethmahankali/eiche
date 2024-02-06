@@ -5,7 +5,6 @@ use crate::{
     sort::TopoSorter,
     tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
-use std::ops::Range;
 
 impl Tree {
     pub fn symbolic_derivative(self, params: &str) -> MaybeTree {
@@ -19,7 +18,13 @@ impl Tree {
         let mut derivmap = Vec::<Option<usize>>::new();
         let mut rootnodes = Vec::<usize>::new();
         for param in params.chars() {
-            compute_symbolic_deriv(&nodes, 0..num_nodes, param, &mut derivs, &mut derivmap);
+            compute_symbolic_deriv(
+                &nodes[0..num_nodes],
+                nodes.len(),
+                param,
+                &mut derivs,
+                &mut derivmap,
+            );
             nodes.extend(derivs.drain(..));
             for ri in root_start..root_end {
                 rootnodes.push(match derivmap[ri] {
@@ -44,16 +49,15 @@ impl Tree {
 
 fn compute_symbolic_deriv(
     nodes: &[Node],
-    input_range: Range<usize>,
+    offset: usize,
     param: char,
     dst: &mut Vec<Node>,
     derivmap: &mut Vec<Option<usize>>,
 ) {
-    let offset = nodes.len();
     dst.clear();
     derivmap.clear();
     derivmap.resize(nodes.len(), None);
-    for ni in input_range {
+    for ni in 0..nodes.len() {
         let deriv = match &nodes[ni] {
             Constant(_val) => Constant(Scalar(0.)),
             Symbol(label) => Constant(Scalar(if *label == param { 1. } else { 0. })),
