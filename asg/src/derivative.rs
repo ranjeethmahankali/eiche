@@ -243,4 +243,20 @@ mod test {
             1e-14,
         );
     }
+
+    #[test]
+    fn t_hessian_2d() {
+        compare_trees(
+            &deftree!(- (+ (pow x 3) (pow y 3)) 5)
+                .unwrap()
+                .symbolic_derivative("xy")
+                .unwrap()
+                .symbolic_derivative("xy")
+                .unwrap(),
+            &deftree!(concat (* 6 x) 0 0 (* 6 y)).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            20,
+            1e-13,
+        );
+    }
 }
