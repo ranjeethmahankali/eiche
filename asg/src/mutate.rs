@@ -88,20 +88,22 @@ impl TemplateCapture {
         return false;
     }
 
-    pub fn make_compact_tree(
-        &mut self,
-        mut tree: Tree,
-        newroots: Option<Range<usize>>,
-    ) -> MaybeTree {
+    fn make_compact_tree(&mut self, mut tree: Tree, newroots: Option<Range<usize>>) -> MaybeTree {
         let root_indices = match newroots {
             Some(roots) => roots,
             None => tree.root_indices(),
         };
-        let root_indices = self.topo_sorter.run_from_range(tree.nodes_mut(), root_indices)?;
+        let root_indices = self
+            .topo_sorter
+            .run_from_range(tree.nodes_mut(), root_indices)?;
         fold_nodes(tree.nodes_mut())?;
         self.deduper.run(tree.nodes_mut());
         self.pruner.run_from_range(tree.nodes_mut(), root_indices);
         return tree.validated();
+    }
+
+    pub fn compact_tree(&mut self, tree: Tree) -> MaybeTree {
+        self.make_compact_tree(tree, None)
     }
 
     fn bind(&mut self, label: char, index: usize) -> bool {
@@ -288,7 +290,8 @@ impl TemplateCapture {
 mod test {
     use super::*;
     use crate::{
-        dedup::equivalent_many, deftree, template::test::get_template_by_name, walk::DepthWalker,
+        dedup::equivalent_many, deftree, template::test::get_template_by_name, tree::UnaryOp::*,
+        walk::DepthWalker,
     };
 
     fn t_check_bindings(capture: &TemplateCapture, template: &Template, tree: &Tree) {
@@ -718,5 +721,17 @@ mod test {
                 .reshape(1, 2)
                 .unwrap(),
         );
+    }
+
+    #[test]
+    fn t_dependent_roots_compact() {
+        // Just making sure if the tree has root nodes depend on each other, use
+        // each other as inputs, it is handled correctly and we never actually
+        // produce dependent roots nodes.
+        let tree = deftree!(concat (- x) x).unwrap();
+        let mut capture = TemplateCapture::new();
+        let tree = capture.compact_tree(tree).unwrap();
+        assert_eq!(tree.nodes(), &[Symbol('x'), Unary(Negate, 0), Symbol('x')]);
+        assert_eq!(tree.dims(), (2, 1));
     }
 }
