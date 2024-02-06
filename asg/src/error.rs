@@ -6,6 +6,9 @@ pub enum Error {
     ContainsNaN,
     /// Tree conains no nodes.
     EmptyTree,
+    /// Root nodes depend on each other. They must be isolated from each other
+    /// in a valid tree.
+    DependentRootNodes,
     /// A mismatch between two dimensions, for example, during a reshape operation.
     DimensionMismatch((usize, usize), (usize, usize)),
     InvalidDimensions,
