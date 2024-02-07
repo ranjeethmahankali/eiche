@@ -36,7 +36,7 @@ impl Pruner {
             nodes,
             &mut self.indices,
             self.walker
-                .walk_from_range(&nodes, root_indices, true, NodeOrdering::Original),
+                .walk_from_roots(&nodes, root_indices, true, NodeOrdering::Original),
         );
         self.prune_unused(nodes);
     }
@@ -45,8 +45,12 @@ impl Pruner {
         Self::mark_used_nodes(
             nodes,
             &mut self.indices,
-            self.walker
-                .walk_from_slice(nodes, roots, true, NodeOrdering::Original),
+            self.walker.walk_from_roots(
+                nodes,
+                roots.iter().map(|r| *r),
+                true,
+                NodeOrdering::Original,
+            ),
         );
         self.prune_unused(nodes);
     }

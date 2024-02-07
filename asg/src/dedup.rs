@@ -113,8 +113,18 @@ pub fn equivalent_many(
 ) -> bool {
     {
         // Zip the depth first iterators and compare.
-        let mut liter = lwalker.walk_from_range(&lnodes, left, false, NodeOrdering::Deterministic);
-        let mut riter = rwalker.walk_from_range(&rnodes, right, false, NodeOrdering::Deterministic);
+        let mut liter = lwalker.walk_from_roots(
+            &lnodes,
+            left.into_iter(),
+            false,
+            NodeOrdering::Deterministic,
+        );
+        let mut riter = rwalker.walk_from_roots(
+            &rnodes,
+            right.into_iter(),
+            false,
+            NodeOrdering::Deterministic,
+        );
         loop {
             match (liter.next(), riter.next()) {
                 (None, None) => {

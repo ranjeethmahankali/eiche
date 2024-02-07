@@ -45,7 +45,7 @@ impl TopoSorter {
         Self::compute_depths(
             nodes,
             &mut self.depths,
-            self.walker.walk_from_range(
+            self.walker.walk_from_roots(
                 &nodes,
                 root_indices.clone(),
                 false,
@@ -72,8 +72,12 @@ impl TopoSorter {
         Self::compute_depths(
             nodes,
             &mut self.depths,
-            self.walker
-                .walk_from_slice(nodes, roots, false, NodeOrdering::Original),
+            self.walker.walk_from_roots(
+                nodes,
+                roots.iter().map(|r| *r),
+                false,
+                NodeOrdering::Original,
+            ),
         )?;
         self.sort_by_depth(nodes);
         // Update roots
@@ -89,11 +93,11 @@ impl TopoSorter {
     fn compute_depths<I: Iterator<Item = (usize, Option<usize>)>>(
         nodes: &[Node],
         depths: &mut Vec<usize>,
-        roots: I,
+        depth_first_walk: I,
     ) -> Result<(), Error> {
         depths.clear();
         depths.resize(nodes.len(), 0);
-        for (index, maybe_parent) in roots {
+        for (index, maybe_parent) in depth_first_walk {
             if let Some(parent) = maybe_parent {
                 depths[index] = usize::max(depths[index], 1 + depths[parent]);
                 if depths[index] >= nodes.len() {

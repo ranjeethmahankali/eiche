@@ -263,4 +263,60 @@ mod test {
             1e-13,
         );
     }
+
+    #[test]
+    fn t_trigonometry() {
+        compare_trees(
+            &deftree!(pow (sin x) 2)
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(* 2 (* (sin x) (cos x))).unwrap(),
+            &[('x', -5., 5.)],
+            100,
+            1e-15,
+        );
+        compare_trees(
+            &deftree!(pow (cos x) 2)
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(* (- 2) (* (cos x) (sin x))).unwrap(),
+            &[('x', -5., 5.)],
+            100,
+            1e-15,
+        )
+    }
+
+    #[test]
+    fn t_sqrt() {
+        compare_trees(
+            &deftree!(sqrt x).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(* 0.5 (pow x (- 0.5))).unwrap(),
+            &[('x', 0.01, 10.)],
+            100,
+            1e-15,
+        );
+        compare_trees(
+            &deftree!(* x (sqrt x))
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(* 1.5 (pow x 0.5)).unwrap(),
+            &[('x', 0.01, 10.)],
+            100,
+            1e-15,
+        );
+    }
+
+    #[test]
+    fn t_abs() {
+        compare_trees(
+            &deftree!(abs x).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(if (< x 0) (- 1.) 1.).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+    }
 }
