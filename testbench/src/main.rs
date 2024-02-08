@@ -13,7 +13,7 @@ fn main() {
     let tree = deftree!(+ (pow x 2) (pow y 2)).unwrap();
     println!("$f(x, y) = {}$\n", tree.to_latex());
     let deriv = {
-        let deriv = tree.symbolic_derivative("x").unwrap();
+        let deriv = tree.symbolic_deriv("x").unwrap();
         let steps = reduce(deriv, 8).unwrap();
         steps.last().unwrap().clone()
     };

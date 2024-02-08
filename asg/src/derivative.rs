@@ -7,7 +7,7 @@ use crate::{
 };
 
 impl Tree {
-    pub fn symbolic_derivative(mut self, params: &str) -> MaybeTree {
+    pub fn symbolic_deriv(mut self, params: &str) -> MaybeTree {
         let num_nodes = self.len();
         let (root_start, root_end) = {
             let root_indices = self.root_indices();
@@ -187,7 +187,7 @@ mod test {
     #[test]
     fn t_polynomial() {
         assert_eq!(
-            deftree!(x).unwrap().symbolic_derivative("x").unwrap(),
+            deftree!(x).unwrap().symbolic_deriv("x").unwrap(),
             deftree!(1).unwrap()
         );
         // Our symbolic derivative implementation is super general. For that
@@ -196,14 +196,14 @@ mod test {
         // but more complex. So instead of comparing trees directly, we compare
         // them numerically.
         compare_trees(
-            &deftree!(pow x 2).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(pow x 2).unwrap().symbolic_deriv("x").unwrap(),
             &deftree!(* 2 x).unwrap(),
             &[('x', -10., 10.)],
             100,
             1e-14,
         );
         compare_trees(
-            &deftree!(pow x 3).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(pow x 3).unwrap().symbolic_deriv("x").unwrap(),
             &deftree!(* 3 (pow x 2)).unwrap(),
             &[('x', -10., 10.)],
             100,
@@ -212,7 +212,7 @@ mod test {
         compare_trees(
             &deftree!(+ (* 1.5 (pow x 2)) (+ (* 2.3 x) 3.46))
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(+ (* 3 x) 2.3).unwrap(),
             &[('x', -10., 10.)],
@@ -222,7 +222,7 @@ mod test {
         compare_trees(
             &deftree!(+ (* 1.2 (pow x 3)) (+ (* 2.3 (pow x 2)) (+ (* 3.4 x) 4.5)))
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(+ (* 3.6 (pow x 2)) (+ (* 4.6 x) 3.4)).unwrap(),
             &[('x', -10., 10.)],
@@ -236,7 +236,7 @@ mod test {
         compare_trees(
             &deftree!(- (+ (pow x 2) (pow y 2)) 5)
                 .unwrap()
-                .symbolic_derivative("xy")
+                .symbolic_deriv("xy")
                 .unwrap(),
             &deftree!(concat (* 2 x) (* 2 y)).unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
@@ -250,9 +250,9 @@ mod test {
         compare_trees(
             &deftree!(- (+ (pow x 3) (pow y 3)) 5)
                 .unwrap()
-                .symbolic_derivative("xy")
+                .symbolic_deriv("xy")
                 .unwrap()
-                .symbolic_derivative("xy")
+                .symbolic_deriv("xy")
                 .unwrap(),
             &deftree!(concat (* 6 x) 0 0 (* 6 y)).unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
@@ -266,7 +266,7 @@ mod test {
         compare_trees(
             &deftree!(pow (sin x) 2)
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(* 2 (* (sin x) (cos x))).unwrap(),
             &[('x', -5., 5.)],
@@ -276,7 +276,7 @@ mod test {
         compare_trees(
             &deftree!(pow (cos x) 2)
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(* (- 2) (* (cos x) (sin x))).unwrap(),
             &[('x', -5., 5.)],
@@ -284,7 +284,7 @@ mod test {
             1e-15,
         );
         compare_trees(
-            &deftree!(tan x).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(tan x).unwrap().symbolic_deriv("x").unwrap(),
             &deftree!(pow (/ 1 (cos x)) 2).unwrap(),
             &[('x', -1.5, 1.5)],
             100,
@@ -295,7 +295,7 @@ mod test {
     #[test]
     fn t_sqrt() {
         compare_trees(
-            &deftree!(sqrt x).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(sqrt x).unwrap().symbolic_deriv("x").unwrap(),
             &deftree!(* 0.5 (pow x (- 0.5))).unwrap(),
             &[('x', 0.01, 10.)],
             100,
@@ -304,7 +304,7 @@ mod test {
         compare_trees(
             &deftree!(* x (sqrt x))
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(* 1.5 (pow x 0.5)).unwrap(),
             &[('x', 0.01, 10.)],
@@ -316,7 +316,7 @@ mod test {
     #[test]
     fn t_abs() {
         compare_trees(
-            &deftree!(abs x).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(abs x).unwrap().symbolic_deriv("x").unwrap(),
             &deftree!(if (< x 0) (- 1.) 1.).unwrap(),
             &[('x', -10., 10.)],
             100,
@@ -329,7 +329,7 @@ mod test {
         compare_trees(
             &deftree!(log (pow x 2))
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(/ 2 x).unwrap(),
             &[('x', 0.01, 10.)],
@@ -342,7 +342,7 @@ mod test {
     fn t_exp() {
         let tree = deftree!(exp x).unwrap();
         compare_trees(
-            &tree.clone().symbolic_derivative("x").unwrap(),
+            &tree.clone().symbolic_deriv("x").unwrap(),
             &tree,
             &[('x', -10., 10.)],
             100,
@@ -351,7 +351,7 @@ mod test {
         compare_trees(
             &deftree!(exp (pow x 2))
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(* 2 (* x (exp (pow x 2)))).unwrap(),
             &[('x', -4., 4.)],
@@ -365,7 +365,7 @@ mod test {
         compare_trees(
             &deftree!(min x (pow x 2))
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
             &[('x', -3., 3.)],
@@ -375,7 +375,7 @@ mod test {
         compare_trees(
             &deftree!(max x (pow x 2))
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(if (and (> x 0) (< x 1)) 1 (* 2 x)).unwrap(),
             &[('x', -3., 3.)],
@@ -389,9 +389,9 @@ mod test {
         compare_trees(
             &deftree!(min x (pow x 2))
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap()
-                .symbolic_derivative("x")
+                .symbolic_deriv("x")
                 .unwrap(),
             &deftree!(if (and (> x 0) (< x 1)) 2 0).unwrap(),
             &[('x', -3., 5.)],
