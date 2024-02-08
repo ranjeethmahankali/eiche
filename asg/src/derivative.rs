@@ -3,7 +3,10 @@ use crate::{
     fold::fold_nodes,
     prune::Pruner,
     sort::TopoSorter,
-    tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
+    tree::{
+        add, div, sub, BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*,
+        Value::*,
+    },
 };
 
 impl Tree {
@@ -44,6 +47,30 @@ impl Tree {
         pruner.run_from_slice(nodes, &rootnodes);
         fold_nodes(nodes)?;
         return copy.with_dims(root_end - root_start, params.len());
+    }
+
+    pub fn numerical_deriv(&self, params: &str, eps: f64) -> MaybeTree {
+        let mut deriv = None;
+        for param in params.chars() {
+            let (left, right) = {
+                let var = Tree::symbol(param);
+                let eps = Tree::constant(Scalar(eps));
+                let newvar = sub(Ok(var.clone()), Ok(eps.clone()))?;
+                let left = self.clone().substitute(&var, &newvar);
+                let newvar = add(Ok(var.clone()), Ok(eps))?;
+                let right = self.clone().substitute(&var, &newvar);
+                (left, right)
+            };
+            let partial = div(sub(left, right), Ok(Tree::constant(Scalar(2. * eps))));
+            deriv = Some(match deriv {
+                Some(tree) => Tree::concat(tree, partial),
+                None => partial,
+            });
+        }
+        match deriv {
+            Some(output) => output?.reshape(self.num_roots(), params.len()),
+            None => Err(Error::CannotComputeNumericDerivative),
+        }
     }
 }
 
