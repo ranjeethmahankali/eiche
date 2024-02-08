@@ -146,6 +146,7 @@ pub fn equivalent_many(
                         (Symbol(c1), Symbol(c2)) => c1 == c2,
                         (Unary(op1, _input1), Unary(op2, _input2)) => op1 == op2,
                         (Binary(op1, _lhs1, _rhs1), Binary(op2, _lhs2, _rhs2)) => op1 == op2,
+                        (Ternary(op1, ..), Ternary(op2, ..)) => op1 == op2,
                         _ => false,
                     } {
                         return false;
@@ -416,5 +417,12 @@ mod test {
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 20);
         compare_trees(&tree, &nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);
+    }
+
+    #[test]
+    fn t_ternary() {
+        assert!(deftree!(if (< x 0) (log (* x 3)) (exp (+ x 3)))
+            .unwrap()
+            .equivalent(&deftree!(if (< x 0) (log (* 3 x)) (exp (+ 3 x))).unwrap()));
     }
 }
