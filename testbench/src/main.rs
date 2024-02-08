@@ -18,7 +18,7 @@ fn main() {
         steps.last().unwrap().clone()
     };
     println!(
-        "Derivative of f(x, y) with respect to x and y is:\n${}$\n",
+        "Derivative of f(x, y) with respect to x and y is:\n\n${}$\n",
         deriv.to_latex()
     );
 }

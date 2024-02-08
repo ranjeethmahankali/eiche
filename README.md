@@ -45,4 +45,5 @@ $= k$
 $f(x, y) = {{x}^{2}} + {{y}^{2}}$
 
 Derivative of f(x, y) with respect to x and y is:
+
 $\begin{bmatrix}{{2}.{x}} & {\dfrac{{{y}^{2}}.{2}}{y}}\end{bmatrix}$
