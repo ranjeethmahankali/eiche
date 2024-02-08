@@ -101,11 +101,8 @@ fn compute_symbolic_deriv(
                         let sec2 = push_node(Binary(Pow, sec, two), dst) + offset;
                         Binary(Multiply, sec2, inputderiv) // chain rule.
                     }
-                    Log => {
-                        let xlogx = push_node(Binary(Multiply, *input, ni), dst) + offset;
-                        Binary(Divide, inputderiv, xlogx)
-                    }
-                    Exp => nodes[ni],
+                    Log => Binary(Divide, inputderiv, *input),
+                    Exp => Binary(Multiply, ni, inputderiv),
                     Not => continue,
                 }
             }
@@ -324,6 +321,82 @@ mod test {
             &[('x', -10., 10.)],
             100,
             0.,
+        );
+    }
+
+    #[test]
+    fn t_log() {
+        compare_trees(
+            &deftree!(log (pow x 2))
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(/ 2 x).unwrap(),
+            &[('x', 0.01, 10.)],
+            100,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_exp() {
+        let tree = deftree!(exp x).unwrap();
+        compare_trees(
+            &tree.clone().symbolic_derivative("x").unwrap(),
+            &tree,
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+        compare_trees(
+            &deftree!(exp (pow x 2))
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(* 2 (* x (exp (pow x 2)))).unwrap(),
+            &[('x', -4., 4.)],
+            100,
+            1e-8,
+        );
+    }
+
+    #[test]
+    fn t_min_max() {
+        compare_trees(
+            &deftree!(min x (pow x 2))
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
+            &[('x', -3., 3.)],
+            100,
+            1e-14,
+        );
+        compare_trees(
+            &deftree!(max x (pow x 2))
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(if (and (> x 0) (< x 1)) 1 (* 2 x)).unwrap(),
+            &[('x', -3., 3.)],
+            100,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_ternary() {
+        compare_trees(
+            &deftree!(min x (pow x 2))
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap()
+                .symbolic_derivative("x")
+                .unwrap(),
+            &deftree!(if (and (> x 0) (< x 1)) 2 0).unwrap(),
+            &[('x', -3., 5.)],
+            100,
+            1e-15,
         );
     }
 }
