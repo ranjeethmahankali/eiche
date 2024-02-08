@@ -182,6 +182,9 @@ impl Tree {
     }
 
     pub fn equivalent(&self, other: &Tree) -> bool {
+        if self.dims() != other.dims() {
+            return false;
+        }
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
         equivalent_many(

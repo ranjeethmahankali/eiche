@@ -161,6 +161,12 @@ lazy_static! {
                      ping (/ a a)
                      pong (1.0)
         ),
+        deftemplate!(pow_divide_by_self
+                     ping (/ (pow x a) x)
+                     pong (pow x (- a 1))),
+        deftemplate!(pow_divide_collapse
+                     ping (/ (pow x a) (pow x b))
+                     pong (pow x (- a b))),
         deftemplate!(distribute_pow_div
                      ping (pow (/ a b) k)
                      pong (/ (pow a k) (pow b k))
@@ -345,6 +351,18 @@ pub mod test {
                 &mut checked,
             );
             check_one_template("divide_by_self", &[('a', -10., 10.)], 1e-12, &mut checked);
+            check_one_template(
+                "pow_divide_by_self",
+                &[('x', 1., 10.), ('a', -10., 10.)],
+                1e-9,
+                &mut checked,
+            );
+            check_one_template(
+                "pow_divide_collapse",
+                &[('x', 1., 5.), ('a', -5., 5.), ('b', -5., 5.)],
+                1e-8,
+                &mut checked,
+            );
             check_one_template(
                 "distribute_pow_div",
                 &[('a', 1., 10.), ('b', 1., 10.), ('k', 0.1, 5.)],

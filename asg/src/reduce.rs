@@ -343,4 +343,22 @@ mod test {
             .unwrap()
             .equivalent(&deftree!(concat p 1.).unwrap()));
     }
+
+    #[test]
+    fn t_reduce_gradient() {
+        let tree = deftree!(- (+ (pow x 2) (pow y 2)) 5)
+            .unwrap()
+            .symbolic_derivative("xy")
+            .unwrap();
+        let reduced = {
+            let steps = reduce(tree, 10).unwrap();
+            steps.last().unwrap().clone()
+        };
+        assert!(reduced.equivalent(
+            &deftree!(concat (* 2 x) (* 2 y))
+                .unwrap()
+                .reshape(1, 2)
+                .unwrap()
+        ));
+    }
 }

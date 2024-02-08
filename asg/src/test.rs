@@ -5,12 +5,15 @@ pub mod util {
     use rand::SeedableRng;
 
     macro_rules! assert_float_eq {
-        ($a:expr, $b:expr, $eps:expr) => {{
+        ($a:expr, $b:expr, $eps:expr, $debug:expr) => {{
             // Make variables to avoid evaluating experssions multiple times.
             let a = $a;
             let b = $b;
             let eps = $eps;
             let error = f64::abs(a - b);
+            if error > eps {
+                println!("{:?}", $debug);
+            }
             assert!(
                 error <= eps,
                 "Assertion failed: |({}) - ({})| = {:e} < {:e}",
@@ -20,6 +23,9 @@ pub mod util {
                 eps
             );
         }};
+        ($a:expr, $b:expr, $eps:expr) => {
+            assert_float_eq!($a, $b, $eps, "")
+        };
         ($a:expr, $b:expr) => {
             assert_float_eq!($a, $b, f64::EPSILON)
         };
@@ -127,7 +133,7 @@ pub mod util {
             assert_eq!(results1.len(), results2.len());
             for (l, r) in results1.iter().zip(results2.iter()) {
                 match (l, r) {
-                    (Value::Scalar(a), Value::Scalar(b)) => assert_float_eq!(a, b, eps),
+                    (Value::Scalar(a), Value::Scalar(b)) => assert_float_eq!(a, b, eps, sample),
                     (Value::Bool(a), Value::Bool(b)) => assert_eq!(a, b),
                     _ => assert!(false, "Mismatched types"),
                 }
