@@ -7,19 +7,19 @@ use crate::{
 };
 
 impl Tree {
-    pub fn symbolic_deriv(mut self, params: &str) -> MaybeTree {
-        let num_nodes = self.len();
+    pub fn symbolic_deriv(&self, params: &str) -> MaybeTree {
         let (root_start, root_end) = {
             let root_indices = self.root_indices();
             (root_indices.start, root_indices.end)
         };
-        let nodes = self.nodes_mut();
+        let mut copy = self.clone();
+        let nodes = copy.nodes_mut();
         let mut derivs = Vec::<Node>::new();
         let mut derivmap = Vec::<Option<usize>>::new();
         let mut rootnodes = Vec::<usize>::new();
         for param in params.chars() {
             compute_symbolic_deriv(
-                &nodes[0..num_nodes],
+                &nodes[0..self.len()],
                 nodes.len(),
                 param,
                 &mut derivs,
@@ -43,7 +43,7 @@ impl Tree {
         let mut pruner = Pruner::new();
         pruner.run_from_slice(nodes, &rootnodes);
         fold_nodes(nodes)?;
-        return self.with_dims(root_end - root_start, params.len());
+        return copy.with_dims(root_end - root_start, params.len());
     }
 }
 
@@ -302,10 +302,7 @@ mod test {
             1e-15,
         );
         compare_trees(
-            &deftree!(* x (sqrt x))
-                .unwrap()
-                .symbolic_deriv("x")
-                .unwrap(),
+            &deftree!(* x (sqrt x)).unwrap().symbolic_deriv("x").unwrap(),
             &deftree!(* 1.5 (pow x 0.5)).unwrap(),
             &[('x', 0.01, 10.)],
             100,
