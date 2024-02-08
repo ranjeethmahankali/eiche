@@ -285,7 +285,14 @@ mod test {
             &[('x', -5., 5.)],
             100,
             1e-15,
-        )
+        );
+        compare_trees(
+            &deftree!(tan x).unwrap().symbolic_derivative("x").unwrap(),
+            &deftree!(pow (/ 1 (cos x)) 2).unwrap(),
+            &[('x', -1.5, 1.5)],
+            100,
+            1e-3,
+        );
     }
 
     #[test]
