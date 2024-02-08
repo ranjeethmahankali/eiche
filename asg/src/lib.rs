@@ -3,6 +3,7 @@ pub mod reduce;
 pub mod tree;
 
 mod dedup;
+mod derivative;
 mod error;
 mod fold;
 mod hash;

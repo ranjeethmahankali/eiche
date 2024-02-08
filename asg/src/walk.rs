@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use crate::tree::{Node, Node::*, Tree};
 
 /// Helper struct for traversing the tree depth first.
@@ -21,38 +19,37 @@ impl DepthWalker {
         }
     }
 
-    /// Get an iterator that walks the nodes of `tree`. If `unique` is
-    /// true, no node will be visited more than once. The choice of
-    /// `order` will affect the order in which the children of certain
-    /// nodes are traversed. See the documentation of `NodeOrdering`
-    /// for more details.
+    /// Get an iterator that walks the nodes of `tree`. If `unique` is true, no
+    /// node will be visited more than once. The choice of `order` will affect
+    /// the order in which the children of certain nodes are traversed. See the
+    /// documentation of `NodeOrdering` for more details.
     pub fn walk_tree<'a>(
         &'a mut self,
         tree: &'a Tree,
         unique: bool,
         ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
-        self.walk_many(&tree.nodes(), tree.root_indices(), unique, ordering)
+        self.walk_from_roots(&tree.nodes(), tree.root_indices(), unique, ordering)
     }
 
-    /// Get an iterator that walks the given `nodes` starting from the
-    /// node at `root_index`. If `unique` is true, no node will be
-    /// visited more than once. The choice of `order` will affect the
-    /// order in which the children of certain nodes are
-    /// traversed. See the documentation of `NodeOrdering` for more
-    /// details.
-    pub fn walk_many<'a>(
+    /// Get an iterator that walks the given `nodes` starting from the nodes in
+    /// the range `root_indices`. If `unique` is true, no node will be visited
+    /// more than once. The choice of `order` will affect the order in which the
+    /// children of certain nodes are traversed. See the documentation of
+    /// `NodeOrdering` for more details.
+    pub fn walk_from_roots<'a, I: Iterator<Item = usize>>(
         &'a mut self,
         nodes: &'a [Node],
-        root_indices: Range<usize>,
+        roots: I,
         unique: bool,
         ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
         // Prep the stack.
         self.stack.clear();
         self.stack.reserve(nodes.len());
-        // Push the roots in reversed order to preserve their order in the output.
-        self.stack.extend(root_indices.map(|r| (r, None)).rev());
+        self.stack.extend(roots.map(|r| (r, None)));
+        // Reverse the roots to preserve their order during traversal.
+        self.stack.reverse();
         // Reset the visited flags.
         self.visited.clear();
         self.visited.resize(nodes.len(), false);

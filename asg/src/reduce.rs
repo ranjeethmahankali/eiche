@@ -129,7 +129,7 @@ impl Eq for Candidate {}
 
 pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
     let mut capture = TemplateCapture::new();
-    let tree = capture.make_compact_tree(tree, None)?;
+    let tree = capture.compact_tree(tree)?;
     let mut hfn = Heuristic::new();
     let mut explored = Vec::<Candidate>::with_capacity(max_iter);
     let mut indexmap = HashMap::<u64, usize>::new();
@@ -342,5 +342,23 @@ mod test {
             .last()
             .unwrap()
             .equivalent(&deftree!(concat p 1.).unwrap()));
+    }
+
+    #[test]
+    fn t_reduce_gradient() {
+        let tree = deftree!(- (+ (pow x 2) (pow y 2)) 5)
+            .unwrap()
+            .symbolic_derivative("xy")
+            .unwrap();
+        let reduced = {
+            let steps = reduce(tree, 10).unwrap();
+            steps.last().unwrap().clone()
+        };
+        assert!(reduced.equivalent(
+            &deftree!(concat (* 2 x) (* 2 y))
+                .unwrap()
+                .reshape(1, 2)
+                .unwrap()
+        ));
     }
 }

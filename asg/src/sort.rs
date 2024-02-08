@@ -32,26 +32,75 @@ impl TopoSorter {
         }
     }
 
-    /// Sort `nodes` to be topologically valid, with `root_index` as
-    /// the new root. Depending on the choice of root, the output
-    /// vector may be littered with unused nodes, and may require
-    /// pruning later. If successful, the new root index is returned.
-    pub fn run(
+    /// Sort `nodes` to be topologically valid, with `root_indices` as the new
+    /// range of root nodes. Depending on the choice of root, the output vector
+    /// may be littered with unused nodes, and may require pruning later. If
+    /// successful, the new root index is returned.
+    pub fn run_from_range(
         &mut self,
         nodes: &mut Vec<Node>,
         root_indices: Range<usize>,
     ) -> Result<Range<usize>, Error> {
         // Compute depths of all nodes.
-        self.depths.clear();
-        self.depths.resize(nodes.len(), 0);
-        let num_roots = root_indices.end - root_indices.start;
-        for (index, maybe_parent) in
-            self.walker
-                .walk_many(&nodes, root_indices.clone(), false, NodeOrdering::Original)
+        Self::compute_depths(
+            nodes,
+            &mut self.depths,
+            self.walker.walk_from_roots(
+                &nodes,
+                root_indices.clone(),
+                false,
+                NodeOrdering::Original,
+            ),
+        )?;
+        self.sort_by_depth(nodes);
+        // Find the new range of roots and return.
+        return match self
+            .sorted_indices
+            .iter()
+            .position(|index| *index == root_indices.start)
         {
+            Some(i) => Ok(i..(i + (root_indices.end - root_indices.start))),
+            None => Err(Error::InvalidTopology),
+        };
+    }
+
+    pub fn run_from_slice(
+        &mut self,
+        nodes: &mut Vec<Node>,
+        roots: &mut [usize],
+    ) -> Result<(), Error> {
+        Self::compute_depths(
+            nodes,
+            &mut self.depths,
+            self.walker.walk_from_roots(
+                nodes,
+                roots.iter().map(|r| *r),
+                false,
+                NodeOrdering::Original,
+            ),
+        )?;
+        self.sort_by_depth(nodes);
+        // Update roots
+        for root in roots {
+            *root = match self.sorted_indices.iter().position(|index| *index == *root) {
+                Some(i) => i,
+                None => return Err(Error::InvalidTopology),
+            };
+        }
+        return Ok(());
+    }
+
+    fn compute_depths<I: Iterator<Item = (usize, Option<usize>)>>(
+        nodes: &[Node],
+        depths: &mut Vec<usize>,
+        depth_first_walk: I,
+    ) -> Result<(), Error> {
+        depths.clear();
+        depths.resize(nodes.len(), 0);
+        for (index, maybe_parent) in depth_first_walk {
             if let Some(parent) = maybe_parent {
-                self.depths[index] = usize::max(self.depths[index], 1 + self.depths[parent]);
-                if self.depths[index] >= nodes.len() {
+                depths[index] = usize::max(depths[index], 1 + depths[parent]);
+                if depths[index] >= nodes.len() {
                     // TODO: This is a terrible way to detect large
                     // cycles. As you'd have to traverse the whole
                     // cycle many times to reach this
@@ -61,6 +110,10 @@ impl TopoSorter {
                 }
             }
         }
+        return Ok(());
+    }
+
+    fn sort_by_depth(&mut self, nodes: &mut Vec<Node>) {
         // Sort the node indices by depth.
         self.sorted_indices.clear();
         self.sorted_indices.extend(0..nodes.len());
@@ -70,17 +123,9 @@ impl TopoSorter {
         // Build a map from old indices to new indices.
         self.index_map.clear();
         self.index_map.resize(nodes.len(), 0);
-        let mut newroots = None;
         for (i, index) in self.sorted_indices.iter().enumerate() {
             self.index_map[*index] = i;
-            if *index == root_indices.start && newroots.is_none() {
-                newroots = Some(i..(i + num_roots));
-            }
         }
-        let newroots = match newroots {
-            Some(val) => val,
-            None => return Err(Error::InvalidTopology),
-        };
         // Gather the sorted nodes.
         self.sorted.clear();
         self.sorted
@@ -97,7 +142,6 @@ impl TopoSorter {
             }));
         // Swap the sorted nodes and the incoming nodes.
         std::mem::swap(&mut self.sorted, nodes);
-        return Ok(newroots);
     }
 }
 
@@ -112,7 +156,7 @@ mod test {
     fn t_topological_sorting_0() {
         let mut sorter = TopoSorter::new();
         let mut nodes = vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')];
-        let root = sorter.run(&mut nodes, 1..2).unwrap();
+        let root = sorter.run_from_range(&mut nodes, 1..2).unwrap();
         assert_eq!(root, 2..3);
         assert_eq!(nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
     }
@@ -128,7 +172,7 @@ mod test {
             Symbol('y'),             // 5
         ];
         let mut sorter = TopoSorter::new();
-        let root = sorter.run(&mut nodes, 4..5).unwrap();
+        let root = sorter.run_from_range(&mut nodes, 4..5).unwrap();
         assert_eq!(root, 5..6);
         assert_eq!(
             nodes,
@@ -160,7 +204,7 @@ mod test {
             Binary(Multiply, 3, 1), // 11
         ];
         let mut sorter = TopoSorter::new();
-        let root = sorter.run(&mut nodes, 10..11).unwrap();
+        let root = sorter.run_from_range(&mut nodes, 10..11).unwrap();
         assert_eq!(root, 11..12);
         assert_eq!(
             nodes,
@@ -197,7 +241,7 @@ mod test {
             Constant(Scalar(2.0)),  // 9
         ];
         assert!(matches!(
-            sorter.run(&mut nodes, 0..1),
+            sorter.run_from_range(&mut nodes, 0..1),
             Err(Error::CyclicGraph)
         ));
     }
@@ -216,7 +260,7 @@ mod test {
             Binary(Add, 1, 3),
             Binary(Add, 2, 4),
         ];
-        let roots = sorter.run(&mut nodes, 5..7).unwrap();
+        let roots = sorter.run_from_range(&mut nodes, 5..7).unwrap();
         assert_eq!(roots, 6..8);
         assert_eq!(
             nodes,

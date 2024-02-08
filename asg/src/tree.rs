@@ -174,6 +174,13 @@ impl Tree {
         }
     }
 
+    pub fn create(nodes: Vec<Node>, dims: (usize, usize)) -> MaybeTree {
+        if matsize(dims) > nodes.len() {
+            return Err(Error::InvalidDimensions);
+        }
+        Tree { nodes, dims }.validated()
+    }
+
     pub fn concat(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
         let mut lhs = lhs?;
         let mut rhs = rhs?;
@@ -255,6 +262,10 @@ impl Tree {
         &mut self.nodes
     }
 
+    pub fn take_nodes(self) -> Vec<Node> {
+        self.nodes
+    }
+
     /// Get a unique list of all symbols in this tree. The list of
     /// chars is expected to be sorted.
     pub fn symbols(&self) -> Vec<char> {
@@ -280,15 +291,43 @@ impl Tree {
         if self.nodes.is_empty() {
             return Err(Error::EmptyTree);
         }
+        // Make sure nodes only depend on the nodes that came before them.
+        let roots = self.root_indices();
         for i in 0..self.nodes.len() {
             match &self.nodes[i] {
                 Constant(val) => match val {
-                    Scalar(val) if f64::is_nan(*val) => return Err(Error::ContainsNaN),
-                    _ => {} // Do nothing.
+                    Scalar(val) => {
+                        if f64::is_nan(*val) {
+                            return Err(Error::ContainsNaN);
+                        }
+                    }
+                    Bool(_) => {} // Do nothing.
                 },
-                Unary(_, input) if *input >= i => return Err(Error::WrongNodeOrder),
-                Binary(_, l, r) if *l >= i || *r >= i => return Err(Error::WrongNodeOrder),
-                Symbol(_) | _ => {} // Do nothing.
+                Symbol(_) => {} // Do nothing.
+                Unary(_, input) => {
+                    if *input >= i {
+                        return Err(Error::WrongNodeOrder);
+                    }
+                    if roots.contains(input) {
+                        return Err(Error::DependentRootNodes);
+                    }
+                }
+                Binary(_, l, r) => {
+                    if *l >= i || *r >= i {
+                        return Err(Error::WrongNodeOrder);
+                    }
+                    if roots.contains(l) || roots.contains(r) {
+                        return Err(Error::WrongNodeOrder);
+                    }
+                }
+                Ternary(_, a, b, c) => {
+                    if *a >= i || *b >= i || *c >= i {
+                        return Err(Error::WrongNodeOrder);
+                    }
+                    if roots.contains(a) || roots.contains(b) || roots.contains(c) {
+                        return Err(Error::DependentRootNodes);
+                    }
+                }
             }
         }
         // Maybe add more checks later.
