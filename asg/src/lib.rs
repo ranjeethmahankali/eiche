@@ -1,6 +1,7 @@
 pub mod error;
 pub mod eval;
 pub mod reduce;
+pub mod substitute;
 pub mod tree;
 
 mod dedup;
