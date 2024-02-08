@@ -7,13 +7,13 @@ use crate::{
 };
 
 impl Tree {
-    pub fn symbolic_derivative(self, params: &str) -> MaybeTree {
+    pub fn symbolic_derivative(mut self, params: &str) -> MaybeTree {
         let num_nodes = self.len();
         let (root_start, root_end) = {
             let root_indices = self.root_indices();
             (root_indices.start, root_indices.end)
         };
-        let mut nodes = self.take_nodes();
+        let nodes = self.nodes_mut();
         let mut derivs = Vec::<Node>::new();
         let mut derivmap = Vec::<Option<usize>>::new();
         let mut rootnodes = Vec::<usize>::new();
@@ -39,11 +39,11 @@ impl Tree {
         // an object that the caller can pass in. That would allow the caller to
         // reuse the resources and avoid repeated allocations.
         let mut sorter = TopoSorter::new();
-        sorter.run_from_slice(&mut nodes, &mut rootnodes)?;
+        sorter.run_from_slice(nodes, &mut rootnodes)?;
         let mut pruner = Pruner::new();
-        pruner.run_from_slice(&mut nodes, &rootnodes);
-        fold_nodes(&mut nodes)?;
-        return Tree::create(nodes, (root_end - root_start, params.len()));
+        pruner.run_from_slice(nodes, &rootnodes);
+        fold_nodes(nodes)?;
+        return self.with_dims(root_end - root_start, params.len());
     }
 }
 
