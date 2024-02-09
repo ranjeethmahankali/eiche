@@ -61,7 +61,7 @@ impl Tree {
                 let right = self.clone().substitute(&var, &newvar);
                 (left, right)
             };
-            let partial = div(sub(left, right), Ok(Tree::constant(Scalar(2. * eps))));
+            let partial = div(sub(right, left), Ok(Tree::constant(Scalar(2. * eps))));
             deriv = Some(match deriv {
                 Some(tree) => Tree::concat(tree, partial),
                 None => partial,
@@ -265,7 +265,10 @@ mod test {
                 .unwrap()
                 .symbolic_deriv("xy")
                 .unwrap(),
-            &deftree!(concat (* 2 x) (* 2 y)).unwrap(),
+            &deftree!(concat (* 2 x) (* 2 y))
+                .unwrap()
+                .reshape(1, 2)
+                .unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
             20,
             1e-14,
@@ -281,7 +284,10 @@ mod test {
                 .unwrap()
                 .symbolic_deriv("xy")
                 .unwrap(),
-            &deftree!(concat (* 6 x) 0 0 (* 6 y)).unwrap(),
+            &deftree!(concat (* 6 x) 0 0 (* 6 y))
+                .unwrap()
+                .reshape(2, 2)
+                .unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
             20,
             1e-13,
@@ -421,6 +427,33 @@ mod test {
             &[('x', -3., 5.)],
             100,
             1e-15,
+        );
+    }
+
+    #[test]
+    fn t_numerical() {
+        compare_trees(
+            &deftree!(pow x 2)
+                .unwrap()
+                .numerical_deriv("x", 1e-4)
+                .unwrap(),
+            &deftree!(* 2 x).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            1e-10,
+        );
+        compare_trees(
+            &deftree!(- (sqrt (+ (pow x 2) (pow y 2))) 5.)
+                .unwrap()
+                .numerical_deriv("xy", 1e-4)
+                .unwrap(),
+            &deftree!(/ (concat x y) (sqrt (+ (pow x 2) (pow y 2))))
+                .unwrap()
+                .reshape(1, 2)
+                .unwrap(),
+            &[('y', -10., 10.), ('x', -10., 10.)],
+            20,
+            1e-7,
         );
     }
 }

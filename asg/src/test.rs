@@ -110,6 +110,12 @@ pub mod util {
         samples_per_var: usize,
         eps: f64,
     ) {
+        assert!(
+            tree1.dims() == tree2.dims(),
+            "Trees must have the same dimensions: {:?}, {:?}",
+            tree1.dims(),
+            tree2.dims()
+        );
         use rand::Rng;
         let mut eval1 = Evaluator::new(&tree1);
         let mut eval2 = Evaluator::new(&tree2);
@@ -130,7 +136,11 @@ pub mod util {
             }
             let results1 = eval1.run().unwrap();
             let results2 = eval2.run().unwrap();
-            assert_eq!(results1.len(), results2.len());
+            assert_eq!(
+                results1.len(),
+                results2.len(),
+                "The results are not of same length"
+            );
             for (l, r) in results1.iter().zip(results2.iter()) {
                 match (l, r) {
                     (Value::Scalar(a), Value::Scalar(b)) => assert_float_eq!(a, b, eps, sample),
