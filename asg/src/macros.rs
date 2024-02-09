@@ -24,7 +24,9 @@ macro_rules! deftree {
     (($($a:tt)*)) => { // Unwrap redundant parens.
         $crate::deftree!($($a)*)
     };
-    // Concat
+    ($a:block) => { // Block expressions.
+        $a
+    };    // Concat
     (concat $($trees:tt) +) => {
         $crate::concat_trees!($($trees) +)
     };

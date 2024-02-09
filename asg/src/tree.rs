@@ -338,9 +338,7 @@ impl Tree {
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> MaybeTree {
         let nroots = self.num_roots();
         let other_nroots = other.num_roots();
-        if nroots > other_nroots {
-            return other.binary_op(self, op);
-        } else if nroots != 1 && nroots != other_nroots {
+        if nroots != 1 && other_nroots != 1 && nroots != other_nroots {
             return Err(Error::DimensionMismatch(self.dims, other.dims));
         }
         self.nodes
@@ -350,6 +348,11 @@ impl Tree {
             let root = offset - 1;
             for r in other.root_indices() {
                 self.nodes.push(Binary(op, root, r + offset));
+            }
+        } else if other_nroots == 1 {
+            let root = self.len() - 1;
+            for r in (offset - nroots)..offset {
+                self.nodes.push(Binary(op, r, root));
             }
         } else {
             for (l, r) in ((offset - nroots)..offset).zip(other.root_indices()) {
@@ -668,6 +671,21 @@ mod test {
                 Symbol('x'),
                 Unary(Negate, 4),
                 Ternary(Choose, 2, 3, 5)
+            ]
+        );
+    }
+
+    #[test]
+    fn t_concat_op_inside_macro() {
+        let tree = deftree!(/ (concat x y) 2.).unwrap();
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Symbol('x'),
+                Symbol('y'),
+                Constant(Scalar(2.0)),
+                Binary(Divide, 0, 2),
+                Binary(Divide, 1, 2)
             ]
         );
     }

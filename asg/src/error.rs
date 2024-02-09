@@ -34,4 +34,5 @@ pub enum Error {
 
     // Derivatives.
     CannotComputeSymbolicDerivative,
+    CannotComputeNumericDerivative,
 }

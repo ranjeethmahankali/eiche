@@ -348,7 +348,7 @@ mod test {
     fn t_reduce_gradient() {
         let tree = deftree!(- (+ (pow x 2) (pow y 2)) 5)
             .unwrap()
-            .symbolic_derivative("xy")
+            .symbolic_deriv("xy")
             .unwrap();
         let reduced = {
             let steps = reduce(tree, 10).unwrap();
