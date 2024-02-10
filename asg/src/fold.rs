@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, Value::*},
+    tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
 /// Compute the results of operations on constants and fold those into
@@ -18,7 +18,7 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
                     None
                 }
             }
-            Binary(op, lhs, rhs) => match (op, &nodes[lhs], &nodes[rhs]) {
+            Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
                 // Constant folding.
                 (op, Constant(a), Constant(b)) => Some(Constant(op.apply(*a, *b)?)),
                 // Identity ops.
@@ -34,6 +34,7 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
                 (And, lhs, Constant(rhs)) if *rhs == true => Some(*lhs),
                 (And, Constant(lhs), rhs) if *lhs == true => Some(*rhs),
                 // Other ops.
+                (Subtract, Constant(val), _rhs) if *val == 0. => Some(Unary(Negate, ri)),
                 (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(Scalar(1.))),
                 (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(Scalar(0.))),
                 (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
