@@ -105,18 +105,13 @@ struct Candidate {
 
 impl Candidate {
     pub fn cost(&self) -> usize {
-        self.steps + self.complexity
+        self.steps + self.tree.len() + self.complexity
     }
 }
 
 impl PartialOrd for Candidate {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        use std::cmp::Ordering::*;
-        match other.steps.partial_cmp(&self.steps) {
-            Some(Less) => Some(Less),
-            Some(Greater) => Some(Greater),
-            Some(Equal) | None => other.cost().partial_cmp(&self.cost()),
-        }
+        other.cost().partial_cmp(&self.cost())
     }
 }
 
@@ -328,7 +323,7 @@ mod test {
                                    (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
                             42.)
         .unwrap();
-        let steps = reduce(tree, 8).unwrap();
+        let steps = reduce(tree, 12).unwrap();
         assert!(steps
             .last()
             .unwrap()
@@ -355,11 +350,8 @@ mod test {
             .unwrap()
             .symbolic_deriv("xy")
             .unwrap();
-        let reduced = {
-            let steps = reduce(tree, 10).unwrap();
-            steps.last().unwrap().clone()
-        };
-        assert!(reduced.equivalent(
+        let steps = reduce(tree, 12).unwrap();
+        assert!(steps.last().unwrap().equivalent(
             &deftree!(concat (* 2 x) (* 2 y))
                 .unwrap()
                 .reshape(1, 2)
@@ -368,9 +360,31 @@ mod test {
     }
 
     #[test]
+    fn t_second_deriv() {
+        let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) x) x).unwrap();
+        let steps = reduce(tree, 16).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(* 6 x).unwrap()));
+    }
+
+    #[test]
     fn t_hessian() {
-        let hess = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) xy) xy).unwrap();
-        println!("${}$\n", hess.to_latex());
-        todo!()
+        let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) xy) xy).unwrap();
+        let steps = reduce(tree, 128).unwrap();
+        assert!(steps.last().unwrap().equivalent(
+            &deftree!(concat (* x 6) 0 0 (* y 6))
+                .unwrap()
+                .reshape(2, 2)
+                .unwrap()
+        ));
+    }
+
+    #[test]
+    fn t_circle_gradient() {
+        let tree = deftree!(sderiv (- (sqrt (+ (pow x 2) (pow y 2))) 3) xy).unwrap();
+        let steps = reduce(tree, 64).unwrap();
+        for step in &steps {
+            println!("${}$\n", step.to_latex());
+        }
+        todo!();
     }
 }
