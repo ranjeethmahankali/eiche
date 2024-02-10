@@ -9,6 +9,14 @@ use crate::{
     },
 };
 
+pub fn symbolic_deriv(tree: MaybeTree, params: &str) -> MaybeTree {
+    tree?.symbolic_deriv(params)
+}
+
+pub fn numerical_deriv(tree: MaybeTree, params: &str, eps: f64) -> MaybeTree {
+    tree?.numerical_deriv(params, eps)
+}
+
 impl Tree {
     pub fn symbolic_deriv(&self, params: &str) -> MaybeTree {
         let (root_start, root_end) = {

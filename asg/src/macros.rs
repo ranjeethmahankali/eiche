@@ -30,6 +30,13 @@ macro_rules! deftree {
     (concat $($trees:tt) +) => {
         $crate::concat_trees!($($trees) +)
     };
+    // Derivatives.
+    (sderiv $tree:tt $params:ident) => {
+        $crate::derivative::symbolic_deriv($crate::deftree!($tree), stringify!($params))
+    };
+    (nderiv $tree:tt $params:ident $eps:literal) => {
+        $crate::derivative::numerical_deriv($crate::deftree!($tree), stringify!($params), $eps)
+    };
     // Unary ops with functions names.
     ($unary_op:ident $a:tt) => {
         $crate::tree::$unary_op($crate::deftree!($a))
@@ -85,7 +92,6 @@ macro_rules! deftree {
     (if $cond:tt $a:tt $b:tt) => {
         $crate::tree::Tree::piecewise($crate::deftree!($cond), $crate::deftree!($a), $crate::deftree!($b))
     };
-    // Symbols.
     ($a:ident) => {{
         const LABEL: &str = stringify!($a);
         $crate::const_assert!(

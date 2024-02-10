@@ -111,7 +111,12 @@ impl Candidate {
 
 impl PartialOrd for Candidate {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        other.cost().partial_cmp(&self.cost())
+        use std::cmp::Ordering::*;
+        match other.steps.partial_cmp(&self.steps) {
+            Some(Less) => Some(Less),
+            Some(Greater) => Some(Greater),
+            Some(Equal) | None => other.cost().partial_cmp(&self.cost()),
+        }
     }
 }
 
@@ -287,14 +292,14 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_0() {
+    fn t_factoring() {
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y)).unwrap();
         let steps = reduce(tree, 8).unwrap();
         assert!(steps.last().unwrap().equivalent(&deftree!(p).unwrap()));
     }
 
     #[test]
-    fn t_reduce_1() {
+    fn t_norm_vec_len() {
         let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
         .unwrap();
@@ -303,7 +308,7 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_concat_1() {
+    fn t_concat_1() {
         let tree = deftree!(concat
                             (/ (+ (* p x) (* p y)) (+ x y))
                             1.
@@ -317,7 +322,7 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_concat_2() {
+    fn t_concat_2() {
         let tree = deftree!(concat
                             (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
                                    (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
@@ -331,7 +336,7 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_concat_3() {
+    fn t_concat_3() {
         let tree = deftree!(concat
                             (/ (+ (* p x) (* p y)) (+ x y))
                             (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
@@ -345,7 +350,7 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_gradient() {
+    fn t_gradient() {
         let tree = deftree!(- (+ (pow x 2) (pow y 2)) 5)
             .unwrap()
             .symbolic_deriv("xy")
@@ -360,5 +365,12 @@ mod test {
                 .reshape(1, 2)
                 .unwrap()
         ));
+    }
+
+    #[test]
+    fn t_hessian() {
+        let hess = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) xy) xy).unwrap();
+        println!("${}$\n", hess.to_latex());
+        todo!()
     }
 }
