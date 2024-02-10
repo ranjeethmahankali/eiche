@@ -105,7 +105,7 @@ struct Candidate {
 
 impl Candidate {
     pub fn cost(&self) -> usize {
-        self.steps + self.complexity
+        self.steps + self.tree.len() + self.complexity
     }
 }
 
@@ -287,14 +287,14 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_0() {
+    fn t_factoring() {
         let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y)).unwrap();
         let steps = reduce(tree, 8).unwrap();
         assert!(steps.last().unwrap().equivalent(&deftree!(p).unwrap()));
     }
 
     #[test]
-    fn t_reduce_1() {
+    fn t_norm_vec_len() {
         let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
         .unwrap();
@@ -303,7 +303,7 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_concat_1() {
+    fn t_concat_1() {
         let tree = deftree!(concat
                             (/ (+ (* p x) (* p y)) (+ x y))
                             1.
@@ -317,13 +317,13 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_concat_2() {
+    fn t_concat_2() {
         let tree = deftree!(concat
                             (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
                                    (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
                             42.)
         .unwrap();
-        let steps = reduce(tree, 8).unwrap();
+        let steps = reduce(tree, 12).unwrap();
         assert!(steps
             .last()
             .unwrap()
@@ -331,7 +331,7 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_concat_3() {
+    fn t_concat_3() {
         let tree = deftree!(concat
                             (/ (+ (* p x) (* p y)) (+ x y))
                             (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
@@ -345,20 +345,50 @@ mod test {
     }
 
     #[test]
-    fn t_reduce_gradient() {
+    fn t_gradient() {
         let tree = deftree!(- (+ (pow x 2) (pow y 2)) 5)
             .unwrap()
             .symbolic_deriv("xy")
             .unwrap();
-        let reduced = {
-            let steps = reduce(tree, 10).unwrap();
-            steps.last().unwrap().clone()
-        };
-        assert!(reduced.equivalent(
+        let steps = reduce(tree, 12).unwrap();
+        assert!(steps.last().unwrap().equivalent(
             &deftree!(concat (* 2 x) (* 2 y))
                 .unwrap()
                 .reshape(1, 2)
                 .unwrap()
+        ));
+    }
+
+    #[test]
+    fn t_second_deriv() {
+        let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) x) x).unwrap();
+        let steps = reduce(tree, 32).unwrap();
+        assert!(steps.last().unwrap().equivalent(&deftree!(* 6 x).unwrap()));
+    }
+
+    #[test]
+    fn t_hessian() {
+        let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) xy) xy).unwrap();
+        let steps = reduce(tree, 256).unwrap();
+        assert!(steps.last().unwrap().equivalent(
+            &deftree!(concat (* x 6) 0 0 (* y 6))
+                .unwrap()
+                .reshape(2, 2)
+                .unwrap()
+        ));
+    }
+
+    #[test]
+    fn t_circle_gradient() {
+        let tree = deftree!(sderiv (- (sqrt (+ (pow x 2) (pow y 2))) 3) xy).unwrap();
+        let steps = reduce(tree, 64).unwrap();
+        assert!(steps.last().unwrap().equivalent(
+            &deftree!(concat
+                      (/ x (sqrt (+ (pow x 2) (pow y 2))))
+                      (/ y (sqrt (+ (pow x 2) (pow y 2)))))
+            .unwrap()
+            .reshape(1, 2)
+            .unwrap()
         ));
     }
 }

@@ -9,6 +9,14 @@ use crate::{
     },
 };
 
+pub fn symbolic_deriv(tree: MaybeTree, params: &str) -> MaybeTree {
+    tree?.symbolic_deriv(params)
+}
+
+pub fn numerical_deriv(tree: MaybeTree, params: &str, eps: f64) -> MaybeTree {
+    tree?.numerical_deriv(params, eps)
+}
+
 impl Tree {
     pub fn symbolic_deriv(&self, params: &str) -> MaybeTree {
         let (root_start, root_end) = {
@@ -114,7 +122,10 @@ fn compute_symbolic_deriv(
                         let df = push_node(Ternary(Choose, cond, neg, one), dst) + offset;
                         Binary(Multiply, df, inputderiv) // Chain rule.
                     }
-                    Sin => Unary(Cos, *input),
+                    Sin => {
+                        let cosf = push_node(Unary(Cos, *input), dst) + offset;
+                        Binary(Multiply, cosf, inputderiv) // Chain rule.
+                    }
                     Cos => {
                         let sin = push_node(Unary(Sin, *input), dst) + offset;
                         let negsin = push_node(Unary(Negate, sin), dst) + offset;
@@ -322,6 +333,16 @@ mod test {
             &[('x', -1.5, 1.5)],
             100,
             1e-3,
+        );
+        compare_trees(
+            &deftree!(sin (pow x 2))
+                .unwrap()
+                .symbolic_deriv("x")
+                .unwrap(),
+            &deftree!(* (cos (pow x 2)) (* 2 x)).unwrap(),
+            &[('x', -2., 2.)],
+            100,
+            1e-14,
         );
     }
 
