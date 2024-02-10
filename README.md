@@ -5,7 +5,7 @@
 
 ## Example
 ```rust
-    use asg::{deftree, reduce::reduce};
+    use symba::{deftree, reduce::reduce};
 
     fn main() {
         println!("Symba can simplify expressions.\n");
