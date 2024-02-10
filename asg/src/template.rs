@@ -139,6 +139,9 @@ lazy_static! {
                      ping (/ (* x y) z)
                      pong (* y (/ x z))
         ),
+        deftemplate!(rearrange_div_div_1
+                     ping (/ (/ a b) c)
+                     pong (/ a (* b c))),
         deftemplate!(rearrange_mul_1
                      ping (* x (* y z))
                      pong (* (* x z) y)),
@@ -347,6 +350,12 @@ pub mod test {
                     "rearrange_add_sub_2",
                 ],
                 &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                1e-12,
+                &mut checked,
+            );
+            check_one_template(
+                "rearrange_div_div_1",
+                &[('a', 0.01, 10.), ('b', 0.01, 10.), ('c', 0.01, 10.)],
                 1e-12,
                 &mut checked,
             );

@@ -1,10 +1,10 @@
+pub mod derivative;
 pub mod error;
 pub mod eval;
 pub mod reduce;
 pub mod tree;
 
 mod dedup;
-mod derivative;
 mod fold;
 mod hash;
 mod io;

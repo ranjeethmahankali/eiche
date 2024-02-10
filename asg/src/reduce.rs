@@ -362,14 +362,14 @@ mod test {
     #[test]
     fn t_second_deriv() {
         let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) x) x).unwrap();
-        let steps = reduce(tree, 16).unwrap();
+        let steps = reduce(tree, 32).unwrap();
         assert!(steps.last().unwrap().equivalent(&deftree!(* 6 x).unwrap()));
     }
 
     #[test]
     fn t_hessian() {
         let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) xy) xy).unwrap();
-        let steps = reduce(tree, 128).unwrap();
+        let steps = reduce(tree, 200).unwrap();
         assert!(steps.last().unwrap().equivalent(
             &deftree!(concat (* x 6) 0 0 (* y 6))
                 .unwrap()
@@ -382,9 +382,14 @@ mod test {
     fn t_circle_gradient() {
         let tree = deftree!(sderiv (- (sqrt (+ (pow x 2) (pow y 2))) 3) xy).unwrap();
         let steps = reduce(tree, 64).unwrap();
-        for step in &steps {
-            println!("${}$\n", step.to_latex());
-        }
-        todo!();
+        println!("${}$\n", steps.last().unwrap().to_latex());
+        assert!(steps.last().unwrap().equivalent(
+            &deftree!(concat
+                      (/ x (sqrt (+ (pow x 2) (pow y 2))))
+                      (/ y (sqrt (+ (pow x 2) (pow y 2)))))
+            .unwrap()
+            .reshape(1, 2)
+            .unwrap()
+        ));
     }
 }
