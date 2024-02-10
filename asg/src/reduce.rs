@@ -346,10 +346,7 @@ mod test {
 
     #[test]
     fn t_gradient() {
-        let tree = deftree!(- (+ (pow x 2) (pow y 2)) 5)
-            .unwrap()
-            .symbolic_deriv("xy")
-            .unwrap();
+        let tree = deftree!(sderiv (- (+ (pow x 2) (pow y 2)) 5) xy).unwrap();
         let steps = reduce(tree, 12).unwrap();
         assert!(steps.last().unwrap().equivalent(
             &deftree!(concat (* 2 x) (* 2 y))

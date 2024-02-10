@@ -20,13 +20,14 @@
         let tree = deftree!(+ (pow x 2) (pow y 2)).unwrap();
         println!("$f(x, y) = {}$\n", tree.to_latex());
         let deriv = {
-            let deriv = tree.symbolic_derivative("xy").unwrap();
-            let steps = reduce(deriv, 8).unwrap();
+            let deriv = tree.symbolic_deriv("xy").unwrap();
+            let steps = reduce(deriv, 12).unwrap();
             steps.last().unwrap().clone()
         };
         println!(
-            "Derivative of f(x, y) with respect to x and y is:\n${}$\n",
+            "Derivative of f(x, y) with respect to x and y is:\n\n$${}$$\n",
             deriv.to_latex()
+        );
     );
 }
 ```
@@ -46,4 +47,4 @@ $f(x, y) = {{x}^{2}} + {{y}^{2}}$
 
 Derivative of f(x, y) with respect to x and y is:
 
-${2}.{x}$
+$$\begin{bmatrix}{{2}.{x}} & {{2}.{y}}\end{bmatrix}$$
