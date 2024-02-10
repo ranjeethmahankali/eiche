@@ -449,6 +449,10 @@ binary_func!(geq, GreaterOrEqual);
 binary_func!(and, And);
 binary_func!(or, Or);
 
+pub fn reshape(tree: MaybeTree, rows: usize, cols: usize) -> MaybeTree {
+    tree?.reshape(rows, cols)
+}
+
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Scalar(value)

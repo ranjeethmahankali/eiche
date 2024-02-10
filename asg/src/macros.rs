@@ -37,6 +37,10 @@ macro_rules! deftree {
     (nderiv $tree:tt $params:ident $eps:literal) => {
         $crate::derivative::numerical_deriv($crate::deftree!($tree), stringify!($params), $eps)
     };
+    // Reshape
+    (reshape $tree:tt $rows:literal $cols:literal) => {
+        $crate::tree::reshape($crate::deftree!($tree), $rows, $cols)
+    };
     // Unary ops with functions names.
     ($unary_op:ident $a:tt) => {
         $crate::tree::$unary_op($crate::deftree!($a))
