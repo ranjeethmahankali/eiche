@@ -1,9 +1,11 @@
-[workspace]
+[package]
+name = "symba"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ranjeeth Mahankali <ranjeethmahankali@gmail.com>"]
 
-# I was asked to specify the resolver by Cargo via a warning and a
-# suggestion. I don't know what it means.
-resolver = "2"
-members = [
-        "asg",
-        "testbench",
-]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "0.8"
+lazy_static = "1.4"
