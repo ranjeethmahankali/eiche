@@ -110,22 +110,15 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// Set all symbols in the evaluator matching `label` to
-    /// `value`. This `value` will be used for all future evaluations,
-    /// unless this function is called again with a different `value`.
-    fn set_var(&mut self, label: char, value: Value) {
+    pub fn set_scalar(&mut self, label: char, value: f64) {
         for (node, reg) in self.tree.nodes().iter().zip(self.regs.iter_mut()) {
             match node {
                 Symbol(l) if *l == label => {
-                    *reg = value;
+                    *reg = Scalar(value);
                 }
                 _ => {}
             }
         }
-    }
-
-    pub fn set_scalar(&mut self, label: char, value: f64) {
-        self.set_var(label, Scalar(value))
     }
 
     /// Write the `value` into the `index`-th register. The existing
@@ -137,7 +130,7 @@ impl<'a> Evaluator<'a> {
     /// Run the evaluator and return the result. The result may
     /// contain the output value, or an
     /// error. `Variablenotfound(label)` error means the variable
-    /// matching `label` hasn't been assigned a value using `set_var`.
+    /// matching `label` hasn't been assigned a value using `set_scalar`.
     pub fn run(&mut self) -> Result<&[Value], Error> {
         for idx in 0..self.tree.len() {
             self.write(

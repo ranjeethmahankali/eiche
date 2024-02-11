@@ -41,6 +41,11 @@ macro_rules! deftree {
     (reshape $tree:tt $rows:literal $cols:literal) => {
         $crate::tree::reshape($crate::deftree!($tree), $rows, $cols)
     };
+    // Constants.
+    (const $tt:expr) => {{
+        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant({$tt}.into()));
+        out
+    }};
     // Unary ops with functions names.
     ($unary_op:ident $a:tt) => {
         $crate::tree::$unary_op($crate::deftree!($a))
@@ -83,11 +88,7 @@ macro_rules! deftree {
     (>= $a:tt $b:tt) => {
       $crate::tree::geq($crate::deftree!($a), $crate::deftree!($b))
     };
-    // Constants.
-    (const $tt:expr) => {{
-        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant({$tt}.into()));
-        out
-    }};
+    // Symbols
     ($a:literal) => {{
         let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant(($a).into()));
         out
