@@ -39,6 +39,6 @@ pub enum Error {
     // Jit
     CannotCreateJitModule,
     CannotAllocateFunctionArgument,
-    JitCompilationError,
     CannotCompileIntrinsic(&'static str),
+    JitCompilationError,
 }

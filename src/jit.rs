@@ -14,6 +14,8 @@ use crate::{
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
+const FUNC_NAME: &str = "";
+
 impl Tree {
     pub fn jit_compile<'ctx, F: UnsafeFunctionPointer>(
         &'ctx self,
@@ -27,7 +29,7 @@ impl Tree {
         let bool_type = context.bool_type();
         let num_symbols = self.symbols().len();
         let fn_type = f64_type.fn_type(&vec![f64_type.into(); num_symbols], false);
-        let function = compiler.module.add_function("symba-tree-fn", fn_type, None);
+        let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         let basic_block = context.append_basic_block(function, "entry");
         builder.position_at_end(basic_block);
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
@@ -303,10 +305,10 @@ impl Tree {
             .build_return(Some(regs.last().ok_or(Error::JitCompilationError)?))
             .map_err(|_| Error::JitCompilationError)?;
         return unsafe {
-            compiler
-                .engine
-                .get_function("symba-tree-fn")
-                .map_err(|_| Error::JitCompilationError)
+            compiler.engine.get_function(FUNC_NAME).map_err(|e| {
+                println!("{:?}", e);
+                Error::JitCompilationError
+            })
         };
     }
 }
@@ -373,6 +375,14 @@ pub struct JitContext {
     inner: Context,
 }
 
+impl JitContext {
+    pub fn new() -> JitContext {
+        JitContext {
+            inner: Context::create(),
+        }
+    }
+}
+
 struct JitCompiler<'ctx> {
     engine: ExecutionEngine<'ctx>,
     module: Module<'ctx>,
@@ -381,15 +391,30 @@ struct JitCompiler<'ctx> {
 
 impl<'ctx> JitCompiler<'ctx> {
     pub fn new(context: &'ctx Context) -> Result<JitCompiler<'ctx>, Error> {
-        let module = context.create_module("symba-tree");
+        let module = context.create_module(FUNC_NAME);
         let engine = module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
-        let module = context.create_module("symba-tree");
         Ok(JitCompiler {
             engine,
             module,
             builder: context.create_builder(),
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::deftree;
+
+    #[test]
+    fn t_square() {
+        type SquareFn = unsafe extern "C" fn(f64) -> f64;
+        let tree = deftree!(+ x 2).unwrap();
+        let context = JitContext::new();
+        let func = tree.jit_compile::<SquareFn>(&context).unwrap();
+        let result = unsafe { func.call(2.5) };
+        assert_eq!(result, 2.5 + 2.);
     }
 }
