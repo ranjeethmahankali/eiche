@@ -35,4 +35,9 @@ pub enum Error {
     // Derivatives.
     CannotComputeSymbolicDerivative,
     CannotComputeNumericDerivative,
+
+    // Jit
+    CannotCreateJitModule,
+    CannotAllocateFunctionArgument,
+    JitCompilationError,
 }

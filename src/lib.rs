@@ -8,6 +8,7 @@ mod dedup;
 mod fold;
 mod hash;
 mod io;
+mod jit;
 mod latex;
 mod macros;
 mod mutate;

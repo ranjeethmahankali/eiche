@@ -15,3 +15,4 @@ categories = ["mathematics"]
 [dependencies]
 rand = "0.8"
 lazy_static = "1.4"
+inkwell = { version = "0.4", features = ["llvm14-0"] }
