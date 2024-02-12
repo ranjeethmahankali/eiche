@@ -42,5 +42,5 @@ pub enum Error {
     CannotCreateJitModule,
     CannotReadInput(char),
     CannotCompileIntrinsic(&'static str),
-    JitCompilationError,
+    JitCompilationError(String),
 }

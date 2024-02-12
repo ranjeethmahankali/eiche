@@ -76,7 +76,7 @@ impl Tree {
                                 regs[*input].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     Sqrt => build_float_unary_intrinsic(
                         builder,
@@ -134,7 +134,7 @@ impl Tree {
                                     cos.into_float_value(),
                                     &format!("reg_{}", ni),
                                 )
-                                .map_err(|_| Error::JitCompilationError)?,
+                                .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                         )
                     }
                     Log => build_float_unary_intrinsic(
@@ -156,7 +156,7 @@ impl Tree {
                     Not => BasicValueEnum::IntValue(
                         builder
                             .build_not(regs[*input].into_int_value(), &format!("reg_{}", ni))
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                 },
                 Binary(op, lhs, rhs) => match op {
@@ -167,7 +167,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     Subtract => BasicValueEnum::FloatValue(
                         builder
@@ -176,7 +176,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     Multiply => BasicValueEnum::FloatValue(
                         builder
@@ -185,7 +185,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     Divide => BasicValueEnum::FloatValue(
                         builder
@@ -194,7 +194,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     Pow => build_float_binary_intrinsic(
                         builder,
@@ -231,7 +231,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     LessOrEqual => BasicValueEnum::IntValue(
                         builder
@@ -241,7 +241,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     Equal => BasicValueEnum::IntValue(
                         builder
@@ -251,7 +251,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     NotEqual => BasicValueEnum::IntValue(
                         builder
@@ -261,7 +261,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     Greater => BasicValueEnum::IntValue(
                         builder
@@ -271,7 +271,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     GreaterOrEqual => BasicValueEnum::IntValue(
                         builder
@@ -281,7 +281,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     And => BasicValueEnum::IntValue(
                         builder
@@ -290,7 +290,7 @@ impl Tree {
                                 regs[*rhs].into_int_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                     Or => BasicValueEnum::IntValue(
                         builder
@@ -299,7 +299,7 @@ impl Tree {
                                 regs[*rhs].into_int_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|_| Error::JitCompilationError)?,
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                     ),
                 },
                 Ternary(op, a, b, c) => match op {
@@ -310,21 +310,21 @@ impl Tree {
                             regs[*c].into_float_value(),
                             &format!("reg_{}", ni),
                         )
-                        .map_err(|_| Error::JitCompilationError)?,
+                        .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
                 },
             };
             regs.push(reg);
         }
-        let outputs = &regs[(self.len() - num_roots)..];
         builder
-            .build_aggregate_return(outputs)
-            .map_err(|_| Error::JitCompilationError)?;
+            .build_aggregate_return(&regs[(self.len() - num_roots)..])
+            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?;
         return unsafe {
-            let func = compiler.engine.get_function(FUNC_NAME).map_err(|e| {
-                eprintln!("{:?}", e);
-                Error::JitCompilationError
-            })?;
-            Ok(JitEvaluator { func })
+            Ok(JitEvaluator {
+                func: compiler
+                    .engine
+                    .get_function(FUNC_NAME)
+                    .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+            })
         };
     }
 }
@@ -431,7 +431,7 @@ mod test {
     use crate::deftree;
 
     #[test]
-    fn t_sum() {
+    fn t_prod_sum() {
         let tree = deftree!(concat (+ x y) (* x y)).unwrap();
         let context = JitContext::new();
         let func = tree.jit_compile::<2, 2>(&context).unwrap();
