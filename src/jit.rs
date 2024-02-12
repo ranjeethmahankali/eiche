@@ -38,7 +38,7 @@ impl Tree {
         let f64_type = context.f64_type();
         let return_type = f64_type.array_type(num_roots as u32);
         let bool_type = context.bool_type();
-        let arg_type = f64_type.array_type(symbols.len() as u32);
+        let arg_type = f64_type.array_type(dbg!(symbols.len()) as u32);
         let fn_type = return_type.fn_type(&[arg_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         let basic_block = context.append_basic_block(function, "entry");
@@ -315,6 +315,7 @@ impl Tree {
             };
             regs.push(reg);
         }
+        dbg!(&regs);
         builder
             .build_aggregate_return(&regs[(self.len() - num_roots)..])
             .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?;
@@ -445,6 +446,7 @@ mod test {
                 assert_eq!(outputs.len(), N_OUTPUTS);
                 let inputs: [f64; N_INPUTS] = inputs.try_into().unwrap();
                 let results = jiteval.run(inputs);
+                println!("Inputs: {:?}", inputs);
                 outputs.copy_from_slice(&results);
             },
             vardata,
@@ -485,7 +487,7 @@ mod test {
 
     #[test]
     fn t_sum_3() {
-        let tree = deftree!(+ (+ x y) z).unwrap();
+        let tree = deftree!(+ x (+ y z)).unwrap();
         check_jit_eval::<3, 1>(
             &tree,
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],

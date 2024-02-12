@@ -16,7 +16,7 @@ pub mod util {
             }
             assert!(
                 error <= eps,
-                "Assertion failed: |({}) - ({})| = {:e} < {:e}",
+                "Assertion failed: |({}) - ({})| = {:e} <= {:e}",
                 a,
                 b,
                 error,
