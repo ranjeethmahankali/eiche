@@ -476,4 +476,21 @@ mod test {
         let tree = deftree!(sqrt x).unwrap();
         check_jit_eval::<1, 1>(&tree, &[('x', 0.01, 10.)], 100, 0.);
     }
+
+    #[test]
+    fn t_circle() {
+        let tree = deftree!(- (sqrt (+ (pow x 2) (pow y 2))) 3).unwrap();
+        check_jit_eval::<2, 1>(&tree, &[('x', -5., 5.), ('y', -5., 5.)], 20, 0.);
+    }
+
+    #[test]
+    fn t_sum_3() {
+        let tree = deftree!(+ (+ x y) z).unwrap();
+        check_jit_eval::<3, 1>(
+            &tree,
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        );
+    }
 }
