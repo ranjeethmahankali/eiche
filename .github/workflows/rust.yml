@@ -14,9 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Install dependencies
-      run: |
-        sudo apt install llvm
+    - name: Install LLVM and Clang
+      uses: KyleMayes/install-llvm-action@v1
+      with:
+        version: "14.0"
     - name: Build
       run: cargo build --verbose
     - name: Run tests
@@ -26,9 +27,10 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Install dependencies
-      run: |
-        sudo apt install llvm
+    - name: Install LLVM and Clang
+      uses: KyleMayes/install-llvm-action@v1
+      with:
+        version: "14.0"
     - name: Build
       run: cargo build --verbose
     - name: Run tests
