@@ -428,16 +428,52 @@ impl<'ctx, const N_INPUTS: usize, const N_OUTPUTS: usize> JitEvaluator<'ctx, N_I
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::deftree;
+    use crate::{deftree, test::util::check_tree_eval};
+
+    fn check_jit_eval<const N_INPUTS: usize, const N_OUTPUTS: usize>(
+        tree: &Tree,
+        vardata: &[(char, f64, f64)],
+        samples_per_var: usize,
+        eps: f64,
+    ) {
+        let context = JitContext::new();
+        let jiteval = tree.jit_compile::<N_INPUTS, N_OUTPUTS>(&context).unwrap();
+        check_tree_eval(
+            tree.clone(),
+            |inputs: &[f64], outputs: &mut [f64]| {
+                assert_eq!(inputs.len(), N_INPUTS);
+                assert_eq!(outputs.len(), N_OUTPUTS);
+                let inputs: [f64; N_INPUTS] = inputs.try_into().unwrap();
+                let results = jiteval.run(inputs);
+                outputs.copy_from_slice(&results);
+            },
+            vardata,
+            samples_per_var,
+            eps,
+        );
+    }
 
     #[test]
     fn t_prod_sum() {
         let tree = deftree!(concat (+ x y) (* x y)).unwrap();
-        let context = JitContext::new();
-        let func = tree.jit_compile::<2, 2>(&context).unwrap();
-        let x = 2.5;
-        let y = 1.4;
-        let result = func.run([x, y]);
-        assert_eq!(result, [(x + y), (x * y)]);
+        check_jit_eval::<2, 2>(&tree, &[('x', -10., 10.), ('y', -10., 10.)], 100, 0.);
+    }
+
+    #[test]
+    fn t_sub_div() {
+        let tree = deftree!(concat (- x y) (/ x y)).unwrap();
+        check_jit_eval::<2, 2>(&tree, &[('x', -10., 10.), ('y', -10., 10.)], 20, 0.);
+    }
+
+    #[test]
+    fn t_pow() {
+        let tree = deftree!(pow x 2).unwrap();
+        check_jit_eval::<1, 1>(&tree, &[('x', -10., -10.)], 100, 0.);
+    }
+
+    #[test]
+    fn t_sqrt() {
+        let tree = deftree!(sqrt x).unwrap();
+        check_jit_eval::<1, 1>(&tree, &[('x', 0.01, 10.)], 100, 0.);
     }
 }
