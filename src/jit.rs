@@ -487,7 +487,7 @@ mod test {
 
     #[test]
     fn t_sum_3() {
-        let tree = deftree!(+ x (+ y z)).unwrap();
+        let tree = deftree!(+ (+ x 3) (+ y z)).unwrap();
         check_jit_eval::<3, 1>(
             &tree,
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
