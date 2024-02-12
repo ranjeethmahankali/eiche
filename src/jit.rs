@@ -1,7 +1,7 @@
 use inkwell::{
     builder::Builder,
     context::Context,
-    execution_engine::{ExecutionEngine, JitFunction, UnsafeFunctionPointer},
+    execution_engine::{ExecutionEngine, JitFunction},
     intrinsics::Intrinsic,
     module::Module,
     types::{BasicTypeEnum, FloatType},
@@ -14,21 +14,30 @@ use crate::{
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
-const FUNC_NAME: &str = "symbafunc";
+pub struct JitEvaluator<'ctx, const N_INPUTS: usize, const N_OUTPUTS: usize> {
+    func: JitFunction<'ctx, unsafe extern "C" fn([f64; N_INPUTS]) -> [f64; N_OUTPUTS]>,
+}
 
 impl Tree {
-    pub fn jit_compile<'ctx, F: UnsafeFunctionPointer>(
+    pub fn jit_compile<'ctx, const N_INPUTS: usize, const N_OUTPUTS: usize>(
         &'ctx self,
         context: &'ctx JitContext,
-    ) -> Result<JitFunction<F>, Error> {
+    ) -> Result<JitEvaluator<N_INPUTS, N_OUTPUTS>, Error> {
+        const FUNC_NAME: &str = "symba_func";
+        let num_roots = self.num_roots();
+        if num_roots != N_OUTPUTS {
+            return Err(Error::OutputSizeMismatch(num_roots, N_OUTPUTS));
+        }
+        let symbols = self.symbols();
+        if symbols.len() != N_INPUTS {
+            return Err(Error::InputSizeMismatch(symbols.len(), N_INPUTS));
+        }
         let context = &context.inner;
         let compiler = JitCompiler::new(&context)?;
         let builder = &compiler.builder;
         let f64_type = context.f64_type();
-        let num_roots = self.num_roots();
         let return_type = f64_type.array_type(num_roots as u32);
         let bool_type = context.bool_type();
-        let symbols = self.symbols();
         let arg_type = f64_type.array_type(symbols.len() as u32);
         let fn_type = return_type.fn_type(&[arg_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
@@ -46,7 +55,7 @@ impl Tree {
                 Symbol(label) => {
                     let args = function
                         .get_first_param()
-                        .ok_or(Error::CannotAllocateFunctionArgument)?
+                        .ok_or(Error::CannotReadInput(*label))?
                         .into_array_value();
                     builder
                         .build_extract_value(
@@ -54,11 +63,11 @@ impl Tree {
                             symbols
                                 .iter()
                                 .position(|c| c == label)
-                                .ok_or(Error::CannotAllocateFunctionArgument)?
+                                .ok_or(Error::CannotReadInput(*label))?
                                 as u32,
                             &format!("reg_{}", label),
                         )
-                        .map_err(|_| Error::CannotAllocateFunctionArgument)?
+                        .map_err(|_| Error::CannotReadInput(*label))?
                 }
                 Unary(op, input) => match op {
                     Negate => BasicValueEnum::FloatValue(
@@ -311,11 +320,11 @@ impl Tree {
             .build_aggregate_return(outputs)
             .map_err(|_| Error::JitCompilationError)?;
         return unsafe {
-            let out = compiler.engine.get_function(FUNC_NAME).map_err(|e| {
+            let func = compiler.engine.get_function(FUNC_NAME).map_err(|e| {
                 eprintln!("{:?}", e);
                 Error::JitCompilationError
-            });
-            out
+            })?;
+            Ok(JitEvaluator { func })
         };
     }
 }
@@ -398,7 +407,7 @@ struct JitCompiler<'ctx> {
 
 impl<'ctx> JitCompiler<'ctx> {
     pub fn new(context: &'ctx Context) -> Result<JitCompiler<'ctx>, Error> {
-        let module = context.create_module(FUNC_NAME);
+        let module = context.create_module("symba_module");
         let engine = module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
@@ -410,6 +419,12 @@ impl<'ctx> JitCompiler<'ctx> {
     }
 }
 
+impl<'ctx, const N_INPUTS: usize, const N_OUTPUTS: usize> JitEvaluator<'ctx, N_INPUTS, N_OUTPUTS> {
+    pub fn run(&self, inputs: [f64; N_INPUTS]) -> [f64; N_OUTPUTS] {
+        unsafe { self.func.call(inputs) }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -417,13 +432,12 @@ mod test {
 
     #[test]
     fn t_sum() {
-        type SquareFn = unsafe extern "C" fn([f64; 2]) -> [f64; 2];
         let tree = deftree!(concat (+ x y) (* x y)).unwrap();
         let context = JitContext::new();
-        let func = tree.jit_compile::<SquareFn>(&context).unwrap();
+        let func = tree.jit_compile::<2, 2>(&context).unwrap();
         let x = 2.5;
         let y = 1.4;
-        let result = unsafe { func.call([x, y]) };
+        let result = func.run([x, y]);
         assert_eq!(result, [(x + y), (x * y)]);
     }
 }
