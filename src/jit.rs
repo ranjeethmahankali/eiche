@@ -21,19 +21,20 @@ impl Tree {
         &'ctx self,
         context: &'ctx JitContext,
     ) -> Result<JitFunction<F>, Error> {
-        assert!(self.dims() == (1, 1));
         let context = &context.inner;
         let compiler = JitCompiler::new(&context)?;
         let builder = &compiler.builder;
         let f64_type = context.f64_type();
+        let num_roots = self.num_roots();
+        let return_type = f64_type.array_type(num_roots as u32);
         let bool_type = context.bool_type();
-        let num_symbols = self.symbols().len();
-        let fn_type = f64_type.fn_type(&vec![f64_type.into(); num_symbols], false);
+        let symbols = self.symbols();
+        let arg_type = f64_type.array_type(symbols.len() as u32);
+        let fn_type = return_type.fn_type(&[arg_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         let basic_block = context.append_basic_block(function, "entry");
         builder.position_at_end(basic_block);
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
-        let mut symbol_regs: Vec<(char, BasicValueEnum)> = Vec::new();
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
                 Constant(val) => match val {
@@ -42,19 +43,23 @@ impl Tree {
                     ),
                     Scalar(val) => BasicValueEnum::FloatValue(f64_type.const_float(*val)),
                 },
-                Symbol(label) => match symbol_regs.iter().find(|(l, _r)| l == label) {
-                    Some((_l, r)) => *r,
-                    None => {
-                        let r = BasicValueEnum::FloatValue(
-                            function
-                                .get_nth_param(symbol_regs.len() as u32)
+                Symbol(label) => {
+                    let args = function
+                        .get_first_param()
+                        .ok_or(Error::CannotAllocateFunctionArgument)?
+                        .into_array_value();
+                    builder
+                        .build_extract_value(
+                            args,
+                            symbols
+                                .iter()
+                                .position(|c| c == label)
                                 .ok_or(Error::CannotAllocateFunctionArgument)?
-                                .into_float_value(),
-                        );
-                        symbol_regs.push((*label, r));
-                        r
-                    }
-                },
+                                as u32,
+                            &format!("reg_{}", label),
+                        )
+                        .map_err(|_| Error::CannotAllocateFunctionArgument)?
+                }
                 Unary(op, input) => match op {
                     Negate => BasicValueEnum::FloatValue(
                         builder
@@ -301,14 +306,16 @@ impl Tree {
             };
             regs.push(reg);
         }
+        let outputs = &regs[(self.len() - num_roots)..];
         builder
-            .build_return(Some(regs.last().ok_or(Error::JitCompilationError)?))
+            .build_aggregate_return(outputs)
             .map_err(|_| Error::JitCompilationError)?;
         return unsafe {
-            compiler.engine.get_function(FUNC_NAME).map_err(|e| {
-                println!("{:?}", e);
+            let out = compiler.engine.get_function(FUNC_NAME).map_err(|e| {
+                eprintln!("{:?}", e);
                 Error::JitCompilationError
-            })
+            });
+            out
         };
     }
 }
@@ -410,11 +417,13 @@ mod test {
 
     #[test]
     fn t_sum() {
-        type SquareFn = unsafe extern "C" fn(f64, f64) -> f64;
-        let tree = deftree!(+ x y).unwrap();
+        type SquareFn = unsafe extern "C" fn([f64; 2]) -> [f64; 2];
+        let tree = deftree!(concat (+ x y) (* x y)).unwrap();
         let context = JitContext::new();
         let func = tree.jit_compile::<SquareFn>(&context).unwrap();
-        let result = unsafe { func.call(2.5, 1.4) };
-        assert_eq!(result, 3.9);
+        let x = 2.5;
+        let y = 1.4;
+        let result = unsafe { func.call([x, y]) };
+        assert_eq!(result, [(x + y), (x * y)]);
     }
 }
