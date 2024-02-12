@@ -14,7 +14,7 @@ use crate::{
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
-const FUNC_NAME: &str = "";
+const FUNC_NAME: &str = "symbafunc";
 
 impl Tree {
     pub fn jit_compile<'ctx, F: UnsafeFunctionPointer>(
@@ -409,12 +409,12 @@ mod test {
     use crate::deftree;
 
     #[test]
-    fn t_square() {
-        type SquareFn = unsafe extern "C" fn(f64) -> f64;
-        let tree = deftree!(+ x 2).unwrap();
+    fn t_sum() {
+        type SquareFn = unsafe extern "C" fn(f64, f64) -> f64;
+        let tree = deftree!(+ x y).unwrap();
         let context = JitContext::new();
         let func = tree.jit_compile::<SquareFn>(&context).unwrap();
-        let result = unsafe { func.call(2.5) };
-        assert_eq!(result, 2.5 + 2.);
+        let result = unsafe { func.call(2.5, 1.4) };
+        assert_eq!(result, 3.9);
     }
 }
