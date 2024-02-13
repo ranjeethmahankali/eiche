@@ -37,10 +37,8 @@ pub enum Error {
     CannotComputeNumericDerivative,
 
     // Jit
-    OutputSizeMismatch(usize, usize),
     InputSizeMismatch(usize, usize),
     CannotCreateJitModule,
-    CannotReadInput(char),
     CannotCompileIntrinsic(&'static str),
     JitCompilationError(String),
 }

@@ -6,7 +6,7 @@ use inkwell::{
     module::Module,
     types::{BasicTypeEnum, FloatType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
-    FloatPredicate, OptimizationLevel,
+    AddressSpace, FloatPredicate, OptimizationLevel,
 };
 
 use crate::{
@@ -14,32 +14,26 @@ use crate::{
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
-pub struct JitEvaluator<'ctx, const N_INPUTS: usize, const N_OUTPUTS: usize> {
-    func: JitFunction<'ctx, unsafe extern "C" fn([f64; N_INPUTS]) -> [f64; N_OUTPUTS]>,
+pub struct JitEvaluator<'ctx> {
+    func: JitFunction<'ctx, unsafe extern "C" fn(*const f64, *mut f64)>,
+    num_inputs: usize,
+    outputs: Vec<f64>,
 }
 
 impl Tree {
-    pub fn jit_compile<'ctx, const N_INPUTS: usize, const N_OUTPUTS: usize>(
-        &'ctx self,
-        context: &'ctx JitContext,
-    ) -> Result<JitEvaluator<N_INPUTS, N_OUTPUTS>, Error> {
+    pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitEvaluator, Error> {
         const FUNC_NAME: &str = "symba_func";
         let num_roots = self.num_roots();
-        if num_roots != N_OUTPUTS {
-            return Err(Error::OutputSizeMismatch(num_roots, N_OUTPUTS));
-        }
         let symbols = self.symbols();
-        if symbols.len() != N_INPUTS {
-            return Err(Error::InputSizeMismatch(symbols.len(), N_INPUTS));
-        }
         let context = &context.inner;
         let compiler = JitCompiler::new(&context)?;
         let builder = &compiler.builder;
         let f64_type = context.f64_type();
-        let return_type = f64_type.array_type(num_roots as u32);
+        let f64_ptr_type = f64_type.ptr_type(AddressSpace::default());
         let bool_type = context.bool_type();
-        let arg_type = f64_type.array_type(dbg!(symbols.len()) as u32);
-        let fn_type = return_type.fn_type(&[arg_type.into()], false);
+        let fn_type = context
+            .void_type()
+            .fn_type(&[f64_ptr_type.into(), f64_ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         let basic_block = context.append_basic_block(function, "entry");
         builder.position_at_end(basic_block);
@@ -53,21 +47,29 @@ impl Tree {
                     Scalar(val) => BasicValueEnum::FloatValue(f64_type.const_float(*val)),
                 },
                 Symbol(label) => {
-                    let args = function
+                    let inputs = function
                         .get_first_param()
-                        .ok_or(Error::CannotReadInput(*label))?
-                        .into_array_value();
+                        .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
+                        .into_pointer_value();
+                    let ptr = unsafe {
+                        builder
+                            .build_gep(
+                                inputs,
+                                &[context.i64_type().const_int(
+                                    symbols.iter().position(|c| c == label).ok_or(
+                                        Error::JitCompilationError(
+                                            "Cannot find symbol".to_string(),
+                                        ),
+                                    )? as u64,
+                                    false,
+                                )],
+                                &format!("arg_{}", *label),
+                            )
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?
+                    };
                     builder
-                        .build_extract_value(
-                            args,
-                            symbols
-                                .iter()
-                                .position(|c| c == label)
-                                .ok_or(Error::CannotReadInput(*label))?
-                                as u32,
-                            &format!("reg_{}", label),
-                        )
-                        .map_err(|_| Error::CannotReadInput(*label))?
+                        .build_load(ptr, &format!("reg_{}", *label))
+                        .map_err(|e| Error::JitCompilationError(e.to_string()))?
                 }
                 Unary(op, input) => match op {
                     Negate => BasicValueEnum::FloatValue(
@@ -315,16 +317,38 @@ impl Tree {
             };
             regs.push(reg);
         }
-        dbg!(&regs);
+        // Copy the outputs.
+        let outputs = function
+            .get_last_param()
+            .ok_or(Error::JitCompilationError(
+                "Cannot write to outputs".to_string(),
+            ))?
+            .into_pointer_value();
+        for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
+            let dst = unsafe {
+                builder
+                    .build_gep(
+                        outputs,
+                        &[context.i64_type().const_int(i as u64, false)],
+                        &format!("output_{}", i),
+                    )
+                    .map_err(|e| Error::JitCompilationError(e.to_string()))?
+            };
+            builder
+                .build_store(dst, *reg)
+                .map_err(|e| Error::JitCompilationError(e.to_string()))?;
+        }
         builder
-            .build_aggregate_return(&regs[(self.len() - num_roots)..])
-            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?;
+            .build_return(None)
+            .map_err(|e| Error::JitCompilationError(e.to_string()))?;
         return unsafe {
             Ok(JitEvaluator {
                 func: compiler
                     .engine
                     .get_function(FUNC_NAME)
                     .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                num_inputs: symbols.len(),
+                outputs: vec![f64::NAN; num_roots],
             })
         };
     }
@@ -420,9 +444,13 @@ impl<'ctx> JitCompiler<'ctx> {
     }
 }
 
-impl<'ctx, const N_INPUTS: usize, const N_OUTPUTS: usize> JitEvaluator<'ctx, N_INPUTS, N_OUTPUTS> {
-    pub fn run(&self, inputs: [f64; N_INPUTS]) -> [f64; N_OUTPUTS] {
-        unsafe { self.func.call(inputs) }
+impl<'ctx> JitEvaluator<'ctx> {
+    pub fn run(&mut self, inputs: &[f64]) -> Result<&[f64], Error> {
+        if inputs.len() != self.num_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        }
+        unsafe { self.func.call(inputs.as_ptr(), self.outputs.as_mut_ptr()) };
+        return Ok(&self.outputs);
     }
 }
 
@@ -431,23 +459,14 @@ mod test {
     use super::*;
     use crate::{deftree, test::util::check_tree_eval};
 
-    fn check_jit_eval<const N_INPUTS: usize, const N_OUTPUTS: usize>(
-        tree: &Tree,
-        vardata: &[(char, f64, f64)],
-        samples_per_var: usize,
-        eps: f64,
-    ) {
+    fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::new();
-        let jiteval = tree.jit_compile::<N_INPUTS, N_OUTPUTS>(&context).unwrap();
+        let mut jiteval = tree.jit_compile(&context).unwrap();
         check_tree_eval(
             tree.clone(),
             |inputs: &[f64], outputs: &mut [f64]| {
-                assert_eq!(inputs.len(), N_INPUTS);
-                assert_eq!(outputs.len(), N_OUTPUTS);
-                let inputs: [f64; N_INPUTS] = inputs.try_into().unwrap();
-                let results = jiteval.run(inputs);
-                println!("Inputs: {:?}", inputs);
-                outputs.copy_from_slice(&results);
+                let results = jiteval.run(&inputs).unwrap();
+                outputs.copy_from_slice(results);
             },
             vardata,
             samples_per_var,
@@ -457,42 +476,61 @@ mod test {
 
     #[test]
     fn t_prod_sum() {
-        let tree = deftree!(concat (+ x y) (* x y)).unwrap();
-        check_jit_eval::<2, 2>(&tree, &[('x', -10., 10.), ('y', -10., 10.)], 100, 0.);
+        check_jit_eval(
+            &deftree!(concat (+ x y) (* x y)).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            100,
+            0.,
+        );
     }
 
     #[test]
     fn t_sub_div() {
-        let tree = deftree!(concat (- x y) (/ x y)).unwrap();
-        check_jit_eval::<2, 2>(&tree, &[('x', -10., 10.), ('y', -10., 10.)], 20, 0.);
+        check_jit_eval(
+            &deftree!(concat (- x y) (/ x y)).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            20,
+            0.,
+        );
     }
 
     #[test]
     fn t_pow() {
-        let tree = deftree!(pow x 2).unwrap();
-        check_jit_eval::<1, 1>(&tree, &[('x', -10., -10.)], 100, 0.);
+        check_jit_eval(&deftree!(pow x 2).unwrap(), &[('x', -10., -10.)], 100, 0.);
     }
 
     #[test]
     fn t_sqrt() {
-        let tree = deftree!(sqrt x).unwrap();
-        check_jit_eval::<1, 1>(&tree, &[('x', 0.01, 10.)], 100, 0.);
+        check_jit_eval(&deftree!(sqrt x).unwrap(), &[('x', 0.01, 10.)], 100, 0.);
     }
 
     #[test]
     fn t_circle() {
-        let tree = deftree!(- (sqrt (+ (pow x 2) (pow y 2))) 3).unwrap();
-        check_jit_eval::<2, 1>(&tree, &[('x', -5., 5.), ('y', -5., 5.)], 20, 0.);
+        check_jit_eval(
+            &deftree!(- (sqrt (+ (pow x 2) (pow y 2))) 3).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.)],
+            20,
+            0.,
+        );
     }
 
     #[test]
     fn t_sum_3() {
-        let tree = deftree!(+ (+ x 3) (+ y z)).unwrap();
-        check_jit_eval::<3, 1>(
-            &tree,
+        check_jit_eval(
+            &deftree!(+ (+ x 3) (+ y z)).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            5,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_sphere() {
+        check_jit_eval(
+            &deftree!(- (sqrt (+ (pow x 2) (+ (pow y 2) (pow z 2)))) 3).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             0.,
-        );
+        )
     }
 }
