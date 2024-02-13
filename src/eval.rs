@@ -152,12 +152,9 @@ impl<'a> Evaluator<'a> {
 
 #[cfg(test)]
 mod test {
-    use std::time::{Duration, Instant};
-
     use super::*;
     use crate::deftree;
     use crate::test::util::{assert_float_eq, check_tree_eval};
-    use crate::tree::{min, MaybeTree};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -335,64 +332,5 @@ mod test {
             100,
             0.,
         );
-    }
-
-    fn _sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
-        use rand::Rng;
-        range.0 + rng.gen::<f64>() * (range.1 - range.0)
-    }
-
-    fn _benchmark_eval(
-        values: &mut Vec<f64>,
-        queries: &[(f64, f64, f64)],
-        eval: &mut Evaluator,
-    ) -> Duration {
-        let before = Instant::now();
-        values.extend(queries.iter().map(|(x, y, z)| {
-            eval.set_scalar('x', *x);
-            eval.set_scalar('y', *y);
-            eval.set_scalar('z', *z);
-            let results = eval.run().unwrap();
-            results[0].scalar().unwrap()
-        }));
-        return Instant::now() - before;
-    }
-
-    // #[test]
-    fn _t_perft() {
-        const RADIUS_RANGE: (f64, f64) = (0.2, 2.);
-        const X_RANGE: (f64, f64) = (0., 100.);
-        const Y_RANGE: (f64, f64) = (0., 100.);
-        const Z_RANGE: (f64, f64) = (0., 100.);
-        const N_SPHERES: usize = 5000;
-        const N_QUERIES: usize = 5000;
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut make_sphere = || -> MaybeTree {
-            deftree!(- (sqrt (+ (+
-                                 (pow (- x (const _sample_range(X_RANGE, &mut rng))) 2)
-                                 (pow (- y (const _sample_range(Y_RANGE, &mut rng))) 2))
-                              (pow (- z (const _sample_range(Z_RANGE, &mut rng))) 2)))
-                     (const _sample_range(RADIUS_RANGE, &mut rng)))
-        };
-        let mut tree = make_sphere();
-        for _ in 1..N_SPHERES {
-            tree = min(tree, make_sphere());
-        }
-        let tree = tree.unwrap();
-        assert_eq!(tree.dims(), (1, 1));
-        let queries: Vec<(f64, f64, f64)> = (0..N_QUERIES)
-            .map(|_| {
-                (
-                    _sample_range(X_RANGE, &mut rng),
-                    _sample_range(Y_RANGE, &mut rng),
-                    _sample_range(Z_RANGE, &mut rng),
-                )
-            })
-            .collect();
-        let mut values: Vec<f64> = Vec::with_capacity(N_QUERIES);
-        let mut eval = Evaluator::new(&tree);
-        let evaltime = _benchmark_eval(&mut values, &queries, &mut eval);
-        println!("Evaluator time: {}ms", evaltime.as_millis());
-        todo!();
     }
 }

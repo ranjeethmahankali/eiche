@@ -533,4 +533,200 @@ mod test {
             0.,
         )
     }
+
+    #[test]
+    fn t_negate() {
+        check_jit_eval(
+            &deftree!(* (- x) (+ y z)).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_abs() {
+        check_jit_eval(
+            &deftree!(* (abs x) (+ (abs y) (abs z))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_trigonometry() {
+        check_jit_eval(
+            &deftree!(/ (+ (sin x) (cos y)) (+ 0.27 (pow (tan z) 2))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_log_exp() {
+        check_jit_eval(
+            &deftree!(/ (+ 1 (log x)) (+ 1 (exp y))).unwrap(),
+            &[('x', 0.1, 5.), ('y', 0.1, 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_min_max() {
+        check_jit_eval(
+            &deftree!(
+                (max (min
+                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            )
+            .unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_choose() {
+        check_jit_eval(
+            &deftree!(if (> x 0) x (-x)).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+        check_jit_eval(
+            &deftree!(if (< x 0) (- x) x).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_or_and() {
+        check_jit_eval(
+            &&deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
+            &[('x', -3., 3.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_not() {
+        check_jit_eval(
+            &deftree!(if (not (> x 0)) (- (pow x 3) (pow y 3)) (+ (pow x 2) (pow y 2))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.)],
+            100,
+            0.,
+        );
+    }
+}
+
+#[cfg(test)]
+mod perft {
+    use crate::{
+        deftree,
+        eval::Evaluator,
+        jit::{JitContext, JitEvaluator},
+        tree::{min, MaybeTree, Tree},
+    };
+    use rand::{rngs::StdRng, SeedableRng};
+    use std::time::{Duration, Instant};
+
+    fn _sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
+        use rand::Rng;
+        range.0 + rng.gen::<f64>() * (range.1 - range.0)
+    }
+    const _RADIUS_RANGE: (f64, f64) = (0.2, 2.);
+    const _X_RANGE: (f64, f64) = (0., 100.);
+    const _Y_RANGE: (f64, f64) = (0., 100.);
+    const _Z_RANGE: (f64, f64) = (0., 100.);
+    const _N_SPHERES: usize = 5000;
+    const _N_QUERIES: usize = 5000;
+
+    fn _sphere_union() -> Tree {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut make_sphere = || -> MaybeTree {
+            deftree!(- (sqrt (+ (+
+                                 (pow (- x (const _sample_range(_X_RANGE, &mut rng))) 2)
+                                 (pow (- y (const _sample_range(_Y_RANGE, &mut rng))) 2))
+                              (pow (- z (const _sample_range(_Z_RANGE, &mut rng))) 2)))
+                     (const _sample_range(_RADIUS_RANGE, &mut rng)))
+        };
+        let mut tree = make_sphere();
+        for _ in 1.._N_SPHERES {
+            tree = min(tree, make_sphere());
+        }
+        let tree = tree.unwrap();
+        assert_eq!(tree.dims(), (1, 1));
+        return tree;
+    }
+
+    fn _benchmark_eval(
+        values: &mut Vec<f64>,
+        queries: &[[f64; 3]],
+        eval: &mut Evaluator,
+    ) -> Duration {
+        let before = Instant::now();
+        values.extend(queries.iter().map(|coords| {
+            eval.set_scalar('x', coords[0]);
+            eval.set_scalar('y', coords[1]);
+            eval.set_scalar('z', coords[2]);
+            let results = eval.run().unwrap();
+            results[0].scalar().unwrap()
+        }));
+        return Instant::now() - before;
+    }
+
+    fn _benchmark_jit(
+        values: &mut Vec<f64>,
+        queries: &[[f64; 3]],
+        eval: &mut JitEvaluator,
+    ) -> Duration {
+        let before = Instant::now();
+        values.extend(queries.iter().map(|coords| {
+            let results = eval.run(coords).unwrap();
+            results[0]
+        }));
+        return Instant::now() - before;
+    }
+
+    fn _t_perft() {
+        let mut rng = StdRng::seed_from_u64(234);
+        let queries: Vec<[f64; 3]> = (0.._N_QUERIES)
+            .map(|_| {
+                [
+                    _sample_range(_X_RANGE, &mut rng),
+                    _sample_range(_Y_RANGE, &mut rng),
+                    _sample_range(_Z_RANGE, &mut rng),
+                ]
+            })
+            .collect();
+        let tree = _sphere_union();
+        let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
+        let mut eval = Evaluator::new(&tree);
+        let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
+        println!("Evaluator time: {}ms", evaltime.as_millis());
+        let mut values2: Vec<f64> = Vec::with_capacity(_N_QUERIES);
+        let context = JitContext::new();
+        let mut jiteval = {
+            let before = Instant::now();
+            let jiteval = tree.jit_compile(&context).unwrap();
+            println!(
+                "Compilation time: {}ms",
+                (Instant::now() - before).as_millis()
+            );
+            jiteval
+        };
+        let jittime = _benchmark_jit(&mut values2, &queries, &mut jiteval);
+        println!("Jit time: {}ms", jittime.as_millis());
+        let ratio = evaltime.as_millis() as f64 / jittime.as_millis() as f64;
+        println!("Ratio: {}", ratio);
+        assert_eq!(values1, values2);
+    }
 }
