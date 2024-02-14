@@ -8,7 +8,6 @@ mod dedup;
 mod fold;
 mod hash;
 mod io;
-mod jit;
 mod latex;
 mod macros;
 mod mutate;
@@ -17,6 +16,9 @@ mod sort;
 mod substitute;
 mod template;
 mod walk;
+
+#[cfg(feature = "llvm-jit")]
+mod jit;
 
 #[cfg(test)]
 mod test;
