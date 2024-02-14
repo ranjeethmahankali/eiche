@@ -1,11 +1,11 @@
 [package]
-name = "symba"
+name = "eiche"
 version = "0.1.0"
 edition = "2021"
 authors = ["Ranjeeth Mahankali <ranjeethmahankali@gmail.com>"]
 description = "A library with tools for working with symbolic expressions."
 readme = "README.md"
-repository = "https://github.com/ranjeethmahankali/symba"
+repository = "https://github.com/ranjeethmahankali/eiche"
 license = "GPL-3.0-only"
 keywords = ["symbolic", "expressions", "math", "algebra"]
 categories = ["mathematics"]
