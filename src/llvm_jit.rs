@@ -40,7 +40,10 @@ impl<'ctx> JitEvaluator<'ctx> {
 }
 
 impl Tree {
-    pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitEvaluator, Error> {
+    pub fn llvm_jit_compile<'ctx>(
+        &'ctx self,
+        context: &'ctx JitContext,
+    ) -> Result<JitEvaluator, Error> {
         const FUNC_NAME: &str = "symba_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
@@ -488,7 +491,7 @@ mod test {
 
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::new();
-        let mut jiteval = tree.jit_compile(&context).unwrap();
+        let mut jiteval = tree.llvm_jit_compile(&context).unwrap();
         check_tree_eval(
             tree.clone(),
             |inputs: &[f64], outputs: &mut [f64]| {
@@ -656,12 +659,13 @@ mod test {
 
 #[cfg(test)]
 mod perft {
+    use super::*;
     use crate::{
         dedup::Deduplicater,
         deftree,
         eval::Evaluator,
-        jit::{JitContext, JitEvaluator},
         prune::Pruner,
+        test::util::assert_float_eq,
         // test::util::assert_float_eq,
         tree::{min, MaybeTree, Tree},
     };
@@ -752,15 +756,15 @@ mod perft {
             "Tree creation time: {}ms",
             (Instant::now() - before).as_millis()
         );
-        // let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
-        // let mut eval = Evaluator::new(&tree);
-        // let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
-        // println!("Evaluator time: {}ms", evaltime.as_millis());
+        let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
+        let mut eval = Evaluator::new(&tree);
+        let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
+        println!("Evaluator time: {}ms", evaltime.as_millis());
         let mut values2: Vec<f64> = Vec::with_capacity(_N_QUERIES);
         let context = JitContext::new();
         let mut jiteval = {
             let before = Instant::now();
-            let jiteval = tree.jit_compile(&context).unwrap();
+            let jiteval = tree.llvm_jit_compile(&context).unwrap();
             println!(
                 "Compilation time: {}ms",
                 (Instant::now() - before).as_millis()
@@ -769,11 +773,11 @@ mod perft {
         };
         let jittime = _benchmark_jit(&mut values2, &queries, &mut jiteval);
         println!("Jit time: {}ms", jittime.as_millis());
-        // let ratio = evaltime.as_millis() as f64 / jittime.as_millis() as f64;
-        // println!("Ratio: {}", ratio);
-        // assert_eq!(values1.len(), values2.len());
-        // for (l, r) in values1.iter().zip(values2.iter()) {
-        //     assert_float_eq!(l, r, 1e-12);
-        // }
+        let ratio = evaltime.as_millis() as f64 / jittime.as_millis() as f64;
+        println!("Ratio: {}", ratio);
+        assert_eq!(values1.len(), values2.len());
+        for (l, r) in values1.iter().zip(values2.iter()) {
+            assert_float_eq!(l, r, 1e-15);
+        }
     }
 }
