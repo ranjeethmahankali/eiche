@@ -81,10 +81,9 @@ $`\begin{bmatrix}{{{{x}^{3}}.{\left({3}.{\dfrac{-1}{{x}^{2}}}\right)}} +
 & {0} \\ {0} & {{{{y}^{3}}.{\left({3}.{\dfrac{-1}{{y}^{2}}}\right)}} +
 {{\left({3}.{\dfrac{1}{y}}\right)}.{\left({{y}^{3}}.{\left({3}.{\dfrac{1}{y}}\right)}\right)}}}\end{bmatrix}`$
 
-This expressions for the derivative and the hessian are unnecessarily
+This expressions for the derivative in the hessian are unnecessarily
 complicated. This is because of how Eiche applies the chain rule when
-differentiating the expressions. Let's use the `reduce` function to
-simplify:
+differentiating the expressions. Let's use the `reduce` function to simplify:
 
 ```rust
     let steps = reduce(hessian, 256).unwrap();
