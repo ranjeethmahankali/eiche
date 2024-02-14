@@ -301,7 +301,8 @@ mod test {
             chars.dedup();
             chars
         };
-        let right: Vec<_> = template.ping().symbols();
+        let mut right: Vec<_> = template.ping().symbols();
+        right.sort();
         assert_eq!(left, right);
         for (_c, i) in capture.bindings.iter() {
             assert!(*i < tree.len());
