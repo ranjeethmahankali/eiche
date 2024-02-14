@@ -388,17 +388,4 @@ mod test {
             .unwrap()
         ));
     }
-
-    #[test]
-    fn t_temp() {
-        let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) xy) xy).unwrap();
-        let steps = reduce(tree, 256).unwrap();
-        println!("$${}$$\n", steps.last().unwrap().to_latex());
-        assert!(steps.last().unwrap().equivalent(
-            &deftree!(concat (* x 6) 0 0 (* y 6))
-                .unwrap()
-                .reshape(2, 2)
-                .unwrap()
-        ));
-    }
 }
