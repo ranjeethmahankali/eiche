@@ -35,4 +35,10 @@ pub enum Error {
     // Derivatives.
     CannotComputeSymbolicDerivative,
     CannotComputeNumericDerivative,
+
+    // Jit
+    InputSizeMismatch(usize, usize),
+    CannotCreateJitModule,
+    CannotCompileIntrinsic(&'static str),
+    JitCompilationError(String),
 }

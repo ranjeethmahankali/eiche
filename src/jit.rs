@@ -1,0 +1,737 @@
+use inkwell::{
+    builder::Builder,
+    context::Context,
+    execution_engine::{ExecutionEngine, JitFunction},
+    intrinsics::Intrinsic,
+    module::Module,
+    types::{BasicTypeEnum, FloatType},
+    values::{BasicMetadataValueEnum, BasicValueEnum},
+    AddressSpace, FloatPredicate, OptimizationLevel,
+};
+
+use crate::{
+    error::Error,
+    tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
+};
+
+pub struct JitEvaluator<'ctx> {
+    func: JitFunction<'ctx, unsafe extern "C" fn(*const f64, *mut f64)>,
+    num_inputs: usize,
+    outputs: Vec<f64>,
+}
+
+impl Tree {
+    pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitEvaluator, Error> {
+        const FUNC_NAME: &str = "symba_func";
+        let num_roots = self.num_roots();
+        let symbols = self.symbols();
+        let context = &context.inner;
+        let compiler = JitCompiler::new(&context)?;
+        let builder = &compiler.builder;
+        let f64_type = context.f64_type();
+        let f64_ptr_type = f64_type.ptr_type(AddressSpace::default());
+        let bool_type = context.bool_type();
+        let fn_type = context
+            .void_type()
+            .fn_type(&[f64_ptr_type.into(), f64_ptr_type.into()], false);
+        let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
+        let basic_block = context.append_basic_block(function, "entry");
+        builder.position_at_end(basic_block);
+        let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
+        for (ni, node) in self.nodes().iter().enumerate() {
+            let reg = match node {
+                Constant(val) => match val {
+                    Bool(val) => BasicValueEnum::IntValue(
+                        bool_type.const_int(if *val { 1 } else { 0 }, false),
+                    ),
+                    Scalar(val) => BasicValueEnum::FloatValue(f64_type.const_float(*val)),
+                },
+                Symbol(label) => {
+                    let inputs = function
+                        .get_first_param()
+                        .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
+                        .into_pointer_value();
+                    let ptr = unsafe {
+                        builder
+                            .build_gep(
+                                inputs,
+                                &[context.i64_type().const_int(
+                                    symbols.iter().position(|c| c == label).ok_or(
+                                        Error::JitCompilationError(
+                                            "Cannot find symbol".to_string(),
+                                        ),
+                                    )? as u64,
+                                    false,
+                                )],
+                                &format!("arg_{}", *label),
+                            )
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?
+                    };
+                    builder
+                        .build_load(ptr, &format!("reg_{}", *label))
+                        .map_err(|e| Error::JitCompilationError(e.to_string()))?
+                }
+                Unary(op, input) => match op {
+                    Negate => BasicValueEnum::FloatValue(
+                        builder
+                            .build_float_neg(
+                                regs[*input].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    Sqrt => build_float_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.sqrt.*",
+                        "sqrt_call",
+                        regs[*input],
+                        f64_type,
+                    )?,
+                    Abs => build_float_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.fabs.*",
+                        "abs_call",
+                        regs[*input],
+                        f64_type,
+                    )?,
+                    Sin => build_float_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.sin.*",
+                        "sin_call",
+                        regs[*input],
+                        f64_type,
+                    )?,
+                    Cos => build_float_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.cos.*",
+                        "cos_call",
+                        regs[*input],
+                        f64_type,
+                    )?,
+                    Tan => {
+                        let sin = build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.sin.*",
+                            "sin_call",
+                            regs[*input],
+                            f64_type,
+                        )?;
+                        let cos = build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.cos.*",
+                            "cos_call",
+                            regs[*input],
+                            f64_type,
+                        )?;
+                        BasicValueEnum::FloatValue(
+                            builder
+                                .build_float_div(
+                                    sin.into_float_value(),
+                                    cos.into_float_value(),
+                                    &format!("reg_{}", ni),
+                                )
+                                .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                        )
+                    }
+                    Log => build_float_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.log.*",
+                        "log_call",
+                        regs[*input],
+                        f64_type,
+                    )?,
+                    Exp => build_float_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.exp.*",
+                        "exp_call",
+                        regs[*input],
+                        f64_type,
+                    )?,
+                    Not => BasicValueEnum::IntValue(
+                        builder
+                            .build_not(regs[*input].into_int_value(), &format!("reg_{}", ni))
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                },
+                Binary(op, lhs, rhs) => match op {
+                    Add => BasicValueEnum::FloatValue(
+                        builder
+                            .build_float_add(
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    Subtract => BasicValueEnum::FloatValue(
+                        builder
+                            .build_float_sub(
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    Multiply => BasicValueEnum::FloatValue(
+                        builder
+                            .build_float_mul(
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    Divide => BasicValueEnum::FloatValue(
+                        builder
+                            .build_float_div(
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    Pow => build_float_binary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.pow.*",
+                        "pow_call",
+                        regs[*lhs],
+                        regs[*rhs],
+                        f64_type,
+                    )?,
+                    Min => build_float_binary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.minnum.*",
+                        "min_call",
+                        regs[*lhs],
+                        regs[*rhs],
+                        f64_type,
+                    )?,
+                    Max => build_float_binary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.maxnum.*",
+                        "max_call",
+                        regs[*lhs],
+                        regs[*rhs],
+                        f64_type,
+                    )?,
+                    Less => BasicValueEnum::IntValue(
+                        builder
+                            .build_float_compare(
+                                FloatPredicate::ULT,
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    LessOrEqual => BasicValueEnum::IntValue(
+                        builder
+                            .build_float_compare(
+                                FloatPredicate::ULE,
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    Equal => BasicValueEnum::IntValue(
+                        builder
+                            .build_float_compare(
+                                FloatPredicate::UEQ,
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    NotEqual => BasicValueEnum::IntValue(
+                        builder
+                            .build_float_compare(
+                                FloatPredicate::UNE,
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    Greater => BasicValueEnum::IntValue(
+                        builder
+                            .build_float_compare(
+                                FloatPredicate::UGT,
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    GreaterOrEqual => BasicValueEnum::IntValue(
+                        builder
+                            .build_float_compare(
+                                FloatPredicate::UGE,
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    And => BasicValueEnum::IntValue(
+                        builder
+                            .build_and(
+                                regs[*lhs].into_int_value(),
+                                regs[*rhs].into_int_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                    Or => BasicValueEnum::IntValue(
+                        builder
+                            .build_or(
+                                regs[*lhs].into_int_value(),
+                                regs[*rhs].into_int_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                    ),
+                },
+                Ternary(op, a, b, c) => match op {
+                    Choose => builder
+                        .build_select(
+                            regs[*a].into_int_value(),
+                            regs[*b].into_float_value(),
+                            regs[*c].into_float_value(),
+                            &format!("reg_{}", ni),
+                        )
+                        .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                },
+            };
+            regs.push(reg);
+        }
+        // Copy the outputs.
+        let outputs = function
+            .get_last_param()
+            .ok_or(Error::JitCompilationError(
+                "Cannot write to outputs".to_string(),
+            ))?
+            .into_pointer_value();
+        for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
+            let dst = unsafe {
+                builder
+                    .build_gep(
+                        outputs,
+                        &[context.i64_type().const_int(i as u64, false)],
+                        &format!("output_{}", i),
+                    )
+                    .map_err(|e| Error::JitCompilationError(e.to_string()))?
+            };
+            builder
+                .build_store(dst, *reg)
+                .map_err(|e| Error::JitCompilationError(e.to_string()))?;
+        }
+        builder
+            .build_return(None)
+            .map_err(|e| Error::JitCompilationError(e.to_string()))?;
+        return unsafe {
+            Ok(JitEvaluator {
+                func: compiler
+                    .engine
+                    .get_function(FUNC_NAME)
+                    .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                num_inputs: symbols.len(),
+                outputs: vec![f64::NAN; num_roots],
+            })
+        };
+    }
+}
+
+pub fn build_float_unary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &'static str,
+    input: BasicValueEnum<'ctx>,
+    f64_type: FloatType<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(module, &[BasicTypeEnum::FloatType(f64_type)])
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[BasicMetadataValueEnum::FloatValue(input.into_float_value())],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+pub fn build_float_binary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &'static str,
+    lhs: BasicValueEnum<'ctx>,
+    rhs: BasicValueEnum<'ctx>,
+    f64_type: FloatType<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(
+            module,
+            &[
+                BasicTypeEnum::FloatType(f64_type),
+                BasicTypeEnum::FloatType(f64_type),
+            ],
+        )
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[
+                BasicMetadataValueEnum::FloatValue(lhs.into_float_value()),
+                BasicMetadataValueEnum::FloatValue(rhs.into_float_value()),
+            ],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+pub struct JitContext {
+    inner: Context,
+}
+
+impl JitContext {
+    pub fn new() -> JitContext {
+        JitContext {
+            inner: Context::create(),
+        }
+    }
+}
+
+struct JitCompiler<'ctx> {
+    engine: ExecutionEngine<'ctx>,
+    module: Module<'ctx>,
+    builder: Builder<'ctx>,
+}
+
+impl<'ctx> JitCompiler<'ctx> {
+    pub fn new(context: &'ctx Context) -> Result<JitCompiler<'ctx>, Error> {
+        let module = context.create_module("symba_module");
+        let engine = module
+            .create_jit_execution_engine(OptimizationLevel::Aggressive)
+            .map_err(|_| Error::CannotCreateJitModule)?;
+        Ok(JitCompiler {
+            engine,
+            module,
+            builder: context.create_builder(),
+        })
+    }
+}
+
+impl<'ctx> JitEvaluator<'ctx> {
+    pub fn run(&mut self, inputs: &[f64]) -> Result<&[f64], Error> {
+        if inputs.len() != self.num_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        }
+        unsafe { self.func.call(inputs.as_ptr(), self.outputs.as_mut_ptr()) };
+        return Ok(&self.outputs);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{deftree, test::util::check_tree_eval};
+
+    fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
+        let context = JitContext::new();
+        let mut jiteval = tree.jit_compile(&context).unwrap();
+        check_tree_eval(
+            tree.clone(),
+            |inputs: &[f64], outputs: &mut [f64]| {
+                let results = jiteval.run(&inputs).unwrap();
+                outputs.copy_from_slice(results);
+            },
+            vardata,
+            samples_per_var,
+            eps,
+        );
+    }
+
+    #[test]
+    fn t_prod_sum() {
+        check_jit_eval(
+            &deftree!(concat (+ x y) (* x y)).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_sub_div() {
+        check_jit_eval(
+            &deftree!(concat (- x y) (/ x y)).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_pow() {
+        check_jit_eval(&deftree!(pow x 2).unwrap(), &[('x', -10., -10.)], 100, 0.);
+    }
+
+    #[test]
+    fn t_sqrt() {
+        check_jit_eval(&deftree!(sqrt x).unwrap(), &[('x', 0.01, 10.)], 100, 0.);
+    }
+
+    #[test]
+    fn t_circle() {
+        check_jit_eval(
+            &deftree!(- (sqrt (+ (pow x 2) (pow y 2))) 3).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_sum_3() {
+        check_jit_eval(
+            &deftree!(+ (+ x 3) (+ y z)).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            5,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_sphere() {
+        check_jit_eval(
+            &deftree!(- (sqrt (+ (pow x 2) (+ (pow y 2) (pow z 2)))) 3).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        )
+    }
+
+    #[test]
+    fn t_negate() {
+        check_jit_eval(
+            &deftree!(* (- x) (+ y z)).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_abs() {
+        check_jit_eval(
+            &deftree!(* (abs x) (+ (abs y) (abs z))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_trigonometry() {
+        check_jit_eval(
+            &deftree!(/ (+ (sin x) (cos y)) (+ 0.27 (pow (tan z) 2))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_log_exp() {
+        check_jit_eval(
+            &deftree!(/ (+ 1 (log x)) (+ 1 (exp y))).unwrap(),
+            &[('x', 0.1, 5.), ('y', 0.1, 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_min_max() {
+        check_jit_eval(
+            &deftree!(
+                (max (min
+                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            )
+            .unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_choose() {
+        check_jit_eval(
+            &deftree!(if (> x 0) x (-x)).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+        check_jit_eval(
+            &deftree!(if (< x 0) (- x) x).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_or_and() {
+        check_jit_eval(
+            &&deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
+            &[('x', -3., 3.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_not() {
+        check_jit_eval(
+            &deftree!(if (not (> x 0)) (- (pow x 3) (pow y 3)) (+ (pow x 2) (pow y 2))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.)],
+            100,
+            0.,
+        );
+    }
+}
+
+#[cfg(test)]
+mod perft {
+    use crate::{
+        deftree,
+        eval::Evaluator,
+        jit::{JitContext, JitEvaluator},
+        tree::{min, MaybeTree, Tree},
+    };
+    use rand::{rngs::StdRng, SeedableRng};
+    use std::time::{Duration, Instant};
+
+    fn _sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
+        use rand::Rng;
+        range.0 + rng.gen::<f64>() * (range.1 - range.0)
+    }
+    const _RADIUS_RANGE: (f64, f64) = (0.2, 2.);
+    const _X_RANGE: (f64, f64) = (0., 100.);
+    const _Y_RANGE: (f64, f64) = (0., 100.);
+    const _Z_RANGE: (f64, f64) = (0., 100.);
+    const _N_SPHERES: usize = 5000;
+    const _N_QUERIES: usize = 5000;
+
+    fn _sphere_union() -> Tree {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut make_sphere = || -> MaybeTree {
+            deftree!(- (sqrt (+ (+
+                                 (pow (- x (const _sample_range(_X_RANGE, &mut rng))) 2)
+                                 (pow (- y (const _sample_range(_Y_RANGE, &mut rng))) 2))
+                              (pow (- z (const _sample_range(_Z_RANGE, &mut rng))) 2)))
+                     (const _sample_range(_RADIUS_RANGE, &mut rng)))
+        };
+        let mut tree = make_sphere();
+        for _ in 1.._N_SPHERES {
+            tree = min(tree, make_sphere());
+        }
+        let tree = tree.unwrap();
+        assert_eq!(tree.dims(), (1, 1));
+        return tree;
+    }
+
+    fn _benchmark_eval(
+        values: &mut Vec<f64>,
+        queries: &[[f64; 3]],
+        eval: &mut Evaluator,
+    ) -> Duration {
+        let before = Instant::now();
+        values.extend(queries.iter().map(|coords| {
+            eval.set_scalar('x', coords[0]);
+            eval.set_scalar('y', coords[1]);
+            eval.set_scalar('z', coords[2]);
+            let results = eval.run().unwrap();
+            results[0].scalar().unwrap()
+        }));
+        return Instant::now() - before;
+    }
+
+    fn _benchmark_jit(
+        values: &mut Vec<f64>,
+        queries: &[[f64; 3]],
+        eval: &mut JitEvaluator,
+    ) -> Duration {
+        let before = Instant::now();
+        values.extend(queries.iter().map(|coords| {
+            let results = eval.run(coords).unwrap();
+            results[0]
+        }));
+        return Instant::now() - before;
+    }
+
+    fn _t_perft() {
+        let mut rng = StdRng::seed_from_u64(234);
+        let queries: Vec<[f64; 3]> = (0.._N_QUERIES)
+            .map(|_| {
+                [
+                    _sample_range(_X_RANGE, &mut rng),
+                    _sample_range(_Y_RANGE, &mut rng),
+                    _sample_range(_Z_RANGE, &mut rng),
+                ]
+            })
+            .collect();
+        let before = Instant::now();
+        let tree = _sphere_union();
+        println!(
+            "Tree creation time: {}ms",
+            (Instant::now() - before).as_millis()
+        );
+        let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
+        let mut eval = Evaluator::new(&tree);
+        let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
+        println!("Evaluator time: {}ms", evaltime.as_millis());
+        let mut values2: Vec<f64> = Vec::with_capacity(_N_QUERIES);
+        let context = JitContext::new();
+        let mut jiteval = {
+            let before = Instant::now();
+            let jiteval = tree.jit_compile(&context).unwrap();
+            println!(
+                "Compilation time: {}ms",
+                (Instant::now() - before).as_millis()
+            );
+            jiteval
+        };
+        let jittime = _benchmark_jit(&mut values2, &queries, &mut jiteval);
+        println!("Jit time: {}ms", jittime.as_millis());
+        let ratio = evaltime.as_millis() as f64 / jittime.as_millis() as f64;
+        println!("Ratio: {}", ratio);
+        assert_eq!(values1, values2);
+    }
+}

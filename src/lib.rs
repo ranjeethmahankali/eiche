@@ -17,5 +17,8 @@ mod substitute;
 mod template;
 mod walk;
 
+#[cfg(feature = "llvm-jit")]
+mod jit;
+
 #[cfg(test)]
 mod test;
