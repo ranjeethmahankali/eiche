@@ -1,13 +1,13 @@
 [package]
-name = "symba"
-version = "0.1.0"
+name = "eiche"
+version = "0.1.1"
 edition = "2021"
 authors = ["Ranjeeth Mahankali <ranjeethmahankali@gmail.com>"]
 description = "A library with tools for working with symbolic expressions."
 readme = "README.md"
-repository = "https://github.com/ranjeethmahankali/symba"
+repository = "https://github.com/ranjeethmahankali/eiche"
 license = "GPL-3.0-only"
-keywords = ["symbolic", "expressions", "math", "algebra"]
+keywords = ["symbolic", "expressions", "math", "algebra", "tree"]
 categories = ["mathematics"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
