@@ -260,10 +260,10 @@ impl Tree {
         &mut self.nodes
     }
 
-    /// Get a unique list of all symbols in this tree. The list of
-    /// chars is expected to be sorted.
+    /// Get a unique list of all symbols in this tree. The symbols will appear
+    /// in the same order as they first appear in the tree.
     pub fn symbols(&self) -> Vec<char> {
-        let mut chars: Vec<_> = self
+        let symbols: Vec<_> = self
             .nodes
             .iter()
             .filter_map(|n| {
@@ -274,9 +274,11 @@ impl Tree {
                 }
             })
             .collect();
-        chars.sort();
-        chars.dedup();
-        return chars;
+        let mut indices: Vec<usize> = (0..symbols.len()).collect();
+        indices.sort_by(|a, b| symbols[*a].cmp(&symbols[*b]));
+        indices.dedup_by(|a, b| symbols[*a] == symbols[*b]);
+        indices.sort();
+        return indices.iter().map(|i| symbols[*i]).collect();
     }
 
     /// Check the tree for errors and return a Result that contains the tree if
@@ -692,5 +694,11 @@ mod test {
                 Binary(Divide, 1, 2)
             ]
         );
+    }
+
+    #[test]
+    fn t_symbols() {
+        let tree = deftree!(* (+ x y) a).unwrap();
+        assert_eq!(tree.symbols(), vec!['x', 'y', 'a']);
     }
 }
