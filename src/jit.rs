@@ -707,7 +707,12 @@ mod perft {
                 ]
             })
             .collect();
+        let before = Instant::now();
         let tree = _sphere_union();
+        println!(
+            "Tree creation time: {}ms",
+            (Instant::now() - before).as_millis()
+        );
         let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
         let mut eval = Evaluator::new(&tree);
         let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
