@@ -76,7 +76,10 @@ hessian matrix:
     println!("$${}$$\n", hessian.to_latex());
 ```
 
-$$\begin{bmatrix}{{{{x}^{3}}.{\left({3}.{\dfrac{-1}{{x}^{2}}}\right)}} + {{\left({3}.{\dfrac{1}{x}}\right)}.{\left({{x}^{3}}.{\left({3}.{\dfrac{1}{x}}\right)}\right)}}} & {0} \\ {0} & {{{{y}^{3}}.{\left({3}.{\dfrac{-1}{{y}^{2}}}\right)}} + {{\left({3}.{\dfrac{1}{y}}\right)}.{\left({{y}^{3}}.{\left({3}.{\dfrac{1}{y}}\right)}\right)}}}\end{bmatrix}$$
+$`\begin{bmatrix}{{{{x}^{3}}.{\left({3}.{\dfrac{-1}{{x}^{2}}}\right)}} +
+{{\left({3}.{\dfrac{1}{x}}\right)}.{\left({{x}^{3}}.{\left({3}.{\dfrac{1}{x}}\right)}\right)}}}
+& {0} \\ {0} & {{{{y}^{3}}.{\left({3}.{\dfrac{-1}{{y}^{2}}}\right)}} +
+{{\left({3}.{\dfrac{1}{y}}\right)}.{\left({{y}^{3}}.{\left({3}.{\dfrac{1}{y}}\right)}\right)}}}\end{bmatrix}`$
 
 This expressions for the derivative and the hessian are unnecessarily
 complicated. This is because of how Eiche applies the chain rule when
@@ -89,4 +92,4 @@ simplify:
     println!("$${}$$\n", steps.last().unwrap().to_latex());
 ```
 
-$$\begin{bmatrix}{{x}.{6}} & {0} \\ {0} & {{y}.{6}}\end{bmatrix}$$
+$`\begin{bmatrix}{{x}.{6}} & {0} \\ {0} & {{y}.{6}}\end{bmatrix}`$
