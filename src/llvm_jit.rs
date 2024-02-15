@@ -1,9 +1,10 @@
 use inkwell::{
     builder::Builder,
     context::Context,
-    execution_engine::{ExecutionEngine, JitFunction},
+    execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
+    passes::PassManager,
     types::{BasicTypeEnum, FloatType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
     AddressSpace, FloatPredicate, OptimizationLevel,
@@ -14,14 +15,35 @@ use crate::{
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
+type UnsafeFuncType = unsafe extern "C" fn(*const f64, *mut f64);
+
 pub struct JitEvaluator<'ctx> {
-    func: JitFunction<'ctx, unsafe extern "C" fn(*const f64, *mut f64)>,
+    func: JitFunction<'ctx, UnsafeFuncType>,
     num_inputs: usize,
     outputs: Vec<f64>,
 }
 
+impl<'ctx> JitEvaluator<'ctx> {
+    pub fn create(
+        func: JitFunction<'ctx, UnsafeFuncType>,
+        num_inputs: usize,
+        num_outputs: usize,
+    ) -> JitEvaluator<'ctx> {
+        // Construct evaluator
+        let eval = JitEvaluator {
+            func,
+            num_inputs,
+            outputs: vec![f64::NAN; num_outputs],
+        };
+        return eval;
+    }
+}
+
 impl Tree {
-    pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitEvaluator, Error> {
+    pub fn llvm_jit_compile<'ctx>(
+        &'ctx self,
+        context: &'ctx JitContext,
+    ) -> Result<JitEvaluator, Error> {
         const FUNC_NAME: &str = "symba_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
@@ -341,16 +363,17 @@ impl Tree {
         builder
             .build_return(None)
             .map_err(|e| Error::JitCompilationError(e.to_string()))?;
-        return unsafe {
-            Ok(JitEvaluator {
-                func: compiler
-                    .engine
-                    .get_function(FUNC_NAME)
-                    .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
-                num_inputs: symbols.len(),
-                outputs: vec![f64::NAN; num_roots],
-            })
+        compiler.run_passes();
+        let engine = compiler
+            .module
+            .create_jit_execution_engine(OptimizationLevel::Aggressive)
+            .map_err(|_| Error::CannotCreateJitModule)?;
+        let func = unsafe {
+            engine
+                .get_function(FUNC_NAME)
+                .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?
         };
+        return Ok(JitEvaluator::create(func, symbols.len(), num_roots));
     }
 }
 
@@ -425,7 +448,6 @@ impl JitContext {
 }
 
 struct JitCompiler<'ctx> {
-    engine: ExecutionEngine<'ctx>,
     module: Module<'ctx>,
     builder: Builder<'ctx>,
 }
@@ -433,14 +455,22 @@ struct JitCompiler<'ctx> {
 impl<'ctx> JitCompiler<'ctx> {
     pub fn new(context: &'ctx Context) -> Result<JitCompiler<'ctx>, Error> {
         let module = context.create_module("symba_module");
-        let engine = module
-            .create_jit_execution_engine(OptimizationLevel::Aggressive)
-            .map_err(|_| Error::CannotCreateJitModule)?;
         Ok(JitCompiler {
-            engine,
             module,
             builder: context.create_builder(),
         })
+    }
+
+    fn run_passes(&self) {
+        // Run optimization passes.
+        let fpm = PassManager::create(());
+        fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+        fpm.add_gvn_pass();
+        fpm.add_cfg_simplification_pass();
+        fpm.add_basic_alias_analysis_pass();
+        fpm.add_promote_memory_to_register_pass();
+        fpm.run_on(&self.module);
     }
 }
 
@@ -461,7 +491,7 @@ mod test {
 
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::new();
-        let mut jiteval = tree.jit_compile(&context).unwrap();
+        let mut jiteval = tree.llvm_jit_compile(&context).unwrap();
         check_tree_eval(
             tree.clone(),
             |inputs: &[f64], outputs: &mut [f64]| {
@@ -622,17 +652,21 @@ mod test {
             &deftree!(if (not (> x 0)) (- (pow x 3) (pow y 3)) (+ (pow x 2) (pow y 2))).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.)],
             100,
-            0.,
+            1e-14,
         );
     }
 }
 
 #[cfg(test)]
 mod perft {
+    use super::*;
     use crate::{
+        dedup::Deduplicater,
         deftree,
         eval::Evaluator,
-        jit::{JitContext, JitEvaluator},
+        prune::Pruner,
+        test::util::assert_float_eq,
+        // test::util::assert_float_eq,
         tree::{min, MaybeTree, Tree},
     };
     use rand::{rngs::StdRng, SeedableRng};
@@ -708,7 +742,16 @@ mod perft {
             })
             .collect();
         let before = Instant::now();
-        let tree = _sphere_union();
+        let tree = {
+            let mut dedup = Deduplicater::new();
+            let mut pruner = Pruner::new();
+            _sphere_union()
+                .fold()
+                .unwrap()
+                .deduplicate(&mut dedup)
+                .unwrap()
+                .prune(&mut pruner)
+        };
         println!(
             "Tree creation time: {}ms",
             (Instant::now() - before).as_millis()
@@ -721,7 +764,7 @@ mod perft {
         let context = JitContext::new();
         let mut jiteval = {
             let before = Instant::now();
-            let jiteval = tree.jit_compile(&context).unwrap();
+            let jiteval = tree.llvm_jit_compile(&context).unwrap();
             println!(
                 "Compilation time: {}ms",
                 (Instant::now() - before).as_millis()
@@ -732,6 +775,9 @@ mod perft {
         println!("Jit time: {}ms", jittime.as_millis());
         let ratio = evaltime.as_millis() as f64 / jittime.as_millis() as f64;
         println!("Ratio: {}", ratio);
-        assert_eq!(values1, values2);
+        assert_eq!(values1.len(), values2.len());
+        for (l, r) in values1.iter().zip(values2.iter()) {
+            assert_float_eq!(l, r, 1e-15);
+        }
     }
 }
