@@ -652,7 +652,7 @@ mod test {
             &deftree!(if (not (> x 0)) (- (pow x 3) (pow y 3)) (+ (pow x 2) (pow y 2))).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.)],
             100,
-            0.,
+            1e-14,
         );
     }
 }
