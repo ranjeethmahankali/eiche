@@ -1,10 +1,8 @@
 use inkwell::{
     builder::Builder,
-    context::Context,
     execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
-    passes::PassManager,
     types::{BasicTypeEnum, FloatType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
     AddressSpace, FloatPredicate, OptimizationLevel,
@@ -14,6 +12,8 @@ use crate::{
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
+
+use super::{JitCompiler, JitContext};
 
 type UnsafeFuncType = unsafe extern "C" fn(*const f64, *mut f64);
 
@@ -41,7 +41,7 @@ impl<'ctx> JitEvaluator<'ctx> {
 
 impl Tree {
     pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitEvaluator, Error> {
-        const FUNC_NAME: &str = "symba_func";
+        const FUNC_NAME: &str = "eiche_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
         let context = &context.inner;
@@ -432,51 +432,6 @@ pub fn build_float_binary_intrinsic<'ctx>(
         .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
-pub struct JitContext {
-    inner: Context,
-}
-
-impl Default for JitContext {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl JitContext {
-    pub fn new() -> JitContext {
-        JitContext {
-            inner: Context::create(),
-        }
-    }
-}
-
-struct JitCompiler<'ctx> {
-    module: Module<'ctx>,
-    builder: Builder<'ctx>,
-}
-
-impl<'ctx> JitCompiler<'ctx> {
-    pub fn new(context: &'ctx Context) -> Result<JitCompiler<'ctx>, Error> {
-        let module = context.create_module("symba_module");
-        Ok(JitCompiler {
-            module,
-            builder: context.create_builder(),
-        })
-    }
-
-    fn run_passes(&self) {
-        // Run optimization passes.
-        let fpm = PassManager::create(());
-        fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
-        fpm.add_gvn_pass();
-        fpm.add_cfg_simplification_pass();
-        fpm.add_basic_alias_analysis_pass();
-        fpm.add_promote_memory_to_register_pass();
-        fpm.run_on(&self.module);
-    }
-}
-
 impl<'ctx> JitEvaluator<'ctx> {
     pub fn run(&mut self, inputs: &[f64]) -> Result<&[f64], Error> {
         if inputs.len() != self.num_inputs {
@@ -493,7 +448,7 @@ mod test {
     use crate::{deftree, test::util::check_tree_eval};
 
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
-        let context = JitContext::new();
+        let context = JitContext::default();
         let mut jiteval = tree.jit_compile(&context).unwrap();
         check_tree_eval(
             tree.clone(),
@@ -765,7 +720,7 @@ mod perft {
         let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
         println!("Evaluator time: {}ms", evaltime.as_millis());
         let mut values2: Vec<f64> = Vec::with_capacity(_N_QUERIES);
-        let context = JitContext::new();
+        let context = JitContext::default();
         let mut jiteval = {
             let before = Instant::now();
             let jiteval = tree.jit_compile(&context).unwrap();
