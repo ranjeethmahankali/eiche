@@ -35,20 +35,17 @@ impl<'ctx> JitEvaluator<'ctx> {
             num_inputs,
             outputs: vec![f64::NAN; num_outputs],
         };
-        return eval;
+        eval
     }
 }
 
 impl Tree {
-    pub fn llvm_jit_compile<'ctx>(
-        &'ctx self,
-        context: &'ctx JitContext,
-    ) -> Result<JitEvaluator, Error> {
+    pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitEvaluator, Error> {
         const FUNC_NAME: &str = "symba_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
         let context = &context.inner;
-        let compiler = JitCompiler::new(&context)?;
+        let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
         let f64_type = context.f64_type();
         let f64_ptr_type = f64_type.ptr_type(AddressSpace::default());
@@ -439,6 +436,12 @@ pub struct JitContext {
     inner: Context,
 }
 
+impl Default for JitContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JitContext {
     pub fn new() -> JitContext {
         JitContext {
@@ -480,7 +483,7 @@ impl<'ctx> JitEvaluator<'ctx> {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         }
         unsafe { self.func.call(inputs.as_ptr(), self.outputs.as_mut_ptr()) };
-        return Ok(&self.outputs);
+        Ok(&self.outputs)
     }
 }
 
@@ -491,11 +494,11 @@ mod test {
 
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::new();
-        let mut jiteval = tree.llvm_jit_compile(&context).unwrap();
+        let mut jiteval = tree.jit_compile(&context).unwrap();
         check_tree_eval(
             tree.clone(),
             |inputs: &[f64], outputs: &mut [f64]| {
-                let results = jiteval.run(&inputs).unwrap();
+                let results = jiteval.run(inputs).unwrap();
                 outputs.copy_from_slice(results);
             },
             vardata,
@@ -639,7 +642,7 @@ mod test {
     #[test]
     fn t_or_and() {
         check_jit_eval(
-            &&deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
+            &deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
             &[('x', -3., 3.)],
             100,
             0.,
@@ -698,7 +701,7 @@ mod perft {
         }
         let tree = tree.unwrap();
         assert_eq!(tree.dims(), (1, 1));
-        return tree;
+        tree
     }
 
     fn _benchmark_eval(
@@ -714,7 +717,7 @@ mod perft {
             let results = eval.run().unwrap();
             results[0].scalar().unwrap()
         }));
-        return Instant::now() - before;
+        Instant::now() - before
     }
 
     fn _benchmark_jit(
@@ -727,9 +730,10 @@ mod perft {
             let results = eval.run(coords).unwrap();
             results[0]
         }));
-        return Instant::now() - before;
+        Instant::now() - before
     }
 
+    // Run this function to bench mark the performance
     fn _t_perft() {
         let mut rng = StdRng::seed_from_u64(234);
         let queries: Vec<[f64; 3]> = (0.._N_QUERIES)
@@ -764,7 +768,7 @@ mod perft {
         let context = JitContext::new();
         let mut jiteval = {
             let before = Instant::now();
-            let jiteval = tree.llvm_jit_compile(&context).unwrap();
+            let jiteval = tree.jit_compile(&context).unwrap();
             println!(
                 "Compilation time: {}ms",
                 (Instant::now() - before).as_millis()
