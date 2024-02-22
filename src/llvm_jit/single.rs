@@ -97,7 +97,7 @@ impl Tree {
                                 regs[*input].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     Sqrt => build_float_unary_intrinsic(
                         builder,
@@ -155,7 +155,7 @@ impl Tree {
                                     cos.into_float_value(),
                                     &format!("reg_{}", ni),
                                 )
-                                .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                                .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                         )
                     }
                     Log => build_float_unary_intrinsic(
@@ -177,7 +177,7 @@ impl Tree {
                     Not => BasicValueEnum::IntValue(
                         builder
                             .build_not(regs[*input].into_int_value(), &format!("reg_{}", ni))
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                 },
                 Binary(op, lhs, rhs) => match op {
@@ -188,7 +188,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     Subtract => BasicValueEnum::FloatValue(
                         builder
@@ -197,7 +197,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     Multiply => BasicValueEnum::FloatValue(
                         builder
@@ -206,7 +206,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     Divide => BasicValueEnum::FloatValue(
                         builder
@@ -215,7 +215,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     Pow => build_float_binary_intrinsic(
                         builder,
@@ -252,7 +252,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     LessOrEqual => BasicValueEnum::IntValue(
                         builder
@@ -262,7 +262,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     Equal => BasicValueEnum::IntValue(
                         builder
@@ -272,7 +272,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     NotEqual => BasicValueEnum::IntValue(
                         builder
@@ -282,7 +282,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     Greater => BasicValueEnum::IntValue(
                         builder
@@ -292,7 +292,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     GreaterOrEqual => BasicValueEnum::IntValue(
                         builder
@@ -302,7 +302,7 @@ impl Tree {
                                 regs[*rhs].into_float_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     And => BasicValueEnum::IntValue(
                         builder
@@ -311,7 +311,7 @@ impl Tree {
                                 regs[*rhs].into_int_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                     Or => BasicValueEnum::IntValue(
                         builder
@@ -320,7 +320,7 @@ impl Tree {
                                 regs[*rhs].into_int_value(),
                                 &format!("reg_{}", ni),
                             )
-                            .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                     ),
                 },
                 Ternary(op, a, b, c) => match op {
@@ -331,7 +331,7 @@ impl Tree {
                             regs[*c].into_float_value(),
                             &format!("reg_{}", ni),
                         )
-                        .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?,
+                        .map_err(|e| Error::JitCompilationError(e.to_string()))?,
                 },
             };
             regs.push(reg);
@@ -368,13 +368,13 @@ impl Tree {
         let func = unsafe {
             engine
                 .get_function(FUNC_NAME)
-                .map_err(|e| Error::JitCompilationError(format!("{e:?}")))?
+                .map_err(|e| Error::JitCompilationError(e.to_string()))?
         };
         return Ok(JitEvaluator::create(func, symbols.len(), num_roots));
     }
 }
 
-pub fn build_float_unary_intrinsic<'ctx>(
+fn build_float_unary_intrinsic<'ctx>(
     builder: &'ctx Builder,
     module: &'ctx Module,
     name: &'static str,
@@ -398,7 +398,7 @@ pub fn build_float_unary_intrinsic<'ctx>(
         .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
-pub fn build_float_binary_intrinsic<'ctx>(
+fn build_float_binary_intrinsic<'ctx>(
     builder: &'ctx Builder,
     module: &'ctx Module,
     name: &'static str,
