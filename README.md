@@ -58,7 +58,7 @@ and y:
 
 ```rust
     let tree = deftree!(- (+ (pow x 3) (pow y 3)) 5).unwrap();
-    println!("$`f(x, y) = {}`$\n", tree.to_latex(
+    println!("$`f(x, y) = {}`$\n", tree.to_latex());
 ```
 
 $`f(x, y) = {\left({{x}^{3}} + {{y}^{3}}\right)} - {5}`$
