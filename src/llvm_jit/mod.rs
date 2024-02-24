@@ -1,4 +1,13 @@
-use inkwell::{builder::Builder, context::Context, module::Module, passes::PassManager};
+use std::path::Path;
+
+use inkwell::{
+    builder::Builder,
+    context::Context,
+    module::Module,
+    passes::PassManager,
+    targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
+    OptimizationLevel,
+};
 
 use crate::error::Error;
 
@@ -38,6 +47,30 @@ impl<'ctx> JitCompiler<'ctx> {
         fpm.add_basic_alias_analysis_pass();
         fpm.add_promote_memory_to_register_pass();
         fpm.run_on(&self.module);
+    }
+
+    #[allow(dead_code)]
+    pub fn write_asm(&self, path: &Path) {
+        Target::initialize_native(&InitializationConfig::default())
+            .expect("Failed to initialize native target");
+        let triple = TargetMachine::get_default_triple();
+        let cpu = TargetMachine::get_host_cpu_name().to_string();
+        let features = TargetMachine::get_host_cpu_features().to_string();
+        let target = Target::from_triple(&triple).unwrap();
+        let machine = target
+            .create_target_machine(
+                &triple,
+                &cpu,
+                &features,
+                OptimizationLevel::Aggressive,
+                RelocMode::Default,
+                CodeModel::Default,
+            )
+            .unwrap();
+        // create a module and do JIT stuff
+        machine
+            .write_to_file(&self.module, FileType::Assembly, path)
+            .unwrap();
     }
 }
 

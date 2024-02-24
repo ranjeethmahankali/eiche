@@ -12,7 +12,7 @@ use inkwell::{
 use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
-use std::fmt::Debug;
+use std::{fmt::Debug, mem::size_of};
 
 use super::{JitCompiler, JitContext};
 use crate::{
@@ -20,13 +20,14 @@ use crate::{
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
-const SIMD_VEC_SIZE: usize = 4;
+type SimdType = __m256d;
+const SIMD_VEC_SIZE: usize = size_of::<SimdType>() / size_of::<f64>();
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 union WideFloat {
     vals: [f64; SIMD_VEC_SIZE],
-    reg: __m256d,
+    reg: SimdType,
 }
 
 impl WideFloat {
@@ -42,12 +43,12 @@ impl WideFloat {
         }
     }
 
-    pub fn ptr(&self) -> *const __m256d {
-        unsafe { &self.reg as *const __m256d }
+    pub fn ptr(&self) -> *const SimdType {
+        unsafe { &self.reg as *const SimdType }
     }
 
-    pub fn ptr_mut(&mut self) -> *mut __m256d {
-        unsafe { &mut self.reg as *mut __m256d }
+    pub fn ptr_mut(&mut self) -> *mut SimdType {
+        unsafe { &mut self.reg as *mut SimdType }
     }
 }
 
@@ -57,7 +58,7 @@ impl Debug for WideFloat {
     }
 }
 
-type UnsafeFuncType = unsafe extern "C" fn(*const __m256d, *mut __m256d, u64);
+type UnsafeFuncType = unsafe extern "C" fn(*const SimdType, *mut SimdType, u64);
 
 pub struct JitSimdArrayEvaluator<'ctx> {
     func: JitFunction<'ctx, UnsafeFuncType>,

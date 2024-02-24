@@ -4,6 +4,9 @@ pub mod eval;
 pub mod reduce;
 pub mod tree;
 
+#[cfg(feature = "llvm-jit")]
+pub mod llvm_jit;
+
 mod dedup;
 mod fold;
 mod hash;
@@ -16,9 +19,6 @@ mod sort;
 mod substitute;
 mod template;
 mod walk;
-
-#[cfg(feature = "llvm-jit")]
-mod llvm_jit;
 
 #[cfg(test)]
 mod test;
