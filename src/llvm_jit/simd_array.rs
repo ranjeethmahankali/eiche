@@ -84,7 +84,10 @@ impl<'ctx> JitSimdArrayEvaluator<'ctx> {
         }
     }
 
-    pub fn push(&mut self, sample: &[f64]) {
+    pub fn push(&mut self, sample: &[f64]) -> Result<(), Error> {
+        if sample.len() != self.num_inputs {
+            return Err(Error::InputSizeMismatch(sample.len(), self.num_inputs));
+        }
         let index = self.num_eval % SIMD_VEC_SIZE;
         if index == 0 {
             self.inputs
@@ -100,6 +103,7 @@ impl<'ctx> JitSimdArrayEvaluator<'ctx> {
             reg.set(*val, index);
         }
         self.num_eval += 1;
+        return Ok(());
     }
 
     pub fn clear(&mut self) {
@@ -602,28 +606,201 @@ fn build_binary_intrinsic<'ctx>(
 
 #[cfg(test)]
 mod test {
-    use crate::deftree;
+    use crate::{
+        deftree,
+        eval::Evaluator,
+        test::util::{assert_float_eq, Sampler},
+    };
 
     use super::*;
 
+    fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
+        let context = JitContext::default();
+        let mut jiteval = tree.jit_compile_array(&context).unwrap();
+        let mut eval = Evaluator::new(&tree);
+        let mut sampler = Sampler::new(vardata, samples_per_var, 42);
+        let mut expected = Vec::with_capacity(
+            tree.num_roots() * usize::pow(samples_per_var, vardata.len() as u32),
+        );
+        let mut actual = Vec::with_capacity(expected.capacity());
+        while let Some(sample) = sampler.next() {
+            for (label, value) in vardata.iter().map(|(label, ..)| *label).zip(sample.iter()) {
+                eval.set_scalar(label, *value);
+            }
+            expected.extend(
+                eval.run()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.scalar().unwrap()),
+            );
+            jiteval.push(sample).unwrap();
+        }
+        jiteval.run(&mut actual);
+        assert_eq!(actual.len(), expected.len());
+        for (l, r) in actual.iter().zip(expected.iter()) {
+            assert_float_eq!(l, r, eps);
+        }
+    }
+
     #[test]
     fn t_mul() {
-        let tree = deftree!(* x y).unwrap();
-        let context = JitContext::default();
-        let mut eval = tree.jit_compile_array(&context).unwrap();
-        const N_SAMPLES: usize = 100;
-        let mut expected = Vec::with_capacity(N_SAMPLES * N_SAMPLES);
-        for xi in 0..N_SAMPLES {
-            let x = 0.1 + (xi as f64) * 0.1;
-            for yi in 0..N_SAMPLES {
-                let y = 0.1 + (yi as f64) * 0.1;
-                eval.push(&[x, y]);
-                expected.push(x * y);
-            }
-        }
-        assert_eq!(eval.num_eval, N_SAMPLES * N_SAMPLES);
-        let mut actual = Vec::with_capacity(N_SAMPLES * N_SAMPLES);
-        eval.run(&mut actual);
-        assert_eq!(actual, expected);
+        check_jit_eval(
+            &deftree!(* x y).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_prod_sum() {
+        check_jit_eval(
+            &deftree!(concat (+ x y) (* x y)).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_sub_div() {
+        check_jit_eval(
+            &deftree!(concat (- x y) (/ x y)).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_pow() {
+        check_jit_eval(&deftree!(pow x 2).unwrap(), &[('x', -10., -10.)], 100, 0.);
+    }
+
+    #[test]
+    fn t_sqrt() {
+        check_jit_eval(&deftree!(sqrt x).unwrap(), &[('x', 0.01, 10.)], 100, 0.);
+    }
+
+    #[test]
+    fn t_circle() {
+        check_jit_eval(
+            &deftree!(- (sqrt (+ (pow x 2) (pow y 2))) 3).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_sum_3() {
+        check_jit_eval(
+            &deftree!(+ (+ x 3) (+ y z)).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            5,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_sphere() {
+        check_jit_eval(
+            &deftree!(- (sqrt (+ (pow x 2) (+ (pow y 2) (pow z 2)))) 3).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        )
+    }
+
+    #[test]
+    fn t_negate() {
+        check_jit_eval(
+            &deftree!(* (- x) (+ y z)).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_abs() {
+        check_jit_eval(
+            &deftree!(* (abs x) (+ (abs y) (abs z))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_trigonometry() {
+        check_jit_eval(
+            &deftree!(/ (+ (sin x) (cos y)) (+ 0.27 (pow (tan z) 2))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
+            10,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_log_exp() {
+        check_jit_eval(
+            &deftree!(/ (+ 1 (log x)) (+ 1 (exp y))).unwrap(),
+            &[('x', 0.1, 5.), ('y', 0.1, 5.)],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_min_max() {
+        check_jit_eval(
+            &deftree!(
+                (max (min
+                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            )
+            .unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_choose() {
+        check_jit_eval(
+            &deftree!(if (> x 0) x (-x)).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+        check_jit_eval(
+            &deftree!(if (< x 0) (- x) x).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_or_and() {
+        check_jit_eval(
+            &deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
+            &[('x', -3., 3.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_not() {
+        check_jit_eval(
+            &deftree!(if (not (> x 0)) (- (pow x 3) (pow y 3)) (+ (pow x 2) (pow y 2))).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.)],
+            100,
+            1e-14,
+        );
     }
 }

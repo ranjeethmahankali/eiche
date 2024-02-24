@@ -32,7 +32,7 @@ pub mod util {
     }
     pub(crate) use assert_float_eq;
 
-    struct Sampler {
+    pub(crate) struct Sampler {
         samples_per_var: usize,
         var_samples: Vec<f64>,
         sample: Vec<f64>,
