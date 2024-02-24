@@ -388,4 +388,22 @@ mod test {
             .unwrap()
         ));
     }
+
+    #[test]
+    fn t_min_max_self() {
+        assert!(
+            reduce(deftree!(min (+ (pow x 2) y) (+ y (pow x 2))).unwrap(), 2)
+                .unwrap()
+                .last()
+                .unwrap()
+                .equivalent(&deftree!(+ (pow x 2) y).unwrap())
+        );
+        assert!(
+            reduce(deftree!(max (+ (pow x 2) y) (+ y (pow x 2))).unwrap(), 2)
+                .unwrap()
+                .last()
+                .unwrap()
+                .equivalent(&deftree!(+ (pow x 2) y).unwrap())
+        );
+    }
 }

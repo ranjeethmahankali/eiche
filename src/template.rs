@@ -227,6 +227,12 @@ lazy_static! {
                      ping (min (+ x z) (+ y z))
                      pong (+ z (min x y))
         ),
+        deftemplate!(min_self
+                     ping (min x x)
+                     pong (x)),
+        deftemplate!(max_self
+                     ping (max x x)
+                     pong (x)),
 
         // ======== Polynomial simplifications ========
         deftemplate!(x_plus_y_squared
@@ -405,6 +411,12 @@ pub mod test {
             check_many_templates(
                 &["min_of_sub_1", "min_of_sub_2", "min_of_add_1"],
                 &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+                0.,
+                &mut checked,
+            );
+            check_many_templates(
+                &["min_self", "max_self"],
+                &[('x', -10., 10.), ('y', -10., 10.)],
                 0.,
                 &mut checked,
             );
