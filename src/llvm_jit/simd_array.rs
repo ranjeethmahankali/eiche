@@ -8,23 +8,140 @@ use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
 };
 
+#[cfg(target_arch = "x86")]
+use std::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+use std::fmt::Debug;
+
+use super::{JitCompiler, JitContext};
 use crate::{
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
+const SIMD_VEC_SIZE: usize = 4;
 
-use super::{JitCompiler, JitContext};
+#[repr(C)]
+#[derive(Copy, Clone)]
+union WideFloat {
+    vals: [f64; SIMD_VEC_SIZE],
+    reg: __m256d,
+}
+
+impl WideFloat {
+    pub fn from(val: f64) -> WideFloat {
+        WideFloat {
+            vals: [val; SIMD_VEC_SIZE],
+        }
+    }
+
+    pub fn set(&mut self, val: f64, idx: usize) {
+        unsafe {
+            self.vals[idx] = val;
+        }
+    }
+
+    pub fn ptr(&self) -> *const __m256d {
+        unsafe { &self.reg as *const __m256d }
+    }
+
+    pub fn ptr_mut(&mut self) -> *mut __m256d {
+        unsafe { &mut self.reg as *mut __m256d }
+    }
+}
+
+impl Debug for WideFloat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe { write!(f, "{:?}", self.vals) }
+    }
+}
 
 type UnsafeFuncType = unsafe extern "C" fn(*const __m256d, *mut __m256d, u64);
 
 pub struct JitSimdArrayEvaluator<'ctx> {
-    _func: JitFunction<'ctx, UnsafeFuncType>,
-    _num_inputs: usize,
+    func: JitFunction<'ctx, UnsafeFuncType>,
+    num_inputs: usize,
+    num_outputs: usize,
+    num_eval: usize,
+    inputs: Vec<WideFloat>,
+    outputs: Vec<WideFloat>,
+}
+
+impl<'ctx> JitSimdArrayEvaluator<'ctx> {
+    pub fn create(
+        func: JitFunction<'ctx, UnsafeFuncType>,
+        num_inputs: usize,
+        num_outputs: usize,
+    ) -> JitSimdArrayEvaluator<'ctx> {
+        JitSimdArrayEvaluator {
+            func,
+            num_inputs,
+            num_outputs,
+            num_eval: 0,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, sample: &[f64]) {
+        let index = self.num_eval % SIMD_VEC_SIZE;
+        if index == 0 {
+            self.inputs
+                .extend(std::iter::repeat(WideFloat::from(f64::NAN)).take(self.num_inputs));
+            self.outputs
+                .extend(std::iter::repeat(WideFloat::from(f64::NAN)).take(self.num_outputs));
+        }
+        let inpsize = self.inputs.len();
+        for (reg, val) in self.inputs[(inpsize - self.num_inputs)..]
+            .iter_mut()
+            .zip(sample.iter())
+        {
+            reg.set(*val, index);
+        }
+        self.num_eval += 1;
+    }
+
+    pub fn clear(&mut self) {
+        self.inputs.clear();
+        self.outputs.clear();
+    }
+
+    fn num_regs(&self) -> usize {
+        (self.num_eval / SIMD_VEC_SIZE)
+            + if self.num_eval % SIMD_VEC_SIZE > 0 {
+                1
+            } else {
+                0
+            }
+    }
+
+    pub fn run(&mut self, dst: &mut Vec<f64>) {
+        unsafe {
+            self.func.call(
+                self.inputs[0].ptr(),
+                self.outputs[0].ptr_mut(),
+                self.num_regs() as u64,
+            );
+        }
+        dst.clear();
+        let mut offset = 0;
+        let mut num_vals = 0;
+        while offset < self.outputs.len() && num_vals < self.num_eval {
+            for i in 0..SIMD_VEC_SIZE {
+                for wf in &self.outputs[offset..(offset + self.num_outputs)] {
+                    unsafe {
+                        dst.push(wf.vals[i]);
+                    }
+                }
+                num_vals += 1;
+                if num_vals >= self.num_eval {
+                    break;
+                }
+            }
+            offset += self.num_outputs;
+        }
+    }
 }
 
 impl Tree {
@@ -33,7 +150,6 @@ impl Tree {
         context: &'ctx JitContext,
     ) -> Result<JitSimdArrayEvaluator, Error> {
         const FUNC_NAME: &str = "eiche_func";
-        const SIMD_VEC_SIZE: u32 = 4;
         let num_roots = self.num_roots();
         let symbols = self.symbols();
         let context = &context.inner;
@@ -41,7 +157,7 @@ impl Tree {
         let builder = &compiler.builder;
         let f64_type = context.f64_type();
         let i64_type = context.i64_type();
-        let fvec_type = f64_type.vec_type(SIMD_VEC_SIZE);
+        let fvec_type = f64_type.vec_type(SIMD_VEC_SIZE as u32);
         let bool_type = context.bool_type();
         let fptr_type = fvec_type.ptr_type(AddressSpace::default());
         let fn_type = context.void_type().fn_type(
@@ -64,6 +180,9 @@ impl Tree {
                 "Cannot read number of evaluations".to_string(),
             ))?
             .into_int_value();
+        builder
+            .build_unconditional_branch(loop_block)
+            .map_err(|e| Error::JitCompilationError(e.to_string()))?;
         // Start the loop
         builder.position_at_end(loop_block);
         let phi = builder
@@ -76,11 +195,10 @@ impl Tree {
             let reg = match node {
                 Constant(val) => match val {
                     Bool(val) => BasicValueEnum::VectorValue(VectorType::const_vector(
-                        &[bool_type.const_int(if *val { 1 } else { 0 }, false);
-                            SIMD_VEC_SIZE as usize],
+                        &[bool_type.const_int(if *val { 1 } else { 0 }, false); SIMD_VEC_SIZE],
                     )),
                     Scalar(val) => BasicValueEnum::VectorValue(VectorType::const_vector(
-                        &[f64_type.const_float(*val); SIMD_VEC_SIZE as usize],
+                        &[f64_type.const_float(*val); SIMD_VEC_SIZE],
                     )),
                 },
                 Symbol(label) => {
@@ -414,10 +532,11 @@ impl Tree {
                 .get_function(FUNC_NAME)
                 .map_err(|e| Error::JitCompilationError(e.to_string()))?
         };
-        Ok(JitSimdArrayEvaluator {
-            _func: func,
-            _num_inputs: symbols.len(),
-        })
+        Ok(JitSimdArrayEvaluator::create(
+            func,
+            symbols.len(),
+            num_roots,
+        ))
     }
 }
 
@@ -479,4 +598,32 @@ fn build_binary_intrinsic<'ctx>(
         .try_as_basic_value()
         .left()
         .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+#[cfg(test)]
+mod test {
+    use crate::deftree;
+
+    use super::*;
+
+    #[test]
+    fn t_mul() {
+        let tree = deftree!(* x y).unwrap();
+        let context = JitContext::default();
+        let mut eval = tree.jit_compile_array(&context).unwrap();
+        const N_SAMPLES: usize = 100;
+        let mut expected = Vec::with_capacity(N_SAMPLES * N_SAMPLES);
+        for xi in 0..N_SAMPLES {
+            let x = 0.1 + (xi as f64) * 0.1;
+            for yi in 0..N_SAMPLES {
+                let y = 0.1 + (yi as f64) * 0.1;
+                eval.push(&[x, y]);
+                expected.push(x * y);
+            }
+        }
+        assert_eq!(eval.num_eval, N_SAMPLES * N_SAMPLES);
+        let mut actual = Vec::with_capacity(N_SAMPLES * N_SAMPLES);
+        eval.run(&mut actual);
+        assert_eq!(actual, expected);
+    }
 }
