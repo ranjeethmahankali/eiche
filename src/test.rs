@@ -32,6 +32,56 @@ pub mod util {
     }
     pub(crate) use assert_float_eq;
 
+    struct Sampler {
+        samples_per_var: usize,
+        var_samples: Vec<f64>,
+        sample: Vec<f64>,
+        counter: Vec<usize>,
+        done: bool,
+    }
+
+    impl Sampler {
+        pub fn new(vardata: &[(char, f64, f64)], samples_per_var: usize, seed: u64) -> Sampler {
+            use rand::Rng;
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut var_samples = Vec::with_capacity(vardata.len() * samples_per_var);
+            for &(_label, lower, upper) in vardata {
+                let span = upper - lower;
+                for _ in 0..samples_per_var {
+                    var_samples.push(lower + rng.gen::<f64>() * span);
+                }
+            }
+            Sampler {
+                samples_per_var,
+                var_samples,
+                sample: vec![f64::NAN; vardata.len()],
+                counter: vec![0; vardata.len()],
+                done: false,
+            }
+        }
+
+        pub fn next(&mut self) -> Option<&[f64]> {
+            if self.done {
+                return None;
+            }
+            for (i, c) in self.counter.iter().enumerate() {
+                self.sample[i] = self.var_samples[i * self.samples_per_var + *c];
+            }
+            for c in self.counter.iter_mut() {
+                *c += 1;
+                if *c < self.samples_per_var {
+                    break;
+                } else {
+                    *c = 0;
+                }
+            }
+            if self.counter.iter().all(|c| *c == 0) {
+                self.done = true;
+            }
+            return Some(&self.sample);
+        }
+    }
+
     /// Helper function to evaluate the tree with randomly sampled
     /// variable values and compare the result to the one returned by
     /// the `expectedfn` for the same inputs. The values must be
@@ -50,24 +100,14 @@ pub mod util {
     ) where
         F: FnMut(&[f64], &mut [f64]) -> (),
     {
-        use rand::Rng;
         let mut eval = Evaluator::new(&tree);
+        let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         let mut expected = vec![f64::NAN; tree.num_roots()];
-        let nvars = vardata.len();
-        let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f64>::with_capacity(nvars);
-        let mut rng = StdRng::seed_from_u64(42);
-        while indices[0] <= samples_per_var {
-            let vari = sample.len();
-            let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f64>() * (upper - lower);
-            sample.push(value);
-            eval.set_scalar(label, value);
-            indices[vari] += 1;
-            if vari < nvars - 1 {
-                continue;
+        let symbols: Vec<_> = vardata.iter().map(|(label, ..)| *label).collect();
+        while let Some(sample) = sampler.next() {
+            for (&label, &value) in symbols.iter().zip(sample.iter()) {
+                eval.set_scalar(label, value);
             }
-            // We set all the variables. Run the test.
             let results = eval.run().unwrap();
             assert_eq!(results.len(), expected.len());
             expected.fill(f64::NAN);
@@ -76,17 +116,6 @@ pub mod util {
                 match rhs {
                     Value::Bool(_) => assert!(false, "Found a boolean when expecting a scalar"),
                     Value::Scalar(rhs) => assert_float_eq!(lhs, rhs, eps),
-                }
-            }
-            // Clean up the index stack.
-            sample.pop();
-            let mut vari = vari;
-            while indices[vari] == samples_per_var && vari > 0 {
-                if let Some(_) = sample.pop() {
-                    indices[vari] = 0;
-                    vari -= 1;
-                } else {
-                    assert!(false); // To ensure the logic of this test is correct.
                 }
             }
         }
@@ -116,23 +145,14 @@ pub mod util {
             tree1.dims(),
             tree2.dims()
         );
-        use rand::Rng;
         let mut eval1 = Evaluator::new(&tree1);
         let mut eval2 = Evaluator::new(&tree2);
-        let nvars = vardata.len();
-        let mut indices = vec![0usize; nvars];
-        let mut sample = Vec::<f64>::with_capacity(nvars);
-        let mut rng = StdRng::seed_from_u64(42);
-        while indices[0] <= samples_per_var {
-            let vari = sample.len();
-            let (label, lower, upper) = vardata[vari];
-            let value = lower + rng.gen::<f64>() * (upper - lower);
-            sample.push(value);
-            eval1.set_scalar(label, value);
-            eval2.set_scalar(label, value);
-            indices[vari] += 1;
-            if vari < nvars - 1 {
-                continue;
+        let mut sampler = Sampler::new(vardata, samples_per_var, 42);
+        let symbols: Vec<_> = vardata.iter().map(|(label, ..)| *label).collect();
+        while let Some(sample) = sampler.next() {
+            for (&label, &value) in symbols.iter().zip(sample.iter()) {
+                eval1.set_scalar(label, value);
+                eval2.set_scalar(label, value);
             }
             let results1 = eval1.run().unwrap();
             let results2 = eval2.run().unwrap();
@@ -146,17 +166,6 @@ pub mod util {
                     (Value::Scalar(a), Value::Scalar(b)) => assert_float_eq!(a, b, eps, sample),
                     (Value::Bool(a), Value::Bool(b)) => assert_eq!(a, b),
                     _ => assert!(false, "Mismatched types"),
-                }
-            }
-            // Clean up the index stack.
-            sample.pop();
-            let mut vari = vari;
-            while indices[vari] == samples_per_var && vari > 0 {
-                if let Some(_) = sample.pop() {
-                    indices[vari] = 0;
-                    vari -= 1;
-                } else {
-                    assert!(false); // To ensure the logic of this test is correct.
                 }
             }
         }
