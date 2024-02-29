@@ -158,6 +158,11 @@ const fn matsize(dims: (usize, usize)) -> usize {
 }
 
 impl Tree {
+    pub fn from_nodes(nodes: Vec<Node>, dims: (usize, usize)) -> MaybeTree {
+        let t = Tree { nodes, dims };
+        return t.validated();
+    }
+
     /// Create a tree representing a constant value.
     pub fn constant(val: Value) -> Tree {
         Tree {
