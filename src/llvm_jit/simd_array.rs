@@ -110,6 +110,7 @@ impl<'ctx> JitSimdArrayEvaluator<'ctx> {
     pub fn clear(&mut self) {
         self.inputs.clear();
         self.outputs.clear();
+        self.num_eval = 0;
     }
 
     fn num_regs(&self) -> usize {
