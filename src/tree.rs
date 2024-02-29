@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::{dedup::Deduplicater, error::Error, fold::fold_nodes, prune::Pruner, sort::TopoSorter};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -169,6 +169,18 @@ impl Tree {
             nodes: vec![Constant(val)],
             dims: (1, 1),
         }
+    }
+
+    pub fn compacted(mut self) -> MaybeTree {
+        let root_indices = self.root_indices();
+        let mut sorter = TopoSorter::new();
+        let root_indices = sorter.run_from_range(self.nodes_mut(), root_indices)?;
+        fold_nodes(self.nodes_mut())?;
+        let mut deduper = Deduplicater::new();
+        deduper.run(self.nodes_mut());
+        let mut pruner = Pruner::new();
+        pruner.run_from_range(self.nodes_mut(), root_indices);
+        return self.validated();
     }
 
     /// Create a tree representing a symbol with the given `label`.
