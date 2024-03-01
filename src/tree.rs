@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::{dedup::Deduplicater, error::Error, fold::fold_nodes, prune::Pruner};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -158,12 +158,27 @@ const fn matsize(dims: (usize, usize)) -> usize {
 }
 
 impl Tree {
+    pub fn from_nodes(nodes: Vec<Node>, dims: (usize, usize)) -> MaybeTree {
+        let t = Tree { nodes, dims };
+        return t.validated();
+    }
+
     /// Create a tree representing a constant value.
     pub fn constant(val: Value) -> Tree {
         Tree {
             nodes: vec![Constant(val)],
             dims: (1, 1),
         }
+    }
+
+    pub fn compacted(mut self) -> MaybeTree {
+        fold_nodes(self.nodes_mut())?;
+        let mut deduper = Deduplicater::new();
+        deduper.run(self.nodes_mut());
+        let mut pruner = Pruner::new();
+        let root_indices = self.root_indices();
+        pruner.run_from_range(self.nodes_mut(), root_indices);
+        return self.validated();
     }
 
     /// Create a tree representing a symbol with the given `label`.
