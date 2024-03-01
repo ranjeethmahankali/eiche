@@ -52,8 +52,8 @@ where
     fn set(&mut self, val: T, idx: usize);
     fn get(&self, idx: usize) -> T;
     fn float_type<'ctx>(context: &'ctx Context) -> FloatType<'ctx>;
-    fn float_vec<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx>;
-    fn bool_vec<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx>;
+    fn const_float<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx>;
+    fn const_bool<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx>;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -77,14 +77,14 @@ impl SimdVec<f32> for Wfloat {
         context.f32_type()
     }
 
-    fn float_vec<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+    fn const_float<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx> {
         BasicValueEnum::VectorValue(VectorType::const_vector(
             &[<Self as SimdVec<f32>>::float_type(context).const_float(val as f64);
                 <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
         ))
     }
 
-    fn bool_vec<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+    fn const_bool<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx> {
         BasicValueEnum::VectorValue(VectorType::const_vector(
             &[context
                 .bool_type()
@@ -115,14 +115,14 @@ impl SimdVec<f64> for Wfloat {
         context.f64_type()
     }
 
-    fn float_vec<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+    fn const_float<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx> {
         BasicValueEnum::VectorValue(VectorType::const_vector(
             &[<Self as SimdVec<f64>>::float_type(context).const_float(val);
                 <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
         ))
     }
 
-    fn bool_vec<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+    fn const_bool<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx> {
         BasicValueEnum::VectorValue(VectorType::const_vector(
             &[context
                 .bool_type()
@@ -288,8 +288,8 @@ impl Tree {
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
                 Constant(val) => match val {
-                    Bool(val) => <Wfloat as SimdVec<T>>::bool_vec(*val, context),
-                    Scalar(val) => <Wfloat as SimdVec<T>>::float_vec(*val, context),
+                    Bool(val) => <Wfloat as SimdVec<T>>::const_bool(*val, context),
+                    Scalar(val) => <Wfloat as SimdVec<T>>::const_float(*val, context),
                 },
                 Symbol(label) => {
                     let offset = builder
