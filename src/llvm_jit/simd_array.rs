@@ -1,9 +1,10 @@
 use inkwell::{
     builder::Builder,
+    context::Context,
     execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
-    types::{BasicTypeEnum, VectorType},
+    types::{BasicTypeEnum, FloatType, VectorType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
 };
@@ -12,7 +13,7 @@ use inkwell::{
 use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
-use std::{fmt::Debug, mem::size_of};
+use std::{marker::PhantomData, mem::size_of};
 
 use super::{JitCompiler, JitContext};
 use crate::{
@@ -21,87 +22,172 @@ use crate::{
 };
 
 type SimdType = __m256d;
-const SIMD_VEC_SIZE: usize = size_of::<SimdType>() / size_of::<f64>();
+const SIMD_F32_SIZE: usize = size_of::<SimdType>() / size_of::<f32>();
+const SIMD_F64_SIZE: usize = size_of::<SimdType>() / size_of::<f64>();
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-union WideFloat {
-    vals: [f64; SIMD_VEC_SIZE],
+pub union Wfloat {
+    valsf32: [f32; SIMD_F32_SIZE],
+    valsf64: [f64; SIMD_F64_SIZE],
     reg: SimdType,
 }
 
-impl WideFloat {
-    pub fn from(val: f64) -> WideFloat {
-        WideFloat {
-            vals: [val; SIMD_VEC_SIZE],
-        }
-    }
-
-    pub fn set(&mut self, val: f64, idx: usize) {
-        unsafe {
-            self.vals[idx] = val;
-        }
-    }
-
-    pub fn ptr(&self) -> *const SimdType {
+impl Wfloat {
+    fn ptr(&self) -> *const SimdType {
         unsafe { &self.reg as *const SimdType }
     }
 
-    pub fn ptr_mut(&mut self) -> *mut SimdType {
+    fn ptr_mut(&mut self) -> *mut SimdType {
         unsafe { &mut self.reg as *mut SimdType }
     }
 }
 
-impl Debug for WideFloat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unsafe { write!(f, "{:?}", self.vals) }
+pub trait SimdVec<T>
+where
+    T: Copy,
+{
+    const SIMD_VEC_SIZE: usize;
+    fn nan() -> Wfloat;
+    fn set(&mut self, val: T, idx: usize);
+    fn get(&self, idx: usize) -> T;
+    fn float_type<'ctx>(context: &'ctx Context) -> FloatType<'ctx>;
+    fn float_vec<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx>;
+    fn bool_vec<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx>;
+}
+
+impl SimdVec<f32> for Wfloat {
+    const SIMD_VEC_SIZE: usize = SIMD_F32_SIZE;
+
+    fn nan() -> Wfloat {
+        Wfloat {
+            valsf32: [f32::NAN; <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
+        }
+    }
+
+    fn set(&mut self, val: f32, idx: usize) {
+        unsafe { self.valsf32[idx] = val }
+    }
+
+    fn get(&self, idx: usize) -> f32 {
+        unsafe { self.valsf32[idx] }
+    }
+
+    fn float_type<'ctx>(context: &'ctx Context) -> FloatType<'ctx> {
+        context.f32_type()
+    }
+
+    fn float_vec<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+        BasicValueEnum::VectorValue(VectorType::const_vector(
+            &[<Self as SimdVec<f32>>::float_type(context).const_float(val as f64);
+                <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
+        ))
+    }
+
+    fn bool_vec<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+        BasicValueEnum::VectorValue(VectorType::const_vector(
+            &[context
+                .bool_type()
+                .const_int(if val { 1 } else { 0 }, false);
+                <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
+        ))
+    }
+}
+
+impl SimdVec<f64> for Wfloat {
+    const SIMD_VEC_SIZE: usize = SIMD_F64_SIZE;
+
+    fn nan() -> Wfloat {
+        Wfloat {
+            valsf64: [f64::NAN; <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
+        }
+    }
+
+    fn set(&mut self, val: f64, idx: usize) {
+        unsafe { self.valsf64[idx] = val }
+    }
+
+    fn get(&self, idx: usize) -> f64 {
+        unsafe { self.valsf64[idx] }
+    }
+
+    fn float_type<'ctx>(context: &'ctx Context) -> FloatType<'ctx> {
+        context.f64_type()
+    }
+
+    fn float_vec<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+        BasicValueEnum::VectorValue(VectorType::const_vector(
+            &[<Self as SimdVec<f64>>::float_type(context).const_float(val);
+                <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
+        ))
+    }
+
+    fn bool_vec<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+        BasicValueEnum::VectorValue(VectorType::const_vector(
+            &[context
+                .bool_type()
+                .const_int(if val { 1 } else { 0 }, false);
+                <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
+        ))
     }
 }
 
 type UnsafeFuncType = unsafe extern "C" fn(*const SimdType, *mut SimdType, u64);
 
-pub struct JitSimdArrayEvaluator<'ctx> {
+pub struct JitSimdFn<'ctx, T>
+where
+    Wfloat: SimdVec<T>,
+    T: Copy,
+{
     func: JitFunction<'ctx, UnsafeFuncType>,
     num_inputs: usize,
     num_outputs: usize,
     num_eval: usize,
-    inputs: Vec<WideFloat>,
-    outputs: Vec<WideFloat>,
+    inputs: Vec<Wfloat>,
+    outputs: Vec<Wfloat>,
+    phantom: PhantomData<T>,
 }
 
-impl<'ctx> JitSimdArrayEvaluator<'ctx> {
+impl<'ctx, T> JitSimdFn<'ctx, T>
+where
+    Wfloat: SimdVec<T>,
+    T: Copy,
+{
+    const SIMD_VEC_SIZE: usize = <Wfloat as SimdVec<T>>::SIMD_VEC_SIZE;
+
     pub fn create(
         func: JitFunction<'ctx, UnsafeFuncType>,
         num_inputs: usize,
         num_outputs: usize,
-    ) -> JitSimdArrayEvaluator<'ctx> {
-        JitSimdArrayEvaluator {
+    ) -> JitSimdFn<'ctx, T> {
+        JitSimdFn::<T> {
             func,
             num_inputs,
             num_outputs,
             num_eval: 0,
             inputs: Vec::new(),
             outputs: Vec::new(),
+            phantom: PhantomData::default(),
         }
     }
 
-    pub fn push(&mut self, sample: &[f64]) -> Result<(), Error> {
+    pub fn push(&mut self, sample: &[T]) -> Result<(), Error> {
         if sample.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(sample.len(), self.num_inputs));
         }
-        let index = self.num_eval % SIMD_VEC_SIZE;
+        let index = self.num_eval % Self::SIMD_VEC_SIZE;
         if index == 0 {
             self.inputs
-                .extend(std::iter::repeat(WideFloat::from(f64::NAN)).take(self.num_inputs));
+                .extend(std::iter::repeat(<Wfloat as SimdVec<T>>::nan()).take(self.num_inputs));
             self.outputs
-                .extend(std::iter::repeat(WideFloat::from(f64::NAN)).take(self.num_outputs));
+                .extend(std::iter::repeat(<Wfloat as SimdVec<T>>::nan()).take(self.num_outputs));
         }
         let inpsize = self.inputs.len();
         for (reg, val) in self.inputs[(inpsize - self.num_inputs)..]
             .iter_mut()
             .zip(sample.iter())
         {
-            reg.set(*val, index);
+            <Wfloat as SimdVec<T>>::set(reg, *val, index);
         }
         self.num_eval += 1;
         return Ok(());
@@ -113,16 +199,16 @@ impl<'ctx> JitSimdArrayEvaluator<'ctx> {
         self.num_eval = 0;
     }
 
-    fn num_regs(&self) -> usize {
-        (self.num_eval / SIMD_VEC_SIZE)
-            + if self.num_eval % SIMD_VEC_SIZE > 0 {
+    pub fn num_regs(&self) -> usize {
+        (self.num_eval / Self::SIMD_VEC_SIZE)
+            + if self.num_eval % Self::SIMD_VEC_SIZE > 0 {
                 1
             } else {
                 0
             }
     }
 
-    pub fn run(&mut self, dst: &mut Vec<f64>) {
+    pub fn run(&mut self, dst: &mut Vec<T>) {
         unsafe {
             self.func.call(
                 self.inputs[0].ptr(),
@@ -135,11 +221,9 @@ impl<'ctx> JitSimdArrayEvaluator<'ctx> {
         let mut offset = 0;
         let mut num_vals = 0;
         while offset < self.outputs.len() && num_vals < self.num_eval {
-            for i in 0..SIMD_VEC_SIZE {
+            for i in 0..Self::SIMD_VEC_SIZE {
                 for wf in &self.outputs[offset..(offset + self.num_outputs)] {
-                    unsafe {
-                        dst.push(wf.vals[i]);
-                    }
+                    dst.push(<Wfloat as SimdVec<T>>::get(&wf, i));
                 }
                 num_vals += 1;
                 if num_vals >= self.num_eval {
@@ -152,20 +236,23 @@ impl<'ctx> JitSimdArrayEvaluator<'ctx> {
 }
 
 impl Tree {
-    pub fn jit_compile_array<'ctx>(
+    pub fn jit_compile_array<'ctx, T>(
         &'ctx self,
         context: &'ctx JitContext,
-    ) -> Result<JitSimdArrayEvaluator, Error> {
+    ) -> Result<JitSimdFn<T>, Error>
+    where
+        Wfloat: SimdVec<T>,
+        T: Copy,
+    {
         const FUNC_NAME: &str = "eiche_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
-        let f64_type = context.f64_type();
+        let float_type = <Wfloat as SimdVec<T>>::float_type(context);
         let i64_type = context.i64_type();
-        let fvec_type = f64_type.vec_type(SIMD_VEC_SIZE as u32);
-        let bool_type = context.bool_type();
+        let fvec_type = float_type.vec_type(<Wfloat as SimdVec<T>>::SIMD_VEC_SIZE as u32);
         let fptr_type = fvec_type.ptr_type(AddressSpace::default());
         let fn_type = context.void_type().fn_type(
             &[fptr_type.into(), fptr_type.into(), i64_type.into()],
@@ -201,12 +288,8 @@ impl Tree {
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
                 Constant(val) => match val {
-                    Bool(val) => BasicValueEnum::VectorValue(VectorType::const_vector(
-                        &[bool_type.const_int(if *val { 1 } else { 0 }, false); SIMD_VEC_SIZE],
-                    )),
-                    Scalar(val) => BasicValueEnum::VectorValue(VectorType::const_vector(
-                        &[f64_type.const_float(*val); SIMD_VEC_SIZE],
-                    )),
+                    Bool(val) => <Wfloat as SimdVec<T>>::bool_vec(*val, context),
+                    Scalar(val) => <Wfloat as SimdVec<T>>::float_vec(*val, context),
                 },
                 Symbol(label) => {
                     let offset = builder
@@ -539,11 +622,7 @@ impl Tree {
                 .get_function(FUNC_NAME)
                 .map_err(|e| Error::JitCompilationError(e.to_string()))?
         };
-        Ok(JitSimdArrayEvaluator::create(
-            func,
-            symbols.len(),
-            num_roots,
-        ))
+        Ok(JitSimdFn::<T>::create(func, symbols.len(), num_roots))
     }
 }
 
@@ -871,7 +950,7 @@ mod perft {
     fn _benchmark_jit(
         values: &mut Vec<f64>,
         queries: &[[f64; 3]],
-        eval: &mut JitSimdArrayEvaluator,
+        eval: &mut JitSimdFn<f64>,
     ) -> Duration {
         for q in queries {
             eval.push(q).unwrap();

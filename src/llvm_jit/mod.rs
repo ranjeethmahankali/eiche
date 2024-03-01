@@ -26,14 +26,36 @@ impl Default for JitContext {
 struct JitCompiler<'ctx> {
     module: Module<'ctx>,
     builder: Builder<'ctx>,
+    machine: TargetMachine,
 }
 
 impl<'ctx> JitCompiler<'ctx> {
     pub fn new(context: &'ctx Context) -> Result<JitCompiler<'ctx>, Error> {
+        Target::initialize_native(&InitializationConfig::default())
+            .expect("Failed to initialize native target");
+        let reloc = RelocMode::Default;
+        let model = CodeModel::JITDefault;
+        let triple = TargetMachine::get_default_triple();
+        let cpu = TargetMachine::get_host_cpu_name().to_string();
+        let target = Target::from_triple(&triple).unwrap();
+        let features = TargetMachine::get_host_cpu_features().to_string();
+        let machine = target
+            .create_target_machine(
+                &triple,
+                &cpu,
+                &features,
+                OptimizationLevel::Aggressive,
+                reloc,
+                model,
+            )
+            .unwrap();
         let module = context.create_module("eiche_module");
+        module.set_triple(&machine.get_triple());
+        module.set_data_layout(&machine.get_target_data().get_data_layout());
         Ok(JitCompiler {
             module,
             builder: context.create_builder(),
+            machine,
         })
     }
 
@@ -51,24 +73,7 @@ impl<'ctx> JitCompiler<'ctx> {
 
     #[allow(dead_code)]
     pub fn write_asm(&self, path: &Path) {
-        Target::initialize_native(&InitializationConfig::default())
-            .expect("Failed to initialize native target");
-        let triple = TargetMachine::get_default_triple();
-        let cpu = TargetMachine::get_host_cpu_name().to_string();
-        let features = TargetMachine::get_host_cpu_features().to_string();
-        let target = Target::from_triple(&triple).unwrap();
-        let machine = target
-            .create_target_machine(
-                &triple,
-                &cpu,
-                &features,
-                OptimizationLevel::Aggressive,
-                RelocMode::Default,
-                CodeModel::Default,
-            )
-            .unwrap();
-        // create a module and do JIT stuff
-        machine
+        self.machine
             .write_to_file(&self.module, FileType::Assembly, path)
             .unwrap();
     }
