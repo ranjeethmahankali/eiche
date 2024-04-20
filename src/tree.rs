@@ -1,4 +1,4 @@
-use crate::{dedup::Deduplicater, error::Error, fold::fold_nodes, prune::Pruner};
+use crate::{dedup::Deduplicater, error::Error, fold::fold_nodes, prune::Pruner, sort::TopoSorter};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -172,6 +172,9 @@ impl Tree {
     }
 
     pub fn compacted(mut self) -> MaybeTree {
+        let mut topo_sorter = TopoSorter::new();
+        let root_indices = self.root_indices();
+        topo_sorter.run_from_range(self.nodes_mut(), root_indices)?;
         fold_nodes(self.nodes_mut())?;
         let mut deduper = Deduplicater::new();
         deduper.run(self.nodes_mut());
