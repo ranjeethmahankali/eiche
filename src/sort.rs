@@ -13,10 +13,9 @@ use crate::{
 /// inputs. A `TopoSorter` instance can be used to sort a vector of
 /// nodes to be topologically valid.
 pub struct TopoSorter {
-    depths: Vec<usize>,
-    sorted_indices: Vec<usize>,
     index_map: Vec<usize>,
     sorted: Vec<Node>,
+    roots: Vec<Node>,
     walker: DepthWalker,
 }
 
@@ -24,10 +23,9 @@ impl TopoSorter {
     /// Create a new `TopoSorter` instance.
     pub fn new() -> TopoSorter {
         TopoSorter {
-            depths: Vec::new(),
-            sorted_indices: Vec::new(),
             index_map: Vec::new(),
             sorted: Vec::new(),
+            roots: Vec::new(),
             walker: DepthWalker::new(),
         }
     }
@@ -41,27 +39,18 @@ impl TopoSorter {
         nodes: &mut Vec<Node>,
         root_indices: Range<usize>,
     ) -> Result<Range<usize>, Error> {
-        // Compute depths of all nodes.
-        Self::compute_depths(
+        Self::sort_nodes(
             nodes,
-            &mut self.depths,
-            self.walker.walk_from_roots(
-                &nodes,
-                root_indices.clone(),
-                false,
-                NodeOrdering::Original,
-            ),
-        )?;
-        self.sort_by_depth(nodes);
-        // Find the new range of roots and return.
-        return match self
-            .sorted_indices
-            .iter()
-            .position(|index| *index == root_indices.start)
-        {
-            Some(i) => Ok(i..(i + (root_indices.end - root_indices.start))),
-            None => Err(Error::InvalidTopology),
-        };
+            self.walker
+                .walk_from_roots(&nodes, root_indices.clone(), true, NodeOrdering::Reversed),
+            &mut self.index_map,
+            root_indices.len(),
+            &mut self.sorted,
+            &mut self.roots,
+        );
+        std::mem::swap(&mut self.sorted, nodes);
+        // TODO: No need to return error from this function.
+        return Ok((nodes.len() - root_indices.len())..nodes.len());
     }
 
     pub fn run_from_slice(
@@ -69,79 +58,73 @@ impl TopoSorter {
         nodes: &mut Vec<Node>,
         roots: &mut [usize],
     ) -> Result<(), Error> {
-        Self::compute_depths(
+        Self::sort_nodes(
             nodes,
-            &mut self.depths,
             self.walker.walk_from_roots(
                 nodes,
                 roots.iter().map(|r| *r),
-                false,
-                NodeOrdering::Original,
+                true,
+                NodeOrdering::Reversed,
             ),
-        )?;
-        self.sort_by_depth(nodes);
-        // Update roots
-        for root in roots {
-            *root = match self.sorted_indices.iter().position(|index| *index == *root) {
-                Some(i) => i,
-                None => return Err(Error::InvalidTopology),
-            };
+            &mut self.index_map,
+            roots.len(),
+            &mut self.sorted,
+            &mut self.roots,
+        );
+        std::mem::swap(&mut self.sorted, nodes);
+        let num_roots = roots.len();
+        for (r, i) in roots.iter_mut().zip((nodes.len() - num_roots)..nodes.len()) {
+            *r = i;
         }
         return Ok(());
     }
 
-    fn compute_depths<I: Iterator<Item = (usize, Option<usize>)>>(
+    fn sort_nodes<I: Iterator<Item = (usize, Option<usize>)>>(
         nodes: &[Node],
-        depths: &mut Vec<usize>,
         depth_first_walk: I,
-    ) -> Result<(), Error> {
-        depths.clear();
-        depths.resize(nodes.len(), 0);
+        indexmap: &mut Vec<usize>,
+        num_roots: usize,
+        sorted: &mut Vec<Node>,
+        roots: &mut Vec<Node>,
+    ) {
+        sorted.clear();
+        sorted.reserve(nodes.len());
+        roots.clear();
+        roots.reserve(num_roots);
+        indexmap.clear();
+        indexmap.resize(nodes.len(), 0);
         for (index, maybe_parent) in depth_first_walk {
-            if let Some(parent) = maybe_parent {
-                depths[index] = usize::max(depths[index], 1 + depths[parent]);
-                if depths[index] >= nodes.len() {
-                    // TODO: This is a terrible way to detect large
-                    // cycles. As you'd have to traverse the whole
-                    // cycle many times to reach this
-                    // condition. Implement proper cycle detection
-                    // later.
-                    return Err(Error::CyclicGraph);
+            match maybe_parent {
+                Some(_) => {
+                    indexmap[index] = sorted.len();
+                    sorted.push(nodes[index]);
+                }
+                None => {
+                    // This is a root node because it has no parent.
+                    roots.push(nodes[index]);
                 }
             }
         }
-        return Ok(());
-    }
-
-    fn sort_by_depth(&mut self, nodes: &mut Vec<Node>) {
-        // Sort the node indices by depth.
-        self.sorted_indices.clear();
-        self.sorted_indices.extend(0..nodes.len());
-        // Highest depth at the start.
-        self.sorted_indices
-            .sort_by(|a, b| self.depths[*b].cmp(&self.depths[*a]));
-        // Build a map from old indices to new indices.
-        self.index_map.clear();
-        self.index_map.resize(nodes.len(), 0);
-        for (i, index) in self.sorted_indices.iter().enumerate() {
-            self.index_map[*index] = i;
+        sorted.reverse();
+        for i in indexmap.iter_mut() {
+            *i = sorted.len() - *i - 1;
         }
-        // Gather the sorted nodes.
-        self.sorted.clear();
-        self.sorted
-            .extend(self.sorted_indices.iter().map(|index| -> Node {
-                match nodes[*index] {
-                    Constant(v) => Constant(v),
-                    Symbol(label) => Symbol(label),
-                    Unary(op, input) => Unary(op, self.index_map[input]),
-                    Binary(op, lhs, rhs) => Binary(op, self.index_map[lhs], self.index_map[rhs]),
-                    Ternary(op, a, b, c) => {
-                        Ternary(op, self.index_map[a], self.index_map[b], self.index_map[c])
-                    }
+        sorted.extend(roots.drain(..));
+        for node in sorted {
+            match node {
+                Constant(_) | Symbol(_) => {} // Nothing.
+                Unary(_, input) => *input = indexmap[*input],
+                Binary(_, lhs, rhs) => {
+                    *lhs = indexmap[*lhs];
+                    *rhs = indexmap[*rhs];
                 }
-            }));
-        // Swap the sorted nodes and the incoming nodes.
-        std::mem::swap(&mut self.sorted, nodes);
+                Ternary(_, a, b, c) => {
+                    *a = indexmap[*a];
+                    *b = indexmap[*b];
+                    *c = indexmap[*c];
+                }
+            }
+        }
     }
 }
 
@@ -211,69 +194,45 @@ mod test {
             vec![
                 Symbol('x'),
                 Symbol('y'),
+                Binary(Add, 0, 1),
+                Unary(Log, 2),
                 Symbol('a'),
                 Symbol('b'),
-                Binary(Add, 0, 1),
-                Binary(Add, 2, 3),
-                Unary(Log, 4),
+                Binary(Add, 4, 5),
+                Binary(Multiply, 3, 6),
                 Symbol('p'),
                 Symbol('p'),
-                Binary(Add, 7, 8),
-                Binary(Multiply, 6, 5),
-                Binary(Pow, 10, 9)
+                Binary(Add, 8, 9),
+                Binary(Pow, 7, 10)
             ]
         );
-    }
-
-    #[test]
-    fn t_cyclic_graph() {
-        let mut sorter = TopoSorter::new();
-        let mut nodes = vec![
-            Binary(Pow, 8, 9),      // 0
-            Symbol('x'),            // 1
-            Binary(Multiply, 0, 1), // 2
-            Symbol('y'),            // 3
-            Binary(Multiply, 0, 3), // 4
-            Binary(Add, 2, 4),      // 5
-            Binary(Add, 1, 3),      // 6
-            Binary(Divide, 5, 6),   // 7
-            Unary(Sqrt, 0),         // 8
-            Constant(Scalar(2.0)),  // 9
-        ];
-        assert!(matches!(
-            sorter.run_from_range(&mut nodes, 0..1),
-            Err(Error::CyclicGraph)
-        ));
     }
 
     #[test]
     fn t_sort_concat() {
         let mut sorter = TopoSorter::new();
         let mut nodes = vec![
-            Symbol('p'),
-            Symbol('x'),
-            Binary(Multiply, 0, 1),
-            Symbol('y'),
-            Binary(Multiply, 0, 3),
-            Binary(Multiply, 0, 7),
-            Constant(Scalar(1.0)),
-            Binary(Add, 1, 3),
-            Binary(Add, 2, 4),
+            Symbol('p'),            // 0
+            Symbol('x'),            // 1
+            Binary(Multiply, 0, 1), // 2: p * x
+            Symbol('y'),            // 3
+            Binary(Multiply, 0, 3), // 4: p * y
+            Binary(Multiply, 0, 7), // 5: p * (x + y)
+            Constant(Scalar(1.0)),  // 6
+            Binary(Add, 1, 3),      // 7: x + y
+            Binary(Add, 2, 4),      // 8: p * x + p * y
         ];
         let roots = sorter.run_from_range(&mut nodes, 5..7).unwrap();
-        assert_eq!(roots, 6..8);
+        assert_eq!(roots, 4..6);
         assert_eq!(
             nodes,
             vec![
+                Symbol('p'),
                 Symbol('x'),
                 Symbol('y'),
-                Symbol('p'),
-                Binary(Add, 0, 1),
-                Binary(Multiply, 2, 0),
-                Binary(Multiply, 2, 1),
-                Binary(Multiply, 2, 3),
-                Constant(Scalar(1.0)),
-                Binary(Add, 4, 5)
+                Binary(Add, 1, 2),
+                Binary(Multiply, 0, 3),
+                Constant(Scalar(1.0))
             ]
         );
     }

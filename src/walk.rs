@@ -70,6 +70,7 @@ impl DepthWalker {
 pub enum NodeOrdering {
     /// Traverse children in the order they appear in the parent.
     Original,
+    Reversed,
     /// Sort the children in a deterministic way, irrespective of the
     /// order they appear in the parent.
     Deterministic,
@@ -104,6 +105,7 @@ impl<'a> DepthIterator<'a> {
             Binary(op, ..) => {
                 match self.ordering {
                     Original => {} // Do nothing.
+                    Reversed => children.reverse(),
                     Deterministic => {
                         if op.is_commutative() {
                             children.sort_by(|a, b| {
@@ -202,6 +204,16 @@ mod test {
                 .collect();
             let b: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            assert_eq!(a, b);
+            // Same thing in reverse traversal order
+            let a: Vec<_> = walker
+                .walk_tree(&tree, true, NodeOrdering::Reversed)
+                .map(|(index, parent)| (index, parent))
+                .collect();
+            let b: Vec<_> = walker
+                .walk_tree(&tree, true, NodeOrdering::Reversed)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
