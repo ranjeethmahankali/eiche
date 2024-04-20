@@ -9,6 +9,7 @@ use crate::tree::{Node, Node::*, Tree};
 pub struct DepthWalker {
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
+    priorities: Vec<usize>,
 }
 
 impl DepthWalker {
@@ -16,7 +17,12 @@ impl DepthWalker {
         DepthWalker {
             stack: vec![],
             visited: vec![],
+            priorities: vec![],
         }
+    }
+
+    pub fn priorities_mut(&mut self) -> &mut Vec<usize> {
+        return &mut self.priorities;
     }
 
     /// Get an iterator that walks the nodes of `tree`. If `unique` is true, no
@@ -50,9 +56,10 @@ impl DepthWalker {
         self.stack.extend(roots.map(|r| (r, None)));
         // Reverse the roots to preserve their order during traversal.
         self.stack.reverse();
-        // Reset the visited flags.
+        // Reset the visited flags and priorities.
         self.visited.clear();
         self.visited.resize(nodes.len(), false);
+        self.priorities.resize(nodes.len(), 0);
         // Create the iterator.
         DepthIterator {
             unique,
@@ -70,6 +77,7 @@ impl DepthWalker {
 pub enum NodeOrdering {
     /// Traverse children in the order they appear in the parent.
     Original,
+    /// Traverse the children in the order reverse of how they appear in the parent.
     Reversed,
     /// Sort the children in a deterministic way, irrespective of the
     /// order they appear in the parent.
@@ -129,6 +137,7 @@ impl<'a> DepthIterator<'a> {
                 // agnostic. That is not the case right now.
             }
         }
+        children.sort_by(|a, b| self.walker.priorities[*b].cmp(&self.walker.priorities[*a]));
     }
 
     /// Skip the children of the current node. The whole subtree from
@@ -175,7 +184,8 @@ impl<'a> Iterator for DepthIterator<'a> {
             }
             Ternary(_opp, a, b, c) => {
                 // Push in reverse order because last in first out.
-                let children = [*c, *b, *a];
+                let mut children = [*c, *b, *a];
+                self.sort_children(node, &mut children);
                 self.walker
                     .stack
                     .extend(children.iter().map(|child| (*child, Some(index))));

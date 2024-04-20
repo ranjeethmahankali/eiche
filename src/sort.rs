@@ -39,10 +39,26 @@ impl TopoSorter {
         nodes: &mut Vec<Node>,
         root_indices: Range<usize>,
     ) -> Result<Range<usize>, Error> {
+        self.walker.priorities_mut().clear();
         Self::sort_nodes(
             nodes,
             self.walker
                 .walk_from_roots(&nodes, root_indices.clone(), true, NodeOrdering::Reversed),
+            &mut self.index_map,
+            root_indices.len(),
+            &mut self.sorted,
+            &mut self.roots,
+        );
+        std::mem::swap(&mut self.sorted, nodes);
+        Self::compute_heights(nodes, self.walker.priorities_mut());
+        Self::sort_nodes(
+            nodes,
+            self.walker.walk_from_roots(
+                &nodes,
+                (nodes.len() - root_indices.len())..nodes.len(),
+                true,
+                NodeOrdering::Reversed,
+            ),
             &mut self.index_map,
             root_indices.len(),
             &mut self.sorted,
@@ -58,6 +74,7 @@ impl TopoSorter {
         nodes: &mut Vec<Node>,
         roots: &mut [usize],
     ) -> Result<(), Error> {
+        self.walker.priorities_mut().clear();
         Self::sort_nodes(
             nodes,
             self.walker.walk_from_roots(
@@ -72,11 +89,45 @@ impl TopoSorter {
             &mut self.roots,
         );
         std::mem::swap(&mut self.sorted, nodes);
+        Self::compute_heights(nodes, self.walker.priorities_mut());
+        Self::sort_nodes(
+            nodes,
+            self.walker.walk_from_roots(
+                nodes,
+                (nodes.len() - roots.len())..nodes.len(),
+                true,
+                NodeOrdering::Reversed,
+            ),
+            &mut self.index_map,
+            roots.len(),
+            &mut self.sorted,
+            &mut self.roots,
+        );
+        std::mem::swap(&mut self.sorted, nodes);
         let num_roots = roots.len();
         for (r, i) in roots.iter_mut().zip((nodes.len() - num_roots)..nodes.len()) {
             *r = i;
         }
+        // TODO: This function need not return an error.
         return Ok(());
+    }
+
+    fn compute_heights(nodes: &[Node], heights: &mut Vec<usize>) {
+        heights.clear();
+        heights.resize(nodes.len(), 0);
+        for (i, node) in nodes.iter().enumerate() {
+            heights[i] = usize::max(
+                heights[i],
+                match node {
+                    Constant(_) | Symbol(_) => 0,
+                    Unary(_, input) => 1 + heights[*input],
+                    Binary(_, lhs, rhs) => 1 + usize::max(heights[*lhs], heights[*rhs]),
+                    Ternary(_, a, b, c) => {
+                        1 + usize::max(heights[*a], usize::max(heights[*b], heights[*c]))
+                    }
+                },
+            );
+        }
     }
 
     fn sort_nodes<I: Iterator<Item = (usize, Option<usize>)>>(
@@ -227,11 +278,11 @@ mod test {
         assert_eq!(
             nodes,
             vec![
-                Symbol('p'),
                 Symbol('x'),
                 Symbol('y'),
-                Binary(Add, 1, 2),
-                Binary(Multiply, 0, 3),
+                Binary(Add, 0, 1),
+                Symbol('p'),
+                Binary(Multiply, 3, 2),
                 Constant(Scalar(1.0))
             ]
         );
