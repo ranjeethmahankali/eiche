@@ -9,6 +9,8 @@ pub enum Error {
     /// Root nodes depend on each other. They must be isolated from each other
     /// in a valid tree.
     DependentRootNodes,
+    /// The roots of the tree are invalid. They must be at the end of the tree.
+    InvalidRoots,
     /// A mismatch between two dimensions, for example, during a reshape operation.
     DimensionMismatch((usize, usize), (usize, usize)),
     InvalidDimensions,

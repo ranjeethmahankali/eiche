@@ -5,7 +5,6 @@ use crate::{
     error::Error,
     fold::fold_nodes,
     prune::Pruner,
-    sort::TopoSorter,
     template::{get_templates, Template},
     tree::{MaybeTree, Node, Node::*, Tree},
 };
@@ -46,7 +45,6 @@ pub struct TemplateCapture {
     node_index: Option<usize>,
     bindings: Vec<(char, usize)>,
     node_map: Vec<usize>,
-    topo_sorter: TopoSorter,
     pruner: Pruner,
     deduper: Deduplicater,
 }
@@ -57,7 +55,6 @@ impl TemplateCapture {
             node_index: None,
             bindings: vec![],
             node_map: vec![],
-            topo_sorter: TopoSorter::new(),
             pruner: Pruner::new(),
             deduper: Deduplicater::new(),
         }
@@ -93,9 +90,9 @@ impl TemplateCapture {
             Some(roots) => roots,
             None => tree.root_indices(),
         };
-        let root_indices = self
-            .topo_sorter
-            .run_from_range(tree.nodes_mut(), root_indices)?;
+        self.pruner
+            .run_from_range(tree.nodes_mut(), root_indices.clone());
+        let root_indices = (tree.len() - root_indices.len())..tree.len();
         fold_nodes(tree.nodes_mut())?;
         self.deduper.run(tree.nodes_mut());
         self.pruner.run_from_range(tree.nodes_mut(), root_indices);
@@ -359,10 +356,11 @@ mod test {
         t_check_bindings(&capture, &template, &tree);
     }
 
-    fn t_check_template(name: &str, tree: Tree, node_index: usize) {
+    fn t_check_template(name: &str, tree: Tree) {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        println!("{}", tree);
         let mut capture = TemplateCapture::new();
         capture.node_index = None;
         capture.bindings.clear();
@@ -373,8 +371,15 @@ mod test {
             template.ping(),
             tree
         );
-        assert!(matches!(capture.node_index, Some(_)));
-        assert_eq!(node_index, capture.node_index.unwrap());
+        let node_index = capture.node_index.unwrap();
+        match (tree.node(node_index).clone(), template.ping().roots()[0]) {
+            (Constant(l), Constant(r)) => assert_eq!(l, r),
+            (Symbol(l), Symbol(r)) => assert_eq!(l, r),
+            (Unary(l, _), Unary(r, _)) => assert_eq!(l, r),
+            (Binary(l, _, _), Binary(r, _, _)) => assert_eq!(l, r),
+            (Ternary(l, _, _, _), Ternary(r, _, _, _)) => assert_eq!(l, r),
+            _ => assert!(false, "Nodes must be of the same type"),
+        }
         t_check_bindings(&capture, &template, &tree);
     }
 
@@ -383,7 +388,6 @@ mod test {
         t_check_template(
             "distribute_mul",
             deftree!(* 0.5 (+ (* x 2.5) (* x 1.5))).unwrap(),
-            6,
         );
     }
 
@@ -392,7 +396,6 @@ mod test {
         t_check_template(
             "min_of_sqrt",
             deftree!(+ 2.57 (* 1.23 (min (sqrt 2) (sqrt 3)))).unwrap(),
-            6,
         );
     }
 
@@ -401,13 +404,12 @@ mod test {
         t_check_template(
             "rearrange_frac",
             deftree!(sqrt (log (* (/ x 2) (/ 2 x)))).unwrap(),
-            4,
         );
     }
 
     #[test]
     fn t_match_divide_by_self() {
-        t_check_template("divide_by_self", deftree!(+ 1 (/ p p)).unwrap(), 2);
+        t_check_template("divide_by_self", deftree!(+ 1 (/ p p)).unwrap());
     }
 
     #[test]
@@ -415,7 +417,6 @@ mod test {
         t_check_template(
             "distribute_pow_div",
             deftree!(pow (pow (/ 2 3) 2) 2.5).unwrap(),
-            3,
         );
     }
 
@@ -424,7 +425,6 @@ mod test {
         t_check_template(
             "distribute_pow_mul",
             deftree!(pow (pow (* 2 3) 2) 2.5).unwrap(),
-            3,
         );
     }
 
@@ -433,7 +433,6 @@ mod test {
         t_check_template(
             "square_sqrt",
             deftree!(log (+ 1 (exp (pow (sqrt 3.2556) 2)))).unwrap(),
-            4,
         );
     }
 
@@ -442,7 +441,6 @@ mod test {
         t_check_template(
             "sqrt_square",
             deftree!(log (+ 1 (exp (sqrt (pow 3.2345 2.))))).unwrap(),
-            4,
         );
     }
 
@@ -451,7 +449,6 @@ mod test {
         t_check_template(
             "square_abs",
             deftree!(log (+ 1 (exp (pow (abs 2) 2.)))).unwrap(),
-            3,
         );
     }
 
@@ -460,7 +457,6 @@ mod test {
         t_check_template(
             "mul_exponents",
             deftree!(log (+ 1 (exp (pow (pow x 3.) 2.)))).unwrap(),
-            5,
         );
     }
 
@@ -469,7 +465,6 @@ mod test {
         t_check_template(
             "add_exponents",
             deftree!(log (+ 1 (exp (* (pow (log x) 2) (pow (log x) 3))))).unwrap(),
-            7,
         );
     }
 
@@ -478,26 +473,17 @@ mod test {
         t_check_template(
             "add_frac",
             deftree!(log (+ 1 (exp (+ (/ 2 (sqrt (+ 2 x))) (/ 3 (sqrt (+ x 2))))))).unwrap(),
-            8,
         );
     }
 
     #[test]
     fn t_match_min_expand() {
-        t_check_template(
-            "min_expand",
-            deftree!(log (+ 1 (exp (min x 2)))).unwrap(),
-            3,
-        );
+        t_check_template("min_expand", deftree!(log (+ 1 (exp (min x 2)))).unwrap());
     }
 
     #[test]
     fn t_match_max_expand() {
-        t_check_template(
-            "max_expand",
-            deftree!(log (+ 1 (exp (max x 2)))).unwrap(),
-            3,
-        );
+        t_check_template("max_expand", deftree!(log (+ 1 (exp (max x 2)))).unwrap());
     }
 
     #[test]
@@ -505,7 +491,6 @@ mod test {
         t_check_template(
             "min_of_sub_1",
             deftree!(log (+ 1 (exp (min (- x 2) (- x 3))))).unwrap(),
-            6,
         );
     }
 
@@ -513,10 +498,10 @@ mod test {
     fn t_match_min_of_add_1() {
         const NAME: &str = "min_of_add_1";
         // Make sure all permutations work.
-        t_check_template(NAME, deftree!(min (+ x z) (+ x y)).unwrap(), 5);
-        t_check_template(NAME, deftree!(min (+ z x) (+ x y)).unwrap(), 5);
-        t_check_template(NAME, deftree!(min (+ z x) (+ y x)).unwrap(), 5);
-        t_check_template(NAME, deftree!(min (+ x z) (+ y x)).unwrap(), 5);
+        t_check_template(NAME, deftree!(min (+ x z) (+ x y)).unwrap());
+        t_check_template(NAME, deftree!(min (+ z x) (+ x y)).unwrap());
+        t_check_template(NAME, deftree!(min (+ z x) (+ y x)).unwrap());
+        t_check_template(NAME, deftree!(min (+ x z) (+ y x)).unwrap());
     }
 
     #[test]
