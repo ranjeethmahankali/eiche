@@ -14,6 +14,9 @@ use crate::{
 /// nodes to be topologically valid.
 pub struct TopoSorter {
     index_map: Vec<usize>,
+    traverse: Vec<(Node, bool)>,
+    scan: Vec<usize>,
+    visited: Vec<bool>,
     sorted: Vec<Node>,
     roots: Vec<Node>,
     walker: DepthWalker,
@@ -24,6 +27,9 @@ impl TopoSorter {
     pub fn new() -> TopoSorter {
         TopoSorter {
             index_map: Vec::new(),
+            traverse: Vec::new(),
+            scan: Vec::new(),
+            visited: Vec::new(),
             sorted: Vec::new(),
             roots: Vec::new(),
             walker: DepthWalker::new(),
@@ -42,10 +48,17 @@ impl TopoSorter {
         self.walker.priorities_mut().clear();
         Self::sort_nodes(
             nodes,
-            self.walker
-                .walk_from_roots(&nodes, root_indices.clone(), true, NodeOrdering::Reversed),
+            self.walker.walk_from_roots(
+                &nodes,
+                root_indices.clone(),
+                false,
+                NodeOrdering::Reversed,
+            ),
             &mut self.index_map,
             root_indices.len(),
+            &mut self.traverse,
+            &mut self.scan,
+            &mut self.visited,
             &mut self.sorted,
             &mut self.roots,
         );
@@ -56,11 +69,14 @@ impl TopoSorter {
             self.walker.walk_from_roots(
                 &nodes,
                 (nodes.len() - root_indices.len())..nodes.len(),
-                true,
+                false,
                 NodeOrdering::Reversed,
             ),
             &mut self.index_map,
             root_indices.len(),
+            &mut self.traverse,
+            &mut self.scan,
+            &mut self.visited,
             &mut self.sorted,
             &mut self.roots,
         );
@@ -80,11 +96,14 @@ impl TopoSorter {
             self.walker.walk_from_roots(
                 nodes,
                 roots.iter().map(|r| *r),
-                true,
+                false,
                 NodeOrdering::Reversed,
             ),
             &mut self.index_map,
             roots.len(),
+            &mut self.traverse,
+            &mut self.scan,
+            &mut self.visited,
             &mut self.sorted,
             &mut self.roots,
         );
@@ -95,11 +114,14 @@ impl TopoSorter {
             self.walker.walk_from_roots(
                 nodes,
                 (nodes.len() - roots.len())..nodes.len(),
-                true,
+                false,
                 NodeOrdering::Reversed,
             ),
             &mut self.index_map,
             roots.len(),
+            &mut self.traverse,
+            &mut self.scan,
+            &mut self.visited,
             &mut self.sorted,
             &mut self.roots,
         );
@@ -135,20 +157,29 @@ impl TopoSorter {
         depth_first_walk: I,
         indexmap: &mut Vec<usize>,
         num_roots: usize,
+        traverse: &mut Vec<(Node, bool)>,
+        scan: &mut Vec<usize>,
+        visited: &mut Vec<bool>,
         sorted: &mut Vec<Node>,
         roots: &mut Vec<Node>,
     ) {
-        sorted.clear();
-        sorted.reserve(nodes.len());
+        traverse.clear();
+        traverse.reserve(nodes.len());
         roots.clear();
         roots.reserve(num_roots);
         indexmap.clear();
         indexmap.resize(nodes.len(), 0);
+        visited.clear();
+        visited.resize(nodes.len(), false);
         for (index, maybe_parent) in depth_first_walk {
+            if visited[index] {
+                traverse[indexmap[index]].1 = false;
+            }
+            visited[index] = true;
             match maybe_parent {
                 Some(_) => {
-                    indexmap[index] = sorted.len();
-                    sorted.push(nodes[index]);
+                    indexmap[index] = traverse.len();
+                    traverse.push((nodes[index], true));
                 }
                 None => {
                     // This is a root node because it has no parent.
@@ -156,6 +187,24 @@ impl TopoSorter {
                 }
             }
         }
+        scan.clear();
+        scan.reserve(traverse.len());
+        sorted.clear();
+        {
+            let mut i = 0usize;
+            for (node, keep) in traverse.iter() {
+                scan.push(i);
+                if *keep {
+                    sorted.push(*node);
+                    i += 1;
+                }
+            }
+        }
+        // Remap indices after deleting nodes.
+        for i in indexmap.iter_mut() {
+            *i = scan[*i];
+        }
+        // Reverse the nodes.
         sorted.reverse();
         for i in indexmap.iter_mut() {
             *i = sorted.len() - *i - 1;
@@ -284,6 +333,46 @@ mod test {
                 Symbol('p'),
                 Binary(Multiply, 3, 2),
                 Constant(Scalar(1.0))
+            ]
+        );
+    }
+
+    #[test]
+    fn t_sorting_3() {
+        let mut nodes = vec![
+            Symbol('x'),             // 0
+            Constant(Scalar(2.0)),   // 1
+            Binary(Pow, 0, 1),       // 2: x^2
+            Unary(Exp, 2),           // 3: e^(x^2)
+            Constant(Scalar(1.0)),   // 4
+            Constant(Scalar(0.0)),   // 5
+            Unary(Log, 0),           // 6: log(x)
+            Binary(Multiply, 5, 6),  // 7: 0 * log(x)
+            Binary(Divide, 4, 0),    // 8: 1 / x
+            Binary(Multiply, 1, 8),  // 9: 2 * (1 / x)
+            Binary(Add, 7, 9),       // 10: 2 * (1 / x)
+            Binary(Multiply, 2, 10), // 11: x^2 * (2 * (1 / x))
+            Binary(Multiply, 3, 11), // 12: e^(x^2) * 2 * x
+        ];
+        let mut sorter = TopoSorter::new();
+        let roots = sorter.run_from_range(&mut nodes, 12..13).unwrap();
+        assert_eq!(roots, 12..13);
+        assert_eq!(
+            nodes,
+            vec![
+                Symbol('x'),
+                Unary(Log, 0),
+                Constant(Scalar(0.0)),
+                Binary(Multiply, 2, 1),
+                Constant(Scalar(1.0)),
+                Binary(Divide, 4, 0),
+                Constant(Scalar(2.0)),
+                Binary(Multiply, 6, 5),
+                Binary(Add, 3, 7),
+                Binary(Pow, 0, 6),
+                Binary(Multiply, 9, 8),
+                Unary(Exp, 9),
+                Binary(Multiply, 11, 10)
             ]
         );
     }
