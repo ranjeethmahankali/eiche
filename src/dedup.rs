@@ -30,10 +30,10 @@ impl Deduplicater {
         }
     }
 
-    /// Deduplicate `nodes`. The `nodes` are expected to be
-    /// topologically sorted. If they are not, this function might
-    /// produce incorrect results. If you suspect the nodes are not
-    /// topologically sorted, use the `TopoSorter` to sort them first.
+    /// Deduplicate `nodes`. The `nodes` are expected to be topologically
+    /// sorted. If they are not, this function might produce incorrect
+    /// results. If you suspect the nodes are not topologically sorted, use the
+    /// `Pruner` to sort them and remove unsused nodes first.
     ///
     /// If a subtree appears twice, any node with the second subtree
     /// as its input will be rewired to the first subtree. That means,

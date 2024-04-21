@@ -1,16 +1,13 @@
 use std::ops::Range;
 
-use crate::{
-    tree::{Node, Node::*, Tree},
-    walk::{DepthWalker, NodeOrdering},
-};
+use crate::tree::{Node, Node::*, Tree};
 
 /// Topological sorter.
 ///
 /// For the topology of a tree to be considered valid, the root of the
 /// tree must be the last node, and every node must appear after its
-/// inputs. A `TopoSorter` instance can be used to sort a vector of
-/// nodes to be topologically valid.
+/// inputs. A `Pruner` instance can be used to sort a vector of
+/// nodes to be topologically valid, and remove unused nodes.
 pub struct Pruner {
     index_map: Vec<usize>,
     traverse: Vec<(Node, bool)>,
@@ -18,7 +15,8 @@ pub struct Pruner {
     visited: Vec<bool>,
     sorted: Vec<Node>,
     roots: Vec<Node>,
-    walker: DepthWalker,
+    heights: Vec<usize>,
+    stack: Vec<(usize, bool)>,
 }
 
 impl Pruner {
@@ -31,7 +29,8 @@ impl Pruner {
             visited: Vec::new(),
             sorted: Vec::new(),
             roots: Vec::new(),
-            walker: DepthWalker::new(),
+            heights: Vec::new(),
+            stack: Vec::new(),
         }
     }
 
@@ -40,28 +39,22 @@ impl Pruner {
     /// may be littered with unused nodes, and may require pruning later. If
     /// successful, the new root index is returned.
     pub fn run_from_range(&mut self, nodes: &mut Vec<Node>, root_indices: Range<usize>) {
-        self.walker.priorities_mut().clear();
-        self.walker
-            .init_from_roots(nodes.len(), root_indices.clone());
-        self.sort_nodes(nodes, root_indices.len());
+        self.init_traverse(nodes.len(), root_indices.clone());
+        self.sort_nodes(nodes, root_indices.len(), false);
         std::mem::swap(&mut self.sorted, nodes);
-        Self::compute_heights(nodes, self.walker.priorities_mut());
-        self.walker
-            .init_from_roots(nodes.len(), (nodes.len() - root_indices.len())..nodes.len());
-        self.sort_nodes(nodes, root_indices.len());
+        self.compute_heights(nodes);
+        self.init_traverse(nodes.len(), (nodes.len() - root_indices.len())..nodes.len());
+        self.sort_nodes(nodes, root_indices.len(), true);
         std::mem::swap(&mut self.sorted, nodes);
     }
 
     pub fn run_from_slice(&mut self, nodes: &mut Vec<Node>, roots: &mut [usize]) {
-        self.walker.priorities_mut().clear();
-        self.walker
-            .init_from_roots(nodes.len(), roots.iter().map(|r| *r));
-        self.sort_nodes(nodes, roots.len());
+        self.init_traverse(nodes.len(), roots.iter().map(|r| *r));
+        self.sort_nodes(nodes, roots.len(), false);
         std::mem::swap(&mut self.sorted, nodes);
-        Self::compute_heights(nodes, self.walker.priorities_mut());
-        self.walker
-            .init_from_roots(nodes.len(), (nodes.len() - roots.len())..nodes.len());
-        self.sort_nodes(nodes, roots.len());
+        self.compute_heights(nodes);
+        self.init_traverse(nodes.len(), (nodes.len() - roots.len())..nodes.len());
+        self.sort_nodes(nodes, roots.len(), true);
         std::mem::swap(&mut self.sorted, nodes);
         let num_roots = roots.len();
         for (r, i) in roots.iter_mut().zip((nodes.len() - num_roots)..nodes.len()) {
@@ -69,25 +62,36 @@ impl Pruner {
         }
     }
 
-    fn compute_heights(nodes: &[Node], heights: &mut Vec<usize>) {
-        heights.clear();
-        heights.resize(nodes.len(), 0);
+    fn init_traverse<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
+        self.stack.clear();
+        self.stack.extend(roots.map(|r| (r, true)));
+        self.stack.reverse();
+        self.visited.clear();
+        self.visited.resize(num_nodes, false);
+    }
+
+    fn compute_heights(&mut self, nodes: &[Node]) {
+        self.heights.clear();
+        self.heights.resize(nodes.len(), 0);
         for (i, node) in nodes.iter().enumerate() {
-            heights[i] = usize::max(
-                heights[i],
+            self.heights[i] = usize::max(
+                self.heights[i],
                 match node {
                     Constant(_) | Symbol(_) => 0,
-                    Unary(_, input) => 1 + heights[*input],
-                    Binary(_, lhs, rhs) => 1 + usize::max(heights[*lhs], heights[*rhs]),
+                    Unary(_, input) => 1 + self.heights[*input],
+                    Binary(_, lhs, rhs) => 1 + usize::max(self.heights[*lhs], self.heights[*rhs]),
                     Ternary(_, a, b, c) => {
-                        1 + usize::max(heights[*a], usize::max(heights[*b], heights[*c]))
+                        1 + usize::max(
+                            self.heights[*a],
+                            usize::max(self.heights[*b], self.heights[*c]),
+                        )
                     }
                 },
             );
         }
     }
 
-    fn sort_nodes(&mut self, nodes: &[Node], num_roots: usize) {
+    fn sort_nodes(&mut self, nodes: &[Node], num_roots: usize, use_height: bool) {
         self.traverse.clear();
         self.traverse.reserve(nodes.len());
         self.roots.clear();
@@ -96,20 +100,40 @@ impl Pruner {
         self.index_map.resize(nodes.len(), 0);
         self.visited.clear();
         self.visited.resize(nodes.len(), false);
-        for (index, maybe_parent) in self.walker.walk(nodes, false, NodeOrdering::Reversed) {
+        while let Some((index, is_root)) = self.stack.pop() {
             if self.visited[index] {
                 self.traverse[self.index_map[index]].1 = false;
             }
             self.visited[index] = true;
-            match maybe_parent {
-                Some(_) => {
-                    self.index_map[index] = self.traverse.len();
-                    self.traverse.push((nodes[index], true));
+            if is_root {
+                self.roots.push(nodes[index]);
+            } else {
+                self.index_map[index] = self.traverse.len();
+                self.traverse.push((nodes[index], true));
+            }
+            let num_children = match nodes[index] {
+                Constant(_) | Symbol(_) => 0,
+                Unary(_op, input) => {
+                    self.stack.push((input, false));
+                    1
                 }
-                None => {
-                    // This is a root node because it has no parent.
-                    self.roots.push(nodes[index]);
+                Binary(_op, lhs, rhs) => {
+                    self.stack.push((lhs, false));
+                    self.stack.push((rhs, false));
+                    2
                 }
+                Ternary(_op, a, b, c) => {
+                    self.stack.push((a, false));
+                    self.stack.push((b, false));
+                    self.stack.push((c, false));
+                    3
+                }
+            };
+            if use_height {
+                let num = self.stack.len();
+                self.stack[(num - num_children)..].sort_by(|(a, _), (b, _)| {
+                    return self.heights[*b].cmp(&self.heights[*a]);
+                });
             }
         }
         self.scan.clear();

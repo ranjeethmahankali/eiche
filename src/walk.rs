@@ -9,7 +9,6 @@ use crate::tree::{Node, Node::*, Tree};
 pub struct DepthWalker {
     stack: Vec<(usize, Option<usize>)>,
     visited: Vec<bool>,
-    priorities: Vec<usize>,
 }
 
 impl DepthWalker {
@@ -17,12 +16,7 @@ impl DepthWalker {
         DepthWalker {
             stack: vec![],
             visited: vec![],
-            priorities: vec![],
         }
-    }
-
-    pub fn priorities_mut(&mut self) -> &mut Vec<usize> {
-        return &mut self.priorities;
     }
 
     pub fn init_from_roots<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
@@ -35,7 +29,6 @@ impl DepthWalker {
         // Reset the visited flags and priorities.
         self.visited.clear();
         self.visited.resize(num_nodes, false);
-        self.priorities.resize(num_nodes, 0);
     }
 
     /// Get an iterator that walks the nodes of `tree`. If `unique` is true, no
@@ -74,8 +67,6 @@ impl DepthWalker {
 pub enum NodeOrdering {
     /// Traverse children in the order they appear in the parent.
     Original,
-    /// Traverse the children in the order reverse of how they appear in the parent.
-    Reversed,
     /// Sort the children in a deterministic way, irrespective of the
     /// order they appear in the parent.
     Deterministic,
@@ -110,7 +101,6 @@ impl<'a> DepthIterator<'a> {
             Binary(op, ..) => {
                 match self.ordering {
                     Original => {} // Do nothing.
-                    Reversed => children.reverse(),
                     Deterministic => {
                         if op.is_commutative() {
                             children.sort_by(|a, b| {
@@ -134,7 +124,6 @@ impl<'a> DepthIterator<'a> {
                 // agnostic. That is not the case right now.
             }
         }
-        children.sort_by(|a, b| self.walker.priorities[*b].cmp(&self.walker.priorities[*a]));
     }
 
     /// Skip the children of the current node. The whole subtree from
@@ -213,18 +202,6 @@ mod test {
             walker.init_from_tree(&tree);
             let b: Vec<_> = walker
                 .walk(tree.nodes(), true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
-                .collect();
-            assert_eq!(a, b);
-            // Same thing in reverse traversal order
-            walker.init_from_tree(&tree);
-            let a: Vec<_> = walker
-                .walk(tree.nodes(), true, NodeOrdering::Reversed)
-                .map(|(index, parent)| (index, parent))
-                .collect();
-            walker.init_from_tree(&tree);
-            let b: Vec<_> = walker
-                .walk(tree.nodes(), true, NodeOrdering::Reversed)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
