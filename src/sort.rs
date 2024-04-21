@@ -46,14 +46,11 @@ impl TopoSorter {
         root_indices: Range<usize>,
     ) -> Result<Range<usize>, Error> {
         self.walker.priorities_mut().clear();
+        self.walker
+            .init_from_roots(nodes.len(), root_indices.clone());
         Self::sort_nodes(
             nodes,
-            self.walker.walk_from_roots(
-                &nodes,
-                root_indices.clone(),
-                false,
-                NodeOrdering::Reversed,
-            ),
+            self.walker.walk(&nodes, false, NodeOrdering::Reversed),
             &mut self.index_map,
             root_indices.len(),
             &mut self.traverse,
@@ -64,14 +61,11 @@ impl TopoSorter {
         );
         std::mem::swap(&mut self.sorted, nodes);
         Self::compute_heights(nodes, self.walker.priorities_mut());
+        self.walker
+            .init_from_roots(nodes.len(), (nodes.len() - root_indices.len())..nodes.len());
         Self::sort_nodes(
             nodes,
-            self.walker.walk_from_roots(
-                &nodes,
-                (nodes.len() - root_indices.len())..nodes.len(),
-                false,
-                NodeOrdering::Reversed,
-            ),
+            self.walker.walk(&nodes, false, NodeOrdering::Reversed),
             &mut self.index_map,
             root_indices.len(),
             &mut self.traverse,
@@ -91,14 +85,11 @@ impl TopoSorter {
         roots: &mut [usize],
     ) -> Result<(), Error> {
         self.walker.priorities_mut().clear();
+        self.walker
+            .init_from_roots(nodes.len(), roots.iter().map(|r| *r));
         Self::sort_nodes(
             nodes,
-            self.walker.walk_from_roots(
-                nodes,
-                roots.iter().map(|r| *r),
-                false,
-                NodeOrdering::Reversed,
-            ),
+            self.walker.walk(nodes, false, NodeOrdering::Reversed),
             &mut self.index_map,
             roots.len(),
             &mut self.traverse,
@@ -109,14 +100,11 @@ impl TopoSorter {
         );
         std::mem::swap(&mut self.sorted, nodes);
         Self::compute_heights(nodes, self.walker.priorities_mut());
+        self.walker
+            .init_from_roots(nodes.len(), (nodes.len() - roots.len())..nodes.len());
         Self::sort_nodes(
             nodes,
-            self.walker.walk_from_roots(
-                nodes,
-                (nodes.len() - roots.len())..nodes.len(),
-                false,
-                NodeOrdering::Reversed,
-            ),
+            self.walker.walk(nodes, false, NodeOrdering::Reversed),
             &mut self.index_map,
             roots.len(),
             &mut self.traverse,

@@ -32,25 +32,22 @@ impl Pruner {
     /// `nodes` are returned. You can minimize allocations by using
     /// the same pruner multiple times.
     pub fn run_from_range(&mut self, nodes: &mut Vec<Node>, root_indices: Range<usize>) {
+        self.walker.init_from_roots(nodes.len(), root_indices);
         Self::mark_used_nodes(
             nodes,
             &mut self.indices,
-            self.walker
-                .walk_from_roots(&nodes, root_indices, true, NodeOrdering::Original),
+            self.walker.walk(&nodes, true, NodeOrdering::Original),
         );
         self.prune_unused(nodes);
     }
 
     pub fn run_from_slice(&mut self, nodes: &mut Vec<Node>, roots: &[usize]) {
+        self.walker
+            .init_from_roots(nodes.len(), roots.iter().map(|r| *r));
         Self::mark_used_nodes(
             nodes,
             &mut self.indices,
-            self.walker.walk_from_roots(
-                nodes,
-                roots.iter().map(|r| *r),
-                true,
-                NodeOrdering::Original,
-            ),
+            self.walker.walk(nodes, true, NodeOrdering::Original),
         );
         self.prune_unused(nodes);
     }
