@@ -200,14 +200,18 @@ impl TopoSorter {
                 }
             }
         }
-        // Remap indices after deleting nodes.
-        for i in indexmap.iter_mut() {
-            *i = scan[*i];
+        if !sorted.is_empty() {
+            // Remap indices after deleting nodes.
+            for i in indexmap.iter_mut() {
+                *i = scan[*i];
+            }
         }
-        // Reverse the nodes.
-        sorted.reverse();
-        for i in indexmap.iter_mut() {
-            *i = sorted.len() - *i - 1;
+        if sorted.len() > 1 {
+            // Reverse the nodes.
+            sorted.reverse();
+            for i in indexmap.iter_mut() {
+                *i = sorted.len() - *i - 1;
+            }
         }
         sorted.extend(roots.drain(..));
         for node in sorted {
