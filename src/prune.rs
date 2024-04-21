@@ -136,6 +136,9 @@ impl Pruner {
                 });
             }
         }
+        // Only some of the nodes from the traverse will be retained. We're
+        // doing an exclusive scan to get the indices of the nodes that are
+        // retained.
         self.scan.clear();
         self.scan.reserve(self.traverse.len());
         self.sorted.clear();
@@ -150,19 +153,21 @@ impl Pruner {
             }
         }
         if !self.sorted.is_empty() {
-            // Remap indices after deleting nodes.
             for i in self.index_map.iter_mut() {
                 *i = self.scan[*i];
             }
         }
         if self.sorted.len() > 1 {
-            // Reverse the nodes.
+            // The correct topological order is the reverse of a depth first
+            // traversal. So we reverse the nodes and adjust the indices.
             self.sorted.reverse();
             for i in self.index_map.iter_mut() {
                 *i = self.sorted.len() - *i - 1;
             }
         }
+        // Push the roots.
         self.sorted.extend(self.roots.drain(..));
+        // Update the inputs of all the nodes with our index map.
         for node in &mut self.sorted {
             match node {
                 Constant(_) | Symbol(_) => {} // Nothing.
@@ -182,6 +187,7 @@ impl Pruner {
 }
 
 impl Tree {
+    /// Prunes the tree and topologically sorts the nodes.
     pub fn prune(mut self, pruner: &mut Pruner) -> Tree {
         let roots = self.root_indices();
         pruner.run_from_range(self.nodes_mut(), roots);
