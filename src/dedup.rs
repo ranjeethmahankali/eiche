@@ -30,10 +30,10 @@ impl Deduplicater {
         }
     }
 
-    /// Deduplicate `nodes`. The `nodes` are expected to be
-    /// topologically sorted. If they are not, this function might
-    /// produce incorrect results. If you suspect the nodes are not
-    /// topologically sorted, use the `TopoSorter` to sort them first.
+    /// Deduplicate `nodes`. The `nodes` are expected to be topologically
+    /// sorted. If they are not, this function might produce incorrect
+    /// results. If you suspect the nodes are not topologically sorted, use the
+    /// `Pruner` to sort them and remove unsused nodes first.
     ///
     /// If a subtree appears twice, any node with the second subtree
     /// as its input will be rewired to the first subtree. That means,
@@ -113,18 +113,10 @@ pub fn equivalent_many(
 ) -> bool {
     {
         // Zip the depth first iterators and compare.
-        let mut liter = lwalker.walk_from_roots(
-            &lnodes,
-            left.into_iter(),
-            false,
-            NodeOrdering::Deterministic,
-        );
-        let mut riter = rwalker.walk_from_roots(
-            &rnodes,
-            right.into_iter(),
-            false,
-            NodeOrdering::Deterministic,
-        );
+        lwalker.init_from_roots(lnodes.len(), left.into_iter());
+        let mut liter = lwalker.walk(&lnodes, false, NodeOrdering::Deterministic);
+        rwalker.init_from_roots(rnodes.len(), right.into_iter());
+        let mut riter = rwalker.walk(&rnodes, false, NodeOrdering::Deterministic);
         loop {
             match (liter.next(), riter.next()) {
                 (None, None) => {

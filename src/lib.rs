@@ -15,7 +15,6 @@ mod latex;
 mod macros;
 mod mutate;
 mod prune;
-mod sort;
 mod substitute;
 mod template;
 mod walk;

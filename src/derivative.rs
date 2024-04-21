@@ -2,7 +2,6 @@ use crate::{
     error::Error,
     fold::fold_nodes,
     prune::Pruner,
-    sort::TopoSorter,
     tree::{
         add, div, sub, BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*,
         Value::*,
@@ -49,11 +48,10 @@ impl Tree {
         // deal. But in the future, I might consider putting these resources in
         // an object that the caller can pass in. That would allow the caller to
         // reuse the resources and avoid repeated allocations.
-        let mut sorter = TopoSorter::new();
-        sorter.run_from_slice(nodes, &mut rootnodes)?;
         let mut pruner = Pruner::new();
-        pruner.run_from_slice(nodes, &rootnodes);
+        pruner.run_from_slice(nodes, &mut rootnodes);
         fold_nodes(nodes)?;
+        pruner.run_from_slice(nodes, &mut rootnodes);
         return copy.with_dims(root_end - root_start, params.len());
     }
 
