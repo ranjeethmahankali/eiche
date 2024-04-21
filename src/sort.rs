@@ -48,32 +48,12 @@ impl TopoSorter {
         self.walker.priorities_mut().clear();
         self.walker
             .init_from_roots(nodes.len(), root_indices.clone());
-        Self::sort_nodes(
-            nodes,
-            self.walker.walk(&nodes, false, NodeOrdering::Reversed),
-            &mut self.index_map,
-            root_indices.len(),
-            &mut self.traverse,
-            &mut self.scan,
-            &mut self.visited,
-            &mut self.sorted,
-            &mut self.roots,
-        );
+        self.sort_nodes(nodes, root_indices.len());
         std::mem::swap(&mut self.sorted, nodes);
         Self::compute_heights(nodes, self.walker.priorities_mut());
         self.walker
             .init_from_roots(nodes.len(), (nodes.len() - root_indices.len())..nodes.len());
-        Self::sort_nodes(
-            nodes,
-            self.walker.walk(&nodes, false, NodeOrdering::Reversed),
-            &mut self.index_map,
-            root_indices.len(),
-            &mut self.traverse,
-            &mut self.scan,
-            &mut self.visited,
-            &mut self.sorted,
-            &mut self.roots,
-        );
+        self.sort_nodes(nodes, root_indices.len());
         std::mem::swap(&mut self.sorted, nodes);
         // TODO: No need to return error from this function.
         return Ok((nodes.len() - root_indices.len())..nodes.len());
@@ -87,32 +67,12 @@ impl TopoSorter {
         self.walker.priorities_mut().clear();
         self.walker
             .init_from_roots(nodes.len(), roots.iter().map(|r| *r));
-        Self::sort_nodes(
-            nodes,
-            self.walker.walk(nodes, false, NodeOrdering::Reversed),
-            &mut self.index_map,
-            roots.len(),
-            &mut self.traverse,
-            &mut self.scan,
-            &mut self.visited,
-            &mut self.sorted,
-            &mut self.roots,
-        );
+        self.sort_nodes(nodes, roots.len());
         std::mem::swap(&mut self.sorted, nodes);
         Self::compute_heights(nodes, self.walker.priorities_mut());
         self.walker
             .init_from_roots(nodes.len(), (nodes.len() - roots.len())..nodes.len());
-        Self::sort_nodes(
-            nodes,
-            self.walker.walk(nodes, false, NodeOrdering::Reversed),
-            &mut self.index_map,
-            roots.len(),
-            &mut self.traverse,
-            &mut self.scan,
-            &mut self.visited,
-            &mut self.sorted,
-            &mut self.roots,
-        );
+        self.sort_nodes(nodes, roots.len());
         std::mem::swap(&mut self.sorted, nodes);
         let num_roots = roots.len();
         for (r, i) in roots.iter_mut().zip((nodes.len() - num_roots)..nodes.len()) {
@@ -140,80 +100,70 @@ impl TopoSorter {
         }
     }
 
-    fn sort_nodes<I: Iterator<Item = (usize, Option<usize>)>>(
-        nodes: &[Node],
-        depth_first_walk: I,
-        indexmap: &mut Vec<usize>,
-        num_roots: usize,
-        traverse: &mut Vec<(Node, bool)>,
-        scan: &mut Vec<usize>,
-        visited: &mut Vec<bool>,
-        sorted: &mut Vec<Node>,
-        roots: &mut Vec<Node>,
-    ) {
-        traverse.clear();
-        traverse.reserve(nodes.len());
-        roots.clear();
-        roots.reserve(num_roots);
-        indexmap.clear();
-        indexmap.resize(nodes.len(), 0);
-        visited.clear();
-        visited.resize(nodes.len(), false);
-        for (index, maybe_parent) in depth_first_walk {
-            if visited[index] {
-                traverse[indexmap[index]].1 = false;
+    fn sort_nodes(&mut self, nodes: &[Node], num_roots: usize) {
+        self.traverse.clear();
+        self.traverse.reserve(nodes.len());
+        self.roots.clear();
+        self.roots.reserve(num_roots);
+        self.index_map.clear();
+        self.index_map.resize(nodes.len(), 0);
+        self.visited.clear();
+        self.visited.resize(nodes.len(), false);
+        for (index, maybe_parent) in self.walker.walk(nodes, false, NodeOrdering::Reversed) {
+            if self.visited[index] {
+                self.traverse[self.index_map[index]].1 = false;
             }
-            visited[index] = true;
+            self.visited[index] = true;
             match maybe_parent {
                 Some(_) => {
-                    indexmap[index] = traverse.len();
-                    traverse.push((nodes[index], true));
+                    self.index_map[index] = self.traverse.len();
+                    self.traverse.push((nodes[index], true));
                 }
                 None => {
                     // This is a root node because it has no parent.
-                    roots.push(nodes[index]);
+                    self.roots.push(nodes[index]);
                 }
             }
         }
-        scan.clear();
-        scan.reserve(traverse.len());
-        sorted.clear();
+        self.scan.clear();
+        self.scan.reserve(self.traverse.len());
+        self.sorted.clear();
         {
             let mut i = 0usize;
-            for (node, keep) in traverse.iter() {
-                scan.push(i);
+            for (node, keep) in self.traverse.iter() {
+                self.scan.push(i);
                 if *keep {
-                    sorted.push(*node);
+                    self.sorted.push(*node);
                     i += 1;
                 }
             }
         }
-        if !sorted.is_empty() {
+        if !self.sorted.is_empty() {
             // Remap indices after deleting nodes.
-            for i in indexmap.iter_mut() {
-                *i = scan[*i];
+            for i in self.index_map.iter_mut() {
+                *i = self.scan[*i];
             }
         }
-        if sorted.len() > 1 {
+        if self.sorted.len() > 1 {
             // Reverse the nodes.
-            sorted.reverse();
-            for i in indexmap.iter_mut() {
-                *i = sorted.len() - *i - 1;
+            self.sorted.reverse();
+            for i in self.index_map.iter_mut() {
+                *i = self.sorted.len() - *i - 1;
             }
         }
-        sorted.extend(roots.drain(..));
-        for node in sorted {
+        self.sorted.extend(self.roots.drain(..));
+        for node in &mut self.sorted {
             match node {
                 Constant(_) | Symbol(_) => {} // Nothing.
-                Unary(_, input) => *input = indexmap[*input],
+                Unary(_, input) => *input = self.index_map[*input],
                 Binary(_, lhs, rhs) => {
-                    *lhs = indexmap[*lhs];
-                    *rhs = indexmap[*rhs];
+                    *lhs = self.index_map[*lhs];
+                    *rhs = self.index_map[*rhs];
                 }
                 Ternary(_, a, b, c) => {
-                    *a = indexmap[*a];
-                    *b = indexmap[*b];
-                    *c = indexmap[*c];
+                    *a = self.index_map[*a];
+                    *b = self.index_map[*b];
+                    *c = self.index_map[*c];
                 }
             }
         }
