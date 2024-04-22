@@ -1,6 +1,12 @@
 use crate::{
     error::Error,
-    tree::{BinaryOp, BinaryOp::*, Node::*, TernaryOp, Tree, UnaryOp, UnaryOp::*, Value, Value::*},
+    tree::{
+        BinaryOp::{self, *},
+        Node::{self, *},
+        TernaryOp, Tree,
+        UnaryOp::{self, *},
+        Value::{self, *},
+    },
 };
 
 impl Value {
@@ -96,35 +102,92 @@ impl PartialEq<bool> for Value {
 }
 
 /// This can be used to compute the value(s) of the tree.
-pub struct Evaluator<'a> {
-    tree: &'a Tree,
-    regs: Box<[Value]>,
+pub struct Evaluator {
+    ops: Vec<(Node, usize)>,
+    regs: Vec<Value>,
+    vars: Vec<(char, Value)>,
+    root_regs: Vec<usize>,
+    outputs: Vec<Value>,
 }
 
-impl<'a> Evaluator<'a> {
+impl Evaluator {
     /// Create a new evaluator for `tree`.
-    pub fn new(tree: &'a Tree) -> Evaluator {
-        Evaluator {
-            tree,
-            regs: vec![Scalar(f64::NAN); tree.len()].into_boxed_slice(),
+    pub fn new(tree: &Tree) -> Evaluator {
+        let roots = tree.root_indices();
+        let mut root_regs = Vec::new();
+        let mut valregs = vec![usize::MAX; tree.len()];
+        let mut alive: Vec<bool> = Vec::new();
+        let mut ops = Vec::new();
+        for index in (0..tree.len()).rev() {
+            let outreg = Self::get_register(&mut valregs, &mut alive, index);
+            if roots.contains(&index) {
+                root_regs.push(outreg);
+            }
+            alive[outreg] = false;
+            valregs[index] = usize::MAX;
+            let op = match tree.node(index) {
+                Constant(val) => (Constant(*val), outreg),
+                Symbol(label) => (Symbol(*label), outreg),
+                Unary(op, input) => {
+                    let ireg = Self::get_register(&mut valregs, &mut alive, *input);
+                    (Unary(*op, ireg), outreg)
+                }
+                Binary(op, lhs, rhs) => {
+                    let lreg = Self::get_register(&mut valregs, &mut alive, *lhs);
+                    let rreg = Self::get_register(&mut valregs, &mut alive, *rhs);
+                    (Binary(*op, lreg, rreg), outreg)
+                }
+                Ternary(op, a, b, c) => {
+                    let areg = Self::get_register(&mut valregs, &mut alive, *a);
+                    let breg = Self::get_register(&mut valregs, &mut alive, *b);
+                    let creg = Self::get_register(&mut valregs, &mut alive, *c);
+                    (Ternary(*op, areg, breg, creg), outreg)
+                }
+            };
+            ops.push(op);
         }
+        root_regs.reverse();
+        ops.reverse();
+        return Evaluator {
+            ops,
+            regs: vec![Value::Scalar(0.); alive.len()],
+            vars: Vec::new(),
+            root_regs,
+            outputs: vec![Value::Scalar(0.); roots.len()],
+        };
+    }
+
+    pub fn num_regs(&self) -> usize {
+        return self.regs.len();
+    }
+
+    fn get_register(valregs: &mut [usize], alive: &mut Vec<bool>, index: usize) -> usize {
+        if valregs[index] != usize::MAX {
+            return valregs[index];
+        }
+        let reg = match alive.iter().position(|flag| !*flag) {
+            Some(reg) => {
+                alive[reg] = true;
+                reg
+            }
+            None => {
+                let reg = alive.len();
+                alive.push(true);
+                reg
+            }
+        };
+        valregs[index] = reg;
+        return reg;
     }
 
     pub fn set_scalar(&mut self, label: char, value: f64) {
-        for (node, reg) in self.tree.nodes().iter().zip(self.regs.iter_mut()) {
-            match node {
-                Symbol(l) if *l == label => {
-                    *reg = Scalar(value);
-                }
-                _ => {}
+        for (l, v) in self.vars.iter_mut() {
+            if *l == label {
+                *v = Value::Scalar(value);
+                return;
             }
         }
-    }
-
-    /// Write the `value` into the `index`-th register. The existing
-    /// value is overwritten.
-    fn write(&mut self, index: usize, value: Value) {
-        self.regs[index] = value;
+        self.vars.push((label, Value::Scalar(value)));
     }
 
     /// Run the evaluator and return the result. The result may
@@ -132,21 +195,22 @@ impl<'a> Evaluator<'a> {
     /// error. `Variablenotfound(label)` error means the variable
     /// matching `label` hasn't been assigned a value using `set_scalar`.
     pub fn run(&mut self) -> Result<&[Value], Error> {
-        for idx in 0..self.tree.len() {
-            self.write(
-                idx,
-                match &self.tree.node(idx) {
-                    Constant(val) => *val,
-                    Symbol(_) => self.regs[idx],
-                    Unary(op, input) => op.apply(self.regs[*input])?,
-                    Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs])?,
-                    Ternary(op, a, b, c) => {
-                        op.apply(self.regs[*a], self.regs[*b], self.regs[*c])?
-                    }
+        for (node, out) in &self.ops {
+            self.regs[*out] = match node {
+                Constant(val) => *val,
+                Symbol(label) => match self.vars.iter().find(|(l, _v)| *l == *label) {
+                    Some((_l, v)) => *v,
+                    None => return Err(Error::VariableNotFound(*label)),
                 },
-            );
+                Unary(op, input) => op.apply(self.regs[*input])?,
+                Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs])?,
+                Ternary(op, a, b, c) => op.apply(self.regs[*a], self.regs[*b], self.regs[*c])?,
+            };
         }
-        return Ok(&self.regs[self.tree.len() - self.tree.num_roots()..]);
+        self.outputs.clear();
+        self.outputs
+            .extend(self.root_regs.iter().map(|r| self.regs[*r]));
+        return Ok(&self.outputs);
     }
 }
 
@@ -267,6 +331,27 @@ mod test {
                 }
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_trees_concat_0() {
+        let tree = deftree!(concat
+                            (log x)
+                            (+ x (pow y 2.)))
+        .unwrap();
+        println!("{:?}", tree.nodes());
+        check_tree_eval(
+            tree,
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x, y] = vars[..] {
+                    output[0] = f64::log(x, std::f64::consts::E);
+                    output[1] = x + f64::powf(y, 2.);
+                }
+            },
+            &[('x', 1., 10.), ('y', 1., 10.)],
             20,
             1e-14,
         );

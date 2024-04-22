@@ -717,6 +717,11 @@ mod perft {
         );
         let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
         let mut eval = Evaluator::new(&tree);
+        println!(
+            "Tree has {} nodes, evaluator allocated {} registers",
+            tree.len(),
+            eval.num_regs()
+        );
         let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
         println!("Evaluator time: {}ms", evaltime.as_millis());
         let mut values2: Vec<f64> = Vec::with_capacity(_N_QUERIES);
