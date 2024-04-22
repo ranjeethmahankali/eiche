@@ -159,6 +159,10 @@ impl Evaluator {
         };
     }
 
+    pub fn num_regs(&self) -> usize {
+        return self.regs.len();
+    }
+
     fn get_register(valregs: &mut [usize], alive: &mut Vec<bool>, index: usize) -> usize {
         if valregs[index] != usize::MAX {
             return valregs[index];
