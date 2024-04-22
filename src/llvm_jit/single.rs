@@ -689,7 +689,6 @@ mod perft {
     }
 
     // Run this function to bench mark the performance
-    #[test]
     fn _t_perft() {
         let mut rng = StdRng::seed_from_u64(234);
         let queries: Vec<[f64; 3]> = (0.._N_QUERIES)
