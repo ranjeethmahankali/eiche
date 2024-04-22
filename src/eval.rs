@@ -1,13 +1,11 @@
 use crate::{
     error::Error,
     tree::{
-        BinaryOp,
-        BinaryOp::*,
+        BinaryOp::{self, *},
         Node::{self, *},
-        TernaryOp, Tree, UnaryOp,
-        UnaryOp::*,
-        Value,
-        Value::*,
+        TernaryOp, Tree,
+        UnaryOp::{self, *},
+        Value::{self, *},
     },
 };
 
