@@ -1,12 +1,3 @@
-/// Assert at compile time using this macro. This is similar to
-/// static_assert in C++.
-#[macro_export]
-macro_rules! const_assert {
-    ($message: literal, $($tt:tt)*) => {
-        const _: () = assert!($($tt)*, $message);
-    }
-}
-
 #[macro_export]
 macro_rules! concat_trees {
     ($tree:tt) => {
@@ -98,11 +89,8 @@ macro_rules! deftree {
         $crate::tree::Tree::piecewise($crate::deftree!($cond), $crate::deftree!($a), $crate::deftree!($b))
     };
     ($a:ident) => {{
-        const LABEL: &str = stringify!($a);
-        $crate::const_assert!(
-            "Symbols can only have a single character as an identifier.",
-            LABEL.len() == 1
-        );
+        const LABEL: &str = {stringify!($a)};
+        const {assert!(LABEL.len() == 1, "Symbols can only have a single character as an identifier.")};
         let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::symbol(LABEL.chars().next().unwrap()));
         out
     }};
