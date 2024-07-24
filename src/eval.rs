@@ -111,7 +111,13 @@ pub struct Evaluator {
 }
 
 impl Evaluator {
-    /// Create a new evaluator for `tree`.
+    /// Create a new evaluator for `tree`. We "compile" the tree into a set of
+    /// ops that closely mirror the nodes of the tree itself. The difference
+    /// between the compiled ops and the tree nodes is that the former reference
+    /// register indices, where the registers are reused. A tree with 100K nodes
+    /// can be computed using less than 10 registers depending on the topology
+    /// of the tree. Registers are allocated using an implementation of Matt
+    /// Keeter's solid state register allocator.
     pub fn new(tree: &Tree) -> Evaluator {
         let roots = tree.root_indices();
         let mut root_regs = Vec::new();
@@ -123,6 +129,11 @@ impl Evaluator {
             if roots.contains(&index) {
                 root_regs.push(outreg);
             }
+            // We immediately mark the output register as not alive, i.e. not in
+            // use, because we want this register to be re-used by one of the
+            // inputs. For example, a long chain of unary ops can all be
+            // performed on the same register without ever allocating a second
+            // register.
             alive[outreg] = false;
             valregs[index] = usize::MAX;
             let op = match tree.node(index) {
@@ -157,10 +168,8 @@ impl Evaluator {
         };
     }
 
-    pub fn num_regs(&self) -> usize {
-        return self.regs.len();
-    }
-
+    /// Get the first register that isn't alive, i.e. is not in use. If all
+    /// registers are in use, i.e. alive, a new register is allocated.
     fn get_register(valregs: &mut [usize], alive: &mut Vec<bool>, index: usize) -> usize {
         if valregs[index] != usize::MAX {
             return valregs[index];
@@ -180,6 +189,15 @@ impl Evaluator {
         return reg;
     }
 
+    /// Get the number of registers used by this evaluator. This is not the same
+    /// as the number of nodes in the tree, because registers are allocated as
+    /// needed, and reused where possible.
+    pub fn num_regs(&self) -> usize {
+        return self.regs.len();
+    }
+
+    /// Set the value of a scalar variable with the given label. You'd do this
+    /// for all the inputs before running the evaluator.
     pub fn set_scalar(&mut self, label: char, value: f64) {
         for (l, v) in self.vars.iter_mut() {
             if *l == label {
