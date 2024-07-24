@@ -20,7 +20,7 @@ pub struct Pruner {
 }
 
 impl Pruner {
-    /// Create a new `TopoSorter` instance.
+    /// Create a new `Pruner` instance.
     pub fn new() -> Pruner {
         Pruner {
             index_map: Vec::new(),
