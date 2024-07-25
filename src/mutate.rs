@@ -9,6 +9,7 @@ use crate::{
     tree::{MaybeTree, Node, Node::*, Tree},
 };
 
+/// Iterator that produces all mutations of a tree.
 pub struct Mutations<'a> {
     tree: &'a Tree,
     capture: &'a mut TemplateCapture,
@@ -16,6 +17,8 @@ pub struct Mutations<'a> {
 }
 
 impl<'a> Mutations<'a> {
+    /// Create mutations of a tree. The capture instance is reused to avoid
+    /// allocations as the iterator is traversed.
     pub fn of(tree: &'a Tree, capture: &'a mut TemplateCapture) -> Mutations<'a> {
         Mutations {
             tree,
@@ -41,10 +44,16 @@ impl<'a> Iterator for Mutations<'a> {
     }
 }
 
+/// This struct remembers how the symbols in a template map to a tree.
 pub struct TemplateCapture {
+    // The node in the tree that maps to the root of the template.
     node_index: Option<usize>,
+    // Bindings between symbols (labels) in the template, and node indices in the tree.
     bindings: Vec<(char, usize)>,
+    // Mapping from the nodes of the 'pong' tree of the template to the nodes in
+    // the tree being modified.
     node_map: Vec<usize>,
+    // Pruner and deduplicater to be reused to avoid allocations.
     pruner: Pruner,
     deduper: Deduplicater,
 }
@@ -103,6 +112,11 @@ impl TemplateCapture {
         self.make_compact_tree(tree, None)
     }
 
+    /// Try to bind the given symbol (label) to the node index. Return whether
+    /// the binding was successful. If the label was already bound to another
+    /// index, false is returned. If the label was already bound to the same
+    /// index, nothing is changed, and true is returned. If the label was not
+    /// previously bound, a new binding is created.
     fn bind(&mut self, label: char, index: usize) -> bool {
         for (l, i) in self.bindings.iter() {
             if *l == label {
@@ -113,19 +127,25 @@ impl TemplateCapture {
         return true;
     }
 
+    /// This is meant to be used to add a node to the tree being mutated when
+    /// applying a captured template to the tree.
     fn add_node(&mut self, dst: &mut Vec<Node>, src: usize, node: Node) {
         self.node_map[src] = dst.len();
         dst.push(node);
     }
 
+    /// Return a checkpoint representing the current state of symbol bindings.
     fn checkpoint(&self) -> usize {
         self.bindings.len()
     }
 
+    /// Restore the symbol bindings to the given state, which was previously
+    /// returned by a checkpoint.
     fn restore(&mut self, state: usize) {
         self.bindings.truncate(state);
     }
 
+    /// Apply the captured template to the tree and produce a mutated tree.
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, Error> {
         let mut tree = tree.clone();
         let root_indices = tree.root_indices();
@@ -164,7 +184,7 @@ impl TemplateCapture {
                 let copy = nodes[oldroot];
                 nodes[oldroot] = nodes[newroot];
                 nodes[newroot] = copy;
-                // Any node that is referecing newroot as an input should be
+                // Any node that is referencing newroot as an input should be
                 // rewired to oldroot to avoid broken topology. Only iterate
                 // over the preexisting nodes.
                 for i in 0..num_nodes {
@@ -207,10 +227,13 @@ impl TemplateCapture {
         return self.make_compact_tree(tree, Some(root_indices));
     }
 
+    /// Try to match the subtree in ltree at index li with the subtree in rtree
+    /// at index ri. This is meant to be used to match the 'ping' tree of a tree
+    /// meant to be mutated.
     fn match_node(&mut self, li: usize, ltree: &Tree, ri: usize, rtree: &Tree) -> bool {
         let cpt = self.checkpoint();
-        let (found_1, commutable) = self.match_node_commute(li, ltree, ri, rtree, false);
-        if found_1 {
+        let (found, commutable) = self.match_node_commute(li, ltree, ri, rtree, false);
+        if found {
             return true;
         }
         if commutable {
@@ -221,6 +244,11 @@ impl TemplateCapture {
         return false;
     }
 
+    /// The purpose is the same as match_node (this is called from inside
+    /// match_node), but you can specify how to deal with commutative
+    /// nodes. Setting the 'commute' argument to true causes the commutative
+    /// nodes to be compared and matched even if the arguments are swapped
+    /// between the left and the right trees.
     fn match_node_commute(
         &mut self,
         li: usize,

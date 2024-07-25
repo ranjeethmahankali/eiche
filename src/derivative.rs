@@ -109,10 +109,10 @@ fn compute_symbolic_deriv(
                         Binary(Divide, inputderiv, sf2)
                     }
                     Abs => {
-                        // Technically the gradient should not be defined at zero
-                        // exactly. But this might be a pragmatic
-                        // compromise. Reconsider this decision later if it becomes
-                        // a problem.
+                        // Technically the gradient should not be defined at
+                        // zero exactly. But this might be a pragmatic
+                        // compromise. Reconsider this decision later if it
+                        // becomes a problem.
                         let zero = push_node(Constant(Scalar(0.)), dst) + offset;
                         let cond = push_node(Binary(Less, *input, zero), dst) + offset;
                         let one = push_node(Constant(Scalar(1.)), dst) + offset;
