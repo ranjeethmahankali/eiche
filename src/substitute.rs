@@ -1,5 +1,5 @@
 use crate::{
-    dedup::equivalent,
+    dedup::equivalent_unchecked,
     error::Error,
     tree::{MaybeTree, Node::*, Tree},
     walk::DepthWalker,
@@ -20,7 +20,8 @@ impl Tree {
         let mut rwalker = DepthWalker::new();
         let flags: Vec<bool> = (0..self.len())
             .map(|ni| {
-                equivalent(
+                equivalent_unchecked(
+                    // We don't need to check because the nodes are from a tree.
                     oldroot,
                     ni,
                     old.nodes(),

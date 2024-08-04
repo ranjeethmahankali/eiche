@@ -102,7 +102,7 @@ impl TemplateCapture {
     ) -> MaybeTree {
         self.pruner.run_from_range(&mut nodes, root_indices.clone());
         fold_nodes(&mut nodes)?;
-        self.deduper.run(&mut nodes);
+        self.deduper.run(&mut nodes)?;
         let root_indices = (nodes.len() - root_indices.len())..nodes.len();
         self.pruner.run_from_range(&mut nodes, root_indices);
         return Tree::from_nodes(nodes, dims);
@@ -316,7 +316,7 @@ impl TemplateCapture {
 mod test {
     use super::*;
     use crate::{
-        dedup::equivalent_many, deftree, template::test::get_template_by_name, tree::UnaryOp::*,
+        dedup::equivalent_trees, deftree, template::test::get_template_by_name, tree::UnaryOp::*,
         walk::DepthWalker,
     };
 
@@ -591,14 +591,7 @@ mod test {
             Mutations::of(&before, &mut capture)
                 .filter_map(|t| {
                     let tree = t.unwrap();
-                    if equivalent_many(
-                        after.root_indices(),
-                        tree.root_indices(),
-                        after.nodes(),
-                        tree.nodes(),
-                        &mut lwalker,
-                        &mut rwalker,
-                    ) {
+                    if equivalent_trees(&after, &tree, &mut lwalker, &mut rwalker) {
                         Some(())
                     } else {
                         None

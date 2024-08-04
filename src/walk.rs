@@ -1,4 +1,11 @@
-use crate::tree::{Node, Node::*, Tree};
+use crate::{
+    error::Error,
+    tree::{
+        check_topological_order,
+        Node::{self, *},
+        Tree,
+    },
+};
 
 /// Helper struct for traversing the tree depth first.
 ///
@@ -42,6 +49,17 @@ impl DepthWalker {
         roots: I,
         unique: bool,
         ordering: NodeOrdering,
+    ) -> Result<DepthIterator<'a>, Error> {
+        check_topological_order(nodes)?;
+        return Ok(self.walk_nodes_unchecked(nodes, roots, unique, ordering));
+    }
+
+    pub fn walk_nodes_unchecked<'a, I: Iterator<Item = usize>>(
+        &'a mut self,
+        nodes: &'a [Node],
+        roots: I,
+        unique: bool,
+        ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
         self.init_from_roots(nodes.len(), roots);
         // Create the iterator.
@@ -64,7 +82,8 @@ impl DepthWalker {
         unique: bool,
         ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
-        return self.walk_nodes(tree.nodes(), tree.root_indices(), unique, ordering);
+        // No need to check since the tree is always valid.
+        return self.walk_nodes_unchecked(tree.nodes(), tree.root_indices(), unique, ordering);
     }
 }
 

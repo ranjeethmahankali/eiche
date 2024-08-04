@@ -153,6 +153,14 @@ pub(crate) fn is_topological_order(nodes: &[Node]) -> bool {
     })
 }
 
+pub(crate) fn check_topological_order(nodes: &[Node]) -> Result<(), Error> {
+    if is_topological_order(nodes) {
+        Ok(())
+    } else {
+        Err(Error::WrongNodeOrder)
+    }
+}
+
 /// Represents an abstract syntax tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
@@ -186,7 +194,7 @@ impl Tree {
         let root_indices = self.root_indices();
         pruner.run_from_range(&mut self.nodes, root_indices);
         let mut deduper = Deduplicater::new();
-        deduper.run(&mut self.nodes);
+        deduper.run(&mut self.nodes)?;
         let mut pruner = Pruner::new();
         let root_indices = self.root_indices();
         pruner.run_from_range(&mut self.nodes, root_indices);
