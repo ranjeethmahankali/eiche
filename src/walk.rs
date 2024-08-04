@@ -1,5 +1,11 @@
 use crate::tree::{Node, Node::*, Tree};
 
+struct StackElement {
+    index: usize,
+    parent: Option<usize>,
+    visited_children: bool,
+}
+
 /// Helper struct for traversing the tree depth first.
 ///
 /// Doing a non-recursive depth first traversal requires
@@ -7,15 +13,17 @@ use crate::tree::{Node, Node::*, Tree};
 /// the same walker many times is recommended to avoid unnecessary
 /// allocations.
 pub struct DepthWalker {
-    stack: Vec<(usize, Option<usize>)>, // The node to be visited, and the optional parent it is being visited from.
-    visited: Vec<bool>,
+    stack: Vec<StackElement>,
+    on_path: Vec<bool>, // Whether a node is on the path from current node to the root.
+    visited: Vec<bool>, // Whether a node is already visited.
 }
 
 impl DepthWalker {
     pub fn new() -> DepthWalker {
         DepthWalker {
-            stack: vec![],
-            visited: vec![],
+            stack: Vec::new(),
+            on_path: Vec::new(),
+            visited: Vec::new(),
         }
     }
 
@@ -23,9 +31,15 @@ impl DepthWalker {
         // Prep the stack.
         self.stack.clear();
         self.stack.reserve(num_nodes);
-        self.stack.extend(roots.map(|r| (r, None)));
+        self.stack.extend(roots.map(|r| StackElement {
+            index: r,
+            parent: None,
+            visited_children: false,
+        }));
         // Reverse the roots to preserve their order during traversal.
         self.stack.reverse();
+        self.on_path.clear();
+        self.on_path.resize(num_nodes, false);
         // Reset the visited flags and priorities.
         self.visited.clear();
         self.visited.resize(num_nodes, false);
@@ -147,14 +161,26 @@ impl<'a> Iterator for DepthIterator<'a> {
     type Item = (usize, Option<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (index, parent) = {
-            // Pop the stack until we find a node we didn't already visit.
-            let (mut i, mut p) = self.walker.stack.pop()?;
-            while self.unique && self.walker.visited[i] {
-                (i, p) = self.walker.stack.pop()?;
+        let StackElement {
+            index,
+            parent,
+            visited_children: _,
+        } = {
+            let mut elem = self.walker.stack.pop()?;
+            while (self.unique && self.walker.visited[elem.index]) || elem.visited_children {
+                elem = self.walker.stack.pop()?;
+                if elem.visited_children {
+                    self.walker.on_path[elem.index] = false;
+                }
             }
-            (i, p)
+            elem
         };
+        self.walker.on_path[index] = true;
+        self.walker.stack.push(StackElement {
+            index,
+            parent,
+            visited_children: true,
+        });
         // Push the children on to the stack.
         let node = &self.nodes[index];
         match node {
@@ -162,7 +188,11 @@ impl<'a> Iterator for DepthIterator<'a> {
                 self.last_pushed = 0;
             }
             Unary(_op, input) => {
-                self.walker.stack.push((*input, Some(index)));
+                self.walker.stack.push(StackElement {
+                    index: *input,
+                    parent: Some(index),
+                    visited_children: false,
+                });
                 self.last_pushed = 1;
             }
             Binary(_op, lhs, rhs) => {
@@ -171,7 +201,11 @@ impl<'a> Iterator for DepthIterator<'a> {
                 // Sort according to the requested ordering.
                 self.sort_children(node, &mut children);
                 for child in children {
-                    self.walker.stack.push((child, Some(index)));
+                    self.walker.stack.push(StackElement {
+                        index: child,
+                        parent: Some(index),
+                        visited_children: false,
+                    });
                 }
                 self.last_pushed = children.len();
             }
@@ -181,7 +215,11 @@ impl<'a> Iterator for DepthIterator<'a> {
                 self.sort_children(node, &mut children);
                 self.walker
                     .stack
-                    .extend(children.iter().map(|child| (*child, Some(index))));
+                    .extend(children.iter().map(|child| StackElement {
+                        index: *child,
+                        parent: Some(index),
+                        visited_children: false,
+                    }));
                 self.last_pushed = children.len();
             }
         }
