@@ -179,9 +179,10 @@ pub fn equivalent(
 
 impl Tree {
     /// Deduplicate the common subtrees in this tree.
-    pub fn deduplicate(mut self, dedup: &mut Deduplicater) -> MaybeTree {
-        dedup.run(self.nodes_mut());
-        return self.validated();
+    pub fn deduplicate(self, dedup: &mut Deduplicater) -> MaybeTree {
+        let (mut nodes, dims) = self.take();
+        dedup.run(&mut nodes);
+        return Tree::from_nodes(nodes, dims);
     }
 
     pub fn equivalent(&self, other: &Tree) -> bool {

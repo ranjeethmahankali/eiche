@@ -6,7 +6,7 @@ use crate::{
 };
 
 impl Tree {
-    pub fn substitute(mut self, old: &Tree, new: &Tree) -> MaybeTree {
+    pub fn substitute(self, old: &Tree, new: &Tree) -> MaybeTree {
         if old.dims() != (1, 1) || new.dims() != (1, 1) {
             return Err(Error::InvalidDimensions);
         }
@@ -30,6 +30,10 @@ impl Tree {
                 )
             })
             .collect();
+        if !flags.iter().any(|f| *f) {
+            // No matches found for substitution.
+            return Ok(self);
+        }
         let newroot = new.root_indices().start;
         let offset = newroot + 1;
         let map_input = move |i: usize| {
@@ -39,7 +43,8 @@ impl Tree {
                 i + offset
             }
         };
-        for node in self.nodes_mut() {
+        let (mut nodes, dims) = self.take();
+        for node in &mut nodes {
             *node = match node {
                 Constant(_) | Symbol(_) => *node,
                 Unary(op, input) => Unary(*op, map_input(*input)),
@@ -47,9 +52,9 @@ impl Tree {
                 Ternary(op, a, b, c) => Ternary(*op, map_input(*a), map_input(*b), map_input(*c)),
             };
         }
-        self.nodes_mut().extend(new.nodes().iter());
-        self.nodes_mut().rotate_right(new.len());
-        return self.validated();
+        nodes.extend(new.nodes().iter());
+        nodes.rotate_right(new.len());
+        return Tree::from_nodes(nodes, dims);
     }
 }
 

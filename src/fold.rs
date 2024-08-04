@@ -70,9 +70,10 @@ impl Tree {
     /// folded. The resulting tree is pruned and checked for validity
     /// befoore it is returned. If the resulting tree is not valid,
     /// the appropriate `Error` is returned.
-    pub fn fold(mut self) -> MaybeTree {
-        fold_nodes(self.nodes_mut())?;
-        return self.validated();
+    pub fn fold(self) -> MaybeTree {
+        let (mut nodes, dims) = self.take();
+        fold_nodes(&mut nodes)?;
+        return Tree::from_nodes(nodes, dims);
     }
 }
 

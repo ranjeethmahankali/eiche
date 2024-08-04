@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::tree::{Node, Node::*, Tree};
+use crate::tree::{Node, Node::*};
 
 /// Pruner and topological sorter.
 ///
@@ -216,15 +216,6 @@ impl Pruner {
                 }
             }
         }
-    }
-}
-
-impl Tree {
-    /// Prunes the tree and topologically sorts the nodes.
-    pub fn prune(mut self, pruner: &mut Pruner) -> Tree {
-        let roots = self.root_indices();
-        pruner.run_from_range(self.nodes_mut(), roots);
-        return self;
     }
 }
 
