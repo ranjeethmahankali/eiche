@@ -153,14 +153,6 @@ pub(crate) fn is_topological_order(nodes: &[Node]) -> bool {
     })
 }
 
-pub(crate) fn check_topological_order(nodes: &[Node]) -> Result<(), Error> {
-    if is_topological_order(nodes) {
-        Ok(())
-    } else {
-        Err(Error::WrongNodeOrder)
-    }
-}
-
 /// Represents an abstract syntax tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
