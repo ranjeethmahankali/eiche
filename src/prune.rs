@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::tree::{Node, Node::*, Tree};
 
-/// Topological sorter.
+/// Pruner and topological sorter.
 ///
 /// For the topology of a tree to be considered valid, the root of the
 /// tree must be the last node, and every node must appear after its
@@ -10,6 +10,11 @@ use crate::tree::{Node, Node::*, Tree};
 /// nodes to be topologically valid, and remove unused nodes.
 pub struct Pruner {
     index_map: Vec<usize>,
+    // This vector stores a flat view of the depth first traversal. The bool
+    // flag represents whether or not that occurrence of the node should be kept
+    // in the final sorted list. For example, for nodes that are visited more
+    // than once, only one occurrence will be flagged as 'true', others should
+    // be flagged 'false'.
     traverse: Vec<(Node, bool)>,
     scan: Vec<usize>,
     visited: Vec<bool>,
@@ -20,7 +25,7 @@ pub struct Pruner {
 }
 
 impl Pruner {
-    /// Create a new `TopoSorter` instance.
+    /// Create a new `Pruner` instance.
     pub fn new() -> Pruner {
         Pruner {
             index_map: Vec::new(),
@@ -34,11 +39,12 @@ impl Pruner {
         }
     }
 
-    /// Sort `nodes` to be topologically valid, with `root_indices` as the new
-    /// range of root nodes. Depending on the choice of root, the output vector
-    /// may be littered with unused nodes, and may require pruning later. If
-    /// successful, the new root index is returned.
+    /// Run the pruning and topological sorting using root node indices provided as a range.
     pub fn run_from_range(&mut self, nodes: &mut Vec<Node>, root_indices: Range<usize>) {
+        // Heights are easier to compute on nodes that are already topologically
+        // sorted. So we prune and sort them once without caring about their
+        // heights, then compute the heights of all nodes, then sort them again
+        // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), root_indices.clone());
         self.sort_nodes(nodes, root_indices.len(), false);
         std::mem::swap(&mut self.sorted, nodes);
@@ -48,7 +54,12 @@ impl Pruner {
         std::mem::swap(&mut self.sorted, nodes);
     }
 
+    /// Run the pruning and topological sorting using root node indices provided as a slice.
     pub fn run_from_slice(&mut self, nodes: &mut Vec<Node>, roots: &mut [usize]) {
+        // Heights are easier to compute on nodes that are already topologically
+        // sorted. So we prune and sort them once without caring about their
+        // heights, then compute the heights of all nodes, then sort them again
+        // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), roots.iter().map(|r| *r));
         self.sort_nodes(nodes, roots.len(), false);
         std::mem::swap(&mut self.sorted, nodes);
@@ -62,6 +73,8 @@ impl Pruner {
         }
     }
 
+    /// Clear all the temporary storage and prepare for a new depth-first
+    /// traversal for the given number of nodes and root nodes.
     fn init_traverse<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
         self.stack.clear();
         self.stack.extend(roots.map(|r| (r, true)));
@@ -70,6 +83,7 @@ impl Pruner {
         self.visited.resize(num_nodes, false);
     }
 
+    /// Root node is the highest, while constants and variable have a zero height.
     fn compute_heights(&mut self, nodes: &[Node]) {
         self.heights.clear();
         self.heights.resize(nodes.len(), 0);
@@ -91,6 +105,15 @@ impl Pruner {
         }
     }
 
+    /// Prune and sort the nodes. This function does a depth-first traversal of
+    /// the tree, with the pre-populated stack. It only keeps the nodes that are
+    /// visited, and uses the visiting order to determine the valid topological
+    /// order of the nodes. If 'use_height' is true, heights are read from
+    /// self.heights. That means, 'use_height' should only be true if heights
+    /// are precomputed by calling self.compute_heights. This flag when set to
+    /// true will cause shallower subtrees to appear before deeper
+    /// subtrees. This is beneficial for optimizing register allocation, as it
+    /// minimizes the liveness range of registers.
     fn sort_nodes(&mut self, nodes: &[Node], num_roots: usize, use_height: bool) {
         self.traverse.clear();
         self.traverse.reserve(nodes.len());
@@ -102,6 +125,16 @@ impl Pruner {
         self.visited.resize(nodes.len(), false);
         while let Some((index, is_root)) = self.stack.pop() {
             if self.visited[index] {
+                /*
+                We're visiting this node more than once, hence it will appear
+                more than once in self.traverse. We flag the previous occurrence
+                of this node with a 'false', so it gets filtered out later when
+                we copy these nodes into self.sorted. We do this because we only
+                want to keep the latest occurrence of each node that is visited
+                more than once. Because we reverse the order of the nodes in a
+                later step, this results in the node appearing just before it's
+                first use as an input by another node.
+                 */
                 self.traverse[self.index_map[index]].1 = false;
             }
             self.visited[index] = true;

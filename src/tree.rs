@@ -305,7 +305,6 @@ impl Tree {
         if self.nodes.is_empty() {
             return Err(Error::EmptyTree);
         }
-        // Make sure nodes only depend on the nodes that came before them.
         let roots = self.root_indices();
         if roots.start >= roots.end || roots.end != self.nodes.len() {
             return Err(Error::InvalidRoots);
@@ -322,6 +321,7 @@ impl Tree {
                 },
                 Symbol(_) => {} // Do nothing.
                 Unary(_, input) => {
+                    // Make sure nodes only depend on the nodes that came before them.
                     if *input >= i {
                         return Err(Error::WrongNodeOrder);
                     }
@@ -330,6 +330,7 @@ impl Tree {
                     }
                 }
                 Binary(_, l, r) => {
+                    // Make sure nodes only depend on the nodes that came before them.
                     if *l >= i || *r >= i {
                         return Err(Error::WrongNodeOrder);
                     }
@@ -338,6 +339,7 @@ impl Tree {
                     }
                 }
                 Ternary(_, a, b, c) => {
+                    // Make sure nodes only depend on the nodes that came before them.
                     if *a >= i || *b >= i || *c >= i {
                         return Err(Error::WrongNodeOrder);
                     }

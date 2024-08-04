@@ -1,7 +1,11 @@
 use crate::tree::{BinaryOp, BinaryOp::*, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*};
 
 impl Tree {
+    /// Produce the latex expression for the tree.
     pub fn to_latex(&self) -> String {
+        // We produce the latex for one root node at a time, and wrap them
+        // inside appropriate vector / matrix brackets according to the
+        // dimensions of the tree.
         let roots = self.roots();
         let (rows, cols) = self.dims();
         if rows == 1 && cols == 1 {
@@ -27,6 +31,7 @@ impl Tree {
     }
 }
 
+/// Produce the latex expression for the subtree of a single node in a tree.
 fn to_latex(node: &Node, nodes: &[Node]) -> String {
     match node {
         Constant(val) => val.to_string(),

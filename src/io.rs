@@ -30,8 +30,7 @@ impl std::fmt::Display for Tree {
                 let mut tokens: Vec<Token> = Vec::with_capacity(self.len()); // Likely need more memory.
                 let mut walker = DepthWalker::new();
                 let mut node_depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-                walker.init_from_tree(self);
-                for (index, parent) in walker.walk(self.nodes(), false, NodeOrdering::Original) {
+                for (index, parent) in walker.walk_tree(&self, false, NodeOrdering::Original) {
                     if let Some(pi) = parent {
                         node_depths[index] = node_depths[pi] + 1;
                     }

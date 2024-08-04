@@ -7,7 +7,7 @@ use crate::tree::{Node, Node::*, Tree};
 /// the same walker many times is recommended to avoid unnecessary
 /// allocations.
 pub struct DepthWalker {
-    stack: Vec<(usize, Option<usize>)>,
+    stack: Vec<(usize, Option<usize>)>, // The node to be visited, and the optional parent it is being visited from.
     visited: Vec<bool>,
 }
 
@@ -19,7 +19,7 @@ impl DepthWalker {
         }
     }
 
-    pub fn init_from_roots<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
+    fn init_from_roots<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
         // Prep the stack.
         self.stack.clear();
         self.stack.reserve(num_nodes);
@@ -31,25 +31,19 @@ impl DepthWalker {
         self.visited.resize(num_nodes, false);
     }
 
-    /// Get an iterator that walks the nodes of `tree`. If `unique` is true, no
-    /// node will be visited more than once. The choice of `order` will affect
-    /// the order in which the children of certain nodes are traversed. See the
-    /// documentation of `NodeOrdering` for more details.
-    pub fn init_from_tree<'a>(&'a mut self, tree: &'a Tree) {
-        self.init_from_roots(tree.len(), tree.root_indices());
-    }
-
     /// Get an iterator that walks the given `nodes` starting from the nodes in
     /// the range `root_indices`. If `unique` is true, no node will be visited
     /// more than once. The choice of `order` will affect the order in which the
     /// children of certain nodes are traversed. See the documentation of
     /// `NodeOrdering` for more details.
-    pub fn walk<'a>(
+    pub fn walk_nodes<'a, I: Iterator<Item = usize>>(
         &'a mut self,
         nodes: &'a [Node],
+        roots: I,
         unique: bool,
         ordering: NodeOrdering,
     ) -> DepthIterator<'a> {
+        self.init_from_roots(nodes.len(), roots);
         // Create the iterator.
         DepthIterator {
             unique,
@@ -58,6 +52,19 @@ impl DepthWalker {
             nodes: &nodes,
             last_pushed: 0,
         }
+    }
+
+    /// Get an interator that walks the given tree starting from its roots. If
+    /// `unique` is true, no node will be visited more than once. The choice of
+    /// `order` will affect the order in which the children of certain nodes are
+    /// traversed. See the documentation of `NodeOrdering` for more details.
+    pub fn walk_tree<'a>(
+        &'a mut self,
+        tree: &'a Tree,
+        unique: bool,
+        ordering: NodeOrdering,
+    ) -> DepthIterator<'a> {
+        return self.walk_nodes(tree.nodes(), tree.root_indices(), unique, ordering);
     }
 }
 
@@ -194,14 +201,12 @@ mod test {
         {
             let tree = deftree!(+ (pow x 2.) (pow y 2.)).unwrap();
             // Make sure two successive traversal yield the same nodes.
-            walker.init_from_tree(&tree);
             let a: Vec<_> = walker
-                .walk(tree.nodes(), true, NodeOrdering::Original)
+                .walk_tree(&tree, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
                 .collect();
-            walker.init_from_tree(&tree);
             let b: Vec<_> = walker
-                .walk(tree.nodes(), true, NodeOrdering::Original)
+                .walk_tree(&tree, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
@@ -209,15 +214,13 @@ mod test {
         {
             // Make sure the same DepthWalker can be used on multiple trees.
             let tree = deftree!(+ (pow x 3.) (pow y 3.)).unwrap();
-            walker.init_from_tree(&tree);
             let a: Vec<_> = walker
-                .walk(tree.nodes(), true, NodeOrdering::Original)
+                .walk_tree(&tree, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             let tree2 = tree.clone();
-            walker.init_from_tree(&tree2);
             let b: Vec<_> = walker
-                .walk(tree2.nodes(), true, NodeOrdering::Original)
+                .walk_tree(&tree2, true, NodeOrdering::Original)
                 .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);

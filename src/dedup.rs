@@ -89,20 +89,19 @@ impl Deduplicater {
     }
 }
 
-/// Check if the nodes at indices `left` and `right` are
-/// equivalent.
+/// Check if the subtrees starting at indices `left` and `right` are
+/// equivalent. 'left' and 'right' represents multi-node roots of the
+/// corresponding trees.
 ///
-/// Two nodes need not share the same input needs to be
-/// equivalent. They just need to represent the same mathematical
-/// expression. For example, two distinct constant nodes with the
-/// holding the same value are equivalent. Two nodes of the same type
-/// with equivalent inputs are considered equivalent. For binary nodes
-/// with commutative operations, checking the equivalence of the
+/// Two nodes need not share the same input needs to be equivalent. They just
+/// need to represent the same mathematical expression. For example, two
+/// distinct constant nodes with the holding the same value are equivalent. Two
+/// nodes of the same type with equivalent inputs are considered equivalent. For
+/// binary nodes with commutative operations, checking the equivalence of the
 /// inputs is done in an order agnostic way.
 ///
-/// This implementation avoids recursion by using `walker1` and
-/// `walker2` are used to traverse the tree depth wise and perform the
-/// comparison.
+/// This implementation avoids recursion by using `walker1` and `walker2` are
+/// used to traverse the tree depth wise and perform the comparison.
 pub fn equivalent_many(
     left: Range<usize>,
     right: Range<usize>,
@@ -112,11 +111,21 @@ pub fn equivalent_many(
     rwalker: &mut DepthWalker,
 ) -> bool {
     {
-        // Zip the depth first iterators and compare.
-        lwalker.init_from_roots(lnodes.len(), left.into_iter());
-        let mut liter = lwalker.walk(&lnodes, false, NodeOrdering::Deterministic);
-        rwalker.init_from_roots(rnodes.len(), right.into_iter());
-        let mut riter = rwalker.walk(&rnodes, false, NodeOrdering::Deterministic);
+        // Zip the depth first iterators and compare. Using a deterministic
+        // ordering during the walk ensures the commutative binary nodes are
+        // compared correctly.
+        let mut liter = lwalker.walk_nodes(
+            &lnodes,
+            left.into_iter(),
+            false,
+            NodeOrdering::Deterministic,
+        );
+        let mut riter = rwalker.walk_nodes(
+            &rnodes,
+            right.into_iter(),
+            false,
+            NodeOrdering::Deterministic,
+        );
         loop {
             match (liter.next(), riter.next()) {
                 (None, None) => {
@@ -149,6 +158,7 @@ pub fn equivalent_many(
     }
 }
 
+/// Check if the subtrees starting at 'left' and 'right' are equivalent.
 pub fn equivalent(
     left: usize,
     right: usize,
