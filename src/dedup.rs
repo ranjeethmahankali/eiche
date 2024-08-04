@@ -114,10 +114,18 @@ pub fn equivalent_many(
         // Zip the depth first iterators and compare. Using a deterministic
         // ordering during the walk ensures the commutative binary nodes are
         // compared correctly.
-        lwalker.init_from_roots(lnodes.len(), left.into_iter());
-        let mut liter = lwalker.walk(&lnodes, false, NodeOrdering::Deterministic);
-        rwalker.init_from_roots(rnodes.len(), right.into_iter());
-        let mut riter = rwalker.walk(&rnodes, false, NodeOrdering::Deterministic);
+        let mut liter = lwalker.walk_nodes(
+            &lnodes,
+            left.into_iter(),
+            false,
+            NodeOrdering::Deterministic,
+        );
+        let mut riter = rwalker.walk_nodes(
+            &rnodes,
+            right.into_iter(),
+            false,
+            NodeOrdering::Deterministic,
+        );
         loop {
             match (liter.next(), riter.next()) {
                 (None, None) => {
