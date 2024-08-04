@@ -302,6 +302,10 @@ impl Tree {
     /// Check the tree for errors and return a Result that contains the tree if
     /// no errors were found, or the first error encountered with the tree.
     pub fn validated(self) -> MaybeTree {
+        /* We make sure the inputs of every node appear before that node
+         * itself. This is important when evaluating the tree, but also ensures
+         * there are no cycles in the tree.
+         */
         if self.nodes.is_empty() {
             return Err(Error::EmptyTree);
         }
