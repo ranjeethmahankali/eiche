@@ -194,7 +194,8 @@ impl Tree {
         let root_indices = self.root_indices();
         pruner.run_from_range(&mut self.nodes, root_indices);
         let mut deduper = Deduplicater::new();
-        deduper.run(&mut self.nodes)?;
+        // We don't need to check because we just ran the pruner on these nodes, which sorts them topologically.
+        deduper.run_unchecked(&mut self.nodes);
         let mut pruner = Pruner::new();
         let root_indices = self.root_indices();
         pruner.run_from_range(&mut self.nodes, root_indices);

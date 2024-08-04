@@ -102,7 +102,8 @@ impl TemplateCapture {
     ) -> MaybeTree {
         self.pruner.run_from_range(&mut nodes, root_indices.clone());
         fold_nodes(&mut nodes)?;
-        self.deduper.run(&mut nodes)?;
+        // We don't need to check for valid topological order because we just ran the pruner on these nodes, which sorts them.
+        self.deduper.run_unchecked(&mut nodes);
         let root_indices = (nodes.len() - root_indices.len())..nodes.len();
         self.pruner.run_from_range(&mut nodes, root_indices);
         return Tree::from_nodes(nodes, dims);

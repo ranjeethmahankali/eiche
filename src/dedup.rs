@@ -1,8 +1,7 @@
 use crate::{
-    error::Error,
     hash::hash_nodes,
     tree::{
-        check_topological_order, MaybeTree,
+        MaybeTree,
         Node::{self, *},
         Tree,
     },
@@ -91,12 +90,6 @@ impl Deduplicater {
                 }
             }
         }
-    }
-
-    pub fn run(&mut self, nodes: &mut Vec<Node>) -> Result<(), Error> {
-        check_topological_order(nodes)?;
-        self.run_unchecked(nodes);
-        return Ok(());
     }
 }
 
