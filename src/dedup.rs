@@ -141,6 +141,8 @@ pub fn equivalent(
     return depth_walk_equivalent_nodes(liter, riter, lnodes, rnodes);
 }
 
+/// Walk the depth iterators and compare the nodes for equivalence. The
+/// iterators must be initialized with these nodes.
 fn depth_walk_equivalent_nodes<'a>(
     mut lwalk: DepthIterator<'a, true>,
     mut rwalk: DepthIterator<'a, true>,
@@ -181,6 +183,8 @@ fn depth_walk_equivalent_nodes<'a>(
     }
 }
 
+/// Walk the depth iterators and compare the trees for equivalence. The depth
+/// iterators must already be initialized with the given trees.
 fn depth_walk_equivalent_trees<'a>(
     mut lwalk: DepthIterator<'a, false>,
     mut rwalk: DepthIterator<'a, false>,

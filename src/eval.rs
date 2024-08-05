@@ -70,6 +70,7 @@ impl BinaryOp {
 }
 
 impl TernaryOp {
+    /// Compute the result of the ternary op.
     pub fn apply(&self, a: Value, b: Value, c: Value) -> Result<Value, Error> {
         Ok(match self {
             TernaryOp::Choose => {

@@ -25,6 +25,8 @@ type SimdType = __m256d;
 const SIMD_F32_SIZE: usize = size_of::<SimdType>() / size_of::<f32>();
 const SIMD_F64_SIZE: usize = size_of::<SimdType>() / size_of::<f64>();
 
+/// Thin wrapper around a simd floating point value. The union makes it easier
+/// to access the individual floating point numbers.
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union Wfloat {
@@ -43,16 +45,33 @@ impl Wfloat {
     }
 }
 
+/// This trait exists to allow reuse of code between f32 and f64 types with
+/// generics. i.e. this enables sharing the code to compile and run the compiled
+/// tree for both f32 and f64. This could represent a simd vector of f64 values,
+/// or that of twice as many f32 values.
 pub trait SimdVec<T>
 where
     T: Copy,
 {
+    /// The number of values of type T in the wide simd type.
     const SIMD_VEC_SIZE: usize;
+
+    /// Get a simd vector filled with NaNs.
     fn nan() -> Wfloat;
+
+    /// Set the entry at `idx` to value `val`.
     fn set(&mut self, val: T, idx: usize);
+
+    /// Get the value at index `idx`.
     fn get(&self, idx: usize) -> T;
+
+    /// Get the type of float, either f32 or f64.
     fn float_type<'ctx>(context: &'ctx Context) -> FloatType<'ctx>;
+
+    /// Get a constant value with all entries in the simd vector populated with `val`.
     fn const_float<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx>;
+
+    /// Get a constant value with all entries in the simd vector populated with `val`.
     fn const_bool<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx>;
 }
 
@@ -134,6 +153,7 @@ impl SimdVec<f64> for Wfloat {
 
 type UnsafeFuncType = unsafe extern "C" fn(*const SimdType, *mut SimdType, u64);
 
+/// Thin wrapper around the compiled native JIT function to do simd evaluations.
 pub struct JitSimdFn<'ctx, T>
 where
     Wfloat: SimdVec<T>,
@@ -145,7 +165,7 @@ where
     num_eval: usize,
     inputs: Vec<Wfloat>,
     outputs: Vec<Wfloat>,
-    phantom: PhantomData<T>,
+    phantom: PhantomData<T>, // This only exists to specialize the type for type T, as T is not used in anything else.
 }
 
 impl<'ctx, T> JitSimdFn<'ctx, T>
@@ -155,6 +175,7 @@ where
 {
     const SIMD_VEC_SIZE: usize = <Wfloat as SimdVec<T>>::SIMD_VEC_SIZE;
 
+    /// Create a new instance from a compiled native function.
     pub fn create(
         func: JitFunction<'ctx, UnsafeFuncType>,
         num_inputs: usize,
@@ -171,6 +192,11 @@ where
         }
     }
 
+    /// Push a new set of input values. The length of `sample` is expected to be
+    /// the same as the number of symbols in the tree that was compiled to
+    /// produce this JIT evaluator. The values are substituted into the
+    /// variables in the same order as they are returned by calling
+    /// `tree.symbols` on the tree that produced this JIT evaluator.
     pub fn push(&mut self, sample: &[T]) -> Result<(), Error> {
         if sample.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(sample.len(), self.num_inputs));
@@ -193,13 +219,14 @@ where
         return Ok(());
     }
 
+    /// Clear all inputs and outputs.
     pub fn clear(&mut self) {
         self.inputs.clear();
         self.outputs.clear();
         self.num_eval = 0;
     }
 
-    pub fn num_regs(&self) -> usize {
+    fn num_regs(&self) -> usize {
         (self.num_eval / Self::SIMD_VEC_SIZE)
             + if self.num_eval % Self::SIMD_VEC_SIZE > 0 {
                 1
@@ -208,6 +235,9 @@ where
             }
     }
 
+    /// Run the evaluator with all the input values that are pushed into it, and
+    /// write the output values into the `dst` vector. Any values previously in
+    /// `dst` are erased.
     pub fn run(&mut self, dst: &mut Vec<T>) {
         unsafe {
             self.func.call(
@@ -236,6 +266,7 @@ where
 }
 
 impl Tree {
+    /// Compile the tree for doing native simd calculations.
     pub fn jit_compile_array<'ctx, T>(
         &'ctx self,
         context: &'ctx JitContext,

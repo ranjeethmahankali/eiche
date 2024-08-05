@@ -180,6 +180,8 @@ impl Tree {
         }
     }
 
+    /// Fold the constants, deduplicate subtrees, prune unused subtrees and
+    /// return a topologically sorted compacted equivalent to this tree.
     pub fn compacted(mut self) -> MaybeTree {
         fold_nodes(&mut self.nodes)?;
         let mut pruner = Pruner::new();
@@ -237,6 +239,8 @@ impl Tree {
         return Ok(lhs);
     }
 
+    /// Get a piece wise expression from the given condition, value when true
+    /// and value when false.
     pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
         return cond?.ternary_op(iftrue?, iffalse?, Choose);
     }
@@ -246,14 +250,18 @@ impl Tree {
         self.nodes.len()
     }
 
+    /// Get the number of roots in this tree.
     pub fn num_roots(&self) -> usize {
         matsize(self.dims)
     }
 
+    /// Get the dimensions of this tree.
     pub fn dims(&self) -> (usize, usize) {
         self.dims
     }
 
+    /// Change the shape of this tree. If the new shape doesn't correspond to
+    /// the same number of elements, an error is returned.
     pub fn reshape(self, rows: usize, cols: usize) -> MaybeTree {
         if matsize((rows, cols)) == self.num_roots() {
             Ok(Tree {

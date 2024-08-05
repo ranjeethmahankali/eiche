@@ -127,6 +127,8 @@ impl Ord for Candidate {
 }
 impl Eq for Candidate {}
 
+/// Reduce the input `tree`. This will stop after `max_iter` iterations and
+/// return the most concise form of the tree at that point.
 pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
     let mut capture = TemplateCapture::new();
     let tree = capture.compact_tree(tree)?;

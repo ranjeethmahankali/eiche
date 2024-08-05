@@ -4,6 +4,7 @@ pub mod util {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
+    /// Assert that the floating point numbers are equal within the given epsilon.
     macro_rules! assert_float_eq {
         ($a:expr, $b:expr, $eps:expr, $debug:expr) => {{
             // Make variables to avoid evaluating experssions multiple times.
@@ -32,6 +33,7 @@ pub mod util {
     }
     pub(crate) use assert_float_eq;
 
+    /// Helper for sampling multiple variables at once.
     pub(crate) struct Sampler {
         samples_per_var: usize,
         var_samples: Vec<f64>,
@@ -41,6 +43,9 @@ pub mod util {
     }
 
     impl Sampler {
+        /// Create a sampler for all the variables. `vardata` should contain a
+        /// tuple of (variable label, lower bound, upper bound). The variables
+        /// are sampled between the bounds, `samples_per_var` times.
         pub fn new(vardata: &[(char, f64, f64)], samples_per_var: usize, seed: u64) -> Sampler {
             use rand::Rng;
             let mut rng = StdRng::seed_from_u64(seed);

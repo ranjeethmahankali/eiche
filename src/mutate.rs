@@ -69,10 +69,14 @@ impl TemplateCapture {
         }
     }
 
+    /// Get the bindings in this capture instance. These map the variable labels
+    /// in the captured template to the indices of the node they're bound to.
     pub fn bindings(&self) -> &Vec<(char, usize)> {
         &self.bindings
     }
 
+    /// Find the next match of the `templte` in `tree`. The search will begin
+    /// after the previously matched node.
     pub fn next_match(&mut self, template: &Template, tree: &Tree) -> bool {
         // Set self.node_index to None and choose the starting index
         // based on what was in self.node_index before setting it to None.
@@ -109,6 +113,8 @@ impl TemplateCapture {
         return Tree::from_nodes(nodes, dims);
     }
 
+    /// Compact the tree using the deduper and pruner instances in this template
+    /// capture. This can avoid reallocating memory by using existing instances.
     pub fn compact_tree(&mut self, tree: Tree) -> MaybeTree {
         let root_indices = tree.root_indices();
         let (nodes, dims) = tree.take();

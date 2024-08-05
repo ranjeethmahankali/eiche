@@ -6,6 +6,9 @@ use crate::{
 };
 
 impl Tree {
+    /// Substitute all subtrees (sub expressions) in this tree that are
+    /// equivalent to `old` with `new`. Both `old` and `new` are expected to
+    /// represent scalars, i.e. have dimensions (1, 1).
     pub fn substitute(self, old: &Tree, new: &Tree) -> MaybeTree {
         if old.dims() != (1, 1) || new.dims() != (1, 1) {
             return Err(Error::InvalidDimensions);
@@ -55,6 +58,7 @@ impl Tree {
                 Ternary(op, a, b, c) => Ternary(*op, map_input(*a), map_input(*b), map_input(*c)),
             };
         }
+        // Instead of prepending the new tree nodes, we append them and rotate the the whole slice.
         nodes.extend(new.nodes().iter());
         nodes.rotate_right(new.len());
         return Tree::from_nodes(nodes, dims);

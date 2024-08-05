@@ -171,6 +171,7 @@ impl<'a, const CHECK_FOR_CYCLES: bool> DepthIterator<'a, CHECK_FOR_CYCLES> {
         }
     }
 
+    /// Push the children of the node at `index` onto the stack.
     fn push_children(&mut self, index: usize) {
         let node = &self.nodes[index];
         match node {

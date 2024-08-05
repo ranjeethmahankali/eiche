@@ -1,5 +1,7 @@
 use crate::tree::{Node, Node::*, Tree, Value::*};
 
+/// Compute a hash for the given nodes. `hashbuf` is just memory that is used
+/// for computing the hash. It can be reused to avoid allocations.
 pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -54,6 +56,8 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
 }
 
 impl Tree {
+    /// Compute a hash for this tree. `hashbuf` is just memory that is used
+    /// for computing the hash. It can be reused to avoid allocations.
     pub fn hash(&self, hashbuf: &mut Vec<u64>) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
