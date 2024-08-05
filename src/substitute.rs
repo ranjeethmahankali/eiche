@@ -1,5 +1,5 @@
 use crate::{
-    dedup::equivalent_unchecked,
+    dedup::equivalent,
     error::Error,
     tree::{MaybeTree, Node::*, Tree},
     walk::DepthWalker,
@@ -18,9 +18,10 @@ impl Tree {
         let oldroot = old.root_indices().start;
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
-        let flags: Vec<bool> = (0..self.len())
-            .map(|ni| {
-                equivalent_unchecked(
+        let flags = {
+            let mut flags = Vec::with_capacity(self.len());
+            for ni in 0..self.len() {
+                flags.push(equivalent(
                     // We don't need to check because the nodes are from a tree.
                     oldroot,
                     ni,
@@ -28,9 +29,10 @@ impl Tree {
                     self.nodes(),
                     &mut lwalker,
                     &mut rwalker,
-                )
-            })
-            .collect();
+                )?);
+            }
+            flags
+        };
         if !flags.iter().any(|f| *f) {
             // No matches found for substitution.
             return Ok(self);

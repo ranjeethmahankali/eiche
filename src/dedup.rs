@@ -1,4 +1,5 @@
 use crate::{
+    error::Error,
     hash::hash_nodes,
     tree::{
         MaybeTree,
@@ -44,7 +45,7 @@ impl Deduplicater {
     /// after deduplication, there can be `dead` nodes remaining, that
     /// are not connected to the root. Consider pruning the tree
     /// afterwards.
-    pub fn run_unchecked(&mut self, nodes: &mut Vec<Node>) {
+    pub fn run(&mut self, nodes: &mut Vec<Node>) -> Result<(), Error> {
         // Compute unique indices after deduplication.
         self.indices.clear();
         self.indices.extend(0..nodes.len());
@@ -54,14 +55,14 @@ impl Deduplicater {
             let h = self.hashes[i];
             let entry = self.hash_to_index.entry(h).or_insert(i);
             if *entry != i
-                && equivalent_unchecked(
+                && equivalent(
                     *entry,
                     i,
                     &nodes,
                     &nodes,
                     &mut self.walker1,
                     &mut self.walker2,
-                )
+                )?
             {
                 // The i-th node should be replaced with entry-th node.
                 self.indices[i] = *entry;
@@ -90,6 +91,7 @@ impl Deduplicater {
                 }
             }
         }
+        return Ok(());
     }
 }
 
@@ -114,35 +116,75 @@ pub fn equivalent_trees(
 ) -> bool {
     let lwalk = lwalker.walk_tree(ltree, false, NodeOrdering::Deterministic);
     let rwalk = rwalker.walk_tree(rtree, false, NodeOrdering::Deterministic);
-    return depth_walk_equivalent(lwalk, rwalk, ltree.nodes(), rtree.nodes());
+    return depth_walk_equivalent_unchecked(lwalk, rwalk, ltree.nodes(), rtree.nodes());
 }
 
 /// Check if the subtrees starting at 'left' and 'right' are equivalent.
-pub fn equivalent_unchecked(
+pub fn equivalent(
     left: usize,
     right: usize,
     lnodes: &[Node],
     rnodes: &[Node],
     lwalker: &mut DepthWalker,
     rwalker: &mut DepthWalker,
-) -> bool {
+) -> Result<bool, Error> {
     // Zip the depth first iterators and compare. Using a deterministic
     // ordering during the walk ensures the commutative binary nodes are
     // compared correctly.
     let liter =
-        lwalker.walk_nodes_unchecked(lnodes, left..(left + 1), false, NodeOrdering::Deterministic);
-    let riter = rwalker.walk_nodes_unchecked(
+        lwalker.walk_nodes(lnodes, left..(left + 1), false, NodeOrdering::Deterministic);
+    let riter = rwalker.walk_nodes(
         rnodes,
         right..(right + 1),
         false,
         NodeOrdering::Deterministic,
     );
-    return depth_walk_equivalent(liter, riter, lnodes, rnodes);
+    return depth_walk_equivalent_checked(liter, riter, lnodes, rnodes);
 }
 
-fn depth_walk_equivalent<'a>(
-    mut lwalk: DepthIterator<'a>,
-    mut rwalk: DepthIterator<'a>,
+fn depth_walk_equivalent_checked<'a>(
+    mut lwalk: DepthIterator<'a, true>,
+    mut rwalk: DepthIterator<'a, true>,
+    lnodes: &[Node],
+    rnodes: &[Node],
+) -> Result<bool, Error> {
+    loop {
+        match (lwalk.next(), rwalk.next()) {
+            (Some(Err(e)), _) | (_, Some(Err(e))) => {
+                return Err(e);
+            }
+            (None, None) => {
+                // Both iterators ended.
+                return Ok(true);
+            }
+            (None, Some(Ok(_))) | (Some(Ok(_)), None) => {
+                // One of the iterators ended prematurely.
+                return Ok(false);
+            }
+            (Some(Ok((li, _lp))), Some(Ok((ri, _rp)))) => {
+                if std::ptr::eq(lnodes, rnodes) && li == ri {
+                    lwalk.skip_children();
+                    rwalk.skip_children();
+                    continue;
+                }
+                if !match (lnodes[li], rnodes[ri]) {
+                    (Constant(v1), Constant(v2)) => v1 == v2,
+                    (Symbol(c1), Symbol(c2)) => c1 == c2,
+                    (Unary(op1, _input1), Unary(op2, _input2)) => op1 == op2,
+                    (Binary(op1, _lhs1, _rhs1), Binary(op2, _lhs2, _rhs2)) => op1 == op2,
+                    (Ternary(op1, ..), Ternary(op2, ..)) => op1 == op2,
+                    _ => false,
+                } {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+}
+
+fn depth_walk_equivalent_unchecked<'a>(
+    mut lwalk: DepthIterator<'a, false>,
+    mut rwalk: DepthIterator<'a, false>,
     lnodes: &[Node],
     rnodes: &[Node],
 ) -> bool {
@@ -181,7 +223,7 @@ impl Tree {
     /// Deduplicate the common subtrees in this tree.
     pub fn deduplicate(self, dedup: &mut Deduplicater) -> MaybeTree {
         let (mut nodes, dims) = self.take();
-        dedup.run_unchecked(&mut nodes); // We don't need to check because the nodes came from a tree.
+        dedup.run(&mut nodes)?; // We don't need to check because the nodes came from a tree.
         return Tree::from_nodes(nodes, dims);
     }
 
@@ -223,154 +265,42 @@ mod test {
             Binary(Multiply, 6, 7), // 8
         ];
         assert!(is_topological_order(&nodes));
-        assert!(equivalent_unchecked(
-            2,
-            5,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
-        assert!(equivalent_unchecked(
-            6,
-            7,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
         // Try more mirroring
         nodes[6] = Binary(Add, 2, 5);
-        assert!(equivalent_unchecked(
-            2,
-            5,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
-        assert!(equivalent_unchecked(
-            6,
-            7,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
         // Multiply node with mirrored inputs.
         nodes[2] = Binary(Multiply, 0, 1);
         nodes[5] = Binary(Multiply, 3, 4);
-        assert!(equivalent_unchecked(
-            2,
-            5,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
-        assert!(equivalent_unchecked(
-            6,
-            7,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
         // Min node with mirrored inputs.
         nodes[2] = Binary(Min, 0, 1);
         nodes[5] = Binary(Min, 3, 4);
-        assert!(equivalent_unchecked(
-            2,
-            5,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
-        assert!(equivalent_unchecked(
-            6,
-            7,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
         // Max node with mirrored inputs.
         nodes[2] = Binary(Max, 0, 1);
         nodes[5] = Binary(Max, 3, 4);
-        assert!(equivalent_unchecked(
-            2,
-            5,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
-        assert!(equivalent_unchecked(
-            6,
-            7,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
+        assert!(equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
         // Subtract node with mirrored inputs.
         nodes[2] = Binary(Subtract, 0, 1);
         nodes[5] = Binary(Subtract, 3, 4);
-        assert!(!equivalent_unchecked(
-            2,
-            5,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
-        assert!(!equivalent_unchecked(
-            6,
-            7,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(!equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
+        assert!(!equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
         // Divide node with mirrored inputs.
         nodes[2] = Binary(Divide, 0, 1);
         nodes[5] = Binary(Divide, 3, 4);
-        assert!(!equivalent_unchecked(
-            2,
-            5,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
-        assert!(!equivalent_unchecked(
-            6,
-            7,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(!equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
+        assert!(!equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
         // Pow node with mirrored inputs.
         nodes[2] = Binary(Pow, 0, 1);
         nodes[5] = Binary(Pow, 3, 4);
-        assert!(!equivalent_unchecked(
-            2,
-            5,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
-        assert!(!equivalent_unchecked(
-            6,
-            7,
-            &nodes,
-            &nodes,
-            &mut walker1,
-            &mut walker2
-        ));
+        assert!(!equivalent(2, 5, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
+        assert!(!equivalent(6, 7, &nodes, &nodes, &mut walker1, &mut walker2).unwrap());
     }
 
     #[test]
