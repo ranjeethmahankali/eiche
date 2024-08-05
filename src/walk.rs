@@ -6,6 +6,7 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 struct StackElement {
     index: usize,
     parent: Option<usize>,
@@ -247,15 +248,25 @@ impl<'a> Iterator for DepthIterator<'a, true> {
             visited_children,
         } = {
             let mut elem = self.walker.stack.pop()?;
-            while (self.unique && self.walker.visited[elem.index]) || elem.visited_children {
-                elem = self.walker.stack.pop()?;
+            loop {
+                if !elem.visited_children && self.walker.on_path[elem.index] {
+                    return Some(Err(Error::CyclicGraph));
+                }
                 if elem.visited_children {
                     self.walker.on_path[elem.index] = false;
                 }
+                if !(self.unique && self.walker.visited[elem.index]) && !elem.visited_children {
+                    break;
+                }
+                elem = self.walker.stack.pop()?;
             }
             elem
         };
-        debug_assert!(!visited_children);
+        println!("popped {}, {:?}, {}", index, parent, visited_children); // DEBUG
+        debug_assert!(!visited_children, "Invalid depth first traversal.");
+        if self.walker.on_path[index] {
+            return Some(Err(Error::CyclicGraph));
+        }
         self.walker.on_path[index] = true;
         self.walker.stack.push(StackElement {
             index,
@@ -303,5 +314,34 @@ mod test {
                 .collect();
             assert_eq!(a, b);
         }
+    }
+
+    #[test]
+    fn t_cyclic_graph() {
+        use crate::tree::{BinaryOp::*, UnaryOp::*, Value::*};
+        let nodes = vec![
+            Binary(Pow, 8, 9),      // 0
+            Symbol('x'),            // 1
+            Binary(Multiply, 0, 1), // 2
+            Symbol('y'),            // 3
+            Binary(Multiply, 0, 3), // 4
+            Binary(Add, 2, 4),      // 5
+            Binary(Add, 1, 3),      // 6
+            Binary(Divide, 5, 6),   // 7
+            Unary(Sqrt, 0),         // 8
+            Constant(Scalar(2.0)),  // 9
+        ];
+        let mut walker = DepthWalker::new();
+        assert!(matches!(
+            walker
+                .walk_nodes(&nodes, 0..1, true, NodeOrdering::Deterministic)
+                .fold(Ok(()), |acc, current| match (acc, current) {
+                    (Ok(_), Ok(_)) => Ok(()),
+                    (Ok(_), Err(e)) => Err(e),
+                    (Err(e), Ok(_)) => Err(e),
+                    (Err(e), Err(_)) => Err(e),
+                }),
+            Err(Error::CyclicGraph)
+        ));
     }
 }

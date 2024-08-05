@@ -116,7 +116,7 @@ pub fn equivalent_trees(
 ) -> bool {
     let lwalk = lwalker.walk_tree(ltree, false, NodeOrdering::Deterministic);
     let rwalk = rwalker.walk_tree(rtree, false, NodeOrdering::Deterministic);
-    return depth_walk_equivalent_unchecked(lwalk, rwalk, ltree.nodes(), rtree.nodes());
+    return depth_walk_equivalent_trees(lwalk, rwalk, ltree, rtree);
 }
 
 /// Check if the subtrees starting at 'left' and 'right' are equivalent.
@@ -131,18 +131,17 @@ pub fn equivalent(
     // Zip the depth first iterators and compare. Using a deterministic
     // ordering during the walk ensures the commutative binary nodes are
     // compared correctly.
-    let liter =
-        lwalker.walk_nodes(lnodes, left..(left + 1), false, NodeOrdering::Deterministic);
+    let liter = lwalker.walk_nodes(lnodes, left..(left + 1), false, NodeOrdering::Deterministic);
     let riter = rwalker.walk_nodes(
         rnodes,
         right..(right + 1),
         false,
         NodeOrdering::Deterministic,
     );
-    return depth_walk_equivalent_checked(liter, riter, lnodes, rnodes);
+    return depth_walk_equivalent_nodes(liter, riter, lnodes, rnodes);
 }
 
-fn depth_walk_equivalent_checked<'a>(
+fn depth_walk_equivalent_nodes<'a>(
     mut lwalk: DepthIterator<'a, true>,
     mut rwalk: DepthIterator<'a, true>,
     lnodes: &[Node],
@@ -182,11 +181,11 @@ fn depth_walk_equivalent_checked<'a>(
     }
 }
 
-fn depth_walk_equivalent_unchecked<'a>(
+fn depth_walk_equivalent_trees<'a>(
     mut lwalk: DepthIterator<'a, false>,
     mut rwalk: DepthIterator<'a, false>,
-    lnodes: &[Node],
-    rnodes: &[Node],
+    ltree: &Tree,
+    rtree: &Tree,
 ) -> bool {
     loop {
         match (lwalk.next(), rwalk.next()) {
@@ -199,12 +198,12 @@ fn depth_walk_equivalent_unchecked<'a>(
                 return false;
             }
             (Some((li, _lp)), Some((ri, _rp))) => {
-                if std::ptr::eq(lnodes, rnodes) && li == ri {
+                if std::ptr::eq(ltree, rtree) && li == ri {
                     lwalk.skip_children();
                     rwalk.skip_children();
                     continue;
                 }
-                if !match (lnodes[li], rnodes[ri]) {
+                if !match (ltree.node(li), rtree.node(ri)) {
                     (Constant(v1), Constant(v2)) => v1 == v2,
                     (Symbol(c1), Symbol(c2)) => c1 == c2,
                     (Unary(op1, _input1), Unary(op2, _input2)) => op1 == op2,
