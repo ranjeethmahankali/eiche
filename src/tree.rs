@@ -186,20 +186,19 @@ impl Tree {
         fold_nodes(&mut self.nodes)?;
         let mut pruner = Pruner::new();
         let root_indices = self.root_indices();
-        pruner.run_from_range(&mut self.nodes, root_indices);
+        let mut nodes = pruner.run_from_range(self.nodes, root_indices.clone())?;
         let mut deduper = Deduplicater::new();
         // We don't need to check because we just ran the pruner on these nodes, which sorts them topologically.
-        deduper.run(&mut self.nodes)?;
+        deduper.run(&mut nodes)?;
         let mut pruner = Pruner::new();
-        let root_indices = self.root_indices();
-        pruner.run_from_range(&mut self.nodes, root_indices);
-        return self.validated();
+        let nodes = pruner.run_from_range(nodes, root_indices)?;
+        return Tree::from_nodes(nodes, self.dims);
     }
     /// Prunes the tree and topologically sorts the nodes.
-    pub fn prune(mut self, pruner: &mut Pruner) -> Tree {
+    pub fn prune(self, pruner: &mut Pruner) -> MaybeTree {
         let roots = self.root_indices();
-        pruner.run_from_range(&mut self.nodes, roots);
-        return self;
+        let nodes = pruner.run_from_range(self.nodes, roots)?;
+        return Tree::from_nodes(nodes, self.dims);
     }
 
     /// Create a tree representing a symbol with the given `label`.

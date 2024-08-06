@@ -343,12 +343,14 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         let b = deftree!(/ (* k (+ x y)) (+ x y))
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         let mut walker1 = DepthWalker::new();
         let mut walker2 = DepthWalker::new();
         assert!(equivalent_trees(&a, &b, &mut walker1, &mut walker2));
@@ -370,7 +372,8 @@ mod test {
             .clone()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 32);
         compare_trees(
@@ -391,7 +394,8 @@ mod test {
             .clone()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 10);
         compare_trees(&tree, &nodup, &[('x', -10., 10.)], 400, 0.);
@@ -411,7 +415,8 @@ mod test {
             .clone()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         assert!(tree.len() > nodup.len());
         assert_eq!(nodup.len(), 20);
         compare_trees(&tree, &nodup, &[('x', -10., 10.), ('y', -9., 10.)], 20, 0.);

@@ -1013,6 +1013,7 @@ mod perft {
                 .deduplicate(&mut dedup)
                 .unwrap()
                 .prune(&mut pruner)
+                .unwrap()
         };
         println!(
             "Tree creation time: {}ms",

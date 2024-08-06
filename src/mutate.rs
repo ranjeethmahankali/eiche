@@ -100,16 +100,16 @@ impl TemplateCapture {
 
     fn make_compact_tree(
         &mut self,
-        mut nodes: Vec<Node>,
+        nodes: Vec<Node>,
         dims: (usize, usize),
         root_indices: Range<usize>,
     ) -> MaybeTree {
-        self.pruner.run_from_range(&mut nodes, root_indices.clone());
+        let mut nodes = self.pruner.run_from_range(nodes, root_indices.clone())?;
         fold_nodes(&mut nodes)?;
         // We don't need to check for valid topological order because we just ran the pruner on these nodes, which sorts them.
         self.deduper.run(&mut nodes)?;
         let root_indices = (nodes.len() - root_indices.len())..nodes.len();
-        self.pruner.run_from_range(&mut nodes, root_indices);
+        let nodes = self.pruner.run_from_range(nodes, root_indices)?;
         return Tree::from_nodes(nodes, dims);
     }
 
@@ -365,7 +365,8 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 3));
@@ -385,7 +386,8 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 7));
@@ -395,7 +397,11 @@ mod test {
     fn t_check_template(name: &str, tree: Tree) {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
-        let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        let tree = tree
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap();
         println!("{}", tree);
         let mut capture = TemplateCapture::new();
         capture.node_index = None;
@@ -545,8 +551,16 @@ mod test {
         fn assert_one_match(tree: Tree, expected: Tree, capture: &mut TemplateCapture) {
             let mut dedup = Deduplicater::new();
             let mut pruner = Pruner::new();
-            let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
-            let expected = expected.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+            let tree = tree
+                .deduplicate(&mut dedup)
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap();
+            let expected = expected
+                .deduplicate(&mut dedup)
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap();
             assert_eq!(
                 1,
                 Mutations::of(&tree, capture)
@@ -583,13 +597,18 @@ mod test {
     fn check_mutations(mut before: Tree, mut after: Tree) {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
-        before = before.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        before = before
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap();
         after = after
             .fold()
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
         let mut capture = TemplateCapture::new();
