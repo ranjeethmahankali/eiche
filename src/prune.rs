@@ -8,7 +8,7 @@ use crate::{
 struct StackElement {
     index: usize,
     is_root: bool,
-    visited_children: bool,
+    visited_children: bool, // Whether we're visiting this node after visiting all it's children.
 }
 
 /// Pruner and topological sorter.
@@ -162,9 +162,11 @@ impl Pruner {
         }) = self.stack.pop()
         {
             if visited_children {
+                // We're backtracking after processing the children of this node. So we remove it from the path.
                 self.on_path[index] = false;
                 continue;
             } else if self.on_path[index] {
+                // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
                 return Err(Error::CyclicGraph);
             }
             if self.visited[index] {
