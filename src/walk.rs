@@ -1,4 +1,17 @@
-use crate::tree::{Node, Node::*, Tree};
+use crate::{
+    error::Error,
+    tree::{
+        Node::{self, *},
+        Tree,
+    },
+};
+
+#[derive(Debug)]
+struct StackElement {
+    index: usize,
+    parent: Option<usize>,
+    visited_children: bool,
+}
 
 /// Helper struct for traversing the tree depth first.
 ///
@@ -7,15 +20,17 @@ use crate::tree::{Node, Node::*, Tree};
 /// the same walker many times is recommended to avoid unnecessary
 /// allocations.
 pub struct DepthWalker {
-    stack: Vec<(usize, Option<usize>)>, // The node to be visited, and the optional parent it is being visited from.
-    visited: Vec<bool>,
+    stack: Vec<StackElement>,
+    visited: Vec<bool>, // Whether a node is already visited.
+    on_path: Vec<bool>, // Whether a node is present on the path between the current node and the root.
 }
 
 impl DepthWalker {
     pub fn new() -> DepthWalker {
         DepthWalker {
-            stack: vec![],
-            visited: vec![],
+            stack: Vec::new(),
+            visited: Vec::new(),
+            on_path: Vec::new(),
         }
     }
 
@@ -23,12 +38,18 @@ impl DepthWalker {
         // Prep the stack.
         self.stack.clear();
         self.stack.reserve(num_nodes);
-        self.stack.extend(roots.map(|r| (r, None)));
+        self.stack.extend(roots.map(|r| StackElement {
+            index: r,
+            parent: None,
+            visited_children: false,
+        }));
         // Reverse the roots to preserve their order during traversal.
         self.stack.reverse();
-        // Reset the visited flags and priorities.
+        // Reset the flags.
         self.visited.clear();
         self.visited.resize(num_nodes, false);
+        self.on_path.clear();
+        self.on_path.resize(num_nodes, false);
     }
 
     /// Get an iterator that walks the given `nodes` starting from the nodes in
@@ -42,7 +63,7 @@ impl DepthWalker {
         roots: I,
         unique: bool,
         ordering: NodeOrdering,
-    ) -> DepthIterator<'a> {
+    ) -> DepthIterator<'a, true> {
         self.init_from_roots(nodes.len(), roots);
         // Create the iterator.
         DepthIterator {
@@ -63,8 +84,16 @@ impl DepthWalker {
         tree: &'a Tree,
         unique: bool,
         ordering: NodeOrdering,
-    ) -> DepthIterator<'a> {
-        return self.walk_nodes(tree.nodes(), tree.root_indices(), unique, ordering);
+    ) -> DepthIterator<'a, false> {
+        self.init_from_roots(tree.len(), tree.root_indices());
+        // Create the iterator.
+        DepthIterator {
+            unique,
+            ordering,
+            walker: self,
+            nodes: tree.nodes(),
+            last_pushed: 0,
+        }
     }
 }
 
@@ -86,7 +115,7 @@ pub enum NodeOrdering {
 /// from `DepthWalker`. That way, the `DepthWalker` instance won't get
 /// tangled up in lifetimes and it can be used multiple traversals,
 /// even on different trees.
-pub struct DepthIterator<'a> {
+pub struct DepthIterator<'a, const CHECK_FOR_CYCLES: bool> {
     unique: bool,
     ordering: NodeOrdering,
     last_pushed: usize,
@@ -94,7 +123,7 @@ pub struct DepthIterator<'a> {
     nodes: &'a [Node],
 }
 
-impl<'a> DepthIterator<'a> {
+impl<'a, const CHECK_FOR_CYCLES: bool> DepthIterator<'a, CHECK_FOR_CYCLES> {
     fn sort_children(&self, parent: &Node, children: &mut [usize]) {
         use std::cmp::Ordering;
         use NodeOrdering::*;
@@ -141,28 +170,20 @@ impl<'a> DepthIterator<'a> {
             self.walker.stack.pop();
         }
     }
-}
 
-impl<'a> Iterator for DepthIterator<'a> {
-    type Item = (usize, Option<usize>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (index, parent) = {
-            // Pop the stack until we find a node we didn't already visit.
-            let (mut i, mut p) = self.walker.stack.pop()?;
-            while self.unique && self.walker.visited[i] {
-                (i, p) = self.walker.stack.pop()?;
-            }
-            (i, p)
-        };
-        // Push the children on to the stack.
+    /// Push the children of the node at `index` onto the stack.
+    fn push_children(&mut self, index: usize) {
         let node = &self.nodes[index];
         match node {
             Constant(_) | Symbol(_) => {
                 self.last_pushed = 0;
             }
             Unary(_op, input) => {
-                self.walker.stack.push((*input, Some(index)));
+                self.walker.stack.push(StackElement {
+                    index: *input,
+                    parent: Some(index),
+                    visited_children: false,
+                });
                 self.last_pushed = 1;
             }
             Binary(_op, lhs, rhs) => {
@@ -171,7 +192,11 @@ impl<'a> Iterator for DepthIterator<'a> {
                 // Sort according to the requested ordering.
                 self.sort_children(node, &mut children);
                 for child in children {
-                    self.walker.stack.push((child, Some(index)));
+                    self.walker.stack.push(StackElement {
+                        index: child,
+                        parent: Some(index),
+                        visited_children: false,
+                    });
                 }
                 self.last_pushed = children.len();
             }
@@ -181,12 +206,77 @@ impl<'a> Iterator for DepthIterator<'a> {
                 self.sort_children(node, &mut children);
                 self.walker
                     .stack
-                    .extend(children.iter().map(|child| (*child, Some(index))));
+                    .extend(children.iter().map(|child| StackElement {
+                        index: *child,
+                        parent: Some(index),
+                        visited_children: false,
+                    }));
                 self.last_pushed = children.len();
             }
         }
+    }
+}
+
+impl<'a> Iterator for DepthIterator<'a, false> {
+    type Item = (usize, Option<usize>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let StackElement {
+            index,
+            parent,
+            visited_children: _,
+        } = {
+            let mut elem = self.walker.stack.pop()?;
+            debug_assert!(!elem.visited_children);
+            while self.unique && self.walker.visited[elem.index] {
+                elem = self.walker.stack.pop()?;
+            }
+            elem
+        };
+        self.push_children(index);
         self.walker.visited[index] = true;
         return Some((index, parent));
+    }
+}
+
+impl<'a> Iterator for DepthIterator<'a, true> {
+    type Item = Result<(usize, Option<usize>), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let StackElement {
+            index,
+            parent,
+            visited_children,
+        } = {
+            let mut elem = self.walker.stack.pop()?;
+            loop {
+                if !elem.visited_children && self.walker.on_path[elem.index] {
+                    return Some(Err(Error::CyclicGraph));
+                }
+                if elem.visited_children {
+                    self.walker.on_path[elem.index] = false;
+                }
+                if !(self.unique && self.walker.visited[elem.index]) && !elem.visited_children {
+                    break;
+                }
+                elem = self.walker.stack.pop()?;
+            }
+            elem
+        };
+        println!("popped {}, {:?}, {}", index, parent, visited_children); // DEBUG
+        debug_assert!(!visited_children, "Invalid depth first traversal.");
+        if self.walker.on_path[index] {
+            return Some(Err(Error::CyclicGraph));
+        }
+        self.walker.on_path[index] = true;
+        self.walker.stack.push(StackElement {
+            index,
+            parent,
+            visited_children: true,
+        });
+        self.push_children(index);
+        self.walker.visited[index] = true;
+        return Some(Ok((index, parent)));
     }
 }
 
@@ -225,5 +315,58 @@ mod test {
                 .collect();
             assert_eq!(a, b);
         }
+    }
+
+    #[test]
+    fn t_cyclic_graph() {
+        use crate::tree::{BinaryOp::*, UnaryOp::*, Value::*};
+        let mut walker = DepthWalker::new();
+        let foldfn = |acc, current| match (acc, current) {
+            (Ok(_), Ok(_)) => Ok(()),
+            (Ok(_), Err(e)) => Err(e),
+            (Err(e), Ok(_)) => Err(e),
+            (Err(e), Err(_)) => Err(e),
+        };
+        assert!(matches!(
+            walker
+                .walk_nodes(
+                    &[
+                        Binary(Pow, 8, 9),      // 0
+                        Symbol('x'),            // 1
+                        Binary(Multiply, 0, 1), // 2
+                        Symbol('y'),            // 3
+                        Binary(Multiply, 0, 3), // 4
+                        Binary(Add, 2, 4),      // 5
+                        Binary(Add, 1, 3),      // 6
+                        Binary(Divide, 5, 6),   // 7
+                        Unary(Sqrt, 0),         // 8
+                        Constant(Scalar(2.0)),  // 9
+                    ],
+                    0..1,
+                    true,
+                    NodeOrdering::Deterministic
+                )
+                .fold(Ok(()), foldfn),
+            Err(Error::CyclicGraph)
+        ));
+        assert!(matches!(
+            walker
+                .walk_nodes(
+                    &[
+                        Symbol('x'),       // 0
+                        Symbol('y'),       // 1
+                        Binary(Pow, 0, 6), // 2 - root
+                        Binary(Add, 0, 2), // 3
+                        Unary(Sqrt, 3),    // 4
+                        Unary(Log, 4),     // 5
+                        Unary(Negate, 5),  // 6
+                    ],
+                    2..3,
+                    false,
+                    NodeOrdering::Deterministic
+                )
+                .fold(Ok(()), foldfn),
+            Err(Error::CyclicGraph)
+        ));
     }
 }

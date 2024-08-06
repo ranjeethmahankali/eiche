@@ -2,6 +2,8 @@
 pub enum Error {
     /// Nodes are not in a valid topological order.
     WrongNodeOrder,
+    /// Nodes have cyclic dependencies.
+    CyclicGraph,
     /// A constant node contains NaN.
     ContainsNaN,
     /// Tree conains no nodes.

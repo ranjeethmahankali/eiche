@@ -1,5 +1,4 @@
-use std::path::Path;
-
+use crate::error::Error;
 use inkwell::{
     builder::Builder,
     context::Context,
@@ -8,11 +7,18 @@ use inkwell::{
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
     OptimizationLevel,
 };
+use std::path::Path;
 
-use crate::error::Error;
-
+/// Context for comiling a tree to LLVM. This is just a thin wrapper around
+/// inkwell Context.
 pub struct JitContext {
     inner: Context,
+}
+
+struct JitCompiler<'ctx> {
+    module: Module<'ctx>,
+    builder: Builder<'ctx>,
+    machine: TargetMachine,
 }
 
 impl Default for JitContext {
@@ -21,12 +27,6 @@ impl Default for JitContext {
             inner: Context::create(),
         }
     }
-}
-
-struct JitCompiler<'ctx> {
-    module: Module<'ctx>,
-    builder: Builder<'ctx>,
-    machine: TargetMachine,
 }
 
 impl<'ctx> JitCompiler<'ctx> {
@@ -59,8 +59,8 @@ impl<'ctx> JitCompiler<'ctx> {
         })
     }
 
+    /// Run optimization passes.
     fn run_passes(&self) {
-        // Run optimization passes.
         let fpm = PassManager::create(());
         fpm.add_instruction_combining_pass();
         fpm.add_reassociate_pass();
@@ -71,6 +71,7 @@ impl<'ctx> JitCompiler<'ctx> {
         fpm.run_on(&self.module);
     }
 
+    /// Write out the compiled assembly to file specified by `path`.
     #[allow(dead_code)]
     pub fn write_asm(&self, path: &Path) {
         self.machine

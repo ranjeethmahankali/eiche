@@ -6,7 +6,10 @@ use crate::{
 };
 
 impl Tree {
-    pub fn substitute(mut self, old: &Tree, new: &Tree) -> MaybeTree {
+    /// Substitute all subtrees (sub expressions) in this tree that are
+    /// equivalent to `old` with `new`. Both `old` and `new` are expected to
+    /// represent scalars, i.e. have dimensions (1, 1).
+    pub fn substitute(self, old: &Tree, new: &Tree) -> MaybeTree {
         if old.dims() != (1, 1) || new.dims() != (1, 1) {
             return Err(Error::InvalidDimensions);
         }
@@ -18,18 +21,25 @@ impl Tree {
         let oldroot = old.root_indices().start;
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
-        let flags: Vec<bool> = (0..self.len())
-            .map(|ni| {
-                equivalent(
+        let flags = {
+            let mut flags = Vec::with_capacity(self.len());
+            for ni in 0..self.len() {
+                flags.push(equivalent(
+                    // We don't need to check because the nodes are from a tree.
                     oldroot,
                     ni,
                     old.nodes(),
                     self.nodes(),
                     &mut lwalker,
                     &mut rwalker,
-                )
-            })
-            .collect();
+                )?);
+            }
+            flags
+        };
+        if !flags.iter().any(|f| *f) {
+            // No matches found for substitution.
+            return Ok(self);
+        }
         let newroot = new.root_indices().start;
         let offset = newroot + 1;
         let map_input = move |i: usize| {
@@ -39,7 +49,8 @@ impl Tree {
                 i + offset
             }
         };
-        for node in self.nodes_mut() {
+        let (mut nodes, dims) = self.take();
+        for node in &mut nodes {
             *node = match node {
                 Constant(_) | Symbol(_) => *node,
                 Unary(op, input) => Unary(*op, map_input(*input)),
@@ -47,9 +58,10 @@ impl Tree {
                 Ternary(op, a, b, c) => Ternary(*op, map_input(*a), map_input(*b), map_input(*c)),
             };
         }
-        self.nodes_mut().extend(new.nodes().iter());
-        self.nodes_mut().rotate_right(new.len());
-        return self.validated();
+        // Instead of prepending the new tree nodes, we append them and rotate the the whole slice.
+        nodes.extend(new.nodes().iter());
+        nodes.rotate_right(new.len());
+        return Tree::from_nodes(nodes, dims);
     }
 }
 

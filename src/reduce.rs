@@ -127,6 +127,8 @@ impl Ord for Candidate {
 }
 impl Eq for Candidate {}
 
+/// Reduce the input `tree`. This will stop after `max_iter` iterations and
+/// return the most concise form of the tree at that point.
 pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
     let mut capture = TemplateCapture::new();
     let tree = capture.compact_tree(tree)?;
@@ -197,7 +199,8 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 2);
     }
 
@@ -210,7 +213,8 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 6);
     }
 
@@ -223,14 +227,16 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 13);
         // Make sure the same heuristic instance can be reused on other trees.
         let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (+ (* 4 x) 2))
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 33);
     }
 
@@ -243,7 +249,8 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 4);
     }
 
@@ -253,8 +260,16 @@ mod test {
         // among the mutations of the 'before' tree.
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
-        let before = before.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
-        let after = after.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        let before = before
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap();
+        let after = after
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap();
         let mut h = Heuristic::new();
         let mut capture = TemplateCapture::new();
         assert!(h.cost(&before) > h.cost(&after));

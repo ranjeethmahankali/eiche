@@ -69,10 +69,14 @@ impl TemplateCapture {
         }
     }
 
+    /// Get the bindings in this capture instance. These map the variable labels
+    /// in the captured template to the indices of the node they're bound to.
     pub fn bindings(&self) -> &Vec<(char, usize)> {
         &self.bindings
     }
 
+    /// Find the next match of the `templte` in `tree`. The search will begin
+    /// after the previously matched node.
     pub fn next_match(&mut self, template: &Template, tree: &Tree) -> bool {
         // Set self.node_index to None and choose the starting index
         // based on what was in self.node_index before setting it to None.
@@ -94,22 +98,27 @@ impl TemplateCapture {
         return false;
     }
 
-    fn make_compact_tree(&mut self, mut tree: Tree, newroots: Option<Range<usize>>) -> MaybeTree {
-        let root_indices = match newroots {
-            Some(roots) => roots,
-            None => tree.root_indices(),
-        };
-        self.pruner
-            .run_from_range(tree.nodes_mut(), root_indices.clone());
-        let root_indices = (tree.len() - root_indices.len())..tree.len();
-        fold_nodes(tree.nodes_mut())?;
-        self.deduper.run(tree.nodes_mut());
-        self.pruner.run_from_range(tree.nodes_mut(), root_indices);
-        return tree.validated();
+    fn make_compact_tree(
+        &mut self,
+        nodes: Vec<Node>,
+        dims: (usize, usize),
+        root_indices: Range<usize>,
+    ) -> MaybeTree {
+        let mut nodes = self.pruner.run_from_range(nodes, root_indices.clone())?;
+        fold_nodes(&mut nodes)?;
+        // We don't need to check for valid topological order because we just ran the pruner on these nodes, which sorts them.
+        self.deduper.run(&mut nodes)?;
+        let root_indices = (nodes.len() - root_indices.len())..nodes.len();
+        let nodes = self.pruner.run_from_range(nodes, root_indices)?;
+        return Tree::from_nodes(nodes, dims);
     }
 
+    /// Compact the tree using the deduper and pruner instances in this template
+    /// capture. This can avoid reallocating memory by using existing instances.
     pub fn compact_tree(&mut self, tree: Tree) -> MaybeTree {
-        self.make_compact_tree(tree, None)
+        let root_indices = tree.root_indices();
+        let (nodes, dims) = tree.take();
+        return self.make_compact_tree(nodes, dims, root_indices);
     }
 
     /// Try to bind the given symbol (label) to the node index. Return whether
@@ -147,9 +156,9 @@ impl TemplateCapture {
 
     /// Apply the captured template to the tree and produce a mutated tree.
     fn apply(&mut self, template: &Template, tree: &Tree) -> Result<Tree, Error> {
-        let mut tree = tree.clone();
         let root_indices = tree.root_indices();
         let num_nodes = tree.nodes().len();
+        let (mut nodes, dims) = tree.clone().take();
         let pong = template.pong();
         self.node_map.clear();
         self.node_map.resize(pong.len(), 0);
@@ -159,28 +168,27 @@ impl TemplateCapture {
         };
         for ni in 0..pong.len() {
             match pong.node(ni) {
-                Constant(val) => self.add_node(tree.nodes_mut(), ni, Constant(*val)),
+                Constant(val) => self.add_node(&mut nodes, ni, Constant(*val)),
                 Symbol(label) => match self.bindings.iter().find(|(ch, _i)| *ch == *label) {
                     Some((_ch, i)) => self.node_map[ni] = *i,
                     None => return Err(Error::UnboundTemplateSymbol),
                 },
                 Unary(op, input) => {
-                    self.add_node(tree.nodes_mut(), ni, Unary(*op, self.node_map[*input]))
+                    self.add_node(&mut nodes, ni, Unary(*op, self.node_map[*input]))
                 }
                 Binary(op, lhs, rhs) => self.add_node(
-                    tree.nodes_mut(),
+                    &mut nodes,
                     ni,
                     Binary(*op, self.node_map[*lhs], self.node_map[*rhs]),
                 ),
                 Ternary(op, a, b, c) => self.add_node(
-                    tree.nodes_mut(),
+                    &mut nodes,
                     ni,
                     Ternary(*op, self.node_map[*a], self.node_map[*b], self.node_map[*c]),
                 ),
             }
             if pong.root_indices().contains(&ni) {
                 let newroot = self.node_map[ni];
-                let nodes = tree.nodes_mut();
                 let copy = nodes[oldroot];
                 nodes[oldroot] = nodes[newroot];
                 nodes[newroot] = copy;
@@ -188,7 +196,7 @@ impl TemplateCapture {
                 // rewired to oldroot to avoid broken topology. Only iterate
                 // over the preexisting nodes.
                 for i in 0..num_nodes {
-                    match tree.nodes_mut().get_mut(i) {
+                    match nodes.get_mut(i) {
                         Some(node) => {
                             match node {
                                 Constant(_) | Symbol(_) => {} // Do nothing.
@@ -224,7 +232,7 @@ impl TemplateCapture {
             }
         }
         // Clean up and make a tree.
-        return self.make_compact_tree(tree, Some(root_indices));
+        return self.make_compact_tree(nodes, dims, root_indices);
     }
 
     /// Try to match the subtree in ltree at index li with the subtree in rtree
@@ -315,7 +323,7 @@ impl TemplateCapture {
 mod test {
     use super::*;
     use crate::{
-        dedup::equivalent_many, deftree, template::test::get_template_by_name, tree::UnaryOp::*,
+        dedup::equivalent_trees, deftree, template::test::get_template_by_name, tree::UnaryOp::*,
         walk::DepthWalker,
     };
 
@@ -357,7 +365,8 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 3));
@@ -377,7 +386,8 @@ mod test {
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         let mut capture = TemplateCapture::new();
         assert!(capture.next_match(&template, &tree));
         assert!(matches!(capture.node_index, Some(i) if i == 7));
@@ -387,7 +397,11 @@ mod test {
     fn t_check_template(name: &str, tree: Tree) {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
-        let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        let tree = tree
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap();
         println!("{}", tree);
         let mut capture = TemplateCapture::new();
         capture.node_index = None;
@@ -537,8 +551,16 @@ mod test {
         fn assert_one_match(tree: Tree, expected: Tree, capture: &mut TemplateCapture) {
             let mut dedup = Deduplicater::new();
             let mut pruner = Pruner::new();
-            let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
-            let expected = expected.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+            let tree = tree
+                .deduplicate(&mut dedup)
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap();
+            let expected = expected
+                .deduplicate(&mut dedup)
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap();
             assert_eq!(
                 1,
                 Mutations::of(&tree, capture)
@@ -575,13 +597,18 @@ mod test {
     fn check_mutations(mut before: Tree, mut after: Tree) {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
-        before = before.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        before = before
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap();
         after = after
             .fold()
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
-            .prune(&mut pruner);
+            .prune(&mut pruner)
+            .unwrap();
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
         let mut capture = TemplateCapture::new();
@@ -590,14 +617,7 @@ mod test {
             Mutations::of(&before, &mut capture)
                 .filter_map(|t| {
                     let tree = t.unwrap();
-                    if equivalent_many(
-                        after.root_indices(),
-                        tree.root_indices(),
-                        after.nodes(),
-                        tree.nodes(),
-                        &mut lwalker,
-                        &mut rwalker,
-                    ) {
+                    if equivalent_trees(&after, &tree, &mut lwalker, &mut rwalker) {
                         Some(())
                     } else {
                         None

@@ -1,3 +1,8 @@
+use super::{JitCompiler, JitContext};
+use crate::{
+    error::Error,
+    tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
+};
 use inkwell::{
     builder::Builder,
     execution_engine::JitFunction,
@@ -8,15 +13,9 @@ use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
 };
 
-use crate::{
-    error::Error,
-    tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
-};
-
-use super::{JitCompiler, JitContext};
-
 type UnsafeFuncType = unsafe extern "C" fn(*const f64, *mut f64);
 
+/// This represents a JIT compiled tree. This is a wrapper around the JIT compiled native function.
 pub struct JitEvaluator<'ctx> {
     func: JitFunction<'ctx, UnsafeFuncType>,
     num_inputs: usize,
@@ -40,6 +39,7 @@ impl<'ctx> JitEvaluator<'ctx> {
 }
 
 impl Tree {
+    /// JIT compile a tree and return a native evaluator.
     pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitEvaluator, Error> {
         const FUNC_NAME: &str = "eiche_func";
         let num_roots = self.num_roots();
@@ -433,6 +433,11 @@ fn build_float_binary_intrinsic<'ctx>(
 }
 
 impl<'ctx> JitEvaluator<'ctx> {
+    /// Run the JIT evaluator with the given input values. The number of input
+    /// values is expected to be the same as the number of variables in the
+    /// tree. The variables are substituted with the input values in the same
+    /// order as returned by calling `tree.symbols()` which was compiled to
+    /// produce this evaluator.
     pub fn run(&mut self, inputs: &[f64]) -> Result<&[f64], Error> {
         if inputs.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
@@ -710,6 +715,7 @@ mod perft {
                 .deduplicate(&mut dedup)
                 .unwrap()
                 .prune(&mut pruner)
+                .unwrap()
         };
         println!(
             "Tree creation time: {}ms",

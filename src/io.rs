@@ -180,7 +180,11 @@ mod test {
       └── [59] Constant(5.25)"
                 .trim()
         );
-        let tree = tree.deduplicate(&mut dedup).unwrap().prune(&mut pruner);
+        let tree = tree
+            .deduplicate(&mut dedup)
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap();
         assert_eq!(
             format!("{}", tree).trim(),
             "

@@ -8,22 +8,34 @@ use crate::{
     },
 };
 
+/// Compute the symbolic derivative of `tree` with respect to
+/// `params`. Irrespective of the dimensions of the input `tree`, it is
+/// flattened into a vector of length, say, 'n'. The symbolic derivative is a
+/// Jacobian matrix of dimensions n x params.len().
 pub fn symbolic_deriv(tree: MaybeTree, params: &str) -> MaybeTree {
     tree?.symbolic_deriv(params)
 }
 
+/// Get a tree representing the numerical derivative of the input `tree` with
+/// respect to `params`, with the step size `eps`. Irrespective of the
+/// dimensions of the input `tree`, it is flattened into a vector of length,
+/// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
+/// params.len().
 pub fn numerical_deriv(tree: MaybeTree, params: &str, eps: f64) -> MaybeTree {
     tree?.numerical_deriv(params, eps)
 }
 
 impl Tree {
+    /// Compute the symbolic derivative of `tree` with respect to
+    /// `params`. Irrespective of the dimensions of the input `tree`, it is
+    /// flattened into a vector of length, say, 'n'. The symbolic derivative is a
+    /// Jacobian matrix of dimensions n x params.len().
     pub fn symbolic_deriv(&self, params: &str) -> MaybeTree {
         let (root_start, root_end) = {
             let root_indices = self.root_indices();
             (root_indices.start, root_indices.end)
         };
-        let mut copy = self.clone();
-        let nodes = copy.nodes_mut();
+        let (mut nodes, _dims) = self.clone().take();
         let mut derivs = Vec::<Node>::new();
         let mut derivmap = Vec::<Option<usize>>::new();
         let mut rootnodes = Vec::<usize>::new();
@@ -49,12 +61,17 @@ impl Tree {
         // an object that the caller can pass in. That would allow the caller to
         // reuse the resources and avoid repeated allocations.
         let mut pruner = Pruner::new();
-        pruner.run_from_slice(nodes, &mut rootnodes);
-        fold_nodes(nodes)?;
-        pruner.run_from_slice(nodes, &mut rootnodes);
-        return copy.with_dims(root_end - root_start, params.len());
+        let mut nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
+        fold_nodes(&mut nodes)?;
+        let nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
+        return Tree::from_nodes(nodes, (root_end - root_start, params.len()));
     }
 
+    /// Get a tree representing the numerical derivative of the input `tree` with
+    /// respect to `params`, with the step size `eps`. Irrespective of the
+    /// dimensions of the input `tree`, it is flattened into a vector of length,
+    /// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
+    /// params.len().
     pub fn numerical_deriv(&self, params: &str, eps: f64) -> MaybeTree {
         let mut deriv = None;
         for param in params.chars() {

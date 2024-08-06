@@ -1,6 +1,15 @@
 use std::ops::Range;
 
-use crate::tree::{Node, Node::*, Tree};
+use crate::{
+    error::Error,
+    tree::Node::{self, *},
+};
+
+struct StackElement {
+    index: usize,
+    is_root: bool,
+    visited_children: bool, // Whether we're visiting this node after visiting all it's children.
+}
 
 /// Pruner and topological sorter.
 ///
@@ -17,11 +26,12 @@ pub struct Pruner {
     // be flagged 'false'.
     traverse: Vec<(Node, bool)>,
     scan: Vec<usize>,
-    visited: Vec<bool>,
     sorted: Vec<Node>,
     roots: Vec<Node>,
     heights: Vec<usize>,
-    stack: Vec<(usize, bool)>,
+    stack: Vec<StackElement>,
+    visited: Vec<bool>,
+    on_path: Vec<bool>,
 }
 
 impl Pruner {
@@ -31,56 +41,73 @@ impl Pruner {
             index_map: Vec::new(),
             traverse: Vec::new(),
             scan: Vec::new(),
-            visited: Vec::new(),
             sorted: Vec::new(),
             roots: Vec::new(),
             heights: Vec::new(),
             stack: Vec::new(),
+            visited: Vec::new(),
+            on_path: Vec::new(),
         }
     }
 
     /// Run the pruning and topological sorting using root node indices provided as a range.
-    pub fn run_from_range(&mut self, nodes: &mut Vec<Node>, root_indices: Range<usize>) {
+    pub fn run_from_range(
+        &mut self,
+        mut nodes: Vec<Node>,
+        root_indices: Range<usize>,
+    ) -> Result<Vec<Node>, Error> {
         // Heights are easier to compute on nodes that are already topologically
         // sorted. So we prune and sort them once without caring about their
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), root_indices.clone());
-        self.sort_nodes(nodes, root_indices.len(), false);
-        std::mem::swap(&mut self.sorted, nodes);
-        self.compute_heights(nodes);
+        self.sort_nodes(&mut nodes, root_indices.len(), false)?;
+        std::mem::swap(&mut self.sorted, &mut nodes);
+        self.compute_heights(&mut nodes);
         self.init_traverse(nodes.len(), (nodes.len() - root_indices.len())..nodes.len());
-        self.sort_nodes(nodes, root_indices.len(), true);
-        std::mem::swap(&mut self.sorted, nodes);
+        self.sort_nodes(&mut nodes, root_indices.len(), true)?;
+        std::mem::swap(&mut self.sorted, &mut nodes);
+        return Ok(nodes);
     }
 
     /// Run the pruning and topological sorting using root node indices provided as a slice.
-    pub fn run_from_slice(&mut self, nodes: &mut Vec<Node>, roots: &mut [usize]) {
+    pub fn run_from_slice(
+        &mut self,
+        mut nodes: Vec<Node>,
+        roots: &mut [usize],
+    ) -> Result<Vec<Node>, Error> {
         // Heights are easier to compute on nodes that are already topologically
         // sorted. So we prune and sort them once without caring about their
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), roots.iter().map(|r| *r));
-        self.sort_nodes(nodes, roots.len(), false);
-        std::mem::swap(&mut self.sorted, nodes);
-        self.compute_heights(nodes);
+        self.sort_nodes(&mut nodes, roots.len(), false)?;
+        std::mem::swap(&mut self.sorted, &mut nodes);
+        self.compute_heights(&mut nodes);
         self.init_traverse(nodes.len(), (nodes.len() - roots.len())..nodes.len());
-        self.sort_nodes(nodes, roots.len(), true);
-        std::mem::swap(&mut self.sorted, nodes);
+        self.sort_nodes(&mut nodes, roots.len(), true)?;
+        std::mem::swap(&mut self.sorted, &mut nodes);
         let num_roots = roots.len();
         for (r, i) in roots.iter_mut().zip((nodes.len() - num_roots)..nodes.len()) {
             *r = i;
         }
+        return Ok(nodes);
     }
 
     /// Clear all the temporary storage and prepare for a new depth-first
     /// traversal for the given number of nodes and root nodes.
     fn init_traverse<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
         self.stack.clear();
-        self.stack.extend(roots.map(|r| (r, true)));
+        self.stack.extend(roots.map(|r| StackElement {
+            index: r,
+            is_root: true,
+            visited_children: false,
+        }));
         self.stack.reverse();
         self.visited.clear();
         self.visited.resize(num_nodes, false);
+        self.on_path.clear();
+        self.on_path.resize(num_nodes, false);
     }
 
     /// Root node is the highest, while constants and variable have a zero height.
@@ -114,7 +141,12 @@ impl Pruner {
     /// true will cause shallower subtrees to appear before deeper
     /// subtrees. This is beneficial for optimizing register allocation, as it
     /// minimizes the liveness range of registers.
-    fn sort_nodes(&mut self, nodes: &[Node], num_roots: usize, use_height: bool) {
+    fn sort_nodes(
+        &mut self,
+        nodes: &[Node],
+        num_roots: usize,
+        use_height: bool,
+    ) -> Result<(), Error> {
         self.traverse.clear();
         self.traverse.reserve(nodes.len());
         self.roots.clear();
@@ -123,7 +155,20 @@ impl Pruner {
         self.index_map.resize(nodes.len(), 0);
         self.visited.clear();
         self.visited.resize(nodes.len(), false);
-        while let Some((index, is_root)) = self.stack.pop() {
+        while let Some(StackElement {
+            index,
+            is_root,
+            visited_children,
+        }) = self.stack.pop()
+        {
+            if visited_children {
+                // We're backtracking after processing the children of this node. So we remove it from the path.
+                self.on_path[index] = false;
+                continue;
+            } else if self.on_path[index] {
+                // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
+                return Err(Error::CyclicGraph);
+            }
             if self.visited[index] {
                 /*
                 We're visiting this node more than once, hence it will appear
@@ -144,29 +189,49 @@ impl Pruner {
                 self.index_map[index] = self.traverse.len();
                 self.traverse.push((nodes[index], true));
             }
+            debug_assert!(!visited_children, "Invalid depth first traversal.");
+            self.on_path[index] = true;
+            self.stack.push(StackElement {
+                index,
+                is_root,
+                visited_children: true,
+            });
             let num_children = match nodes[index] {
                 Constant(_) | Symbol(_) => 0,
                 Unary(_op, input) => {
-                    self.stack.push((input, false));
+                    self.stack.push(StackElement {
+                        index: input,
+                        is_root: false,
+                        visited_children: false,
+                    });
                     1
                 }
                 Binary(_op, lhs, rhs) => {
-                    self.stack.push((lhs, false));
-                    self.stack.push((rhs, false));
-                    2
+                    let children = [lhs, rhs];
+                    self.stack.extend(children.iter().map(|ci| StackElement {
+                        index: *ci,
+                        is_root: false,
+                        visited_children: false,
+                    }));
+                    children.len()
                 }
                 Ternary(_op, a, b, c) => {
-                    self.stack.push((a, false));
-                    self.stack.push((b, false));
-                    self.stack.push((c, false));
-                    3
+                    let children = [a, b, c];
+                    self.stack.extend(children.iter().map(|ci| StackElement {
+                        index: *ci,
+                        is_root: false,
+                        visited_children: false,
+                    }));
+                    children.len()
                 }
             };
             if use_height {
                 let num = self.stack.len();
-                self.stack[(num - num_children)..].sort_by(|(a, _), (b, _)| {
-                    return self.heights[*b].cmp(&self.heights[*a]);
-                });
+                self.stack[(num - num_children)..].sort_by(
+                    |StackElement { index: a, .. }, StackElement { index: b, .. }| {
+                        return self.heights[*b].cmp(&self.heights[*a]);
+                    },
+                );
             }
         }
         // Only some of the nodes from the traverse will be retained. We're
@@ -216,15 +281,7 @@ impl Pruner {
                 }
             }
         }
-    }
-}
-
-impl Tree {
-    /// Prunes the tree and topologically sorts the nodes.
-    pub fn prune(mut self, pruner: &mut Pruner) -> Tree {
-        let roots = self.root_indices();
-        pruner.run_from_range(self.nodes_mut(), roots);
-        return self;
+        return Ok(());
     }
 }
 
@@ -238,23 +295,28 @@ mod test {
     #[test]
     fn t_topological_sorting_0() {
         let mut sorter = Pruner::new();
-        let mut nodes = vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')];
-        sorter.run_from_range(&mut nodes, 1..2);
+        let nodes = sorter
+            .run_from_range(vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')], 1..2)
+            .unwrap();
         assert_eq!(nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
     }
 
     #[test]
     fn t_topological_sorting_1() {
-        let mut nodes = vec![
-            Symbol('x'),             // 0
-            Binary(Add, 0, 2),       // 1
-            Constant(Scalar(2.245)), // 2
-            Binary(Multiply, 1, 5),  // 3
-            Unary(Sqrt, 3),          // 4 - root
-            Symbol('y'),             // 5
-        ];
         let mut sorter = Pruner::new();
-        sorter.run_from_range(&mut nodes, 4..5);
+        let nodes = sorter
+            .run_from_range(
+                vec![
+                    Symbol('x'),             // 0
+                    Binary(Add, 0, 2),       // 1
+                    Constant(Scalar(2.245)), // 2
+                    Binary(Multiply, 1, 5),  // 3
+                    Unary(Sqrt, 3),          // 4 - root
+                    Symbol('y'),             // 5
+                ],
+                4..5,
+            )
+            .unwrap();
         assert_eq!(
             nodes,
             vec![
@@ -270,22 +332,26 @@ mod test {
 
     #[test]
     fn t_topological_sorting_2() {
-        let mut nodes = vec![
-            Symbol('a'),            // 0
-            Binary(Add, 0, 2),      // 1
-            Symbol('b'),            // 2
-            Unary(Log, 5),          // 3
-            Symbol('x'),            // 4
-            Binary(Add, 4, 6),      // 5
-            Symbol('y'),            // 6
-            Symbol('p'),            // 7
-            Binary(Add, 7, 9),      // 8
-            Symbol('p'),            // 9
-            Binary(Pow, 11, 8),     // 10 - root.
-            Binary(Multiply, 3, 1), // 11
-        ];
         let mut sorter = Pruner::new();
-        sorter.run_from_range(&mut nodes, 10..11);
+        let nodes = sorter
+            .run_from_range(
+                vec![
+                    Symbol('a'),            // 0
+                    Binary(Add, 0, 2),      // 1
+                    Symbol('b'),            // 2
+                    Unary(Log, 5),          // 3
+                    Symbol('x'),            // 4
+                    Binary(Add, 4, 6),      // 5
+                    Symbol('y'),            // 6
+                    Symbol('p'),            // 7
+                    Binary(Add, 7, 9),      // 8
+                    Symbol('p'),            // 9
+                    Binary(Pow, 11, 8),     // 10 - root.
+                    Binary(Multiply, 3, 1), // 11
+                ],
+                10..11,
+            )
+            .unwrap();
         assert_eq!(
             nodes,
             vec![
@@ -308,18 +374,22 @@ mod test {
     #[test]
     fn t_sort_concat() {
         let mut sorter = Pruner::new();
-        let mut nodes = vec![
-            Symbol('p'),            // 0
-            Symbol('x'),            // 1
-            Binary(Multiply, 0, 1), // 2: p * x
-            Symbol('y'),            // 3
-            Binary(Multiply, 0, 3), // 4: p * y
-            Binary(Multiply, 0, 7), // 5: p * (x + y)
-            Constant(Scalar(1.0)),  // 6
-            Binary(Add, 1, 3),      // 7: x + y
-            Binary(Add, 2, 4),      // 8: p * x + p * y
-        ];
-        sorter.run_from_range(&mut nodes, 5..7);
+        let nodes = sorter
+            .run_from_range(
+                vec![
+                    Symbol('p'),            // 0
+                    Symbol('x'),            // 1
+                    Binary(Multiply, 0, 1), // 2: p * x
+                    Symbol('y'),            // 3
+                    Binary(Multiply, 0, 3), // 4: p * y
+                    Binary(Multiply, 0, 7), // 5: p * (x + y)
+                    Constant(Scalar(1.0)),  // 6
+                    Binary(Add, 1, 3),      // 7: x + y
+                    Binary(Add, 2, 4),      // 8: p * x + p * y
+                ],
+                5..7,
+            )
+            .unwrap();
         assert_eq!(
             nodes,
             vec![
@@ -335,23 +405,27 @@ mod test {
 
     #[test]
     fn t_sorting_3() {
-        let mut nodes = vec![
-            Symbol('x'),             // 0
-            Constant(Scalar(2.0)),   // 1
-            Binary(Pow, 0, 1),       // 2: x^2
-            Unary(Exp, 2),           // 3: e^(x^2)
-            Constant(Scalar(1.0)),   // 4
-            Constant(Scalar(0.0)),   // 5
-            Unary(Log, 0),           // 6: log(x)
-            Binary(Multiply, 5, 6),  // 7: 0 * log(x)
-            Binary(Divide, 4, 0),    // 8: 1 / x
-            Binary(Multiply, 1, 8),  // 9: 2 * (1 / x)
-            Binary(Add, 7, 9),       // 10: 2 * (1 / x)
-            Binary(Multiply, 2, 10), // 11: x^2 * (2 * (1 / x))
-            Binary(Multiply, 3, 11), // 12: e^(x^2) * 2 * x
-        ];
         let mut sorter = Pruner::new();
-        sorter.run_from_range(&mut nodes, 12..13);
+        let nodes = sorter
+            .run_from_range(
+                vec![
+                    Symbol('x'),             // 0
+                    Constant(Scalar(2.0)),   // 1
+                    Binary(Pow, 0, 1),       // 2: x^2
+                    Unary(Exp, 2),           // 3: e^(x^2)
+                    Constant(Scalar(1.0)),   // 4
+                    Constant(Scalar(0.0)),   // 5
+                    Unary(Log, 0),           // 6: log(x)
+                    Binary(Multiply, 5, 6),  // 7: 0 * log(x)
+                    Binary(Divide, 4, 0),    // 8: 1 / x
+                    Binary(Multiply, 1, 8),  // 9: 2 * (1 / x)
+                    Binary(Add, 7, 9),       // 10: 2 * (1 / x)
+                    Binary(Multiply, 2, 10), // 11: x^2 * (2 * (1 / x))
+                    Binary(Multiply, 3, 11), // 12: e^(x^2) * 2 * x
+                ],
+                12..13,
+            )
+            .unwrap();
         assert_eq!(
             nodes,
             vec![
@@ -370,5 +444,44 @@ mod test {
                 Binary(Multiply, 11, 10)
             ]
         );
+    }
+
+    #[test]
+    fn t_prune_cyclic() {
+        use crate::tree::{BinaryOp::*, UnaryOp::*, Value::*};
+        let mut sorter = Pruner::new();
+        assert!(matches!(
+            sorter.run_from_range(
+                vec![
+                    Binary(Pow, 8, 9),      // 0 - root
+                    Symbol('x'),            // 1
+                    Binary(Multiply, 0, 1), // 2
+                    Symbol('y'),            // 3
+                    Binary(Multiply, 0, 3), // 4
+                    Binary(Add, 2, 4),      // 5
+                    Binary(Add, 1, 3),      // 6
+                    Binary(Divide, 5, 6),   // 7
+                    Unary(Sqrt, 0),         // 8
+                    Constant(Scalar(2.0)),  // 9
+                ],
+                0..1,
+            ),
+            Err(Error::CyclicGraph)
+        ));
+        assert!(matches!(
+            sorter.run_from_range(
+                vec![
+                    Symbol('x'),       // 0
+                    Symbol('y'),       // 1
+                    Binary(Pow, 0, 6), // 2 - root
+                    Binary(Add, 0, 2), // 3
+                    Unary(Sqrt, 3),    // 4
+                    Unary(Log, 4),     // 5
+                    Unary(Negate, 5),  // 6
+                ],
+                2..3
+            ),
+            Err(Error::CyclicGraph)
+        ));
     }
 }

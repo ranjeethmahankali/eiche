@@ -144,6 +144,15 @@ pub enum Node {
 
 use Node::*;
 
+pub(crate) fn is_topological_order(nodes: &[Node]) -> bool {
+    nodes.iter().enumerate().all(|(i, node)| match node {
+        Constant(_) | Symbol(_) => true,
+        Unary(_, input) => *input < i,
+        Binary(_, l, r) => *l < i && *r < i,
+        Ternary(_, a, b, c) => *a < i && *b < i && *c < i,
+    })
+}
+
 /// Represents an abstract syntax tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
@@ -171,17 +180,25 @@ impl Tree {
         }
     }
 
+    /// Fold the constants, deduplicate subtrees, prune unused subtrees and
+    /// return a topologically sorted compacted equivalent to this tree.
     pub fn compacted(mut self) -> MaybeTree {
-        fold_nodes(self.nodes_mut())?;
+        fold_nodes(&mut self.nodes)?;
         let mut pruner = Pruner::new();
         let root_indices = self.root_indices();
-        pruner.run_from_range(self.nodes_mut(), root_indices);
+        let mut nodes = pruner.run_from_range(self.nodes, root_indices.clone())?;
         let mut deduper = Deduplicater::new();
-        deduper.run(self.nodes_mut());
+        // We don't need to check because we just ran the pruner on these nodes, which sorts them topologically.
+        deduper.run(&mut nodes)?;
         let mut pruner = Pruner::new();
-        let root_indices = self.root_indices();
-        pruner.run_from_range(self.nodes_mut(), root_indices);
-        return self.validated();
+        let nodes = pruner.run_from_range(nodes, root_indices)?;
+        return Tree::from_nodes(nodes, self.dims);
+    }
+    /// Prunes the tree and topologically sorts the nodes.
+    pub fn prune(self, pruner: &mut Pruner) -> MaybeTree {
+        let roots = self.root_indices();
+        let nodes = pruner.run_from_range(self.nodes, roots)?;
+        return Tree::from_nodes(nodes, self.dims);
     }
 
     /// Create a tree representing a symbol with the given `label`.
@@ -192,6 +209,10 @@ impl Tree {
         }
     }
 
+    /// Concatenate the two trees into a vector. If the input trees are
+    /// matrices, they are flattened and then concatenated into a flat
+    /// vector. If the caller doesn't want a vector, they can use the `reshape`
+    /// function to reshape the tree after concatenation.
     pub fn concat(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
         let mut lhs = lhs?;
         let mut rhs = rhs?;
@@ -217,6 +238,8 @@ impl Tree {
         return Ok(lhs);
     }
 
+    /// Get a piece wise expression from the given condition, value when true
+    /// and value when false.
     pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
         return cond?.ternary_op(iftrue?, iffalse?, Choose);
     }
@@ -226,19 +249,18 @@ impl Tree {
         self.nodes.len()
     }
 
+    /// Get the number of roots in this tree.
     pub fn num_roots(&self) -> usize {
         matsize(self.dims)
     }
 
+    /// Get the dimensions of this tree.
     pub fn dims(&self) -> (usize, usize) {
         self.dims
     }
 
-    pub fn with_dims(mut self, rows: usize, cols: usize) -> MaybeTree {
-        self.dims = (rows, cols);
-        return self.validated();
-    }
-
+    /// Change the shape of this tree. If the new shape doesn't correspond to
+    /// the same number of elements, an error is returned.
     pub fn reshape(self, rows: usize, cols: usize) -> MaybeTree {
         if matsize((rows, cols)) == self.num_roots() {
             Ok(Tree {
@@ -274,8 +296,19 @@ impl Tree {
         &self.nodes
     }
 
-    pub fn nodes_mut(&mut self) -> &mut Vec<Node> {
-        &mut self.nodes
+    /// The nodes and the dimensions of the tree. This drops the tree and gives
+    /// the ownership of the data to the caller.
+    ///
+    /// This is meant to be used by algorithms that want to perform direct
+    /// surgery on the nodes of the tree, rearrange them etc. Our goal is to
+    /// make sure it is impossible for an invalid tree to ever exist. For this
+    /// reason, these algos are expected to take full owner ship of the data in
+    /// the tree, do what they want to do and construct a new tree from the
+    /// modified data. When they construct the new tree, we perform checks to
+    /// make sure the tree is valid. Once constructed, the tree must remain
+    /// immutable, unless someone calls this function to take ownership.
+    pub fn take(self) -> (Vec<Node>, (usize, usize)) {
+        (self.nodes, self.dims)
     }
 
     /// Get a unique list of all symbols in this tree. The symbols will appear
@@ -301,7 +334,11 @@ impl Tree {
 
     /// Check the tree for errors and return a Result that contains the tree if
     /// no errors were found, or the first error encountered with the tree.
-    pub fn validated(self) -> MaybeTree {
+    fn validated(self) -> MaybeTree {
+        /* We make sure the inputs of every node appear before that node
+         * itself. This is important when evaluating the tree, but also ensures
+         * there are no cycles in the tree.
+         */
         if self.nodes.is_empty() {
             return Err(Error::EmptyTree);
         }
@@ -309,45 +346,27 @@ impl Tree {
         if roots.start >= roots.end || roots.end != self.nodes.len() {
             return Err(Error::InvalidRoots);
         }
-        for i in 0..self.nodes.len() {
-            match &self.nodes[i] {
-                Constant(val) => match val {
-                    Scalar(val) => {
-                        if f64::is_nan(*val) {
-                            return Err(Error::ContainsNaN);
-                        }
-                    }
-                    Bool(_) => {} // Do nothing.
-                },
-                Symbol(_) => {} // Do nothing.
-                Unary(_, input) => {
-                    // Make sure nodes only depend on the nodes that came before them.
-                    if *input >= i {
-                        return Err(Error::WrongNodeOrder);
-                    }
-                    if roots.contains(input) {
-                        return Err(Error::DependentRootNodes);
-                    }
-                }
-                Binary(_, l, r) => {
-                    // Make sure nodes only depend on the nodes that came before them.
-                    if *l >= i || *r >= i {
-                        return Err(Error::WrongNodeOrder);
-                    }
-                    if roots.contains(l) || roots.contains(r) {
-                        return Err(Error::WrongNodeOrder);
-                    }
-                }
-                Ternary(_, a, b, c) => {
-                    // Make sure nodes only depend on the nodes that came before them.
-                    if *a >= i || *b >= i || *c >= i {
-                        return Err(Error::WrongNodeOrder);
-                    }
-                    if roots.contains(a) || roots.contains(b) || roots.contains(c) {
-                        return Err(Error::DependentRootNodes);
-                    }
-                }
-            }
+        // Check for NaNs.
+        if self.nodes.iter().any(|node| match node {
+            Constant(val) => match val {
+                Bool(_) => false,
+                Scalar(val) => f64::is_nan(*val),
+            },
+            Symbol(_) | Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _) => false,
+        }) {
+            return Err(Error::ContainsNaN);
+        }
+        if !is_topological_order(&self.nodes) {
+            return Err(Error::WrongNodeOrder);
+        }
+        // Check if any nodes depend on roots as their inputs. This is not allowed.
+        if self.nodes.iter().any(|node| match node {
+            Constant(_) | Symbol(_) => false, // Do nothing.
+            Unary(_, input) => roots.contains(input),
+            Binary(_, l, r) => roots.contains(l) || roots.contains(r),
+            Ternary(_, a, b, c) => roots.contains(a) || roots.contains(b) || roots.contains(c),
+        }) {
+            return Err(Error::DependentRootNodes);
         }
         // Maybe add more checks later.
         return Ok(self);
