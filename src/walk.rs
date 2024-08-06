@@ -320,28 +320,52 @@ mod test {
     #[test]
     fn t_cyclic_graph() {
         use crate::tree::{BinaryOp::*, UnaryOp::*, Value::*};
-        let nodes = vec![
-            Binary(Pow, 8, 9),      // 0
-            Symbol('x'),            // 1
-            Binary(Multiply, 0, 1), // 2
-            Symbol('y'),            // 3
-            Binary(Multiply, 0, 3), // 4
-            Binary(Add, 2, 4),      // 5
-            Binary(Add, 1, 3),      // 6
-            Binary(Divide, 5, 6),   // 7
-            Unary(Sqrt, 0),         // 8
-            Constant(Scalar(2.0)),  // 9
-        ];
         let mut walker = DepthWalker::new();
+        let foldfn = |acc, current| match (acc, current) {
+            (Ok(_), Ok(_)) => Ok(()),
+            (Ok(_), Err(e)) => Err(e),
+            (Err(e), Ok(_)) => Err(e),
+            (Err(e), Err(_)) => Err(e),
+        };
         assert!(matches!(
             walker
-                .walk_nodes(&nodes, 0..1, true, NodeOrdering::Deterministic)
-                .fold(Ok(()), |acc, current| match (acc, current) {
-                    (Ok(_), Ok(_)) => Ok(()),
-                    (Ok(_), Err(e)) => Err(e),
-                    (Err(e), Ok(_)) => Err(e),
-                    (Err(e), Err(_)) => Err(e),
-                }),
+                .walk_nodes(
+                    &[
+                        Binary(Pow, 8, 9),      // 0
+                        Symbol('x'),            // 1
+                        Binary(Multiply, 0, 1), // 2
+                        Symbol('y'),            // 3
+                        Binary(Multiply, 0, 3), // 4
+                        Binary(Add, 2, 4),      // 5
+                        Binary(Add, 1, 3),      // 6
+                        Binary(Divide, 5, 6),   // 7
+                        Unary(Sqrt, 0),         // 8
+                        Constant(Scalar(2.0)),  // 9
+                    ],
+                    0..1,
+                    true,
+                    NodeOrdering::Deterministic
+                )
+                .fold(Ok(()), foldfn),
+            Err(Error::CyclicGraph)
+        ));
+        assert!(matches!(
+            walker
+                .walk_nodes(
+                    &[
+                        Symbol('x'),       // 0
+                        Symbol('y'),       // 1
+                        Binary(Pow, 0, 6), // 2 - root
+                        Binary(Add, 0, 2), // 3
+                        Unary(Sqrt, 3),    // 4
+                        Unary(Log, 4),     // 5
+                        Unary(Negate, 5),  // 6
+                    ],
+                    2..3,
+                    false,
+                    NodeOrdering::Deterministic
+                )
+                .fold(Ok(()), foldfn),
             Err(Error::CyclicGraph)
         ));
     }
