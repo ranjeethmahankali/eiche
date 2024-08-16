@@ -26,6 +26,28 @@ impl Value {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct Interval {
+    lower: Value,
+    upper: Value,
+}
+
+impl Interval {
+    pub fn scalar(&self) -> Result<(f64, f64), Error> {
+        match (self.lower, self.upper) {
+            (Scalar(lower), Scalar(upper)) => Ok((lower, upper)),
+            _ => Err(Error::TypeMismatch),
+        }
+    }
+
+    pub fn boolean(&self) -> Result<(bool, bool), Error> {
+        match (self.lower, self.upper) {
+            (Bool(lower), Bool(upper)) => Ok((lower, upper)),
+            _ => Err(Error::TypeMismatch),
+        }
+    }
+}
+
 impl UnaryOp {
     /// Compute the result of the operation on `value`.
     pub fn apply(&self, value: Value) -> Result<Value, Error> {
