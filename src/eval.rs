@@ -1,4 +1,5 @@
 use crate::{
+    compile::{compile, Instructions},
     error::Error,
     tree::{
         BinaryOp::{self, *},
@@ -112,82 +113,21 @@ pub struct Evaluator {
 }
 
 impl Evaluator {
-    /// Create a new evaluator for `tree`. We "compile" the tree into a set of
-    /// ops that closely mirror the nodes of the tree itself. The difference
-    /// between the compiled ops and the tree nodes is that the former reference
-    /// register indices, where the registers are reused. A tree with 100K nodes
-    /// can be computed using less than 10 registers depending on the topology
-    /// of the tree. Registers are allocated using an implementation of Matt
-    /// Keeter's solid state register allocator.
+    /// Create a new evaluator for `tree`.
     pub fn new(tree: &Tree) -> Evaluator {
-        let roots = tree.root_indices();
-        let mut root_regs = Vec::new();
-        let mut valregs = vec![usize::MAX; tree.len()];
-        let mut alive: Vec<bool> = Vec::new();
-        let mut ops = Vec::new();
-        for index in (0..tree.len()).rev() {
-            let outreg = Self::get_register(&mut valregs, &mut alive, index);
-            if roots.contains(&index) {
-                root_regs.push(outreg);
-            }
-            // We immediately mark the output register as not alive, i.e. not in
-            // use, because we want this register to be re-used by one of the
-            // inputs. For example, a long chain of unary ops can all be
-            // performed on the same register without ever allocating a second
-            // register.
-            alive[outreg] = false;
-            valregs[index] = usize::MAX;
-            let op = match tree.node(index) {
-                Constant(val) => (Constant(*val), outreg),
-                Symbol(label) => (Symbol(*label), outreg),
-                Unary(op, input) => {
-                    let ireg = Self::get_register(&mut valregs, &mut alive, *input);
-                    (Unary(*op, ireg), outreg)
-                }
-                Binary(op, lhs, rhs) => {
-                    let lreg = Self::get_register(&mut valregs, &mut alive, *lhs);
-                    let rreg = Self::get_register(&mut valregs, &mut alive, *rhs);
-                    (Binary(*op, lreg, rreg), outreg)
-                }
-                Ternary(op, a, b, c) => {
-                    let areg = Self::get_register(&mut valregs, &mut alive, *a);
-                    let breg = Self::get_register(&mut valregs, &mut alive, *b);
-                    let creg = Self::get_register(&mut valregs, &mut alive, *c);
-                    (Ternary(*op, areg, breg, creg), outreg)
-                }
-            };
-            ops.push(op);
-        }
-        root_regs.reverse();
-        ops.reverse();
+        let Instructions {
+            ops,
+            num_regs,
+            out_regs: root_regs,
+        } = compile(tree);
+        let num_roots = root_regs.len();
         return Evaluator {
             ops,
-            regs: vec![Value::Scalar(0.); alive.len()],
+            regs: vec![Value::Scalar(0.); num_regs],
             vars: Vec::new(),
             root_regs,
-            outputs: vec![Value::Scalar(0.); roots.len()],
+            outputs: vec![Value::Scalar(0.); num_roots],
         };
-    }
-
-    /// Get the first register that isn't alive, i.e. is not in use. If all
-    /// registers are in use, i.e. alive, a new register is allocated.
-    fn get_register(valregs: &mut [usize], alive: &mut Vec<bool>, index: usize) -> usize {
-        if valregs[index] != usize::MAX {
-            return valregs[index];
-        }
-        let reg = match alive.iter().position(|flag| !*flag) {
-            Some(reg) => {
-                alive[reg] = true;
-                reg
-            }
-            None => {
-                let reg = alive.len();
-                alive.push(true);
-                reg
-            }
-        };
-        valregs[index] = reg;
-        return reg;
     }
 
     /// Get the number of registers used by this evaluator. This is not the same

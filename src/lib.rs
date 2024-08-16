@@ -7,6 +7,7 @@ pub mod tree;
 #[cfg(feature = "llvm-jit")]
 pub mod llvm_jit;
 
+mod compile;
 mod dedup;
 mod fold;
 mod hash;
