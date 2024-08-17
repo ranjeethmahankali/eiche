@@ -1,3 +1,5 @@
+use std::ops::Neg;
+
 use crate::{
     compile::{compile, Instructions},
     error::Error,
@@ -120,6 +122,34 @@ impl Interval {
             _ => Err(Error::TypeMismatch),
         }
     }
+
+    pub fn from_boolean(lower: bool, upper: bool) -> Interval {
+        if lower != upper && lower {
+            Interval {
+                lower: Value::from_boolean(false),
+                upper: Value::from_boolean(true),
+            }
+        } else {
+            Interval {
+                lower: Value::from_boolean(lower),
+                upper: Value::from_boolean(upper),
+            }
+        }
+    }
+
+    pub fn from_scalar(lower: f64, upper: f64) -> Interval {
+        if lower > upper {
+            Interval {
+                lower: Value::from_scalar(upper),
+                upper: Value::from_scalar(lower),
+            }
+        } else {
+            Interval {
+                lower: Value::from_scalar(lower),
+                upper: Value::from_scalar(upper),
+            }
+        }
+    }
 }
 
 impl ValueType for Interval {
@@ -144,8 +174,39 @@ impl ValueType for Interval {
         }
     }
 
-    fn unary_op(_op: UnaryOp, _val: Self) -> Result<Self, Error> {
-        todo!()
+    fn unary_op(op: UnaryOp, val: Self) -> Result<Self, Error> {
+        use inari::interval;
+        Ok(match (val.lower, val.upper) {
+            (Bool(lower), Bool(upper)) => match op {
+                Not => {
+                    let (lower, upper) = match (lower, upper) {
+                        (true, true) => (false, false),
+                        (true, false) | (false, true) => (false, true),
+                        (false, false) => (true, true),
+                    };
+                    Interval::from_boolean(lower, upper)
+                }
+                Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp => {
+                    return Err(Error::TypeMismatch)
+                }
+            },
+            (Scalar(lower), Scalar(upper)) => {
+                let it = interval!(lower, upper).map_err(|_| Error::TypeMismatch)?;
+                let out = match op {
+                    Negate => it.neg(),
+                    Sqrt => it.sqrt(),
+                    Abs => it.abs(),
+                    Sin => it.sin(),
+                    Cos => it.cos(),
+                    Tan => it.tan(),
+                    Log => it.ln(),
+                    Exp => it.exp(),
+                    Not => return Err(Error::TypeMismatch),
+                };
+                Interval::from_scalar(out.inf(), out.sup())
+            }
+            (Bool(_), Scalar(_)) | (Scalar(_), Bool(_)) => return Err(Error::TypeMismatch),
+        })
     }
 
     fn binary_op(_op: BinaryOp, _lhs: Self, _rhs: Self) -> Result<Self, Error> {

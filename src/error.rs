@@ -19,6 +19,8 @@ pub enum Error {
     /// The datatype encountered is not what was expected. For example, if a
     /// computation was expecting a scalar input and finds a boolean value.
     TypeMismatch,
+    /// Something went wrong when trying to do interval airthmetic.
+    InvalidInterval,
 
     // Evaluation related errors
     /// A symbol was not assigned a value before evaluating.
