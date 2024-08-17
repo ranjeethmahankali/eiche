@@ -103,6 +103,24 @@ impl ValueType for Value {
     }
 }
 
+impl PartialEq<f64> for Value {
+    fn eq(&self, other: &f64) -> bool {
+        match self {
+            Value::Scalar(val) => val == other,
+            Value::Bool(_) => false,
+        }
+    }
+}
+
+impl PartialEq<bool> for Value {
+    fn eq(&self, other: &bool) -> bool {
+        match self {
+            Value::Scalar(_) => false,
+            Value::Bool(flag) => flag == other,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Interval {
     Scalar(inari::Interval),
@@ -323,21 +341,9 @@ impl ValueType for Interval {
     }
 }
 
-impl PartialEq<f64> for Value {
-    fn eq(&self, other: &f64) -> bool {
-        match self {
-            Value::Scalar(val) => val == other,
-            Value::Bool(_) => false,
-        }
-    }
-}
-
-impl PartialEq<bool> for Value {
-    fn eq(&self, other: &bool) -> bool {
-        match self {
-            Value::Scalar(_) => false,
-            Value::Bool(flag) => flag == other,
-        }
+impl From<inari::Interval> for Interval {
+    fn from(value: inari::Interval) -> Self {
+        Interval::Scalar(value)
     }
 }
 
@@ -427,7 +433,7 @@ pub type IntervalEvaluator = Evaluator<Interval>;
 mod test {
     use super::*;
     use crate::deftree;
-    use crate::test::util::{assert_float_eq, check_value_eval};
+    use crate::test::util::{assert_float_eq, check_interval_eval, check_value_eval};
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
 
@@ -517,6 +523,16 @@ mod test {
             &[('x', -5., 5.), ('y', -5., 5.)],
             10,
             0.,
+        );
+    }
+
+    #[test]
+    fn t_interval_sum() {
+        check_interval_eval(
+            deftree!(+ x y).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.)],
+            10,
+            5,
         );
     }
 

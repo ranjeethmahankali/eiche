@@ -1,6 +1,6 @@
 pub mod util {
     use crate::{
-        eval::ValueEvaluator,
+        eval::{IntervalEvaluator, ValueEvaluator},
         tree::{Tree, Value},
     };
     use rand::{rngs::StdRng, SeedableRng};
@@ -123,6 +123,71 @@ pub mod util {
                     Value::Bool(_) => assert!(false, "Found a boolean when expecting a scalar"),
                     Value::Scalar(rhs) => assert_float_eq!(lhs, rhs, eps),
                 }
+            }
+        }
+    }
+
+    pub fn check_interval_eval(
+        tree: Tree,
+        vardata: &[(char, f64, f64)],
+        samples_per_var: usize,
+        intervals_per_var: usize,
+    ) {
+        let num_roots = tree.num_roots();
+        let mut eval = ValueEvaluator::new(&tree);
+        let mut ieval = IntervalEvaluator::new(&tree);
+        let mut sampler = Sampler::new(vardata, samples_per_var, 42);
+        let mut computed_intervals =
+            vec![inari::Interval::EMPTY; intervals_per_var.pow(vardata.len() as u32) * num_roots];
+        let mut computed = vec![false; intervals_per_var.pow(vardata.len() as u32)];
+        let steps: Vec<_> = vardata
+            .iter()
+            .map(|(_label, lower, upper)| (upper - lower) / intervals_per_var as f64)
+            .collect();
+        let symbols: Vec<_> = vardata.iter().map(|(label, ..)| *label).collect();
+        while let Some(sample) = sampler.next() {
+            assert_eq!(sample.len(), vardata.len());
+            // Find the index of the interval that the sample belongs in.
+            let (index, isample, _) = sample.iter().zip(vardata.iter()).zip(steps.iter()).fold(
+                (0usize, Vec::new(), 1usize),
+                |(mut idx, mut intervals, mut multiplier),
+                 ((value, (_label, lower, _upper)), step)| {
+                    let local_idx = f64::floor((value - lower) / step);
+                    idx += (local_idx as usize) * multiplier;
+                    let inf = lower + local_idx * step;
+                    intervals.push(inari::interval!(inf, inf + step).unwrap());
+                    multiplier *= intervals_per_var;
+                    return (idx, intervals, multiplier);
+                },
+            );
+            assert!(index < computed.len());
+            let expected = {
+                let offset = index * num_roots;
+                if !computed[index] {
+                    for (&label, &ivalue) in symbols.iter().zip(isample.iter()) {
+                        ieval.set_value(label, ivalue.into());
+                    }
+                    let iresults = ieval.run().unwrap();
+                    assert_eq!(iresults.len(), num_roots);
+                    for i in 0..num_roots {
+                        let iout = iresults[i].scalar().unwrap();
+                        assert!(!iout.is_empty());
+                        assert!(!iout.is_entire());
+                        assert!(iout.is_common_interval());
+                        computed_intervals[offset + i] = iout;
+                    }
+                    computed[index] = true;
+                }
+                &computed_intervals[offset..(offset + num_roots)]
+            };
+            for (&label, &value) in symbols.iter().zip(sample.iter()) {
+                eval.set_value(label, value.into());
+            }
+            let results = eval.run().unwrap();
+            assert_eq!(num_roots, results.len());
+            assert_eq!(results.len(), expected.len());
+            for (range, value) in expected.iter().zip(results.iter()) {
+                assert!(range.contains(value.scalar().unwrap()));
             }
         }
     }
