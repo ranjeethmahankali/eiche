@@ -100,6 +100,63 @@ impl ValueType for Value {
     }
 }
 
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub struct Interval {
+    lower: Value,
+    upper: Value,
+}
+
+impl Interval {
+    pub fn scalar(&self) -> Result<(f64, f64), Error> {
+        match (self.lower, self.upper) {
+            (Scalar(lower), Scalar(upper)) => Ok((lower, upper)),
+            _ => Err(Error::TypeMismatch),
+        }
+    }
+
+    pub fn boolean(&self) -> Result<(bool, bool), Error> {
+        match (self.lower, self.upper) {
+            (Bool(lower), Bool(upper)) => Ok((lower, upper)),
+            _ => Err(Error::TypeMismatch),
+        }
+    }
+}
+
+impl ValueType for Interval {
+    fn from_scalar(val: f64) -> Self {
+        Interval {
+            lower: Value::from_scalar(val),
+            upper: Value::from_scalar(val),
+        }
+    }
+
+    fn from_boolean(val: bool) -> Self {
+        Interval {
+            lower: Value::from_boolean(val),
+            upper: Value::from_boolean(val),
+        }
+    }
+
+    fn from_value(val: Value) -> Self {
+        Interval {
+            lower: val,
+            upper: val,
+        }
+    }
+
+    fn unary_op(_op: UnaryOp, _val: Self) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn binary_op(_op: BinaryOp, _lhs: Self, _rhs: Self) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn ternary_op(_op: TernaryOp, _a: Self, _b: Self, _c: Self) -> Result<Self, Error> {
+        todo!()
+    }
+}
+
 impl PartialEq<f64> for Value {
     fn eq(&self, other: &f64) -> bool {
         match self {
@@ -197,6 +254,8 @@ where
 }
 
 pub type ValueEvaluator = Evaluator<Value>;
+
+pub type IntervalEvaluator = Evaluator<Interval>;
 
 #[cfg(test)]
 mod test {
