@@ -1,5 +1,3 @@
-use std::ops::{Add, Div, Mul, Neg, Sub};
-
 use crate::{
     compile::{compile, Instructions},
     error::Error,
@@ -11,12 +9,13 @@ use crate::{
         Value,
     },
 };
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Size of a value type must be known at compile time.
 pub trait ValueType: Sized + Copy {
-    fn from_scalar(val: f64) -> Self;
-    fn from_boolean(val: bool) -> Self;
-    fn from_value(val: Value) -> Self;
+    fn from_scalar(val: f64) -> Result<Self, Error>;
+    fn from_boolean(val: bool) -> Result<Self, Error>;
+    fn from_value(val: Value) -> Result<Self, Error>;
     fn unary_op(op: UnaryOp, val: Self) -> Result<Self, Error>;
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error>;
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error>;
@@ -39,16 +38,16 @@ impl Value {
 }
 
 impl ValueType for Value {
-    fn from_scalar(val: f64) -> Self {
-        Value::Scalar(val)
+    fn from_scalar(val: f64) -> Result<Self, Error> {
+        Ok(Value::Scalar(val))
     }
 
-    fn from_boolean(val: bool) -> Self {
-        Value::Bool(val)
+    fn from_boolean(val: bool) -> Result<Self, Error> {
+        Ok(Value::Bool(val))
     }
 
-    fn from_value(val: Value) -> Self {
-        val
+    fn from_value(val: Value) -> Result<Self, Error> {
+        Ok(val)
     }
 
     fn unary_op(op: UnaryOp, value: Self) -> Result<Self, Error> {
@@ -125,32 +124,34 @@ impl Interval {
         }
     }
 
-    pub fn from_boolean(lower: bool, upper: bool) -> Interval {
-        if lower != upper && lower {
+    pub fn from_boolean(lower: bool, upper: bool) -> Result<Interval, Error> {
+        Ok(if lower != upper && lower {
             Interval::Boolean(upper, lower)
         } else {
             Interval::Boolean(lower, upper)
-        }
+        })
     }
 
-    pub fn from_scalar(lower: f64, upper: f64) -> Interval {
-        todo!()
+    pub fn from_scalar(lower: f64, upper: f64) -> Result<Interval, Error> {
+        Ok(Interval::Scalar(
+            inari::interval!(lower, upper).map_err(|_| Error::InvalidInterval)?,
+        ))
     }
 }
 
 impl ValueType for Interval {
-    fn from_scalar(val: f64) -> Self {
-        todo!()
+    fn from_scalar(val: f64) -> Result<Self, Error> {
+        Interval::from_scalar(val, val)
     }
 
-    fn from_boolean(val: bool) -> Self {
-        Interval::Boolean(val, val)
+    fn from_boolean(val: bool) -> Result<Self, Error> {
+        Ok(Interval::Boolean(val, val))
     }
 
-    fn from_value(val: Value) -> Self {
+    fn from_value(val: Value) -> Result<Self, Error> {
         match val {
-            Value::Bool(val) => Interval::Boolean(val, val),
-            Value::Scalar(val) => todo!(),
+            Value::Bool(val) => Ok(Interval::Boolean(val, val)),
+            Value::Scalar(val) => Interval::from_scalar(val, val),
         }
     }
 
@@ -174,7 +175,7 @@ impl ValueType for Interval {
                         (true, false) | (false, true) => (false, true),
                         (false, false) => (true, true),
                     };
-                    Interval::from_boolean(lower, upper)
+                    Interval::from_boolean(lower, upper)?
                 }
                 Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp => {
                     return Err(Error::TypeMismatch)
@@ -184,24 +185,90 @@ impl ValueType for Interval {
     }
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
-        use Interval::*;
-        Ok(match (lhs, rhs) {
-            (Scalar(lhs), Scalar(rhs)) => Interval::Scalar(match op {
-                Add => lhs.add(rhs),
-                Subtract => lhs.sub(rhs),
-                Multiply => lhs.mul(rhs),
-                Divide => lhs.div(rhs),
-                Pow => lhs.pow(rhs),
-                Min => lhs.min(rhs),
-                Max => lhs.max(rhs),
-                Less => todo!(),
-                LessOrEqual => todo!(),
-                Equal => todo!(),
-                NotEqual => todo!(),
-                Greater => todo!(),
-                GreaterOrEqual => todo!(),
+        use {inari::Overlap::*, Interval::*};
+        match (lhs, rhs) {
+            (Scalar(lhs), Scalar(rhs)) => match op {
+                Add => Ok(Interval::Scalar(lhs.add(rhs))),
+                Subtract => Ok(Interval::Scalar(lhs.sub(rhs))),
+                Multiply => Ok(Interval::Scalar(lhs.mul(rhs))),
+                Divide => Ok(Interval::Scalar(lhs.div(rhs))),
+                Pow => Ok(Interval::Scalar(lhs.pow(rhs))),
+                Min => Ok(Interval::Scalar(lhs.min(rhs))),
+                Max => Ok(Interval::Scalar(lhs.max(rhs))),
+                Less => {
+                    let (lo, hi) = if lhs.strict_precedes(rhs) {
+                        (true, true)
+                    } else if rhs.strict_precedes(lhs) {
+                        (false, false)
+                    } else {
+                        (false, true)
+                    };
+                    Interval::from_boolean(lo, hi)
+                }
+                LessOrEqual => {
+                    let (lo, hi) = if lhs.precedes(rhs) {
+                        (true, true)
+                    } else if rhs.strict_precedes(lhs) {
+                        (false, false)
+                    } else {
+                        (false, true)
+                    };
+                    Interval::from_boolean(lo, hi)
+                }
+                Equal => {
+                    let (lo, hi) = match lhs.overlap(rhs) {
+                        BothEmpty => (true, true),
+                        FirstEmpty | SecondEmpty | Before | After => (false, false),
+                        Meets | Overlaps | Starts | ContainedBy | Finishes | StartedBy
+                        | FinishedBy | OverlappedBy | Contains | MetBy => (false, true),
+                        Equals => {
+                            if lhs.is_singleton() {
+                                (true, true)
+                            } else {
+                                (false, true)
+                            }
+                        }
+                    };
+                    Interval::from_boolean(lo, hi)
+                }
+                NotEqual => {
+                    let (lo, hi) = match lhs.overlap(rhs) {
+                        BothEmpty => (false, false),
+                        FirstEmpty | SecondEmpty | Before | After => (true, true),
+                        Meets | Overlaps | Starts | ContainedBy | Finishes | FinishedBy
+                        | Contains | StartedBy | OverlappedBy | MetBy => (false, true),
+                        Equals => {
+                            if lhs.is_singleton() {
+                                (false, false)
+                            } else {
+                                (false, true)
+                            }
+                        }
+                    };
+                    Interval::from_boolean(lo, hi)
+                }
+                Greater => {
+                    let (lo, hi) = if rhs.strict_precedes(lhs) {
+                        (true, true)
+                    } else if lhs.strict_precedes(rhs) {
+                        (false, false)
+                    } else {
+                        (false, true)
+                    };
+                    Interval::from_boolean(lo, hi)
+                }
+                GreaterOrEqual => {
+                    let (lo, hi) = if rhs.precedes(lhs) {
+                        (true, true)
+                    } else if lhs.strict_precedes(rhs) {
+                        (false, false)
+                    } else {
+                        (false, true)
+                    };
+                    Interval::from_boolean(lo, hi)
+                }
                 And | Or => return Err(Error::TypeMismatch),
-            }),
+            },
             (Boolean(llo, lhi), Boolean(rlo, rhi)) => match op {
                 Add | Subtract | Multiply | Divide | Pow | Min | Max | Less | LessOrEqual
                 | Equal | NotEqual | Greater | GreaterOrEqual => return Err(Error::TypeMismatch),
@@ -223,16 +290,19 @@ impl ValueType for Interval {
                 }
             },
             _ => return Err(Error::TypeMismatch),
-        })
+        }
     }
 
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
         use Interval::*;
         match op {
-            TernaryOp::Choose => Ok(match a.boolean()? {
-                (true, true) => b,
+            TernaryOp::Choose => match a.boolean()? {
+                (true, true) => Ok(b),
                 (true, false) | (false, true) => match (b, c) {
-                    (Scalar(b), Scalar(c)) => todo!(),
+                    (Scalar(b), Scalar(c)) => Interval::from_scalar(
+                        f64::min(b.inf(), c.inf()),
+                        f64::max(b.sup(), c.sup()),
+                    ),
                     (Scalar(_), Boolean(_, _)) | (Boolean(_, _), Scalar(_)) => {
                         return Err(Error::TypeMismatch)
                     }
@@ -244,8 +314,8 @@ impl ValueType for Interval {
                         }
                     }
                 },
-                (false, false) => c,
-            }),
+                (false, false) => Ok(c),
+            },
         }
     }
 }
@@ -294,10 +364,10 @@ where
         let num_roots = root_regs.len();
         return Evaluator {
             ops,
-            regs: vec![T::from_scalar(0.); num_regs],
+            regs: vec![T::from_scalar(0.).unwrap(); num_regs],
             vars: Vec::new(),
             root_regs,
-            outputs: vec![T::from_scalar(0.); num_roots],
+            outputs: vec![T::from_scalar(0.).unwrap(); num_roots],
         };
     }
 
@@ -313,11 +383,11 @@ where
     pub fn set_scalar(&mut self, label: char, value: f64) {
         for (l, v) in self.vars.iter_mut() {
             if *l == label {
-                *v = T::from_scalar(value);
+                *v = T::from_scalar(value).unwrap();
                 return;
             }
         }
-        self.vars.push((label, T::from_scalar(value)));
+        self.vars.push((label, T::from_scalar(value).unwrap()));
     }
 
     /// Run the evaluator and return the result. The result may
@@ -327,7 +397,7 @@ where
     pub fn run(&mut self) -> Result<&[T], Error> {
         for (node, out) in &self.ops {
             self.regs[*out] = match node {
-                Constant(val) => T::from_value(*val),
+                Constant(val) => T::from_value(*val).unwrap(),
                 Symbol(label) => match self.vars.iter().find(|(l, _v)| *l == *label) {
                     Some((_l, v)) => *v,
                     None => return Err(Error::VariableNotFound(*label)),
