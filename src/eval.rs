@@ -106,14 +106,14 @@ impl ValueType for Value {
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Interval {
-    Scalar(f64, f64),
+    Scalar(inari::Interval),
     Boolean(bool, bool),
 }
 
 impl Interval {
-    pub fn scalar(&self) -> Result<(f64, f64), Error> {
+    pub fn scalar(&self) -> Result<inari::Interval, Error> {
         match self {
-            Interval::Scalar(lower, upper) => Ok((*lower, *upper)),
+            Interval::Scalar(it) => Ok(*it),
             _ => Err(Error::TypeMismatch),
         }
     }
@@ -134,17 +134,13 @@ impl Interval {
     }
 
     pub fn from_scalar(lower: f64, upper: f64) -> Interval {
-        if lower > upper {
-            Interval::Scalar(upper, lower)
-        } else {
-            Interval::Scalar(lower, upper)
-        }
+        todo!()
     }
 }
 
 impl ValueType for Interval {
     fn from_scalar(val: f64) -> Self {
-        Interval::Scalar(val, val)
+        todo!()
     }
 
     fn from_boolean(val: bool) -> Self {
@@ -154,28 +150,23 @@ impl ValueType for Interval {
     fn from_value(val: Value) -> Self {
         match val {
             Value::Bool(val) => Interval::Boolean(val, val),
-            Value::Scalar(val) => Interval::Scalar(val, val),
+            Value::Scalar(val) => todo!(),
         }
     }
 
     fn unary_op(op: UnaryOp, val: Self) -> Result<Self, Error> {
-        use inari::interval;
         Ok(match val {
-            Interval::Scalar(lower, upper) => {
-                let it = interval!(lower, upper).map_err(|_| Error::TypeMismatch)?;
-                let out = match op {
-                    Negate => it.neg(),
-                    Sqrt => it.sqrt(),
-                    Abs => it.abs(),
-                    Sin => it.sin(),
-                    Cos => it.cos(),
-                    Tan => it.tan(),
-                    Log => it.ln(),
-                    Exp => it.exp(),
-                    Not => return Err(Error::TypeMismatch),
-                };
-                Interval::from_scalar(out.inf(), out.sup())
-            }
+            Interval::Scalar(it) => Interval::Scalar(match op {
+                Negate => it.neg(),
+                Sqrt => it.sqrt(),
+                Abs => it.abs(),
+                Sin => it.sin(),
+                Cos => it.cos(),
+                Tan => it.tan(),
+                Log => it.ln(),
+                Exp => it.exp(),
+                Not => return Err(Error::TypeMismatch),
+            }),
             Interval::Boolean(lower, upper) => match op {
                 Not => {
                     let (lower, upper) = match (lower, upper) {
@@ -193,29 +184,24 @@ impl ValueType for Interval {
     }
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
-        use {inari::interval, Interval::*};
+        use Interval::*;
         Ok(match (lhs, rhs) {
-            (Scalar(llo, lhi), Scalar(rlo, rhi)) => {
-                let lhs = interval!(llo, lhi).map_err(|_| Error::TypeMismatch)?;
-                let rhs = interval!(rlo, rhi).map_err(|_| Error::TypeMismatch)?;
-                let out = match op {
-                    Add => lhs.add(rhs),
-                    Subtract => lhs.sub(rhs),
-                    Multiply => lhs.mul(rhs),
-                    Divide => lhs.div(rhs),
-                    Pow => lhs.pow(rhs),
-                    Min => lhs.min(rhs),
-                    Max => lhs.max(rhs),
-                    Less => todo!(),
-                    LessOrEqual => todo!(),
-                    Equal => todo!(),
-                    NotEqual => todo!(),
-                    Greater => todo!(),
-                    GreaterOrEqual => todo!(),
-                    And | Or => return Err(Error::TypeMismatch),
-                };
-                Interval::from_scalar(out.inf(), out.sup())
-            }
+            (Scalar(lhs), Scalar(rhs)) => Interval::Scalar(match op {
+                Add => lhs.add(rhs),
+                Subtract => lhs.sub(rhs),
+                Multiply => lhs.mul(rhs),
+                Divide => lhs.div(rhs),
+                Pow => lhs.pow(rhs),
+                Min => lhs.min(rhs),
+                Max => lhs.max(rhs),
+                Less => todo!(),
+                LessOrEqual => todo!(),
+                Equal => todo!(),
+                NotEqual => todo!(),
+                Greater => todo!(),
+                GreaterOrEqual => todo!(),
+                And | Or => return Err(Error::TypeMismatch),
+            }),
             (Boolean(llo, lhi), Boolean(rlo, rhi)) => match op {
                 Add | Subtract | Multiply | Divide | Pow | Min | Max | Less | LessOrEqual
                 | Equal | NotEqual | Greater | GreaterOrEqual => return Err(Error::TypeMismatch),
@@ -241,18 +227,13 @@ impl ValueType for Interval {
     }
 
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
-        use {inari::interval, Interval::*};
+        use Interval::*;
         match op {
             TernaryOp::Choose => Ok(match a.boolean()? {
                 (true, true) => b,
                 (true, false) | (false, true) => match (b, c) {
-                    (Scalar(blo, bhi), Scalar(clo, chi)) => {
-                        let b = interval!(blo, bhi).map_err(|_| Error::TypeMismatch)?;
-                        let c = interval!(clo, chi).map_err(|_| Error::TypeMismatch)?;
-                        let out = b.min(c);
-                        Interval::from_scalar(out.inf(), out.sup())
-                    }
-                    (Scalar(_, _), Boolean(_, _)) | (Boolean(_, _), Scalar(_, _)) => {
+                    (Scalar(b), Scalar(c)) => todo!(),
+                    (Scalar(_), Boolean(_, _)) | (Boolean(_, _), Scalar(_)) => {
                         return Err(Error::TypeMismatch)
                     }
                     (Boolean(blo, bhi), Boolean(clo, chi)) => {
