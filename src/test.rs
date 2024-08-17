@@ -14,7 +14,7 @@ pub mod util {
             let eps = $eps;
             let error = f64::abs(a - b);
             if error > eps {
-                println!("{:?}", $debug);
+                eprintln!("{:?}", $debug);
             }
             assert!(
                 error <= eps,
