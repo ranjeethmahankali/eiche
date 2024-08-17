@@ -213,7 +213,14 @@ impl ValueType for Interval {
                 Subtract => Ok(Interval::Scalar(lhs.sub(rhs))),
                 Multiply => Ok(Interval::Scalar(lhs.mul(rhs))),
                 Divide => Ok(Interval::Scalar(lhs.div(rhs))),
-                Pow => Ok(Interval::Scalar(lhs.pow(rhs))),
+                Pow => Ok({
+                    if rhs.is_singleton() && rhs.inf() == 2. {
+                        // Special case for squaring to get tighter intervals.
+                        Interval::Scalar(lhs.sqr())
+                    } else {
+                        Interval::Scalar(lhs.pow(rhs))
+                    }
+                }),
                 Min => Ok(Interval::Scalar(lhs.min(rhs))),
                 Max => Ok(Interval::Scalar(lhs.max(rhs))),
                 Less => {
@@ -588,6 +595,32 @@ mod test {
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
             1e-14,
+        );
+    }
+
+    #[test]
+    fn t_interval_distance_to_point() {
+        check_interval_eval(
+            deftree!(sqrt (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.))).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_tree_2() {
+        check_interval_eval(
+            deftree!(
+                (max (min
+                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            )
+            .unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            5,
         );
     }
 
