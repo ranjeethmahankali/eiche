@@ -58,7 +58,7 @@ impl ValueType for Value {
             Sin => Scalar(f64::sin(value.scalar()?)),
             Cos => Scalar(f64::cos(value.scalar()?)),
             Tan => Scalar(f64::tan(value.scalar()?)),
-            Log => Scalar(f64::log(value.scalar()?, std::f64::consts::E)),
+            Log => Scalar(f64::ln(value.scalar()?)),
             Exp => Scalar(f64::exp(value.scalar()?)),
             // Boolean
             Not => Bool(!value.boolean()?),
@@ -339,8 +339,7 @@ mod test {
             deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
-                    output[0] = f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
-                        / (f64::cos(x) + 2.);
+                    output[0] = f64::powf(f64::ln(f64::sin(x) + 2.), 3.) / (f64::cos(x) + 2.);
                 }
             },
             &[('x', -2.5, 2.5)],
@@ -390,7 +389,7 @@ mod test {
             tree,
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
-                    output[0] = f64::log(x, std::f64::consts::E);
+                    output[0] = f64::ln(x);
                     output[1] = x + f64::powf(y, 2.);
                 }
             },
@@ -413,7 +412,7 @@ mod test {
             )).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y, z] = vars[..] {
-                    output[0] = f64::powf(f64::log(f64::sin(x) + 2., std::f64::consts::E), 3.)
+                    output[0] = f64::powf(f64::ln(f64::sin(x) + 2.), 3.)
                         / (f64::cos(x) + 2.);
                     output[1] = x + y;
                     output[2] = {
