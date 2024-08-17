@@ -136,6 +136,22 @@ pub mod util {
         let num_roots = tree.num_roots();
         let mut eval = ValueEvaluator::new(&tree);
         let mut ieval = IntervalEvaluator::new(&tree);
+        let total_range: Vec<inari::Interval> = {
+            for &(label, lower, upper) in vardata {
+                ieval.set_value(label, inari::interval!(lower, upper).unwrap().into());
+            }
+            ieval
+                .run()
+                .unwrap()
+                .iter()
+                .map(|val| {
+                    let iout = val.scalar().unwrap();
+                    assert!(iout.is_common_interval());
+                    iout
+                })
+                .collect()
+        };
+        assert_eq!(total_range.len(), num_roots);
         let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         let mut computed_intervals =
             vec![inari::Interval::EMPTY; intervals_per_var.pow(vardata.len() as u32) * num_roots];
@@ -174,6 +190,7 @@ pub mod util {
                         assert!(!iout.is_empty());
                         assert!(!iout.is_entire());
                         assert!(iout.is_common_interval());
+                        assert!(iout.subset(total_range[i]));
                         computed_intervals[offset + i] = iout;
                     }
                     computed[index] = true;

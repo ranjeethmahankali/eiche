@@ -552,6 +552,16 @@ mod test {
     }
 
     #[test]
+    fn t_interval_tree_1() {
+        check_interval_eval(
+            deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap(),
+            &[('x', -2.5, 2.5)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
     fn t_tree_2() {
         check_value_eval(
             deftree!(
