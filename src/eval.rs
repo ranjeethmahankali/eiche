@@ -626,13 +626,11 @@ mod test {
 
     #[test]
     fn t_trees_concat_0() {
-        let tree = deftree!(concat
+        check_value_eval(
+            deftree!(concat
                             (log x)
                             (+ x (pow y 2.)))
-        .unwrap();
-        println!("{:?}", tree.nodes());
-        check_value_eval(
-            tree,
+            .unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
                     output[0] = f64::ln(x);
@@ -642,6 +640,19 @@ mod test {
             &[('x', 1., 10.), ('y', 1., 10.)],
             20,
             1e-14,
+        );
+    }
+
+    #[test]
+    fn t_interval_trees_concat_0() {
+        check_interval_eval(
+            deftree!(concat
+                            (log x)
+                            (+ x (pow y 2.)))
+            .unwrap(),
+            &[('x', 1., 10.), ('y', 1., 10.)],
+            20,
+            5,
         );
     }
 
@@ -682,6 +693,23 @@ mod test {
     }
 
     #[test]
+    fn t_interval_trees_concat_1() {
+        check_interval_eval(
+            deftree!(concat
+                     (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
+                     (+ x y)
+                     ((max (min
+                            (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                            (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+                       (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            )).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            5
+        );
+    }
+
+    #[test]
     fn t_choose() {
         check_value_eval(
             deftree!(if (> x 0) x (-x)).unwrap(),
@@ -704,6 +732,22 @@ mod test {
             &[('x', -10., 10.)],
             100,
             0.,
+        );
+    }
+
+    #[test]
+    fn t_interval_choose() {
+        check_interval_eval(
+            deftree!(if (> x 0) x (-x)).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            10,
+        );
+        check_interval_eval(
+            deftree!(if (< x 0) (- x) x).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            10,
         );
     }
 }
