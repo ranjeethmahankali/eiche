@@ -132,7 +132,10 @@ impl Interval {
         })
     }
 
-    pub fn from_scalar(lower: f64, upper: f64) -> Result<Interval, Error> {
+    pub fn from_scalar(mut lower: f64, mut upper: f64) -> Result<Interval, Error> {
+        if upper < lower {
+            (lower, upper) = (upper, lower);
+        }
         Ok(Interval::Scalar(
             inari::interval!(lower, upper).map_err(|_| Error::InvalidInterval)?,
         ))
@@ -380,14 +383,14 @@ where
 
     /// Set the value of a scalar variable with the given label. You'd do this
     /// for all the inputs before running the evaluator.
-    pub fn set_scalar(&mut self, label: char, value: f64) {
+    pub fn set_value(&mut self, label: char, value: T) {
         for (l, v) in self.vars.iter_mut() {
             if *l == label {
-                *v = T::from_scalar(value).unwrap();
+                *v = value;
                 return;
             }
         }
-        self.vars.push((label, T::from_scalar(value).unwrap()));
+        self.vars.push((label, value));
     }
 
     /// Run the evaluator and return the result. The result may
@@ -426,7 +429,7 @@ mod test {
     use crate::deftree;
     use crate::test::util::{assert_float_eq, check_value_eval};
     use rand::rngs::StdRng;
-    use rand::SeedableRng;
+    use rand::{Rng, SeedableRng};
 
     #[test]
     fn t_constant() {
@@ -452,8 +455,8 @@ mod test {
         let h = deftree!(sqrt (+ (pow x 2.) (pow y 2.))).unwrap();
         let mut eval = ValueEvaluator::new(&h);
         for (x, y, expected) in TRIPLETS {
-            eval.set_scalar('x', x);
-            eval.set_scalar('y', y);
+            eval.set_value('x', x.into());
+            eval.set_value('y', y.into());
             match eval.run() {
                 Ok(val) => assert_eq!(val, &[expected]),
                 _ => assert!(false),
@@ -463,21 +466,42 @@ mod test {
 
     #[test]
     fn t_trig_identity() {
-        use rand::Rng;
-        const PI_2: f64 = 2.0 * std::f64::consts::TAU;
+        const PI_2: f64 = std::f64::consts::TAU;
         let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.)).unwrap();
         let mut eval = ValueEvaluator::new(&sum);
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
             let x: f64 = PI_2 * rng.gen::<f64>();
-            eval.set_scalar('x', x);
-            match eval.run() {
-                Ok(val) => {
-                    assert_eq!(val.len(), 1);
-                    assert_float_eq!(val[0].scalar().unwrap(), 1.);
+            eval.set_value('x', x.into());
+            let val = eval.run().unwrap();
+            assert_eq!(val.len(), 1);
+            assert_float_eq!(val[0].scalar().unwrap(), 1.);
+        }
+    }
+
+    #[test]
+    fn t_interval_pow() {
+        let tree = deftree!(pow x 2).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        let mut rng = StdRng::seed_from_u64(42);
+        const MAX_VAL: f64 = 32.;
+        for _ in 0..100 {
+            let lo = MAX_VAL * rng.gen::<f64>();
+            let hi = MAX_VAL * rng.gen::<f64>();
+            let (outlo, outhi) = {
+                let mut outlo = lo * lo;
+                let mut outhi = hi * hi;
+                if outhi < outlo {
+                    (outlo, outhi) = (outhi, outlo);
                 }
-                _ => assert!(false),
-            }
+                (outlo, outhi)
+            };
+            eval.set_value('x', Interval::from_scalar(lo, hi).unwrap());
+            let val = eval.run().unwrap();
+            assert_eq!(val.len(), 1);
+            let val = val[0].scalar().unwrap();
+            assert_float_eq!(val.inf(), outlo, 1e-12);
+            assert_float_eq!(val.sup(), outhi, 1e-12);
         }
     }
 

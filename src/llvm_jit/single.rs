@@ -671,9 +671,9 @@ mod perft {
     ) -> Duration {
         let before = Instant::now();
         values.extend(queries.iter().map(|coords| {
-            eval.set_scalar('x', coords[0]);
-            eval.set_scalar('y', coords[1]);
-            eval.set_scalar('z', coords[2]);
+            eval.set_value('x', coords[0].into());
+            eval.set_value('y', coords[1].into());
+            eval.set_value('z', coords[2].into());
             let results = eval.run().unwrap();
             results[0].scalar().unwrap()
         }));

@@ -738,7 +738,7 @@ mod test {
         let mut actual = Vec::with_capacity(expected.capacity());
         while let Some(sample) = sampler.next() {
             for (label, value) in vardata.iter().map(|(label, ..)| *label).zip(sample.iter()) {
-                eval.set_scalar(label, *value);
+                eval.set_value(label, (*value).into());
             }
             expected.extend(
                 eval.run()
@@ -969,9 +969,9 @@ mod perft {
     ) -> Duration {
         let before = Instant::now();
         values.extend(queries.iter().map(|coords| {
-            eval.set_scalar('x', coords[0]);
-            eval.set_scalar('y', coords[1]);
-            eval.set_scalar('z', coords[2]);
+            eval.set_value('x', coords[0].into());
+            eval.set_value('y', coords[1].into());
+            eval.set_value('z', coords[2].into());
             let results = eval.run().unwrap();
             results[0].scalar().unwrap()
         }));

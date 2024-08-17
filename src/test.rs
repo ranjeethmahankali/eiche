@@ -1,8 +1,9 @@
 pub mod util {
-    use crate::tree::Value;
-    use crate::{eval::Evaluator, tree::Tree};
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
+    use crate::{
+        eval::ValueEvaluator,
+        tree::{Tree, Value},
+    };
+    use rand::{rngs::StdRng, SeedableRng};
 
     /// Assert that the floating point numbers are equal within the given epsilon.
     macro_rules! assert_float_eq {
@@ -105,13 +106,13 @@ pub mod util {
     ) where
         F: FnMut(&[f64], &mut [f64]) -> (),
     {
-        let mut eval = Evaluator::new(&tree);
+        let mut eval = ValueEvaluator::new(&tree);
         let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         let mut expected = vec![f64::NAN; tree.num_roots()];
         let symbols: Vec<_> = vardata.iter().map(|(label, ..)| *label).collect();
         while let Some(sample) = sampler.next() {
             for (&label, &value) in symbols.iter().zip(sample.iter()) {
-                eval.set_scalar(label, value);
+                eval.set_value(label, value.into());
             }
             let results = eval.run().unwrap();
             assert_eq!(results.len(), expected.len());
@@ -150,14 +151,14 @@ pub mod util {
             tree1.dims(),
             tree2.dims()
         );
-        let mut eval1 = Evaluator::new(&tree1);
-        let mut eval2 = Evaluator::new(&tree2);
+        let mut eval1 = ValueEvaluator::new(&tree1);
+        let mut eval2 = ValueEvaluator::new(&tree2);
         let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         let symbols: Vec<_> = vardata.iter().map(|(label, ..)| *label).collect();
         while let Some(sample) = sampler.next() {
             for (&label, &value) in symbols.iter().zip(sample.iter()) {
-                eval1.set_scalar(label, value);
-                eval2.set_scalar(label, value);
+                eval1.set_value(label, value.into());
+                eval2.set_value(label, value.into());
             }
             let results1 = eval1.run().unwrap();
             let results2 = eval2.run().unwrap();
