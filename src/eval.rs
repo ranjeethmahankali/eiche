@@ -1,4 +1,4 @@
-use std::ops::Neg;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::{
     compile::{compile, Instructions},
@@ -193,11 +193,65 @@ impl ValueType for Interval {
     }
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
-        todo!()
+        use {inari::interval, Interval::*};
+        Ok(match (lhs, rhs) {
+            (Scalar(llo, lhi), Scalar(rlo, rhi)) => {
+                let lhs = interval!(llo, lhi).map_err(|_| Error::TypeMismatch)?;
+                let rhs = interval!(rlo, rhi).map_err(|_| Error::TypeMismatch)?;
+                let out = match op {
+                    Add => lhs.add(rhs),
+                    Subtract => lhs.sub(rhs),
+                    Multiply => lhs.mul(rhs),
+                    Divide => lhs.div(rhs),
+                    Pow => lhs.pow(rhs),
+                    Min => lhs.min(rhs),
+                    Max => lhs.max(rhs),
+                    Less => todo!(),
+                    LessOrEqual => todo!(),
+                    Equal => todo!(),
+                    NotEqual => todo!(),
+                    Greater => todo!(),
+                    GreaterOrEqual => todo!(),
+                    And | Or => return Err(Error::TypeMismatch),
+                };
+                Interval::from_scalar(out.inf(), out.sup())
+            }
+            (Boolean(llo, lhi), Boolean(rlo, rhi)) => match op {
+                Add | Subtract | Multiply | Divide | Pow | Min | Max | Less | LessOrEqual
+                | Equal | NotEqual | Greater | GreaterOrEqual => return Err(Error::TypeMismatch),
+                And => todo!(),
+                Or => todo!(),
+            },
+            _ => return Err(Error::TypeMismatch),
+        })
     }
 
-    fn ternary_op(_op: TernaryOp, _a: Self, _b: Self, _c: Self) -> Result<Self, Error> {
-        todo!()
+    fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
+        use {inari::interval, Interval::*};
+        match op {
+            TernaryOp::Choose => Ok(match a.boolean()? {
+                (true, true) => b,
+                (true, false) | (false, true) => match (b, c) {
+                    (Scalar(blo, bhi), Scalar(clo, chi)) => {
+                        let b = interval!(blo, bhi).map_err(|_| Error::TypeMismatch)?;
+                        let c = interval!(clo, chi).map_err(|_| Error::TypeMismatch)?;
+                        let out = b.min(c);
+                        Interval::from_scalar(out.inf(), out.sup())
+                    }
+                    (Scalar(_, _), Boolean(_, _)) | (Boolean(_, _), Scalar(_, _)) => {
+                        return Err(Error::TypeMismatch)
+                    }
+                    (Boolean(blo, bhi), Boolean(clo, chi)) => {
+                        if blo == bhi && blo == clo && blo == chi {
+                            Interval::from_boolean(false, true)
+                        } else {
+                            Interval::from_boolean(blo, bhi)
+                        }
+                    }
+                },
+                (false, false) => c,
+            }),
+        }
     }
 }
 
