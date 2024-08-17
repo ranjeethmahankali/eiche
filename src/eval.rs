@@ -8,7 +8,7 @@ use crate::{
         Node::{self, *},
         TernaryOp, Tree,
         UnaryOp::{self, *},
-        Value::{self, *},
+        Value,
     },
 };
 
@@ -25,15 +25,15 @@ pub trait ValueType: Sized + Copy {
 impl Value {
     pub fn scalar(&self) -> Result<f64, Error> {
         match self {
-            Scalar(val) => Ok(*val),
-            Bool(_) => Err(Error::TypeMismatch),
+            Value::Scalar(val) => Ok(*val),
+            Value::Bool(_) => Err(Error::TypeMismatch),
         }
     }
 
     pub fn boolean(&self) -> Result<bool, Error> {
         match self {
-            Scalar(_) => Err(Error::TypeMismatch),
-            Bool(val) => Ok(*val),
+            Value::Scalar(_) => Err(Error::TypeMismatch),
+            Value::Bool(val) => Ok(*val),
         }
     }
 }
@@ -52,6 +52,7 @@ impl ValueType for Value {
     }
 
     fn unary_op(op: UnaryOp, value: Self) -> Result<Self, Error> {
+        use Value::*;
         Ok(match op {
             // Scalar
             Negate => Scalar(-value.scalar()?),
@@ -68,6 +69,7 @@ impl ValueType for Value {
     }
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
+        use Value::*;
         Ok(match op {
             // Scalar.
             Add => Scalar(lhs.scalar()? + rhs.scalar()?),
@@ -103,94 +105,63 @@ impl ValueType for Value {
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
-pub struct Interval {
-    lower: Value,
-    upper: Value,
+pub enum Interval {
+    Scalar(f64, f64),
+    Boolean(bool, bool),
 }
 
 impl Interval {
     pub fn scalar(&self) -> Result<(f64, f64), Error> {
-        match (self.lower, self.upper) {
-            (Scalar(lower), Scalar(upper)) => Ok((lower, upper)),
+        match self {
+            Interval::Scalar(lower, upper) => Ok((*lower, *upper)),
             _ => Err(Error::TypeMismatch),
         }
     }
 
     pub fn boolean(&self) -> Result<(bool, bool), Error> {
-        match (self.lower, self.upper) {
-            (Bool(lower), Bool(upper)) => Ok((lower, upper)),
+        match self {
+            Interval::Boolean(lower, upper) => Ok((*lower, *upper)),
             _ => Err(Error::TypeMismatch),
         }
     }
 
     pub fn from_boolean(lower: bool, upper: bool) -> Interval {
         if lower != upper && lower {
-            Interval {
-                lower: Value::from_boolean(false),
-                upper: Value::from_boolean(true),
-            }
+            Interval::Boolean(upper, lower)
         } else {
-            Interval {
-                lower: Value::from_boolean(lower),
-                upper: Value::from_boolean(upper),
-            }
+            Interval::Boolean(lower, upper)
         }
     }
 
     pub fn from_scalar(lower: f64, upper: f64) -> Interval {
         if lower > upper {
-            Interval {
-                lower: Value::from_scalar(upper),
-                upper: Value::from_scalar(lower),
-            }
+            Interval::Scalar(upper, lower)
         } else {
-            Interval {
-                lower: Value::from_scalar(lower),
-                upper: Value::from_scalar(upper),
-            }
+            Interval::Scalar(lower, upper)
         }
     }
 }
 
 impl ValueType for Interval {
     fn from_scalar(val: f64) -> Self {
-        Interval {
-            lower: Value::from_scalar(val),
-            upper: Value::from_scalar(val),
-        }
+        Interval::Scalar(val, val)
     }
 
     fn from_boolean(val: bool) -> Self {
-        Interval {
-            lower: Value::from_boolean(val),
-            upper: Value::from_boolean(val),
-        }
+        Interval::Boolean(val, val)
     }
 
     fn from_value(val: Value) -> Self {
-        Interval {
-            lower: val,
-            upper: val,
+        match val {
+            Value::Bool(val) => Interval::Boolean(val, val),
+            Value::Scalar(val) => Interval::Scalar(val, val),
         }
     }
 
     fn unary_op(op: UnaryOp, val: Self) -> Result<Self, Error> {
         use inari::interval;
-        Ok(match (val.lower, val.upper) {
-            (Bool(lower), Bool(upper)) => match op {
-                Not => {
-                    let (lower, upper) = match (lower, upper) {
-                        (true, true) => (false, false),
-                        (true, false) | (false, true) => (false, true),
-                        (false, false) => (true, true),
-                    };
-                    Interval::from_boolean(lower, upper)
-                }
-                Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp => {
-                    return Err(Error::TypeMismatch)
-                }
-            },
-            (Scalar(lower), Scalar(upper)) => {
+        Ok(match val {
+            Interval::Scalar(lower, upper) => {
                 let it = interval!(lower, upper).map_err(|_| Error::TypeMismatch)?;
                 let out = match op {
                     Negate => it.neg(),
@@ -205,11 +176,23 @@ impl ValueType for Interval {
                 };
                 Interval::from_scalar(out.inf(), out.sup())
             }
-            (Bool(_), Scalar(_)) | (Scalar(_), Bool(_)) => return Err(Error::TypeMismatch),
+            Interval::Boolean(lower, upper) => match op {
+                Not => {
+                    let (lower, upper) = match (lower, upper) {
+                        (true, true) => (false, false),
+                        (true, false) | (false, true) => (false, true),
+                        (false, false) => (true, true),
+                    };
+                    Interval::from_boolean(lower, upper)
+                }
+                Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp => {
+                    return Err(Error::TypeMismatch)
+                }
+            },
         })
     }
 
-    fn binary_op(_op: BinaryOp, _lhs: Self, _rhs: Self) -> Result<Self, Error> {
+    fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
         todo!()
     }
 
@@ -221,8 +204,8 @@ impl ValueType for Interval {
 impl PartialEq<f64> for Value {
     fn eq(&self, other: &f64) -> bool {
         match self {
-            Scalar(val) => val == other,
-            Bool(_) => false,
+            Value::Scalar(val) => val == other,
+            Value::Bool(_) => false,
         }
     }
 }
@@ -230,8 +213,8 @@ impl PartialEq<f64> for Value {
 impl PartialEq<bool> for Value {
     fn eq(&self, other: &bool) -> bool {
         match self {
-            Scalar(_) => false,
-            Bool(flag) => flag == other,
+            Value::Scalar(_) => false,
+            Value::Bool(flag) => flag == other,
         }
     }
 }
@@ -329,10 +312,10 @@ mod test {
     #[test]
     fn t_constant() {
         let x = deftree!(const std::f64::consts::PI).unwrap();
-        assert_eq!(x.roots(), &[Constant(Scalar(std::f64::consts::PI))]);
+        assert_eq!(x.roots(), &[Constant(Value::Scalar(std::f64::consts::PI))]);
         let mut eval = ValueEvaluator::new(&x);
         match eval.run() {
-            Ok(val) => assert_eq!(val, &[Scalar(std::f64::consts::PI)]),
+            Ok(val) => assert_eq!(val, &[Value::Scalar(std::f64::consts::PI)]),
             _ => assert!(false),
         }
     }
