@@ -424,7 +424,7 @@ pub type IntervalEvaluator = Evaluator<Interval>;
 mod test {
     use super::*;
     use crate::deftree;
-    use crate::test::util::{assert_float_eq, check_tree_eval};
+    use crate::test::util::{assert_float_eq, check_value_eval};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -483,7 +483,7 @@ mod test {
 
     #[test]
     fn t_sum() {
-        check_tree_eval(
+        check_value_eval(
             deftree!(+ x y).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
@@ -498,7 +498,7 @@ mod test {
 
     #[test]
     fn t_tree_1() {
-        check_tree_eval(
+        check_value_eval(
             deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
@@ -513,7 +513,7 @@ mod test {
 
     #[test]
     fn t_tree_2() {
-        check_tree_eval(
+        check_value_eval(
             deftree!(
                 (max (min
                       (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
@@ -548,7 +548,7 @@ mod test {
                             (+ x (pow y 2.)))
         .unwrap();
         println!("{:?}", tree.nodes());
-        check_tree_eval(
+        check_value_eval(
             tree,
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
@@ -564,7 +564,7 @@ mod test {
 
     #[test]
     fn t_trees_concat_1() {
-        check_tree_eval(
+        check_value_eval(
             deftree!(concat
                      (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
                      (+ x y)
@@ -600,7 +600,7 @@ mod test {
 
     #[test]
     fn t_choose() {
-        check_tree_eval(
+        check_value_eval(
             deftree!(if (> x 0) x (-x)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
@@ -611,7 +611,7 @@ mod test {
             100,
             0.,
         );
-        check_tree_eval(
+        check_value_eval(
             deftree!(if (< x 0) (- x) x).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {

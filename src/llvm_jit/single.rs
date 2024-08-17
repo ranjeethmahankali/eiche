@@ -450,12 +450,12 @@ impl<'ctx> JitEvaluator<'ctx> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, test::util::check_tree_eval};
+    use crate::{deftree, test::util::check_value_eval};
 
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::default();
         let mut jiteval = tree.jit_compile(&context).unwrap();
-        check_tree_eval(
+        check_value_eval(
             tree.clone(),
             |inputs: &[f64], outputs: &mut [f64]| {
                 let results = jiteval.run(inputs).unwrap();

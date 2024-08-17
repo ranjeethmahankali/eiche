@@ -96,7 +96,7 @@ pub mod util {
     /// corresponding entry in `vardata`. Each entry in vardata
     /// consists of the label of the symbol / variable, lower bound
     /// and upper bound.
-    pub fn check_tree_eval<F>(
+    pub fn check_value_eval<F>(
         tree: Tree,
         mut expectedfn: F,
         vardata: &[(char, f64, f64)],
