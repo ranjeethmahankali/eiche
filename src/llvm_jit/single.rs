@@ -626,7 +626,7 @@ mod perft {
     use crate::{
         dedup::Deduplicater,
         deftree,
-        eval::Evaluator,
+        eval::ValueEvaluator,
         prune::Pruner,
         test::util::assert_float_eq,
         // test::util::assert_float_eq,
@@ -667,7 +667,7 @@ mod perft {
     fn _benchmark_eval(
         values: &mut Vec<f64>,
         queries: &[[f64; 3]],
-        eval: &mut Evaluator,
+        eval: &mut ValueEvaluator,
     ) -> Duration {
         let before = Instant::now();
         values.extend(queries.iter().map(|coords| {
@@ -722,7 +722,7 @@ mod perft {
             (Instant::now() - before).as_millis()
         );
         let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
-        let mut eval = Evaluator::new(&tree);
+        let mut eval = ValueEvaluator::new(&tree);
         println!(
             "Tree has {} nodes, evaluator allocated {} registers",
             tree.len(),

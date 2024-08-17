@@ -10,6 +10,16 @@ use crate::{
     },
 };
 
+/// Size of a value type must be known at compile time.
+pub trait ValueType: Sized + Copy {
+    fn from_scalar(val: f64) -> Self;
+    fn from_boolean(val: bool) -> Self;
+    fn from_value(val: Value) -> Self;
+    fn unary_op(op: UnaryOp, val: Self) -> Result<Self, Error>;
+    fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error>;
+    fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error>;
+}
+
 impl Value {
     pub fn scalar(&self) -> Result<f64, Error> {
         match self {
@@ -26,32 +36,21 @@ impl Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
-struct Interval {
-    lower: Value,
-    upper: Value,
-}
-
-impl Interval {
-    pub fn scalar(&self) -> Result<(f64, f64), Error> {
-        match (self.lower, self.upper) {
-            (Scalar(lower), Scalar(upper)) => Ok((lower, upper)),
-            _ => Err(Error::TypeMismatch),
-        }
+impl ValueType for Value {
+    fn from_scalar(val: f64) -> Self {
+        Value::Scalar(val)
     }
 
-    pub fn boolean(&self) -> Result<(bool, bool), Error> {
-        match (self.lower, self.upper) {
-            (Bool(lower), Bool(upper)) => Ok((lower, upper)),
-            _ => Err(Error::TypeMismatch),
-        }
+    fn from_boolean(val: bool) -> Self {
+        Value::Bool(val)
     }
-}
 
-impl UnaryOp {
-    /// Compute the result of the operation on `value`.
-    pub fn apply(&self, value: Value) -> Result<Value, Error> {
-        Ok(match self {
+    fn from_value(val: Value) -> Self {
+        val
+    }
+
+    fn unary_op(op: UnaryOp, value: Self) -> Result<Self, Error> {
+        Ok(match op {
             // Scalar
             Negate => Scalar(-value.scalar()?),
             Sqrt => Scalar(f64::sqrt(value.scalar()?)),
@@ -65,12 +64,9 @@ impl UnaryOp {
             Not => Bool(!value.boolean()?),
         })
     }
-}
 
-impl BinaryOp {
-    /// Compute the result of the operation on `lhs` and `rhs`.
-    pub fn apply(&self, lhs: Value, rhs: Value) -> Result<Value, Error> {
-        Ok(match self {
+    fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
+        Ok(match op {
             // Scalar.
             Add => Scalar(lhs.scalar()? + rhs.scalar()?),
             Subtract => Scalar(lhs.scalar()? - rhs.scalar()?),
@@ -90,12 +86,9 @@ impl BinaryOp {
             Or => Bool(lhs.boolean()? || rhs.boolean()?),
         })
     }
-}
 
-impl TernaryOp {
-    /// Compute the result of the ternary op.
-    pub fn apply(&self, a: Value, b: Value, c: Value) -> Result<Value, Error> {
-        Ok(match self {
+    fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
+        Ok(match op {
             TernaryOp::Choose => {
                 if a.boolean()? {
                     b
@@ -126,17 +119,23 @@ impl PartialEq<bool> for Value {
 }
 
 /// This can be used to compute the value(s) of the tree.
-pub struct Evaluator {
+pub struct Evaluator<T>
+where
+    T: ValueType,
+{
     ops: Vec<(Node, usize)>,
-    regs: Vec<Value>,
-    vars: Vec<(char, Value)>,
+    regs: Vec<T>,
+    vars: Vec<(char, T)>,
     root_regs: Vec<usize>,
-    outputs: Vec<Value>,
+    outputs: Vec<T>,
 }
 
-impl Evaluator {
+impl<T> Evaluator<T>
+where
+    T: ValueType,
+{
     /// Create a new evaluator for `tree`.
-    pub fn new(tree: &Tree) -> Evaluator {
+    pub fn new(tree: &Tree) -> Evaluator<T> {
         let Instructions {
             ops,
             num_regs,
@@ -145,10 +144,10 @@ impl Evaluator {
         let num_roots = root_regs.len();
         return Evaluator {
             ops,
-            regs: vec![Value::Scalar(0.); num_regs],
+            regs: vec![T::from_scalar(0.); num_regs],
             vars: Vec::new(),
             root_regs,
-            outputs: vec![Value::Scalar(0.); num_roots],
+            outputs: vec![T::from_scalar(0.); num_roots],
         };
     }
 
@@ -164,28 +163,30 @@ impl Evaluator {
     pub fn set_scalar(&mut self, label: char, value: f64) {
         for (l, v) in self.vars.iter_mut() {
             if *l == label {
-                *v = Value::Scalar(value);
+                *v = T::from_scalar(value);
                 return;
             }
         }
-        self.vars.push((label, Value::Scalar(value)));
+        self.vars.push((label, T::from_scalar(value)));
     }
 
     /// Run the evaluator and return the result. The result may
     /// contain the output value, or an
     /// error. `Variablenotfound(label)` error means the variable
     /// matching `label` hasn't been assigned a value using `set_scalar`.
-    pub fn run(&mut self) -> Result<&[Value], Error> {
+    pub fn run(&mut self) -> Result<&[T], Error> {
         for (node, out) in &self.ops {
             self.regs[*out] = match node {
-                Constant(val) => *val,
+                Constant(val) => T::from_value(*val),
                 Symbol(label) => match self.vars.iter().find(|(l, _v)| *l == *label) {
                     Some((_l, v)) => *v,
                     None => return Err(Error::VariableNotFound(*label)),
                 },
-                Unary(op, input) => op.apply(self.regs[*input])?,
-                Binary(op, lhs, rhs) => op.apply(self.regs[*lhs], self.regs[*rhs])?,
-                Ternary(op, a, b, c) => op.apply(self.regs[*a], self.regs[*b], self.regs[*c])?,
+                Unary(op, input) => T::unary_op(*op, self.regs[*input])?,
+                Binary(op, lhs, rhs) => T::binary_op(*op, self.regs[*lhs], self.regs[*rhs])?,
+                Ternary(op, a, b, c) => {
+                    T::ternary_op(*op, self.regs[*a], self.regs[*b], self.regs[*c])?
+                }
             };
         }
         self.outputs.clear();
@@ -194,6 +195,8 @@ impl Evaluator {
         return Ok(&self.outputs);
     }
 }
+
+pub type ValueEvaluator = Evaluator<Value>;
 
 #[cfg(test)]
 mod test {
@@ -207,7 +210,7 @@ mod test {
     fn t_constant() {
         let x = deftree!(const std::f64::consts::PI).unwrap();
         assert_eq!(x.roots(), &[Constant(Scalar(std::f64::consts::PI))]);
-        let mut eval = Evaluator::new(&x);
+        let mut eval = ValueEvaluator::new(&x);
         match eval.run() {
             Ok(val) => assert_eq!(val, &[Scalar(std::f64::consts::PI)]),
             _ => assert!(false),
@@ -225,7 +228,7 @@ mod test {
             (12., 35., 37.),
         ];
         let h = deftree!(sqrt (+ (pow x 2.) (pow y 2.))).unwrap();
-        let mut eval = Evaluator::new(&h);
+        let mut eval = ValueEvaluator::new(&h);
         for (x, y, expected) in TRIPLETS {
             eval.set_scalar('x', x);
             eval.set_scalar('y', y);
@@ -241,7 +244,7 @@ mod test {
         use rand::Rng;
         const PI_2: f64 = 2.0 * std::f64::consts::TAU;
         let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.)).unwrap();
-        let mut eval = Evaluator::new(&sum);
+        let mut eval = ValueEvaluator::new(&sum);
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
             let x: f64 = PI_2 * rng.gen::<f64>();
