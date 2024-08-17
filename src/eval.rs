@@ -219,8 +219,22 @@ impl ValueType for Interval {
             (Boolean(llo, lhi), Boolean(rlo, rhi)) => match op {
                 Add | Subtract | Multiply | Divide | Pow | Min | Max | Less | LessOrEqual
                 | Equal | NotEqual | Greater | GreaterOrEqual => return Err(Error::TypeMismatch),
-                And => todo!(),
-                Or => todo!(),
+                And => {
+                    let (lo, hi) = match (llo, lhi, rlo, rhi) {
+                        (true, true, true, true) => (true, true),
+                        (_, _, false, false) | (false, false, _, _) => (false, false),
+                        _ => (false, true),
+                    };
+                    Interval::from_boolean(lo, hi)
+                }
+                Or => {
+                    let (lo, hi) = match (llo, lhi, rlo, rhi) {
+                        (false, false, false, false) => (false, false),
+                        (_, _, true, true) | (true, true, _, _) => (true, true),
+                        _ => (false, true),
+                    };
+                    Interval::from_boolean(lo, hi)
+                }
             },
             _ => return Err(Error::TypeMismatch),
         })
