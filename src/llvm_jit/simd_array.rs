@@ -722,7 +722,7 @@ mod test {
     use crate::{
         deftree,
         eval::ValueEvaluator,
-        test::util::{assert_float_eq, Sampler},
+        test::{assert_float_eq, Sampler},
     };
 
     use super::*;
@@ -926,7 +926,7 @@ mod perft {
         deftree,
         eval::ValueEvaluator,
         prune::Pruner,
-        test::util::assert_float_eq,
+        test::assert_float_eq,
         // test::util::assert_float_eq,
         tree::{min, MaybeTree, Tree},
     };

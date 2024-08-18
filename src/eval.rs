@@ -440,7 +440,7 @@ pub type IntervalEvaluator = Evaluator<Interval>;
 mod test {
     use super::*;
     use crate::deftree;
-    use crate::test::util::{assert_float_eq, check_interval_eval, check_value_eval};
+    use crate::test::{assert_float_eq, check_interval_eval, check_value_eval};
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
 

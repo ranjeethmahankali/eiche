@@ -89,7 +89,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, prune::Pruner, test::util::compare_trees};
+    use crate::{deftree, prune::Pruner, test::compare_trees};
 
     #[test]
     fn t_sconstant_folding_0() {

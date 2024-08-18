@@ -450,7 +450,7 @@ impl<'ctx> JitEvaluator<'ctx> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, test::util::check_value_eval};
+    use crate::{deftree, test::check_value_eval};
 
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::default();
@@ -628,7 +628,7 @@ mod perft {
         deftree,
         eval::ValueEvaluator,
         prune::Pruner,
-        test::util::assert_float_eq,
+        test::assert_float_eq,
         // test::util::assert_float_eq,
         tree::{min, MaybeTree, Tree},
     };
