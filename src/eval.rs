@@ -4,7 +4,8 @@ use crate::{
     tree::{
         BinaryOp::{self, *},
         Node::{self, *},
-        TernaryOp, Tree,
+        TernaryOp::{self, *},
+        Tree,
         UnaryOp::{self, *},
         Value,
     },
@@ -61,6 +62,7 @@ impl ValueType for Value {
             Tan => Scalar(f64::tan(value.scalar()?)),
             Log => Scalar(f64::ln(value.scalar()?)),
             Exp => Scalar(f64::exp(value.scalar()?)),
+            Floor => Scalar(f64::floor(value.scalar()?)),
             // Boolean
             Not => Bool(!value.boolean()?),
         })
@@ -77,6 +79,7 @@ impl ValueType for Value {
             Pow => Scalar(f64::powf(lhs.scalar()?, rhs.scalar()?)),
             Min => Scalar(f64::min(lhs.scalar()?, rhs.scalar()?)),
             Max => Scalar(f64::max(lhs.scalar()?, rhs.scalar()?)),
+            Remainder => Scalar(lhs.scalar()?.rem_euclid(rhs.scalar()?)),
             // Boolean.
             Less => Bool(lhs.scalar()? < rhs.scalar()?),
             LessOrEqual => Bool(lhs.scalar()? <= rhs.scalar()?),
@@ -91,13 +94,14 @@ impl ValueType for Value {
 
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
         Ok(match op {
-            TernaryOp::Choose => {
+            Choose => {
                 if a.boolean()? {
                     b
                 } else {
                     c
                 }
             }
+            MulAdd => Value::Scalar(a.scalar()?.mul_add(b.scalar()?, c.scalar()?)),
         })
     }
 }
@@ -394,6 +398,51 @@ mod test {
             &[('x', -10., 10.)],
             100,
             0.,
+        );
+    }
+
+    #[test]
+    fn t_floor() {
+        check_value_eval(
+            deftree!(floor (log x)).unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x] = vars[..] {
+                    output[0] = f64::ln(x).floor();
+                }
+            },
+            &[('x', 0.1, 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_remainder() {
+        check_value_eval(
+            deftree!(rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)).unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x] = vars[..] {
+                    output[0] = (5. * x * x + 2. * x + 3.).rem_euclid(3. * x * x);
+                }
+            },
+            &[('x', -1., 1.)],
+            100,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_mul_add() {
+        check_value_eval(
+            deftree!(muladd a b c).unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [a, b, c] = vars[..] {
+                    output[0] = a * b + c;
+                }
+            },
+            &[('a', -1., 1.), ('b', -1., 1.), ('c', -1., 1.)],
+            10,
+            1e-14,
         );
     }
 }

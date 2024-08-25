@@ -71,6 +71,7 @@ impl ValueType for Interval {
                 Tan => it.tan(),
                 Log => it.ln(),
                 Exp => it.exp(),
+                Floor => it.floor(),
                 Not => return Err(Error::TypeMismatch),
             }),
             Interval::Boolean(lower, upper) => match op {
@@ -82,7 +83,7 @@ impl ValueType for Interval {
                     };
                     Interval::from_boolean(lower, upper)?
                 }
-                Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp => {
+                Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
                     return Err(Error::TypeMismatch)
                 }
             },
@@ -107,6 +108,7 @@ impl ValueType for Interval {
                 }),
                 Min => Ok(Interval::Scalar(lhs.min(rhs))),
                 Max => Ok(Interval::Scalar(lhs.max(rhs))),
+                Remainder => Ok(Interval::Scalar(lhs.sub(lhs.div(rhs).floor().mul(rhs)))),
                 Less => {
                     let (lo, hi) = if lhs.strict_precedes(rhs) {
                         (true, true)
@@ -182,8 +184,10 @@ impl ValueType for Interval {
                 And | Or => return Err(Error::TypeMismatch),
             },
             (Boolean(llo, lhi), Boolean(rlo, rhi)) => match op {
-                Add | Subtract | Multiply | Divide | Pow | Min | Max | Less | LessOrEqual
-                | Equal | NotEqual | Greater | GreaterOrEqual => return Err(Error::TypeMismatch),
+                Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
+                | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => {
+                    return Err(Error::TypeMismatch)
+                }
                 And => {
                     let (lo, hi) = match (llo, lhi, rlo, rhi) {
                         (true, true, true, true) => (true, true),
@@ -207,8 +211,9 @@ impl ValueType for Interval {
 
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
         use Interval::*;
+        use TernaryOp::*;
         match op {
-            TernaryOp::Choose => match a.boolean()? {
+            Choose => match a.boolean()? {
                 (true, true) => Ok(b),
                 (true, false) | (false, true) => match (b, c) {
                     (Scalar(b), Scalar(c)) => Interval::from_scalar(
@@ -228,6 +233,9 @@ impl ValueType for Interval {
                 },
                 (false, false) => Ok(c),
             },
+            MulAdd => Ok(Interval::Scalar(
+                a.scalar()?.mul_add(b.scalar()?, c.scalar()?),
+            )),
         }
     }
 }
@@ -478,6 +486,36 @@ mod test {
         check_interval_eval(
             deftree!(if (< x 0) (- x) x).unwrap(),
             &[('x', -10., 10.)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
+    fn t_floor() {
+        check_interval_eval(
+            deftree!(floor (/ (pow x 2) (+ 2 (sin x)))).unwrap(),
+            &[('x', 1., 5.)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
+    fn t_remainder() {
+        check_interval_eval(
+            deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
+            &[('x', 1., 5.)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
+    fn t_mul_add() {
+        check_interval_eval(
+            deftree!(muladd (sin x) (cos x) (pow x 2)).unwrap(),
+            &[('x', -4., 4.)],
             100,
             10,
         );

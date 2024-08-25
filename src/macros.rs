@@ -79,7 +79,7 @@ macro_rules! deftree {
     (>= $a:tt $b:tt) => {
       $crate::tree::geq($crate::deftree!($a), $crate::deftree!($b))
     };
-    // Symbols
+    // Constants
     ($a:literal) => {{
         let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant(($a).into()));
         out
@@ -88,6 +88,11 @@ macro_rules! deftree {
     (if $cond:tt $a:tt $b:tt) => {
         $crate::tree::Tree::piecewise($crate::deftree!($cond), $crate::deftree!($a), $crate::deftree!($b))
     };
+    // MulAdd
+    (muladd $a:tt $b:tt $c:tt) => {
+        $crate::tree::Tree::mul_add($crate::deftree!($a), $crate::deftree!($b), $crate::deftree!($c))
+    };
+    // Symbols
     ($a:ident) => {{
         const LABEL: &str = {stringify!($a)};
         const {assert!(LABEL.len() == 1, "Symbols can only have a single character as an identifier.")};

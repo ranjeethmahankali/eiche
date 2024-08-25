@@ -20,6 +20,7 @@ pub enum UnaryOp {
     Tan,
     Log,
     Exp,
+    Floor,
     // Boolean
     Not,
 }
@@ -35,6 +36,7 @@ pub enum BinaryOp {
     Pow,
     Min,
     Max,
+    Remainder, // Floating point remainder
     // Boolean
     Less,
     LessOrEqual,
@@ -49,6 +51,7 @@ pub enum BinaryOp {
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum TernaryOp {
     Choose,
+    MulAdd,
 }
 
 impl UnaryOp {
@@ -65,8 +68,9 @@ impl UnaryOp {
             Tan => 5,
             Log => 6,
             Exp => 7,
+            Floor => 8,
             // Boolean
-            Not => 8,
+            Not => 9,
         }
     }
 }
@@ -84,15 +88,16 @@ impl BinaryOp {
             Pow => 4,
             Min => 5,
             Max => 6,
+            Remainder => 7,
             // Boolean
-            Less => 7,
-            LessOrEqual => 8,
-            Equal => 9,
-            NotEqual => 10,
-            Greater => 11,
-            GreaterOrEqual => 12,
-            And => 13,
-            Or => 14,
+            Less => 8,
+            LessOrEqual => 9,
+            Equal => 10,
+            NotEqual => 11,
+            Greater => 12,
+            GreaterOrEqual => 13,
+            And => 14,
+            Or => 15,
         }
     }
 
@@ -108,6 +113,7 @@ impl BinaryOp {
             Pow => false,
             Min => true,
             Max => true,
+            Remainder => false,
             // Boolean
             Less => false,
             LessOrEqual => false,
@@ -126,6 +132,7 @@ impl TernaryOp {
         use TernaryOp::*;
         match self {
             Choose => 0,
+            MulAdd => 1,
         }
     }
 }
@@ -242,6 +249,10 @@ impl Tree {
     /// and value when false.
     pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
         return cond?.ternary_op(iftrue?, iffalse?, Choose);
+    }
+
+    pub fn mul_add(a: MaybeTree, b: MaybeTree, c: MaybeTree) -> MaybeTree {
+        return a?.ternary_op(b?, c?, MulAdd);
     }
 
     /// The number of nodes in this tree.
@@ -467,6 +478,7 @@ unary_func!(cos, Cos);
 unary_func!(tan, Tan);
 unary_func!(log, Log);
 unary_func!(exp, Exp);
+unary_func!(floor, Floor);
 unary_func!(not, Not);
 
 macro_rules! binary_func {
@@ -484,6 +496,7 @@ binary_func!(div, Divide);
 binary_func!(pow, Pow);
 binary_func!(min, Min);
 binary_func!(max, Max);
+binary_func!(rem, Remainder);
 binary_func!(less, Less);
 binary_func!(greater, Greater);
 binary_func!(equals, Equal);
