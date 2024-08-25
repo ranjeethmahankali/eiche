@@ -90,7 +90,7 @@ macro_rules! deftree {
     };
     // MulAdd
     (muladd $a:tt $b:tt $c:tt) => {
-        $crate::tree::Tree::mul_add($crate::deftree!($cond), $crate::deftree!($a), $crate::deftree!($b))
+        $crate::tree::Tree::mul_add($crate::deftree!($a), $crate::deftree!($b), $crate::deftree!($c))
     };
     // Symbols
     ($a:ident) => {{

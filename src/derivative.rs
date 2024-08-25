@@ -474,6 +474,17 @@ mod test {
     }
 
     #[test]
+    fn t_mul_add() {
+        compare_trees(
+            &deftree!(sderiv (muladd (sin x) (cos x) (pow x 2)) x).unwrap(),
+            &deftree!(+ (* 2 x) (- (pow (cos x) 2) (pow (sin x) 2))).unwrap(),
+            &[('x', -1., 1.)],
+            100,
+            1e-14,
+        );
+    }
+
+    #[test]
     fn t_numerical() {
         compare_trees(
             &deftree!(nderiv (pow x 2) x 1e-4).unwrap(),

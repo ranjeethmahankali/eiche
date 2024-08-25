@@ -101,7 +101,7 @@ impl ValueType for Value {
                     c
                 }
             }
-            MulAdd => Value::Scalar(a.scalar()? * b.scalar()? + c.scalar()?),
+            MulAdd => Value::Scalar(a.scalar()?.mul_add(b.scalar()?, c.scalar()?)),
         })
     }
 }
@@ -398,6 +398,51 @@ mod test {
             &[('x', -10., 10.)],
             100,
             0.,
+        );
+    }
+
+    #[test]
+    fn t_floor() {
+        check_value_eval(
+            deftree!(floor (log x)).unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x] = vars[..] {
+                    output[0] = f64::ln(x).floor();
+                }
+            },
+            &[('x', 0.1, 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_remainder() {
+        check_value_eval(
+            deftree!(rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)).unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x] = vars[..] {
+                    output[0] = (5. * x * x + 2. * x + 3.).rem_euclid(3. * x * x);
+                }
+            },
+            &[('x', -1., 1.)],
+            100,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_mul_add() {
+        check_value_eval(
+            deftree!(muladd a b c).unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [a, b, c] = vars[..] {
+                    output[0] = a * b + c;
+                }
+            },
+            &[('a', -1., 1.), ('b', -1., 1.), ('c', -1., 1.)],
+            10,
+            1e-14,
         );
     }
 }

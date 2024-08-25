@@ -648,6 +648,36 @@ mod test {
     }
 
     #[test]
+    fn t_floor() {
+        check_jit_eval(
+            &deftree!(floor (+ (pow x 2) (sin x))).unwrap(),
+            &[('x', -5., 5.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_remainder() {
+        check_jit_eval(
+            &deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
+            &[('x', 1., 5.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_mul_add() {
+        check_jit_eval(
+            &deftree!(muladd (sin x) (cos x) (pow x 2)).unwrap(),
+            &[('x', -5., 5.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
     fn t_choose() {
         check_jit_eval(
             &deftree!(if (> x 0) x (-x)).unwrap(),

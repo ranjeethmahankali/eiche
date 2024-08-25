@@ -492,12 +492,32 @@ mod test {
     }
 
     #[test]
+    fn t_floor() {
+        check_interval_eval(
+            deftree!(floor (/ (pow x 2) (+ 2 (sin x)))).unwrap(),
+            &[('x', 1., 5.)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
     fn t_remainder() {
         check_interval_eval(
             deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
             &[('x', 1., 5.)],
-            20,
-            4,
+            100,
+            10,
+        );
+    }
+
+    #[test]
+    fn t_mul_add() {
+        check_interval_eval(
+            deftree!(muladd (sin x) (cos x) (pow x 2)).unwrap(),
+            &[('x', -4., 4.)],
+            100,
+            10,
         );
     }
 }

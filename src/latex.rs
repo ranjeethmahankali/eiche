@@ -354,6 +354,26 @@ mod test {
     }
 
     #[test]
+    fn t_mul_add() {
+        assert_eq!(
+            "{\\sin\\left({x}\\right)}.{\\cos\\left({x}\\right)}+{{x}^{2}}",
+            deftree!(muladd (sin x) (cos x) (pow x 2))
+                .unwrap()
+                .to_latex()
+        );
+        assert_eq!(
+            "{\\left({x} + {2}\\right)}.{\\left({x} + {3}\\right)}+{e^{x}}",
+            deftree!(muladd (+ x 2) (+ x 3) (exp x)).unwrap().to_latex()
+        );
+        assert_eq!(
+            "{\\left({x} + {2}\\right)}.{\\left({x} + {3}\\right)}+{\\left({1} + {\\ln\\left({x}\\right)}\\right)}",
+            deftree!(muladd (+ x 2) (+ x 3) (+ 1 (log x)))
+                .unwrap()
+                .to_latex()
+        );
+    }
+
+    #[test]
     fn t_mat2x2() {
         assert_eq!(
             "\\begin{bmatrix}{a} & {c} \\\\ {b} & {d}\\end{bmatrix}",
