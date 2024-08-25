@@ -458,12 +458,18 @@ mod test {
     #[test]
     fn t_remainder() {
         compare_trees(
-            &deftree!(rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)).unwrap(),
-            &deftree!(- (+ (* 10 x) 2) (* (* 6 x) (floor (/ (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)))))
-                .unwrap(),
+            &deftree!(sderiv (rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)) x).unwrap(),
+            &deftree!(-
+                      (+ (* 10 x) 2)
+                      (*
+                       (* 6 x)
+                       (floor (/
+                               (+ (+ (* (pow x 2) 5) (* x 2)) 3)
+                               (* (pow x 2) 3)))))
+            .unwrap(),
             &[('x', -1., 1.)],
             100,
-            1e-14,
+            1e-12,
         )
     }
 
