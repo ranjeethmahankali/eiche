@@ -8,7 +8,7 @@ use crate::{
 struct StackElement {
     index: usize,
     visited_children: bool, // Whether we're visiting this node after visiting all it's children.
-    parent: Option<usize>,
+    is_root: bool,
 }
 
 /// Pruner and topological sorter.
@@ -108,46 +108,44 @@ impl Pruner {
         while let Some(StackElement {
             index,
             visited_children,
-            parent,
+            is_root,
         }) = self.stack.pop()
         {
             if self.visited[index] {
                 continue;
             }
-            let traversed = if visited_children {
+            if visited_children {
                 // We're backtracking after processing the children of this node. So we remove it from the path.
+                // Since we visited all children of this node, we're ready to push it into the sorted list, and mark it as
+                // processed.
                 self.on_path[index] = false;
-                true
-            } else if self.on_path[index] {
-                // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
-                return Err(Error::CyclicGraph);
-            } else {
-                self.on_path[index] = true;
-                self.stack.push(StackElement {
-                    index,
-                    visited_children: true,
-                    parent,
-                });
-                false
-            };
-            if traversed {
-                if parent.is_none() {
-                    // Root node.
+                if is_root {
                     self.roots.push(nodes[index]);
                 } else {
                     self.index_map[index] = self.sorted.len();
                     self.sorted.push(nodes[index]);
-                    self.visited[index] = true;
                 }
+                self.visited[index] = true;
                 continue;
+            } else if self.on_path[index] {
+                // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
+                return Err(Error::CyclicGraph);
             }
+            // We reached this node for the first time. We push this node to the stack again for backtracking after it's
+            // children are visited. And we push its children on to the stack.
+            self.on_path[index] = true;
+            self.stack.push(StackElement {
+                index,
+                visited_children: true,
+                is_root,
+            });
             let num_children = match nodes[index] {
-                Constant(_) | Symbol(_) => 0,
+                Constant(_) | Symbol(_) => 0, // No children.
                 Unary(_op, input) => {
                     self.stack.push(StackElement {
                         index: input,
                         visited_children: false,
-                        parent: Some(index),
+                        is_root: false,
                     });
                     1
                 }
@@ -156,7 +154,7 @@ impl Pruner {
                     self.stack.extend(children.iter().map(|ci| StackElement {
                         index: *ci,
                         visited_children: false,
-                        parent: Some(index),
+                        is_root: false,
                     }));
                     children.len()
                 }
@@ -165,7 +163,7 @@ impl Pruner {
                     self.stack.extend(children.iter().map(|ci| StackElement {
                         index: *ci,
                         visited_children: false,
-                        parent: Some(index),
+                        is_root: false,
                     }));
                     children.len()
                 }
@@ -174,7 +172,7 @@ impl Pruner {
                 let num = self.stack.len();
                 self.stack[(num - num_children)..].sort_by(
                     |StackElement { index: a, .. }, StackElement { index: b, .. }| {
-                        return self.heights[*a].cmp(&self.heights[*b]);
+                        self.heights[*a].cmp(&self.heights[*b])
                     },
                 );
             }
@@ -207,7 +205,7 @@ impl Pruner {
         self.stack.extend(roots.map(|r| StackElement {
             index: r,
             visited_children: false,
-            parent: None,
+            is_root: true,
         }));
         self.stack.reverse();
         self.visited.clear();
