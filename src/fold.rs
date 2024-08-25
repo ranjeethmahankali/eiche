@@ -12,9 +12,11 @@ use crate::{
     },
 };
 
-/// Compute the results of operations on constants and fold those into
-/// constant nodes. The unused nodes after folding are not
-/// pruned. Use a pruner for that.
+/**
+Compute the results of operations on constants and fold those into
+constant nodes. The unused nodes after folding are not
+pruned. Use a pruner for that.
+*/
 pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
     for index in 0..nodes.len() {
         let folded = match nodes[index] {
@@ -55,6 +57,9 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
                 _ => None,
             },
             Ternary(op, a, b, c) => match (op, &nodes[a], &nodes[b], &nodes[c]) {
+                (op, Constant(a), Constant(b), Constant(c)) => {
+                    Some(Constant(Value::ternary_op(op, *a, *b, *c)?))
+                }
                 (Choose, Constant(flag), left, right) => {
                     if flag.boolean()? {
                         Some(*left)
@@ -64,6 +69,23 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
                 }
                 _ => None,
             },
+        };
+        if let Some(node) = folded {
+            nodes[index] = node;
+        }
+    }
+    return Ok(());
+}
+
+pub fn fold_nodes_muladd(nodes: &mut Vec<Node>) -> Result<(), Error> {
+    for index in 0..nodes.len() {
+        let folded = match nodes[index] {
+            Binary(Add, li, ri) => match (&nodes[li], &nodes[ri]) {
+                (_lhs, Binary(Multiply, a, b)) => Some(Ternary(MulAdd, *a, *b, li)),
+                (Binary(Multiply, a, b), _rhs) => Some(Ternary(MulAdd, *a, *b, ri)),
+                _ => None,
+            },
+            _ => None,
         };
         if let Some(node) = folded {
             nodes[index] = node;
@@ -82,6 +104,13 @@ impl Tree {
     pub fn fold(self) -> MaybeTree {
         let (mut nodes, dims) = self.take();
         fold_nodes(&mut nodes)?;
+        return Tree::from_nodes(nodes, dims);
+    }
+
+    pub fn fold_with_muladd(self) -> MaybeTree {
+        let (mut nodes, dims) = self.take();
+        fold_nodes(&mut nodes)?;
+        fold_nodes_muladd(&mut nodes)?;
         return Tree::from_nodes(nodes, dims);
     }
 }
@@ -339,5 +368,17 @@ mod test {
             .prune(&mut pruner)
             .unwrap()
             .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),);
+    }
+
+    #[test]
+    fn t_mul_add() {
+        let mut pruner = Pruner::new();
+        assert!(deftree!(+ (* a b) (+ (* c d) (+ (* e f) g)))
+            .unwrap()
+            .fold_with_muladd()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(muladd a b (muladd c d (muladd e f g))).unwrap()));
     }
 }
