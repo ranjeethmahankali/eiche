@@ -156,6 +156,7 @@ fn compute_symbolic_deriv(
                     }
                     Log => Binary(Divide, inputderiv, *input),
                     Exp => Binary(Multiply, ni, inputderiv),
+                    Floor => Constant(Scalar(0.)),
                     Not => continue,
                 }
             }
@@ -173,6 +174,7 @@ fn compute_symbolic_deriv(
                     Add => Binary(Add, lderiv, rderiv),
                     Subtract => Binary(Subtract, lderiv, rderiv),
                     Multiply => {
+                        // TODO: Use fma here.
                         let lr = push_node(Binary(Multiply, *lhs, rderiv), dst) + offset;
                         let rl = push_node(Binary(Multiply, *rhs, lderiv), dst) + offset;
                         Binary(Add, lr, rl)
@@ -203,6 +205,13 @@ fn compute_symbolic_deriv(
                         let cond = push_node(Binary(Greater, *lhs, *rhs), dst) + offset;
                         Ternary(Choose, cond, lderiv, rderiv)
                     }
+                    Remainder => {
+                        let div = push_node(Binary(Divide, *lhs, *rhs), dst) + offset;
+                        let floor = push_node(Unary(Floor, div), dst) + offset;
+                        let gderiv_floorfg =
+                            push_node(Binary(Multiply, rderiv, floor), dst) + offset;
+                        Binary(Subtract, lderiv, gderiv_floorfg)
+                    }
                     Less | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual | And | Or => {
                         continue
                     }
@@ -219,6 +228,23 @@ fn compute_symbolic_deriv(
                         None => continue,
                     };
                     Ternary(Choose, *a, bderiv, cderiv)
+                }
+                MulAdd => {
+                    // All three must be differentiable.
+                    let aderiv = match derivmap[*a] {
+                        Some(val) => val,
+                        None => continue,
+                    };
+                    let bderiv = match derivmap[*b] {
+                        Some(val) => val,
+                        None => continue,
+                    };
+                    let cderiv = match derivmap[*c] {
+                        Some(val) => val,
+                        None => continue,
+                    };
+                    let abc = push_node(Ternary(MulAdd, *a, bderiv, cderiv), dst) + offset;
+                    Ternary(MulAdd, aderiv, *b, abc)
                 }
             },
         };
@@ -416,6 +442,29 @@ mod test {
             100,
             1e-15,
         );
+    }
+
+    #[test]
+    fn t_floor() {
+        compare_trees(
+            &deftree!(sderiv (floor (+ x y)) x).unwrap(),
+            &deftree!(0.).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            20,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_remainder() {
+        compare_trees(
+            &deftree!(rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)).unwrap(),
+            &deftree!(- (+ (* 10 x) 2) (* (* 6 x) (floor (/ (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)))))
+                .unwrap(),
+            &[('x', -1., 1.)],
+            100,
+            1e-14,
+        )
     }
 
     #[test]

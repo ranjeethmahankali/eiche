@@ -4,7 +4,8 @@ use crate::{
     tree::{
         BinaryOp::{self, *},
         Node::{self, *},
-        TernaryOp, Tree,
+        TernaryOp::{self, *},
+        Tree,
         UnaryOp::{self, *},
         Value,
     },
@@ -61,6 +62,7 @@ impl ValueType for Value {
             Tan => Scalar(f64::tan(value.scalar()?)),
             Log => Scalar(f64::ln(value.scalar()?)),
             Exp => Scalar(f64::exp(value.scalar()?)),
+            Floor => Scalar(f64::floor(value.scalar()?)),
             // Boolean
             Not => Bool(!value.boolean()?),
         })
@@ -77,6 +79,7 @@ impl ValueType for Value {
             Pow => Scalar(f64::powf(lhs.scalar()?, rhs.scalar()?)),
             Min => Scalar(f64::min(lhs.scalar()?, rhs.scalar()?)),
             Max => Scalar(f64::max(lhs.scalar()?, rhs.scalar()?)),
+            Remainder => Scalar(lhs.scalar()?.rem_euclid(rhs.scalar()?)),
             // Boolean.
             Less => Bool(lhs.scalar()? < rhs.scalar()?),
             LessOrEqual => Bool(lhs.scalar()? <= rhs.scalar()?),
@@ -91,13 +94,14 @@ impl ValueType for Value {
 
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
         Ok(match op {
-            TernaryOp::Choose => {
+            Choose => {
                 if a.boolean()? {
                     b
                 } else {
                     c
                 }
             }
+            MulAdd => Value::Scalar(a.scalar()? * b.scalar()? + c.scalar()?),
         })
     }
 }

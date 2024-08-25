@@ -174,6 +174,14 @@ impl Tree {
                         regs[*input],
                         f64_type,
                     )?,
+                    Floor => build_float_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.floor.*",
+                        "floor_call",
+                        regs[*input],
+                        f64_type,
+                    )?,
                     Not => BasicValueEnum::IntValue(
                         builder
                             .build_not(regs[*input].into_int_value(), &format!("reg_{}", ni))
@@ -244,6 +252,15 @@ impl Tree {
                         regs[*rhs],
                         f64_type,
                     )?,
+                    Remainder => BasicValueEnum::FloatValue(
+                        builder
+                            .build_float_rem(
+                                regs[*lhs].into_float_value(),
+                                regs[*rhs].into_float_value(),
+                                &format!("reg_{}", ni),
+                            )
+                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
+                    ),
                     Less => BasicValueEnum::IntValue(
                         builder
                             .build_float_compare(
@@ -332,6 +349,16 @@ impl Tree {
                             &format!("reg_{}", ni),
                         )
                         .map_err(|e| Error::JitCompilationError(e.to_string()))?,
+                    MulAdd => build_float_ternary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.fma.*",
+                        "fma_call",
+                        regs[*a],
+                        regs[*b],
+                        regs[*c],
+                        f64_type,
+                    )?,
                 },
             };
             regs.push(reg);
@@ -423,6 +450,43 @@ fn build_float_binary_intrinsic<'ctx>(
             &[
                 BasicMetadataValueEnum::FloatValue(lhs.into_float_value()),
                 BasicMetadataValueEnum::FloatValue(rhs.into_float_value()),
+            ],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+fn build_float_ternary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &'static str,
+    a: BasicValueEnum<'ctx>,
+    b: BasicValueEnum<'ctx>,
+    c: BasicValueEnum<'ctx>,
+    f64_type: FloatType<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(
+            module,
+            &[
+                BasicTypeEnum::FloatType(f64_type),
+                BasicTypeEnum::FloatType(f64_type),
+                BasicTypeEnum::FloatType(f64_type),
+            ],
+        )
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[
+                BasicMetadataValueEnum::FloatValue(a.into_float_value()),
+                BasicMetadataValueEnum::FloatValue(b.into_float_value()),
+                BasicMetadataValueEnum::FloatValue(c.into_float_value()),
             ],
             call_name,
         )
