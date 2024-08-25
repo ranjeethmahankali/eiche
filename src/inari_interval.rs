@@ -108,7 +108,7 @@ impl ValueType for Interval {
                 }),
                 Min => Ok(Interval::Scalar(lhs.min(rhs))),
                 Max => Ok(Interval::Scalar(lhs.max(rhs))),
-                Remainder => Ok(Interval::Scalar(lhs.sub(lhs.div(rhs).floor()))),
+                Remainder => Ok(Interval::Scalar(lhs.sub(lhs.div(rhs).floor().mul(rhs)))),
                 Less => {
                     let (lo, hi) = if lhs.strict_precedes(rhs) {
                         (true, true)
@@ -494,10 +494,10 @@ mod test {
     #[test]
     fn t_remainder() {
         check_interval_eval(
-            deftree!(rem (+ x y) (- x y)).unwrap(),
-            &[('x', 1., 10.), ('y', 1., 10.)],
+            deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
+            &[('x', 1., 5.)],
             20,
-            5,
+            4,
         );
     }
 }
