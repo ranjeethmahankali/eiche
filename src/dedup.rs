@@ -45,7 +45,7 @@ impl Deduplicater {
     /// after deduplication, there can be `dead` nodes remaining, that
     /// are not connected to the root. Consider pruning the tree
     /// afterwards.
-    pub fn run(&mut self, nodes: &mut Vec<Node>) -> Result<(), Error> {
+    pub fn run(&mut self, nodes: &mut [Node]) -> Result<(), Error> {
         // Compute unique indices after deduplication.
         self.indices.clear();
         self.indices.extend(0..nodes.len());

@@ -46,7 +46,7 @@ impl Pruner {
         &mut self,
         mut nodes: Vec<Node>,
         root_indices: Range<usize>,
-    ) -> Result<Vec<Node>, Error> {
+    ) -> Result<(Vec<Node>, Range<usize>), Error> {
         // Heights are easier to compute on nodes that are already topologically
         // sorted. So we prune and sort them once without caring about their
         // heights, then compute the heights of all nodes, then sort them again
@@ -58,10 +58,10 @@ impl Pruner {
         // Second pass now using heights.
         let root_indices = (nodes.len() - root_indices.len())..nodes.len();
         // self.init_traverse(nodes.len(), root_indices.clone());
-        self.init_traverse(nodes.len(), root_indices);
+        self.init_traverse(nodes.len(), root_indices.clone());
         self.sort_nodes(&mut nodes, true)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
-        return Ok(nodes);
+        return Ok((nodes, root_indices));
     }
 
     /// Run the pruning and topological sorting using root node indices provided as a slice.
@@ -247,16 +247,17 @@ mod test {
     #[test]
     fn t_topological_sorting_0() {
         let mut sorter = Pruner::new();
-        let nodes = sorter
+        let (nodes, roots) = sorter
             .run_from_range(vec![Symbol('x'), Binary(Add, 0, 2), Symbol('y')], 1..2)
             .unwrap();
+        assert_eq!(roots, 2..3);
         assert_eq!(nodes, vec![Symbol('x'), Symbol('y'), Binary(Add, 0, 1)]);
     }
 
     #[test]
     fn t_topological_sorting_1() {
         let mut sorter = Pruner::new();
-        let nodes = sorter
+        let (nodes, roots) = sorter
             .run_from_range(
                 vec![
                     Symbol('x'),             // 0
@@ -269,6 +270,7 @@ mod test {
                 4..5,
             )
             .unwrap();
+        assert_eq!(roots, 5..6);
         assert_eq!(
             nodes,
             vec![
@@ -285,7 +287,7 @@ mod test {
     #[test]
     fn t_topological_sorting_2() {
         let mut sorter = Pruner::new();
-        let nodes = sorter
+        let (nodes, roots) = sorter
             .run_from_range(
                 vec![
                     Symbol('a'),            // 0
@@ -304,6 +306,7 @@ mod test {
                 10..11,
             )
             .unwrap();
+        assert_eq!(roots, 11..12);
         assert_eq!(
             nodes,
             vec![
@@ -326,7 +329,7 @@ mod test {
     #[test]
     fn t_sort_concat() {
         let mut sorter = Pruner::new();
-        let nodes = sorter
+        let (nodes, roots) = sorter
             .run_from_range(
                 vec![
                     Symbol('p'),            // 0
@@ -342,6 +345,7 @@ mod test {
                 5..7,
             )
             .unwrap();
+        assert_eq!(roots, 4..6);
         assert_eq!(
             nodes,
             vec![
@@ -358,7 +362,7 @@ mod test {
     #[test]
     fn t_sorting_3() {
         let mut sorter = Pruner::new();
-        let nodes = sorter
+        let (nodes, roots) = sorter
             .run_from_range(
                 vec![
                     Symbol('x'),             // 0
@@ -378,6 +382,7 @@ mod test {
                 12..13,
             )
             .unwrap();
+        assert_eq!(roots, 12..13);
         assert_eq!(
             nodes,
             vec![
