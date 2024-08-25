@@ -289,7 +289,7 @@ pub mod test {
         eps: f64,
         checked: &mut HashSet<&str>,
     ) {
-        use crate::test::util::compare_trees;
+        use crate::test::compare_trees;
         // Find template by name.
         let template = TEMPLATES.iter().find(|t| t.name == name).unwrap();
         // Check if valid trees can be made from the templates.

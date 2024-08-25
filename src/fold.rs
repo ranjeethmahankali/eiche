@@ -1,6 +1,15 @@
 use crate::{
     error::Error,
-    tree::{BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
+    eval::ValueType,
+    tree::{
+        BinaryOp::*,
+        MaybeTree,
+        Node::{self, *},
+        TernaryOp::*,
+        Tree,
+        UnaryOp::*,
+        Value::{self, *},
+    },
 };
 
 /// Compute the results of operations on constants and fold those into
@@ -13,14 +22,14 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
             Symbol(_) => None,
             Unary(op, input) => {
                 if let Constant(value) = nodes[input] {
-                    Some(Constant(op.apply(value)?))
+                    Some(Constant(Value::unary_op(op, value)?))
                 } else {
                     None
                 }
             }
             Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
                 // Constant folding.
-                (op, Constant(a), Constant(b)) => Some(Constant(op.apply(*a, *b)?)),
+                (op, Constant(a), Constant(b)) => Some(Constant(Value::binary_op(op, *a, *b)?)),
                 // Identity ops.
                 (Add, lhs, Constant(val)) if *val == 0. => Some(*lhs),
                 (Add, Constant(val), rhs) if *val == 0. => Some(*rhs),
@@ -80,7 +89,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, prune::Pruner, test::util::compare_trees};
+    use crate::{deftree, prune::Pruner, test::compare_trees};
 
     #[test]
     fn t_sconstant_folding_0() {

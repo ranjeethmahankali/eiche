@@ -450,12 +450,12 @@ impl<'ctx> JitEvaluator<'ctx> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, test::util::check_tree_eval};
+    use crate::{deftree, test::check_value_eval};
 
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::default();
         let mut jiteval = tree.jit_compile(&context).unwrap();
-        check_tree_eval(
+        check_value_eval(
             tree.clone(),
             |inputs: &[f64], outputs: &mut [f64]| {
                 let results = jiteval.run(inputs).unwrap();
@@ -626,9 +626,9 @@ mod perft {
     use crate::{
         dedup::Deduplicater,
         deftree,
-        eval::Evaluator,
+        eval::ValueEvaluator,
         prune::Pruner,
-        test::util::assert_float_eq,
+        test::assert_float_eq,
         // test::util::assert_float_eq,
         tree::{min, MaybeTree, Tree},
     };
@@ -667,13 +667,13 @@ mod perft {
     fn _benchmark_eval(
         values: &mut Vec<f64>,
         queries: &[[f64; 3]],
-        eval: &mut Evaluator,
+        eval: &mut ValueEvaluator,
     ) -> Duration {
         let before = Instant::now();
         values.extend(queries.iter().map(|coords| {
-            eval.set_scalar('x', coords[0]);
-            eval.set_scalar('y', coords[1]);
-            eval.set_scalar('z', coords[2]);
+            eval.set_value('x', coords[0].into());
+            eval.set_value('y', coords[1].into());
+            eval.set_value('z', coords[2].into());
             let results = eval.run().unwrap();
             results[0].scalar().unwrap()
         }));
@@ -722,14 +722,14 @@ mod perft {
             (Instant::now() - before).as_millis()
         );
         let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
-        let mut eval = Evaluator::new(&tree);
+        let mut eval = ValueEvaluator::new(&tree);
         println!(
             "Tree has {} nodes, evaluator allocated {} registers",
             tree.len(),
             eval.num_regs()
         );
         let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
-        println!("Evaluator time: {}ms", evaltime.as_millis());
+        println!("ValueEvaluator time: {}ms", evaltime.as_millis());
         let mut values2: Vec<f64> = Vec::with_capacity(_N_QUERIES);
         let context = JitContext::default();
         let mut jiteval = {

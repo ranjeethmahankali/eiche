@@ -1,4 +1,4 @@
-name: Rust
+name: Build and Run Tests
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
   build-and-test-linux:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v1
       with:
@@ -26,7 +26,7 @@ jobs:
   build-and-test-windows:
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose --no-default-features
     - name: Run tests

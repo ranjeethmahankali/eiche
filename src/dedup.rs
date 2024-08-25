@@ -246,7 +246,7 @@ mod test {
     use crate::{
         deftree,
         prune::Pruner,
-        test::util::compare_trees,
+        test::compare_trees,
         tree::{is_topological_order, BinaryOp::*},
     };
 

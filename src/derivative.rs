@@ -235,7 +235,7 @@ fn push_node(node: Node, dst: &mut Vec<Node>) -> usize {
 
 #[cfg(test)]
 mod test {
-    use crate::{deftree, test::util::compare_trees};
+    use crate::{deftree, test::compare_trees};
 
     #[test]
     fn t_polynomial() {

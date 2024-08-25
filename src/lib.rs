@@ -7,6 +7,10 @@ pub mod tree;
 #[cfg(feature = "llvm-jit")]
 pub mod llvm_jit;
 
+#[cfg(feature = "inari-intervals")]
+pub mod inari_interval;
+
+mod compile;
 mod dedup;
 mod fold;
 mod hash;

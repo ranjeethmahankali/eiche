@@ -721,8 +721,8 @@ fn build_binary_intrinsic<'ctx>(
 mod test {
     use crate::{
         deftree,
-        eval::Evaluator,
-        test::util::{assert_float_eq, Sampler},
+        eval::ValueEvaluator,
+        test::{assert_float_eq, Sampler},
     };
 
     use super::*;
@@ -730,7 +730,7 @@ mod test {
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::default();
         let mut jiteval = tree.jit_compile_array(&context).unwrap();
-        let mut eval = Evaluator::new(&tree);
+        let mut eval = ValueEvaluator::new(&tree);
         let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         let mut expected = Vec::with_capacity(
             tree.num_roots() * usize::pow(samples_per_var, vardata.len() as u32),
@@ -738,7 +738,7 @@ mod test {
         let mut actual = Vec::with_capacity(expected.capacity());
         while let Some(sample) = sampler.next() {
             for (label, value) in vardata.iter().map(|(label, ..)| *label).zip(sample.iter()) {
-                eval.set_scalar(label, *value);
+                eval.set_value(label, (*value).into());
             }
             expected.extend(
                 eval.run()
@@ -924,9 +924,9 @@ mod perft {
     use crate::{
         dedup::Deduplicater,
         deftree,
-        eval::Evaluator,
+        eval::ValueEvaluator,
         prune::Pruner,
-        test::util::assert_float_eq,
+        test::assert_float_eq,
         // test::util::assert_float_eq,
         tree::{min, MaybeTree, Tree},
     };
@@ -965,13 +965,13 @@ mod perft {
     fn _benchmark_eval(
         values: &mut Vec<f64>,
         queries: &[[f64; 3]],
-        eval: &mut Evaluator,
+        eval: &mut ValueEvaluator,
     ) -> Duration {
         let before = Instant::now();
         values.extend(queries.iter().map(|coords| {
-            eval.set_scalar('x', coords[0]);
-            eval.set_scalar('y', coords[1]);
-            eval.set_scalar('z', coords[2]);
+            eval.set_value('x', coords[0].into());
+            eval.set_value('y', coords[1].into());
+            eval.set_value('z', coords[2].into());
             let results = eval.run().unwrap();
             results[0].scalar().unwrap()
         }));
@@ -1020,9 +1020,9 @@ mod perft {
             (Instant::now() - before).as_millis()
         );
         let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
-        let mut eval = Evaluator::new(&tree);
+        let mut eval = ValueEvaluator::new(&tree);
         let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
-        println!("Evaluator time: {}ms", evaltime.as_millis());
+        println!("ValueEvaluator time: {}ms", evaltime.as_millis());
         let mut values2: Vec<f64> = Vec::with_capacity(_N_QUERIES);
         let context = JitContext::default();
         let mut jiteval = {
