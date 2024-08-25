@@ -51,7 +51,6 @@ pub enum BinaryOp {
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum TernaryOp {
     Choose,
-    MulAdd,
 }
 
 impl UnaryOp {
@@ -132,7 +131,6 @@ impl TernaryOp {
         use TernaryOp::*;
         match self {
             Choose => 0,
-            MulAdd => 1,
         }
     }
 }
@@ -192,19 +190,19 @@ impl Tree {
     pub fn compacted(mut self) -> MaybeTree {
         fold_nodes(&mut self.nodes)?;
         let mut pruner = Pruner::new();
-        let root_indices = self.root_indices();
-        let mut nodes = pruner.run_from_range(self.nodes, root_indices.clone())?;
+        let roots = self.root_indices();
+        let (mut nodes, roots) = pruner.run_from_range(self.nodes, roots)?;
         let mut deduper = Deduplicater::new();
         // We don't need to check because we just ran the pruner on these nodes, which sorts them topologically.
         deduper.run(&mut nodes)?;
         let mut pruner = Pruner::new();
-        let nodes = pruner.run_from_range(nodes, root_indices)?;
+        let (nodes, _) = pruner.run_from_range(nodes, roots)?;
         return Tree::from_nodes(nodes, self.dims);
     }
     /// Prunes the tree and topologically sorts the nodes.
     pub fn prune(self, pruner: &mut Pruner) -> MaybeTree {
         let roots = self.root_indices();
-        let nodes = pruner.run_from_range(self.nodes, roots)?;
+        let (nodes, _) = pruner.run_from_range(self.nodes, roots)?;
         return Tree::from_nodes(nodes, self.dims);
     }
 
@@ -249,10 +247,6 @@ impl Tree {
     /// and value when false.
     pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
         return cond?.ternary_op(iftrue?, iffalse?, Choose);
-    }
-
-    pub fn mul_add(a: MaybeTree, b: MaybeTree, c: MaybeTree) -> MaybeTree {
-        return a?.ternary_op(b?, c?, MulAdd);
     }
 
     /// The number of nodes in this tree.

@@ -45,7 +45,7 @@ impl Deduplicater {
     /// after deduplication, there can be `dead` nodes remaining, that
     /// are not connected to the root. Consider pruning the tree
     /// afterwards.
-    pub fn run(&mut self, nodes: &mut Vec<Node>) -> Result<(), Error> {
+    pub fn run(&mut self, nodes: &mut [Node]) -> Result<(), Error> {
         // Compute unique indices after deduplication.
         self.indices.clear();
         self.indices.extend(0..nodes.len());
@@ -362,10 +362,11 @@ mod test {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let tree = deftree!(
-            (max (min
-                  (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-             (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+            max (
+                min
+                    (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
+                    (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
+                (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25)
         )
         .unwrap();
         let nodup = tree

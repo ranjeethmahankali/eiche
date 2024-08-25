@@ -77,23 +77,6 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
     return Ok(());
 }
 
-pub fn fold_nodes_muladd(nodes: &mut Vec<Node>) -> Result<(), Error> {
-    for index in 0..nodes.len() {
-        let folded = match nodes[index] {
-            Binary(Add, li, ri) => match (&nodes[li], &nodes[ri]) {
-                (_lhs, Binary(Multiply, a, b)) => Some(Ternary(MulAdd, *a, *b, li)),
-                (Binary(Multiply, a, b), _rhs) => Some(Ternary(MulAdd, *a, *b, ri)),
-                _ => None,
-            },
-            _ => None,
-        };
-        if let Some(node) = folded {
-            nodes[index] = node;
-        }
-    }
-    return Ok(());
-}
-
 impl Tree {
     /// Computes the results of constant operations, and folds them
     /// into the tree. Identity operations and other expressions whose
@@ -104,13 +87,6 @@ impl Tree {
     pub fn fold(self) -> MaybeTree {
         let (mut nodes, dims) = self.take();
         fold_nodes(&mut nodes)?;
-        return Tree::from_nodes(nodes, dims);
-    }
-
-    pub fn fold_with_muladd(self) -> MaybeTree {
-        let (mut nodes, dims) = self.take();
-        fold_nodes(&mut nodes)?;
-        fold_nodes_muladd(&mut nodes)?;
         return Tree::from_nodes(nodes, dims);
     }
 }
@@ -368,17 +344,5 @@ mod test {
             .prune(&mut pruner)
             .unwrap()
             .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),);
-    }
-
-    #[test]
-    fn t_mul_add() {
-        let mut pruner = Pruner::new();
-        assert!(deftree!(+ (* a b) (+ (* c d) (+ (* e f) g)))
-            .unwrap()
-            .fold_with_muladd()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(muladd a b (muladd c d (muladd e f g))).unwrap()));
     }
 }
