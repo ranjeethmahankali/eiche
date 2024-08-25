@@ -19,18 +19,11 @@ struct StackElement {
 /// nodes to be topologically valid, and remove unused nodes.
 pub struct Pruner {
     index_map: Vec<usize>,
-    // This vector stores a flat view of the depth first traversal. The bool
-    // flag represents whether or not that occurrence of the node should be kept
-    // in the final sorted list. For example, for nodes that are visited more
-    // than once, only one occurrence will be flagged as 'true', others should
-    // be flagged 'false'.
-    traverse: Vec<(Node, bool)>,
-    scan: Vec<usize>,
+    indices: Vec<usize>,
     sorted: Vec<Node>,
     roots: Vec<Node>,
     heights: Vec<usize>,
     stack: Vec<StackElement>,
-    visited: Vec<bool>,
     on_path: Vec<bool>,
 }
 
@@ -39,13 +32,11 @@ impl Pruner {
     pub fn new() -> Pruner {
         Pruner {
             index_map: Vec::new(),
-            traverse: Vec::new(),
-            scan: Vec::new(),
+            indices: Vec::new(),
             sorted: Vec::new(),
             roots: Vec::new(),
             heights: Vec::new(),
             stack: Vec::new(),
-            visited: Vec::new(),
             on_path: Vec::new(),
         }
     }
@@ -104,8 +95,6 @@ impl Pruner {
             visited_children: false,
         }));
         self.stack.reverse();
-        self.visited.clear();
-        self.visited.resize(num_nodes, false);
         self.on_path.clear();
         self.on_path.resize(num_nodes, false);
     }
@@ -147,14 +136,11 @@ impl Pruner {
         num_roots: usize,
         use_height: bool,
     ) -> Result<(), Error> {
-        self.traverse.clear();
-        self.traverse.reserve(nodes.len());
         self.roots.clear();
         self.roots.reserve(num_roots);
         self.index_map.clear();
-        self.index_map.resize(nodes.len(), 0);
-        self.visited.clear();
-        self.visited.resize(nodes.len(), false);
+        self.index_map.resize(nodes.len(), usize::MAX);
+        let mut traverse_index = 0usize;
         while let Some(StackElement {
             index,
             is_root,
@@ -169,25 +155,11 @@ impl Pruner {
                 // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
                 return Err(Error::CyclicGraph);
             }
-            if self.visited[index] {
-                /*
-                We're visiting this node more than once, hence it will appear
-                more than once in self.traverse. We flag the previous occurrence
-                of this node with a 'false', so it gets filtered out later when
-                we copy these nodes into self.sorted. We do this because we only
-                want to keep the latest occurrence of each node that is visited
-                more than once. Because we reverse the order of the nodes in a
-                later step, this results in the node appearing just before it's
-                first use as an input by another node.
-                 */
-                self.traverse[self.index_map[index]].1 = false;
-            }
-            self.visited[index] = true;
             if is_root {
                 self.roots.push(nodes[index]);
             } else {
-                self.index_map[index] = self.traverse.len();
-                self.traverse.push((nodes[index], true));
+                self.index_map[index] = traverse_index;
+                traverse_index += 1;
             }
             debug_assert!(!visited_children, "Invalid depth first traversal.");
             self.on_path[index] = true;
@@ -234,32 +206,26 @@ impl Pruner {
                 );
             }
         }
-        // Only some of the nodes from the traverse will be retained. We're
-        // doing an exclusive scan to get the indices of the nodes that are
-        // retained.
-        self.scan.clear();
-        self.scan.reserve(self.traverse.len());
+        self.indices.clear();
+        self.indices
+            .extend((0..nodes.len()).filter(|i| self.index_map[*i] != usize::MAX));
+        self.indices
+            .sort_by(|a, b| self.index_map[*a].cmp(&self.index_map[*b]));
         self.sorted.clear();
-        {
-            let mut i = 0usize;
-            for (node, keep) in self.traverse.iter() {
-                self.scan.push(i);
-                if *keep {
-                    self.sorted.push(*node);
-                    i += 1;
-                }
-            }
-        }
-        if !self.sorted.is_empty() {
-            for i in self.index_map.iter_mut() {
-                *i = self.scan[*i];
-            }
+        for (i, idx) in self.indices.iter().enumerate() {
+            self.index_map[*idx] = i;
+            self.sorted.push(nodes[*idx]);
         }
         if self.sorted.len() > 1 {
+            dbg!(&self.sorted);
+            dbg!(&self.index_map);
             // The correct topological order is the reverse of a depth first
             // traversal. So we reverse the nodes and adjust the indices.
             self.sorted.reverse();
             for i in self.index_map.iter_mut() {
+                if *i == usize::MAX {
+                    continue;
+                }
                 *i = self.sorted.len() - *i - 1;
             }
         }
