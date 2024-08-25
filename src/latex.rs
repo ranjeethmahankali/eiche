@@ -44,10 +44,9 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 Negate => format!("-{{{}}}", {
                     match inode {
                         // Special cases that require braces.
-                        Binary(Add, ..)
-                        | Binary(Subtract, ..)
-                        | Ternary(Choose, ..)
-                        | Ternary(MulAdd, ..) => with_parens(ix),
+                        Binary(Add, ..) | Binary(Subtract, ..) | Ternary(Choose, ..) => {
+                            with_parens(ix)
+                        }
                         Constant(_) | Symbol(_) | Unary(..) | Binary(..) => ix,
                     }
                 }),
@@ -65,7 +64,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                         | Binary(Min, ..)
                         | Binary(Max, ..)
                         | Ternary(Choose, ..) => ix,
-                        Binary(..) | Ternary(MulAdd, ..) => with_parens(ix),
+                        Binary(..) => with_parens(ix),
                     }
                 }),
                 Floor => format!("\\lfloor{{{}}}\\rfloor", ix),
@@ -114,12 +113,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
             match op {
                 Choose => format!(
                     "\\left\\{{ \\begin{{array}}{{lr}} {{{bx}}}, & \\text{{if }} {{{ax}}}\\\\ {{{cx}}}, \\end{{array}} \\right\\}}"
-                ),
-                MulAdd => {
-                    let (ax, bx) = parens_binary(Multiply, &nodes[*a], &nodes[*b], ax, bx);
-                    let cx = parens_add_sub(&nodes[*c], cx);
-                    format!("{{{}}}.{{{}}}+{{{}}}", ax, bx, cx)
-                }
+                )
             }
         }
     }
@@ -150,8 +144,7 @@ fn parens_binary(
                     | Unary(Tan, _)
                     | Unary(Log, _)
                     | Unary(Exp, _)
-                    | Binary(..)
-                    | Ternary(MulAdd, ..) => with_parens(lx),
+                    | Binary(..) => with_parens(lx),
                     Constant(_) if lx.len() > 1 => with_parens(lx),
                     Constant(_) | Symbol(_) | Unary(_, _) | Ternary(Choose, ..) => lx,
                 }
@@ -163,8 +156,7 @@ fn parens_binary(
                     | Symbol(_)
                     | Unary(_, _)
                     | Binary(_, _, _)
-                    | Ternary(Choose, ..)
-                    | Ternary(MulAdd, ..) => rx,
+                    | Ternary(Choose, ..) => rx,
                 }
             },
         ),
@@ -188,11 +180,9 @@ fn parens_div(node: &Node, latex: String) -> String {
 /// string in parentheses if necessary.
 fn parens_mul(node: &Node, latex: String) -> String {
     match node {
-        Binary(Add, ..)
-        | Binary(Subtract, ..)
-        | Binary(Multiply, ..)
-        | Unary(Negate, ..)
-        | Ternary(MulAdd, ..) => with_parens(latex),
+        Binary(Add, ..) | Binary(Subtract, ..) | Binary(Multiply, ..) | Unary(Negate, ..) => {
+            with_parens(latex)
+        }
         Binary(..) | Unary(..) | Symbol(_) | Constant(_) | Ternary(Choose, ..) => latex,
     }
 }
@@ -201,9 +191,7 @@ fn parens_mul(node: &Node, latex: String) -> String {
 /// `latex` string in parentheses if necessary.
 fn parens_add_sub(node: &Node, latex: String) -> String {
     match node {
-        Binary(Add, ..) | Binary(Subtract, ..) | Unary(Negate, _) | Ternary(MulAdd, ..) => {
-            with_parens(latex)
-        }
+        Binary(Add, ..) | Binary(Subtract, ..) | Unary(Negate, _) => with_parens(latex),
         Binary(..) | Constant(_) | Symbol(_) | Unary(..) | Ternary(Choose, ..) => latex,
     }
 }
@@ -350,26 +338,6 @@ mod test {
         assert_eq!(
             "{\\left({x} + {y}\\right)} \\bmod {\\left({x} - {y}\\right)}",
             deftree!(rem (+ x y) (- x y)).unwrap().to_latex()
-        );
-    }
-
-    #[test]
-    fn t_mul_add() {
-        assert_eq!(
-            "{\\sin\\left({x}\\right)}.{\\cos\\left({x}\\right)}+{{x}^{2}}",
-            deftree!(muladd (sin x) (cos x) (pow x 2))
-                .unwrap()
-                .to_latex()
-        );
-        assert_eq!(
-            "{\\left({x} + {2}\\right)}.{\\left({x} + {3}\\right)}+{e^{x}}",
-            deftree!(muladd (+ x 2) (+ x 3) (exp x)).unwrap().to_latex()
-        );
-        assert_eq!(
-            "{\\left({x} + {2}\\right)}.{\\left({x} + {3}\\right)}+{\\left({1} + {\\ln\\left({x}\\right)}\\right)}",
-            deftree!(muladd (+ x 2) (+ x 3) (+ 1 (log x)))
-                .unwrap()
-                .to_latex()
         );
     }
 

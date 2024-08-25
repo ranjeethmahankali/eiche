@@ -229,23 +229,6 @@ fn compute_symbolic_deriv(
                     };
                     Ternary(Choose, *a, bderiv, cderiv)
                 }
-                MulAdd => {
-                    // All three must be differentiable.
-                    let aderiv = match derivmap[*a] {
-                        Some(val) => val,
-                        None => continue,
-                    };
-                    let bderiv = match derivmap[*b] {
-                        Some(val) => val,
-                        None => continue,
-                    };
-                    let cderiv = match derivmap[*c] {
-                        Some(val) => val,
-                        None => continue,
-                    };
-                    let abc = push_node(Ternary(MulAdd, *a, bderiv, cderiv), dst) + offset;
-                    Ternary(MulAdd, aderiv, *b, abc)
-                }
             },
         };
         derivmap[ni] = Some(offset + dst.len());
@@ -471,17 +454,6 @@ mod test {
             100,
             1e-12,
         )
-    }
-
-    #[test]
-    fn t_mul_add() {
-        compare_trees(
-            &deftree!(sderiv (muladd (sin x) (cos x) (pow x 2)) x).unwrap(),
-            &deftree!(+ (* 2 x) (- (pow (cos x) 2) (pow (sin x) 2))).unwrap(),
-            &[('x', -1., 1.)],
-            100,
-            1e-14,
-        );
     }
 
     #[test]

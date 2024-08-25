@@ -101,7 +101,6 @@ impl ValueType for Value {
                     c
                 }
             }
-            MulAdd => Value::Scalar(a.scalar()?.mul_add(b.scalar()?, c.scalar()?)),
         })
     }
 }
@@ -427,21 +426,6 @@ mod test {
             },
             &[('x', -1., 1.)],
             100,
-            1e-14,
-        );
-    }
-
-    #[test]
-    fn t_mul_add() {
-        check_value_eval(
-            deftree!(muladd a b c).unwrap(),
-            |vars: &[f64], output: &mut [f64]| {
-                if let [a, b, c] = vars[..] {
-                    output[0] = a * b + c;
-                }
-            },
-            &[('a', -1., 1.), ('b', -1., 1.), ('c', -1., 1.)],
-            10,
             1e-14,
         );
     }

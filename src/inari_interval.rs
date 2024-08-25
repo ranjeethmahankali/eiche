@@ -233,9 +233,6 @@ impl ValueType for Interval {
                 },
                 (false, false) => Ok(c),
             },
-            MulAdd => Ok(Interval::Scalar(
-                a.scalar()?.mul_add(b.scalar()?, c.scalar()?),
-            )),
         }
     }
 }
@@ -506,16 +503,6 @@ mod test {
         check_interval_eval(
             deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
             &[('x', 1., 5.)],
-            100,
-            10,
-        );
-    }
-
-    #[test]
-    fn t_mul_add() {
-        check_interval_eval(
-            deftree!(muladd (sin x) (cos x) (pow x 2)).unwrap(),
-            &[('x', -4., 4.)],
             100,
             10,
         );

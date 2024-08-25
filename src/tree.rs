@@ -51,7 +51,6 @@ pub enum BinaryOp {
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub enum TernaryOp {
     Choose,
-    MulAdd,
 }
 
 impl UnaryOp {
@@ -132,7 +131,6 @@ impl TernaryOp {
         use TernaryOp::*;
         match self {
             Choose => 0,
-            MulAdd => 1,
         }
     }
 }
@@ -249,10 +247,6 @@ impl Tree {
     /// and value when false.
     pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
         return cond?.ternary_op(iftrue?, iffalse?, Choose);
-    }
-
-    pub fn mul_add(a: MaybeTree, b: MaybeTree, c: MaybeTree) -> MaybeTree {
-        return a?.ternary_op(b?, c?, MulAdd);
     }
 
     /// The number of nodes in this tree.

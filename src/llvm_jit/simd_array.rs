@@ -610,16 +610,6 @@ impl Tree {
                             &format!("reg_{}", ni),
                         )
                         .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    MulAdd => build_ternary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.fma.*",
-                        "fma_call",
-                        regs[*a],
-                        regs[*b],
-                        regs[*c],
-                        fvec_type,
-                    )?,
                 },
             };
             regs.push(reg);
@@ -735,43 +725,6 @@ fn build_binary_intrinsic<'ctx>(
             &[
                 BasicMetadataValueEnum::VectorValue(lhs.into_vector_value()),
                 BasicMetadataValueEnum::VectorValue(rhs.into_vector_value()),
-            ],
-            call_name,
-        )
-        .map_err(|_| Error::CannotCompileIntrinsic(name))?
-        .try_as_basic_value()
-        .left()
-        .ok_or(Error::CannotCompileIntrinsic(name))
-}
-
-fn build_ternary_intrinsic<'ctx>(
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    name: &'static str,
-    call_name: &'static str,
-    a: BasicValueEnum<'ctx>,
-    b: BasicValueEnum<'ctx>,
-    c: BasicValueEnum<'ctx>,
-    vec_type: VectorType<'ctx>,
-) -> Result<BasicValueEnum<'ctx>, Error> {
-    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
-    let intrinsic_fn = intrinsic
-        .get_declaration(
-            module,
-            &[
-                BasicTypeEnum::VectorType(vec_type),
-                BasicTypeEnum::VectorType(vec_type),
-                BasicTypeEnum::VectorType(vec_type),
-            ],
-        )
-        .ok_or(Error::CannotCompileIntrinsic(name))?;
-    builder
-        .build_call(
-            intrinsic_fn,
-            &[
-                BasicMetadataValueEnum::VectorValue(a.into_vector_value()),
-                BasicMetadataValueEnum::VectorValue(b.into_vector_value()),
-                BasicMetadataValueEnum::VectorValue(c.into_vector_value()),
             ],
             call_name,
         )
@@ -960,16 +913,6 @@ mod test {
         check_jit_eval(
             &deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
             &[('x', 1., 5.)],
-            100,
-            0.,
-        );
-    }
-
-    #[test]
-    fn t_mul_add() {
-        check_jit_eval(
-            &deftree!(muladd (sin x) (cos x) (pow x 2)).unwrap(),
-            &[('x', -5., 5.)],
             100,
             0.,
         );
