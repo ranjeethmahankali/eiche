@@ -7,8 +7,8 @@ use crate::{
 
 struct StackElement {
     index: usize,
-    is_root: bool,
     visited_children: bool, // Whether we're visiting this node after visiting all it's children.
+    parent: Option<usize>,
 }
 
 /// Pruner and topological sorter.
@@ -23,6 +23,8 @@ pub struct Pruner {
     sorted: Vec<Node>,
     roots: Vec<Node>,
     heights: Vec<usize>,
+    visited: Vec<bool>,
+    last_parent: Vec<Option<usize>>,
     stack: Vec<StackElement>,
     on_path: Vec<bool>,
 }
@@ -36,6 +38,8 @@ impl Pruner {
             sorted: Vec::new(),
             roots: Vec::new(),
             heights: Vec::new(),
+            visited: Vec::new(),
+            last_parent: Vec::new(),
             stack: Vec::new(),
             on_path: Vec::new(),
         }
@@ -52,11 +56,13 @@ impl Pruner {
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), root_indices.clone());
-        self.sort_nodes(&mut nodes, root_indices.len(), false)?;
+        self.find_last_parents(&nodes)?;
+        self.init_traverse(nodes.len(), root_indices.clone());
+        self.sort_nodes(&mut nodes, false)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
         self.compute_heights(&mut nodes);
         self.init_traverse(nodes.len(), (nodes.len() - root_indices.len())..nodes.len());
-        self.sort_nodes(&mut nodes, root_indices.len(), true)?;
+        self.sort_nodes(&mut nodes, true)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
         return Ok(nodes);
     }
@@ -72,53 +78,19 @@ impl Pruner {
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), roots.iter().map(|r| *r));
-        self.sort_nodes(&mut nodes, roots.len(), false)?;
+        self.find_last_parents(&nodes)?;
+        self.init_traverse(nodes.len(), roots.iter().map(|r| *r));
+        self.sort_nodes(&mut nodes, false)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
         self.compute_heights(&mut nodes);
         self.init_traverse(nodes.len(), (nodes.len() - roots.len())..nodes.len());
-        self.sort_nodes(&mut nodes, roots.len(), true)?;
+        self.sort_nodes(&mut nodes, true)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
         let num_roots = roots.len();
         for (r, i) in roots.iter_mut().zip((nodes.len() - num_roots)..nodes.len()) {
             *r = i;
         }
         return Ok(nodes);
-    }
-
-    /// Clear all the temporary storage and prepare for a new depth-first
-    /// traversal for the given number of nodes and root nodes.
-    fn init_traverse<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
-        self.stack.clear();
-        self.stack.extend(roots.map(|r| StackElement {
-            index: r,
-            is_root: true,
-            visited_children: false,
-        }));
-        self.stack.reverse();
-        self.on_path.clear();
-        self.on_path.resize(num_nodes, false);
-    }
-
-    /// Root node is the highest, while constants and variable have a zero height.
-    fn compute_heights(&mut self, nodes: &[Node]) {
-        self.heights.clear();
-        self.heights.resize(nodes.len(), 0);
-        for (i, node) in nodes.iter().enumerate() {
-            self.heights[i] = usize::max(
-                self.heights[i],
-                match node {
-                    Constant(_) | Symbol(_) => 0,
-                    Unary(_, input) => 1 + self.heights[*input],
-                    Binary(_, lhs, rhs) => 1 + usize::max(self.heights[*lhs], self.heights[*rhs]),
-                    Ternary(_, a, b, c) => {
-                        1 + usize::max(
-                            self.heights[*a],
-                            usize::max(self.heights[*b], self.heights[*c]),
-                        )
-                    }
-                },
-            );
-        }
     }
 
     /// Prune and sort the nodes. This function does a depth-first traversal of
@@ -130,73 +102,29 @@ impl Pruner {
     /// true will cause shallower subtrees to appear before deeper
     /// subtrees. This is beneficial for optimizing register allocation, as it
     /// minimizes the liveness range of registers.
-    fn sort_nodes(
-        &mut self,
-        nodes: &[Node],
-        num_roots: usize,
-        use_height: bool,
-    ) -> Result<(), Error> {
+    fn sort_nodes(&mut self, nodes: &[Node], use_height: bool) -> Result<(), Error> {
         self.roots.clear();
-        self.roots.reserve(num_roots);
+        self.roots.reserve(self.stack.len());
         self.index_map.clear();
         self.index_map.resize(nodes.len(), usize::MAX);
         let mut traverse_index = 0usize;
         while let Some(StackElement {
             index,
-            is_root,
             visited_children,
+            parent,
         }) = self.stack.pop()
         {
-            if visited_children {
-                // We're backtracking after processing the children of this node. So we remove it from the path.
-                self.on_path[index] = false;
+            if self.check_for_cycles(visited_children, index, parent)? {
                 continue;
-            } else if self.on_path[index] {
-                // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
-                return Err(Error::CyclicGraph);
             }
-            if is_root {
+            if parent.is_none() {
+                // Root node.
                 self.roots.push(nodes[index]);
             } else {
                 self.index_map[index] = traverse_index;
                 traverse_index += 1;
             }
-            debug_assert!(!visited_children, "Invalid depth first traversal.");
-            self.on_path[index] = true;
-            self.stack.push(StackElement {
-                index,
-                is_root,
-                visited_children: true,
-            });
-            let num_children = match nodes[index] {
-                Constant(_) | Symbol(_) => 0,
-                Unary(_op, input) => {
-                    self.stack.push(StackElement {
-                        index: input,
-                        is_root: false,
-                        visited_children: false,
-                    });
-                    1
-                }
-                Binary(_op, lhs, rhs) => {
-                    let children = [lhs, rhs];
-                    self.stack.extend(children.iter().map(|ci| StackElement {
-                        index: *ci,
-                        is_root: false,
-                        visited_children: false,
-                    }));
-                    children.len()
-                }
-                Ternary(_op, a, b, c) => {
-                    let children = [a, b, c];
-                    self.stack.extend(children.iter().map(|ci| StackElement {
-                        index: *ci,
-                        is_root: false,
-                        visited_children: false,
-                    }));
-                    children.len()
-                }
-            };
+            let num_children = self.push_children(nodes, index);
             if use_height {
                 let num = self.stack.len();
                 self.stack[(num - num_children)..].sort_by(
@@ -248,6 +176,122 @@ impl Pruner {
             }
         }
         return Ok(());
+    }
+
+    fn find_last_parents(&mut self, nodes: &[Node]) -> Result<(), Error> {
+        self.last_parent.clear();
+        self.last_parent.resize(nodes.len(), None);
+        while let Some(StackElement {
+            index,
+            visited_children,
+            parent,
+        }) = self.stack.pop()
+        {
+            if self.check_for_cycles(visited_children, index, parent)? {
+                continue;
+            }
+            self.last_parent[index] = parent;
+            if self.visited[index] {
+                continue;
+            }
+            self.visited[index] = true;
+            self.push_children(nodes, index);
+        }
+        return Ok(());
+    }
+
+    /// Clear all the temporary storage and prepare for a new depth-first
+    /// traversal for the given number of nodes and root nodes.
+    fn init_traverse<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
+        self.stack.clear();
+        self.stack.extend(roots.map(|r| StackElement {
+            index: r,
+            visited_children: false,
+            parent: None,
+        }));
+        self.stack.reverse();
+        self.visited.clear();
+        self.visited.resize(num_nodes, false);
+        self.on_path.clear();
+        self.on_path.resize(num_nodes, false);
+    }
+
+    /// Root node is the highest, while constants and variable have a zero height.
+    fn compute_heights(&mut self, nodes: &[Node]) {
+        self.heights.clear();
+        self.heights.resize(nodes.len(), 0);
+        for (i, node) in nodes.iter().enumerate() {
+            self.heights[i] = usize::max(
+                self.heights[i],
+                match node {
+                    Constant(_) | Symbol(_) => 0,
+                    Unary(_, input) => 1 + self.heights[*input],
+                    Binary(_, lhs, rhs) => 1 + usize::max(self.heights[*lhs], self.heights[*rhs]),
+                    Ternary(_, a, b, c) => {
+                        1 + usize::max(
+                            self.heights[*a],
+                            usize::max(self.heights[*b], self.heights[*c]),
+                        )
+                    }
+                },
+            );
+        }
+    }
+
+    fn check_for_cycles(
+        &mut self,
+        visited_children: bool,
+        index: usize,
+        parent: Option<usize>,
+    ) -> Result<bool, Error> {
+        if visited_children {
+            // We're backtracking after processing the children of this node. So we remove it from the path.
+            self.on_path[index] = false;
+            return Ok(true);
+        } else if self.on_path[index] {
+            // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
+            return Err(Error::CyclicGraph);
+        } else {
+            self.on_path[index] = true;
+            self.stack.push(StackElement {
+                index,
+                visited_children: true,
+                parent,
+            });
+        }
+        return Ok(false);
+    }
+
+    fn push_children(&mut self, nodes: &[Node], index: usize) -> usize {
+        match nodes[index] {
+            Constant(_) | Symbol(_) => 0,
+            Unary(_op, input) => {
+                self.stack.push(StackElement {
+                    index: input,
+                    visited_children: false,
+                    parent: Some(index),
+                });
+                1
+            }
+            Binary(_op, lhs, rhs) => {
+                let children = [lhs, rhs];
+                self.stack.extend(children.iter().map(|ci| StackElement {
+                    index: *ci,
+                    visited_children: false,
+                    parent: Some(index),
+                }));
+                children.len()
+            }
+            Ternary(_op, a, b, c) => {
+                let children = [a, b, c];
+                self.stack.extend(children.iter().map(|ci| StackElement {
+                    index: *ci,
+                    visited_children: false,
+                    parent: Some(index),
+                }));
+                children.len()
+            }
+        }
     }
 }
 
