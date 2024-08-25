@@ -287,25 +287,6 @@ mod test {
     }
 
     #[test]
-    fn t_trees_concat_0() {
-        check_value_eval(
-            deftree!(concat
-                            (log x)
-                            (+ x (pow y 2.)))
-            .unwrap(),
-            |vars: &[f64], output: &mut [f64]| {
-                if let [x, y] = vars[..] {
-                    output[0] = f64::ln(x);
-                    output[1] = x + f64::powf(y, 2.);
-                }
-            },
-            &[('x', 1., 10.), ('y', 1., 10.)],
-            20,
-            1e-14,
-        );
-    }
-
-    #[test]
     fn t_tree_2() {
         check_value_eval(
             deftree!(
@@ -330,6 +311,25 @@ mod test {
                 }
             },
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_trees_concat_0() {
+        check_value_eval(
+            deftree!(concat
+                            (log x)
+                            (+ x (pow y 2.)))
+            .unwrap(),
+            |vars: &[f64], output: &mut [f64]| {
+                if let [x, y] = vars[..] {
+                    output[0] = f64::ln(x);
+                    output[1] = x + f64::powf(y, 2.);
+                }
+            },
+            &[('x', 1., 10.), ('y', 1., 10.)],
             20,
             1e-14,
         );
