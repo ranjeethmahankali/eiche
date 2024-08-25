@@ -26,22 +26,8 @@ jobs:
   build-and-test-windows:
     runs-on: windows-latest
     steps:
-    - uses: msys2/setup-msys2@v2 # Setup MSYS2 for dependencies that require GCC
-      with:
-        path-type: inherit
-    - name: Setup the toolchain to build gmp stuff
-      shell: msys2 {0}
-      run: |
-        pacman --noconfirm -S pacman-mirrors
-        pacman --noconfirm -S diffutils m4 make mingw-w64-x86_64-gcc
-        echo 'Using the Rust GNU toolchain'
-        rustup toolchain install stable-gnu
-        rustup set default-host x86_64-pc-windows-gnu
-        rustup target add x86_64-pc-windows-gnu
     - uses: actions/checkout@v4
     - name: Build
-      shell: msys2 {0}
-      run: cargo +stable-gnu build --verbose --no-default-features
+      run: cargo build --verbose --no-default-features
     - name: Run tests
-      shell: msys2 {0}
       run: cargo test --verbose --no-default-features
