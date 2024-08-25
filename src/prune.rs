@@ -19,12 +19,10 @@ struct StackElement {
 /// nodes to be topologically valid, and remove unused nodes.
 pub struct Pruner {
     index_map: Vec<usize>,
-    indices: Vec<usize>,
     sorted: Vec<Node>,
     roots: Vec<Node>,
     heights: Vec<usize>,
     visited: Vec<bool>,
-    last_parent: Vec<Option<usize>>,
     stack: Vec<StackElement>,
     on_path: Vec<bool>,
 }
@@ -34,12 +32,10 @@ impl Pruner {
     pub fn new() -> Pruner {
         Pruner {
             index_map: Vec::new(),
-            indices: Vec::new(),
             sorted: Vec::new(),
             roots: Vec::new(),
             heights: Vec::new(),
             visited: Vec::new(),
-            last_parent: Vec::new(),
             stack: Vec::new(),
             on_path: Vec::new(),
         }
@@ -56,12 +52,13 @@ impl Pruner {
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), root_indices.clone());
-        self.find_last_parents(&nodes)?;
-        self.init_traverse(nodes.len(), root_indices.clone());
         self.sort_nodes(&mut nodes, false)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
         self.compute_heights(&mut nodes);
-        self.init_traverse(nodes.len(), (nodes.len() - root_indices.len())..nodes.len());
+        // Second pass now using heights.
+        let root_indices = (nodes.len() - root_indices.len())..nodes.len();
+        // self.init_traverse(nodes.len(), root_indices.clone());
+        self.init_traverse(nodes.len(), root_indices);
         self.sort_nodes(&mut nodes, true)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
         return Ok(nodes);
@@ -78,16 +75,15 @@ impl Pruner {
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), roots.iter().map(|r| *r));
-        self.find_last_parents(&nodes)?;
-        self.init_traverse(nodes.len(), roots.iter().map(|r| *r));
-        self.sort_nodes(&mut nodes, false)?;
+        self.sort_nodes(&nodes, false)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
         self.compute_heights(&mut nodes);
-        self.init_traverse(nodes.len(), (nodes.len() - roots.len())..nodes.len());
-        self.sort_nodes(&mut nodes, true)?;
+        // Second pass after computing heights.
+        let newroots = (nodes.len() - roots.len())..nodes.len();
+        self.init_traverse(nodes.len(), newroots.clone());
+        self.sort_nodes(&nodes, true)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
-        let num_roots = roots.len();
-        for (r, i) in roots.iter_mut().zip((nodes.len() - num_roots)..nodes.len()) {
+        for (r, i) in roots.iter_mut().zip(newroots) {
             *r = i;
         }
         return Ok(nodes);
@@ -107,54 +103,80 @@ impl Pruner {
         self.roots.reserve(self.stack.len());
         self.index_map.clear();
         self.index_map.resize(nodes.len(), usize::MAX);
-        let mut traverse_index = 0usize;
+        self.sorted.clear();
+        self.sorted.reserve(nodes.len());
         while let Some(StackElement {
             index,
             visited_children,
             parent,
         }) = self.stack.pop()
         {
-            if self.check_for_cycles(visited_children, index, parent)? {
+            if self.visited[index] {
                 continue;
             }
-            if parent.is_none() {
-                // Root node.
-                self.roots.push(nodes[index]);
+            let traversed = if visited_children {
+                // We're backtracking after processing the children of this node. So we remove it from the path.
+                self.on_path[index] = false;
+                true
+            } else if self.on_path[index] {
+                // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
+                return Err(Error::CyclicGraph);
             } else {
-                self.index_map[index] = traverse_index;
-                traverse_index += 1;
+                self.on_path[index] = true;
+                self.stack.push(StackElement {
+                    index,
+                    visited_children: true,
+                    parent,
+                });
+                false
+            };
+            if traversed {
+                if parent.is_none() {
+                    // Root node.
+                    self.roots.push(nodes[index]);
+                } else {
+                    self.index_map[index] = self.sorted.len();
+                    self.sorted.push(nodes[index]);
+                    self.visited[index] = true;
+                }
+                continue;
             }
-            let num_children = self.push_children(nodes, index);
+            let num_children = match nodes[index] {
+                Constant(_) | Symbol(_) => 0,
+                Unary(_op, input) => {
+                    self.stack.push(StackElement {
+                        index: input,
+                        visited_children: false,
+                        parent: Some(index),
+                    });
+                    1
+                }
+                Binary(_op, lhs, rhs) => {
+                    let children = [rhs, lhs];
+                    self.stack.extend(children.iter().map(|ci| StackElement {
+                        index: *ci,
+                        visited_children: false,
+                        parent: Some(index),
+                    }));
+                    children.len()
+                }
+                Ternary(_op, a, b, c) => {
+                    let children = [c, b, a];
+                    self.stack.extend(children.iter().map(|ci| StackElement {
+                        index: *ci,
+                        visited_children: false,
+                        parent: Some(index),
+                    }));
+                    children.len()
+                }
+            };
             if use_height {
                 let num = self.stack.len();
                 self.stack[(num - num_children)..].sort_by(
                     |StackElement { index: a, .. }, StackElement { index: b, .. }| {
-                        return self.heights[*b].cmp(&self.heights[*a]);
+                        return self.heights[*a].cmp(&self.heights[*b]);
                     },
                 );
-            }
-        }
-        self.indices.clear();
-        self.indices
-            .extend((0..nodes.len()).filter(|i| self.index_map[*i] != usize::MAX));
-        self.indices
-            .sort_by(|a, b| self.index_map[*a].cmp(&self.index_map[*b]));
-        self.sorted.clear();
-        for (i, idx) in self.indices.iter().enumerate() {
-            self.index_map[*idx] = i;
-            self.sorted.push(nodes[*idx]);
-        }
-        if self.sorted.len() > 1 {
-            dbg!(&self.sorted);
-            dbg!(&self.index_map);
-            // The correct topological order is the reverse of a depth first
-            // traversal. So we reverse the nodes and adjust the indices.
-            self.sorted.reverse();
-            for i in self.index_map.iter_mut() {
-                if *i == usize::MAX {
-                    continue;
-                }
-                *i = self.sorted.len() - *i - 1;
             }
         }
         // Push the roots.
@@ -174,28 +196,6 @@ impl Pruner {
                     *c = self.index_map[*c];
                 }
             }
-        }
-        return Ok(());
-    }
-
-    fn find_last_parents(&mut self, nodes: &[Node]) -> Result<(), Error> {
-        self.last_parent.clear();
-        self.last_parent.resize(nodes.len(), None);
-        while let Some(StackElement {
-            index,
-            visited_children,
-            parent,
-        }) = self.stack.pop()
-        {
-            if self.check_for_cycles(visited_children, index, parent)? {
-                continue;
-            }
-            self.last_parent[index] = parent;
-            if self.visited[index] {
-                continue;
-            }
-            self.visited[index] = true;
-            self.push_children(nodes, index);
         }
         return Ok(());
     }
@@ -235,62 +235,6 @@ impl Pruner {
                     }
                 },
             );
-        }
-    }
-
-    fn check_for_cycles(
-        &mut self,
-        visited_children: bool,
-        index: usize,
-        parent: Option<usize>,
-    ) -> Result<bool, Error> {
-        if visited_children {
-            // We're backtracking after processing the children of this node. So we remove it from the path.
-            self.on_path[index] = false;
-            return Ok(true);
-        } else if self.on_path[index] {
-            // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
-            return Err(Error::CyclicGraph);
-        } else {
-            self.on_path[index] = true;
-            self.stack.push(StackElement {
-                index,
-                visited_children: true,
-                parent,
-            });
-        }
-        return Ok(false);
-    }
-
-    fn push_children(&mut self, nodes: &[Node], index: usize) -> usize {
-        match nodes[index] {
-            Constant(_) | Symbol(_) => 0,
-            Unary(_op, input) => {
-                self.stack.push(StackElement {
-                    index: input,
-                    visited_children: false,
-                    parent: Some(index),
-                });
-                1
-            }
-            Binary(_op, lhs, rhs) => {
-                let children = [lhs, rhs];
-                self.stack.extend(children.iter().map(|ci| StackElement {
-                    index: *ci,
-                    visited_children: false,
-                    parent: Some(index),
-                }));
-                children.len()
-            }
-            Ternary(_op, a, b, c) => {
-                let children = [a, b, c];
-                self.stack.extend(children.iter().map(|ci| StackElement {
-                    index: *ci,
-                    visited_children: false,
-                    parent: Some(index),
-                }));
-                children.len()
-            }
         }
     }
 }
