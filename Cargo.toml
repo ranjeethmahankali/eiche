@@ -16,8 +16,9 @@ categories = ["mathematics"]
 rand = "0.8"
 lazy_static = "1.4"
 inkwell = { version = "0.4", features = ["llvm14-0"], optional = true }
-inari = "2.0"
+inari = { version = "2.0", optional = true }
 
 [features]
-default = ["llvm-jit"]
+default = ["llvm-jit", "inari-intervals"]
 llvm-jit = ["dep:inkwell"]
+inari-intervals = ["dep:inari"]
