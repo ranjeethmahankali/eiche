@@ -1,6 +1,7 @@
 pub mod derivative;
 pub mod error;
 pub mod eval;
+pub mod prune;
 pub mod reduce;
 pub mod tree;
 
@@ -18,7 +19,6 @@ mod io;
 mod latex;
 mod macros;
 mod mutate;
-mod prune;
 mod substitute;
 mod template;
 mod walk;
