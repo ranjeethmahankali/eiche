@@ -263,7 +263,6 @@ impl<'a> Iterator for DepthIterator<'a, true> {
             }
             elem
         };
-        println!("popped {}, {:?}, {}", index, parent, visited_children); // DEBUG
         debug_assert!(!visited_children, "Invalid depth first traversal.");
         if self.walker.on_path[index] {
             return Some(Err(Error::CyclicGraph));

@@ -68,7 +68,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                         Binary(..) | Ternary(MulAdd, ..) => with_parens(ix),
                     }
                 }),
-                Floor => format!("\\floor{{{}}}", ix),
+                Floor => format!("\\lfloor{{{}}}\\rfloor", ix),
                 // Boolean
                 Not => format!("\\text{{not }}{{{}}}", with_parens(ix)),
             }
@@ -339,12 +339,18 @@ mod test {
 
     #[test]
     fn t_floor() {
-        assert_eq!("", deftree!(floor (/ x y)).unwrap().to_latex());
+        assert_eq!(
+            "\\lfloor{\\dfrac{x}{y}}\\rfloor",
+            deftree!(floor (/ x y)).unwrap().to_latex()
+        );
     }
 
     #[test]
     fn t_remainder() {
-        assert_eq!("", deftree!(rem (+ x y) (- x y)).unwrap().to_latex());
+        assert_eq!(
+            "{\\left({x} + {y}\\right)} \\bmod {\\left({x} - {y}\\right)}",
+            deftree!(rem (+ x y) (- x y)).unwrap().to_latex()
+        );
     }
 
     #[test]
