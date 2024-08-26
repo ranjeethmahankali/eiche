@@ -387,6 +387,7 @@ impl Tree {
                 .get_function(FUNC_NAME)
                 .map_err(|e| Error::JitCompilationError(e.to_string()))?
         };
+        compiler.write_asm(&std::path::Path::new("/mnt/d/dev/linux/eiche")); // temporary code.
         return Ok(JitEvaluator::create(func, symbols.len(), num_roots));
     }
 }
