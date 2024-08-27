@@ -91,10 +91,7 @@ impl<'ctx> JitCompiler<'ctx> {
             )
             .unwrap();
         machine
-            .write_to_file(&self.module, FileType::Assembly, path)
-            .unwrap();
-        machine
-            .write_to_file(&self.module, FileType::Assembly, path)
+            .write_to_file(&self.module, FileType::Object, path)
             .unwrap();
     }
 

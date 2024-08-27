@@ -388,10 +388,7 @@ impl Tree {
                 .map_err(|e| Error::JitCompilationError(e.to_string()))?
         };
         compiler.write_asm(&std::path::Path::new(
-            "/mnt/d/dev/linux/fidgetmark/hex_llvm.asm",
-        )); // temporary code.
-        compiler.write_llvm_ir(&std::path::Path::new(
-            "/mnt/d/dev/linux/fidgetmark/hex_llvm.ir",
+            "/mnt/d/dev/linux/fidgetmark/hex_llvm.obj",
         )); // temporary code.
         return Ok(JitEvaluator::create(func, symbols.len(), num_roots));
     }
