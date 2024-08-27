@@ -78,6 +78,14 @@ impl<'ctx> JitCompiler<'ctx> {
             .write_to_file(&self.module, FileType::Assembly, path)
             .unwrap();
     }
+
+    #[allow(dead_code)]
+    pub fn write_llvm_ir(&self, path: &Path) {
+        match self.module.print_to_file(path) {
+            Ok(_) => {}
+            Err(err) => eprintln!("Error when printing LLVM IR to a file: {}", err),
+        }
+    }
 }
 
 pub mod single;
