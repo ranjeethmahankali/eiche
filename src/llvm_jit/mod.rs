@@ -4,7 +4,7 @@ use inkwell::{
     context::Context,
     module::Module,
     passes::PassManager,
-    targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
+    targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple},
     OptimizationLevel,
 };
 use std::path::Path;
@@ -74,7 +74,26 @@ impl<'ctx> JitCompiler<'ctx> {
     /// Write out the compiled assembly to file specified by `path`.
     #[allow(dead_code)]
     pub fn write_asm(&self, path: &Path) {
-        self.machine
+        let triple = TargetTriple::create("x86_64-pc-windows-msvc");
+        let reloc = RelocMode::Default;
+        let model = CodeModel::JITDefault;
+        let cpu = TargetMachine::get_host_cpu_name().to_string();
+        let target = Target::from_triple(&triple).unwrap();
+        let features = TargetMachine::get_host_cpu_features().to_string();
+        let machine = target
+            .create_target_machine(
+                &triple,
+                &cpu,
+                &features,
+                OptimizationLevel::Aggressive,
+                reloc,
+                model,
+            )
+            .unwrap();
+        machine
+            .write_to_file(&self.module, FileType::Assembly, path)
+            .unwrap();
+        machine
             .write_to_file(&self.module, FileType::Assembly, path)
             .unwrap();
     }
