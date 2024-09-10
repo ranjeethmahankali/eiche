@@ -4,7 +4,9 @@ use inkwell::{
     context::Context,
     module::Module,
     passes::PassManager,
-    targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple},
+    targets::{
+        CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple,
+    },
     OptimizationLevel,
 };
 use std::path::Path;
@@ -80,6 +82,7 @@ impl<'ctx> JitCompiler<'ctx> {
         let cpu = TargetMachine::get_host_cpu_name().to_string();
         let target = Target::from_triple(&triple).unwrap();
         let features = TargetMachine::get_host_cpu_features().to_string();
+        println!("{:?}", features);
         let machine = target
             .create_target_machine(
                 &triple,
