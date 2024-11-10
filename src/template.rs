@@ -1,9 +1,8 @@
-use lazy_static::lazy_static;
-
 use crate::{
     mutate::TemplateCapture,
     tree::{Node::*, Tree},
 };
+use std::sync::LazyLock;
 
 /// This macro is only meant for use within this module.
 macro_rules! deftemplate {
@@ -117,8 +116,8 @@ impl Template {
     }
 }
 
-lazy_static! {
-    static ref TEMPLATES: Vec<Template> = vec![
+static TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
+    vec![
         deftemplate!(distribute_mul
                      ping (+ (* k a) (* k b))
                      pong (* k (+ a b))
@@ -202,7 +201,6 @@ lazy_static! {
                      ping (+ (/ x z) (/ y z))
                      pong (/ (+ x y) z)
         ),
-
         // ====== Min and max simplifications ======
 
         // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
@@ -233,7 +231,6 @@ lazy_static! {
         deftemplate!(max_self
                      ping (max x x)
                      pong (x)),
-
         // ======== Polynomial simplifications ========
         deftemplate!(x_plus_y_squared
                      ping (pow (+ x y) 2.)
@@ -241,19 +238,17 @@ lazy_static! {
         deftemplate!(x_minus_y_squared
                      ping (pow (- x y) 2.)
                      pong ((- (+ (pow x 2.) (pow y 2.)) (* 2. (* x y))))),
-    ];
+    ]
+});
 
-    static ref MIRRORED_TEMPLATES: Vec<Template> = mirrored(&TEMPLATES);
-}
-
-fn mirrored(templates: &Vec<Template>) -> Vec<Template> {
-    let mut out = templates.clone();
-    out.extend(templates.iter().filter_map(|t| t.mirrored()));
-    return out;
-}
-
-pub fn get_templates() -> &'static Vec<Template> {
-    &MIRRORED_TEMPLATES
+/// Gets the defined list of templates, plus their mirrored versions.
+pub fn all_templates() -> &'static Vec<Template> {
+    static ALL_TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
+        let mut all_templates = TEMPLATES.clone();
+        all_templates.extend(TEMPLATES.iter().filter_map(|t| t.mirrored()));
+        all_templates
+    });
+    &ALL_TEMPLATES
 }
 
 #[cfg(test)]
@@ -263,7 +258,7 @@ pub mod test {
 
     #[cfg(test)]
     pub fn get_template_by_name(name: &str) -> Option<&Template> {
-        get_templates().iter().find(|&t| t.name == name)
+        all_templates().iter().find(|&t| t.name == name)
     }
 
     #[test]
