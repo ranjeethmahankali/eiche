@@ -116,7 +116,7 @@ impl Template {
     }
 }
 
-static TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
+static BASE_TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
     vec![
         deftemplate!(distribute_mul
                      ping (+ (* k a) (* k b))
@@ -241,9 +241,10 @@ static TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
     ]
 });
 
-pub static ALL_TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
-    let mut all_templates = TEMPLATES.clone();
-    all_templates.extend(TEMPLATES.iter().filter_map(|t| t.mirrored()));
+/// The base templates plus their mirrored versions.
+pub static TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
+    let mut all_templates = BASE_TEMPLATES.clone();
+    all_templates.extend(BASE_TEMPLATES.iter().filter_map(|t| t.mirrored()));
     all_templates
 });
 
@@ -254,17 +255,17 @@ pub mod test {
 
     #[cfg(test)]
     pub fn get_template_by_name(name: &str) -> Option<&Template> {
-        ALL_TEMPLATES.iter().find(|&t| t.name == name)
+        TEMPLATES.iter().find(|&t| t.name == name)
     }
 
     #[test]
     fn t_load_templates() {
         // Just to make sure all the templates are valid and load
         // correctly.
-        assert!(!TEMPLATES.is_empty());
+        assert!(!BASE_TEMPLATES.is_empty());
         // Make sure templates have unique names.
-        let mut names: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
-        for t in TEMPLATES.iter() {
+        let mut names: HashSet<&str> = HashSet::with_capacity(BASE_TEMPLATES.len());
+        for t in BASE_TEMPLATES.iter() {
             // I can't see a sensible case for simplifying matrices, that is
             // different from simplifying the elements of the matrix. So the
             // templates are resitricted to have at most 1 root.
@@ -282,7 +283,7 @@ pub mod test {
     ) {
         use crate::test::compare_trees;
         // Find template by name.
-        let template = TEMPLATES.iter().find(|t| t.name == name).unwrap();
+        let template = BASE_TEMPLATES.iter().find(|t| t.name == name).unwrap();
         // Check if valid trees can be made from the templates.
         print!("{}   ... ", name);
         compare_trees(&template.ping, &template.pong, vardata, 20, eps);
@@ -306,7 +307,7 @@ pub mod test {
 
     #[test]
     fn t_check_templates() {
-        let mut checked: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
+        let mut checked: HashSet<&str> = HashSet::with_capacity(BASE_TEMPLATES.len());
         // Check each template. This is necessary they need different
         // vardata and ranges. e.g. You can't use negative values in
         // sqrt.
@@ -423,7 +424,7 @@ pub mod test {
         }
         {
             // Make sure all templates have been checked.
-            let unchecked = TEMPLATES
+            let unchecked = BASE_TEMPLATES
                 .iter()
                 .map(|t| t.name.as_str())
                 .filter(|name| !checked.contains(name))
