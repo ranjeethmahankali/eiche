@@ -1,9 +1,8 @@
-use lazy_static::lazy_static;
-
 use crate::{
     mutate::TemplateCapture,
     tree::{Node::*, Tree},
 };
+use std::sync::LazyLock;
 
 /// This macro is only meant for use within this module.
 macro_rules! deftemplate {
@@ -117,8 +116,8 @@ impl Template {
     }
 }
 
-lazy_static! {
-    static ref TEMPLATES: Vec<Template> = vec![
+static BASE_TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
+    vec![
         deftemplate!(distribute_mul
                      ping (+ (* k a) (* k b))
                      pong (* k (+ a b))
@@ -202,7 +201,6 @@ lazy_static! {
                      ping (+ (/ x z) (/ y z))
                      pong (/ (+ x y) z)
         ),
-
         // ====== Min and max simplifications ======
 
         // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
@@ -233,7 +231,6 @@ lazy_static! {
         deftemplate!(max_self
                      ping (max x x)
                      pong (x)),
-
         // ======== Polynomial simplifications ========
         deftemplate!(x_plus_y_squared
                      ping (pow (+ x y) 2.)
@@ -241,20 +238,15 @@ lazy_static! {
         deftemplate!(x_minus_y_squared
                      ping (pow (- x y) 2.)
                      pong ((- (+ (pow x 2.) (pow y 2.)) (* 2. (* x y))))),
-    ];
+    ]
+});
 
-    static ref MIRRORED_TEMPLATES: Vec<Template> = mirrored(&TEMPLATES);
-}
-
-fn mirrored(templates: &Vec<Template>) -> Vec<Template> {
-    let mut out = templates.clone();
-    out.extend(templates.iter().filter_map(|t| t.mirrored()));
-    return out;
-}
-
-pub fn get_templates() -> &'static Vec<Template> {
-    &MIRRORED_TEMPLATES
-}
+/// The base templates plus their mirrored versions.
+pub static TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
+    let mut all_templates = BASE_TEMPLATES.clone();
+    all_templates.extend(BASE_TEMPLATES.iter().filter_map(|t| t.mirrored()));
+    all_templates
+});
 
 #[cfg(test)]
 pub mod test {
@@ -263,17 +255,17 @@ pub mod test {
 
     #[cfg(test)]
     pub fn get_template_by_name(name: &str) -> Option<&Template> {
-        get_templates().iter().find(|&t| t.name == name)
+        TEMPLATES.iter().find(|&t| t.name == name)
     }
 
     #[test]
     fn t_load_templates() {
         // Just to make sure all the templates are valid and load
         // correctly.
-        assert!(!TEMPLATES.is_empty());
+        assert!(!BASE_TEMPLATES.is_empty());
         // Make sure templates have unique names.
-        let mut names: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
-        for t in TEMPLATES.iter() {
+        let mut names: HashSet<&str> = HashSet::with_capacity(BASE_TEMPLATES.len());
+        for t in BASE_TEMPLATES.iter() {
             // I can't see a sensible case for simplifying matrices, that is
             // different from simplifying the elements of the matrix. So the
             // templates are resitricted to have at most 1 root.
@@ -291,7 +283,7 @@ pub mod test {
     ) {
         use crate::test::compare_trees;
         // Find template by name.
-        let template = TEMPLATES.iter().find(|t| t.name == name).unwrap();
+        let template = BASE_TEMPLATES.iter().find(|t| t.name == name).unwrap();
         // Check if valid trees can be made from the templates.
         print!("{}   ... ", name);
         compare_trees(&template.ping, &template.pong, vardata, 20, eps);
@@ -315,7 +307,7 @@ pub mod test {
 
     #[test]
     fn t_check_templates() {
-        let mut checked: HashSet<&str> = HashSet::with_capacity(TEMPLATES.len());
+        let mut checked: HashSet<&str> = HashSet::with_capacity(BASE_TEMPLATES.len());
         // Check each template. This is necessary they need different
         // vardata and ranges. e.g. You can't use negative values in
         // sqrt.
@@ -432,7 +424,7 @@ pub mod test {
         }
         {
             // Make sure all templates have been checked.
-            let unchecked = TEMPLATES
+            let unchecked = BASE_TEMPLATES
                 .iter()
                 .map(|t| t.name.as_str())
                 .filter(|name| !checked.contains(name))

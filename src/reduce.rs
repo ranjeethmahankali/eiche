@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     mutate::{Mutations, TemplateCapture},
-    template::get_templates,
+    template::TEMPLATES,
     tree::{Node, Node::*, Tree},
 };
 use std::{
@@ -136,7 +136,7 @@ pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
     let mut explored = Vec::<Candidate>::with_capacity(max_iter);
     let mut indexmap = HashMap::<u64, usize>::new();
     let mut hashbuf = Vec::<u64>::new();
-    let mut heap = BinaryHeap::<Candidate>::with_capacity(get_templates().len() * max_iter / 2); // Estimate.
+    let mut heap = BinaryHeap::<Candidate>::with_capacity(TEMPLATES.len() * max_iter / 2); // Estimate.
     let mut min_complexity = usize::MAX;
     let mut best_candidate = 0;
     let start_complexity = hfn.cost(&tree);
