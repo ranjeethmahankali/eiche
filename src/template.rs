@@ -241,15 +241,11 @@ static TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
     ]
 });
 
-/// Gets the defined list of templates, plus their mirrored versions.
-pub fn all_templates() -> &'static Vec<Template> {
-    static ALL_TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
-        let mut all_templates = TEMPLATES.clone();
-        all_templates.extend(TEMPLATES.iter().filter_map(|t| t.mirrored()));
-        all_templates
-    });
-    &ALL_TEMPLATES
-}
+pub static ALL_TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
+    let mut all_templates = TEMPLATES.clone();
+    all_templates.extend(TEMPLATES.iter().filter_map(|t| t.mirrored()));
+    all_templates
+});
 
 #[cfg(test)]
 pub mod test {
@@ -258,7 +254,7 @@ pub mod test {
 
     #[cfg(test)]
     pub fn get_template_by_name(name: &str) -> Option<&Template> {
-        all_templates().iter().find(|&t| t.name == name)
+        ALL_TEMPLATES.iter().find(|&t| t.name == name)
     }
 
     #[test]

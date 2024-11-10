@@ -5,7 +5,7 @@ use crate::{
     error::Error,
     fold::fold_nodes,
     prune::Pruner,
-    template::{all_templates, Template},
+    template::{Template, ALL_TEMPLATES},
     tree::{MaybeTree, Node, Node::*, Tree},
 };
 
@@ -32,7 +32,7 @@ impl<'a> Iterator for Mutations<'a> {
     type Item = Result<Tree, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let templates = all_templates();
+        let templates = &ALL_TEMPLATES;
         while self.template_index < templates.len() {
             let template = &templates[self.template_index];
             while self.capture.next_match(template, self.tree) {
