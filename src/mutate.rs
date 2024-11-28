@@ -35,7 +35,7 @@ impl Iterator for Mutations<'_> {
         let templates = &TEMPLATES;
         while self.template_index < templates.len() {
             let template = &templates[self.template_index];
-            while self.capture.next_match(template, self.tree) {
+            if self.capture.next_match(template, self.tree) {
                 return Some(self.capture.apply(template, self.tree));
             }
             self.template_index += 1;

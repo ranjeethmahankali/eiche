@@ -247,21 +247,17 @@ impl Iterator for DepthIterator<'_, true> {
             index,
             parent,
             visited_children,
-        } = {
-            let mut elem = self.walker.stack.pop()?;
-            loop {
-                if !elem.visited_children && self.walker.on_path[elem.index] {
-                    return Some(Err(Error::CyclicGraph));
-                }
-                if elem.visited_children {
-                    self.walker.on_path[elem.index] = false;
-                }
-                if !(self.unique && self.walker.visited[elem.index]) && !elem.visited_children {
-                    break;
-                }
-                elem = self.walker.stack.pop()?;
+        } = loop {
+            let elem = self.walker.stack.pop()?;
+            if !elem.visited_children && self.walker.on_path[elem.index] {
+                return Some(Err(Error::CyclicGraph));
             }
-            elem
+            if elem.visited_children {
+                self.walker.on_path[elem.index] = false;
+                continue;
+            } else if !(self.unique && self.walker.visited[elem.index]) {
+                break elem;
+            }
         };
         debug_assert!(!visited_children, "Invalid depth first traversal.");
         if self.walker.on_path[index] {
