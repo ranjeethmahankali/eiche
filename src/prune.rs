@@ -58,14 +58,14 @@ impl Pruner {
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), root_indices.clone());
-        self.sort_nodes(&mut nodes, false)?;
+        self.sort_nodes(&nodes, false)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
-        self.compute_heights(&mut nodes);
+        self.compute_heights(&nodes);
         // Second pass now using heights.
         let root_indices = (nodes.len() - root_indices.len())..nodes.len();
         // self.init_traverse(nodes.len(), root_indices.clone());
         self.init_traverse(nodes.len(), root_indices.clone());
-        self.sort_nodes(&mut nodes, true)?;
+        self.sort_nodes(&nodes, true)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
         Ok((nodes, root_indices))
     }
@@ -83,7 +83,7 @@ impl Pruner {
         self.init_traverse(nodes.len(), roots.iter().copied());
         self.sort_nodes(&nodes, false)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
-        self.compute_heights(&mut nodes);
+        self.compute_heights(&nodes);
         // Second pass after computing heights.
         let newroots = (nodes.len() - roots.len())..nodes.len();
         self.init_traverse(nodes.len(), newroots.clone());

@@ -415,7 +415,7 @@ mod test {
             (Unary(l, _), Unary(r, _)) => assert_eq!(l, r),
             (Binary(l, _, _), Binary(r, _, _)) => assert_eq!(l, r),
             (Ternary(l, _, _, _), Ternary(r, _, _, _)) => assert_eq!(l, r),
-            _ => assert!(false, "Nodes must be of the same type"),
+            _ => panic!("Nodes must be of the same type"),
         }
         t_check_bindings(&capture, template, &tree);
     }

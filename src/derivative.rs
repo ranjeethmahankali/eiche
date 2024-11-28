@@ -48,9 +48,9 @@ impl Tree {
                 &mut derivmap,
             );
             nodes.append(&mut derivs);
-            for ri in root_start..root_end {
-                rootnodes.push(match derivmap[ri] {
-                    Some(deriv) => deriv,
+            for item in &derivmap[root_start..root_end] {
+                rootnodes.push(match item {
+                    Some(deriv) => *deriv,
                     None => return Err(Error::CannotComputeSymbolicDerivative),
                 });
             }

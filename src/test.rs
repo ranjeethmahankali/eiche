@@ -120,7 +120,7 @@ pub fn check_value_eval<F>(
         expectedfn(sample, &mut expected);
         for (lhs, rhs) in expected.iter().zip(results.iter()) {
             match rhs {
-                Value::Bool(_) => assert!(false, "Found a boolean when expecting a scalar"),
+                Value::Bool(_) => panic!("Found a boolean when expecting a scalar"),
                 Value::Scalar(rhs) => assert_float_eq!(lhs, rhs, eps),
             }
         }

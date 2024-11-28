@@ -218,7 +218,7 @@ mod test {
         let mut eval = ValueEvaluator::new(&x);
         match eval.run() {
             Ok(val) => assert_eq!(val, &[Value::Scalar(std::f64::consts::PI)]),
-            _ => assert!(false),
+            _ => panic!(),
         }
     }
 
@@ -239,7 +239,7 @@ mod test {
             eval.set_value('y', y.into());
             match eval.run() {
                 Ok(val) => assert_eq!(val, &[expected]),
-                _ => assert!(false),
+                _ => panic!(),
             }
         }
     }

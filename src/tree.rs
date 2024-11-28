@@ -254,6 +254,11 @@ impl Tree {
         self.nodes.len()
     }
 
+    /// Check if the tree is empty.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
     /// Get the number of roots in this tree.
     pub fn num_roots(&self) -> usize {
         matsize(self.dims)

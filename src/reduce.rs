@@ -111,7 +111,7 @@ impl Candidate {
 
 impl PartialOrd for Candidate {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        other.cost().partial_cmp(&self.cost())
+        Some(self.cmp(other))
     }
 }
 
