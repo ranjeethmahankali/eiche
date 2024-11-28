@@ -66,13 +66,13 @@ where
     fn get(&self, idx: usize) -> T;
 
     /// Get the type of float, either f32 or f64.
-    fn float_type<'ctx>(context: &'ctx Context) -> FloatType<'ctx>;
+    fn float_type(context: &Context) -> FloatType<'_>;
 
     /// Get a constant value with all entries in the simd vector populated with `val`.
-    fn const_float<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx>;
+    fn const_float(val: f64, context: &Context) -> BasicValueEnum<'_>;
 
     /// Get a constant value with all entries in the simd vector populated with `val`.
-    fn const_bool<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx>;
+    fn const_bool(val: bool, context: &Context) -> BasicValueEnum<'_>;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -92,18 +92,18 @@ impl SimdVec<f32> for Wfloat {
         unsafe { self.valsf32[idx] }
     }
 
-    fn float_type<'ctx>(context: &'ctx Context) -> FloatType<'ctx> {
+    fn float_type(context: &Context) -> FloatType<'_> {
         context.f32_type()
     }
 
-    fn const_float<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+    fn const_float(val: f64, context: &Context) -> BasicValueEnum<'_> {
         BasicValueEnum::VectorValue(VectorType::const_vector(
-            &[<Self as SimdVec<f32>>::float_type(context).const_float(val as f64);
+            &[<Self as SimdVec<f32>>::float_type(context).const_float(val);
                 <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
         ))
     }
 
-    fn const_bool<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+    fn const_bool(val: bool, context: &Context) -> BasicValueEnum<'_> {
         BasicValueEnum::VectorValue(VectorType::const_vector(
             &[context
                 .bool_type()
@@ -130,18 +130,18 @@ impl SimdVec<f64> for Wfloat {
         unsafe { self.valsf64[idx] }
     }
 
-    fn float_type<'ctx>(context: &'ctx Context) -> FloatType<'ctx> {
+    fn float_type(context: &Context) -> FloatType<'_> {
         context.f64_type()
     }
 
-    fn const_float<'ctx>(val: f64, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+    fn const_float(val: f64, context: &Context) -> BasicValueEnum<'_> {
         BasicValueEnum::VectorValue(VectorType::const_vector(
             &[<Self as SimdVec<f64>>::float_type(context).const_float(val);
                 <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
         ))
     }
 
-    fn const_bool<'ctx>(val: bool, context: &'ctx Context) -> BasicValueEnum<'ctx> {
+    fn const_bool(val: bool, context: &Context) -> BasicValueEnum<'_> {
         BasicValueEnum::VectorValue(VectorType::const_vector(
             &[context
                 .bool_type()
@@ -188,7 +188,7 @@ where
             num_eval: 0,
             inputs: Vec::new(),
             outputs: Vec::new(),
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
 
@@ -216,7 +216,7 @@ where
             <Wfloat as SimdVec<T>>::set(reg, *val, index);
         }
         self.num_eval += 1;
-        return Ok(());
+        Ok(())
     }
 
     /// Clear all inputs and outputs.
@@ -253,7 +253,7 @@ where
         while offset < self.outputs.len() && num_vals < self.num_eval {
             for i in 0..Self::SIMD_VEC_SIZE {
                 for wf in &self.outputs[offset..(offset + self.num_outputs)] {
-                    dst.push(<Wfloat as SimdVec<T>>::get(&wf, i));
+                    dst.push(<Wfloat as SimdVec<T>>::get(wf, i));
                 }
                 num_vals += 1;
                 if num_vals >= self.num_eval {
@@ -270,7 +270,7 @@ impl Tree {
     pub fn jit_compile_array<'ctx, T>(
         &'ctx self,
         context: &'ctx JitContext,
-    ) -> Result<JitSimdFn<T>, Error>
+    ) -> Result<JitSimdFn<'ctx, T>, Error>
     where
         Wfloat: SimdVec<T>,
         T: Copy,
@@ -747,7 +747,7 @@ mod test {
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::default();
         let mut jiteval = tree.jit_compile_array(&context).unwrap();
-        let mut eval = ValueEvaluator::new(&tree);
+        let mut eval = ValueEvaluator::new(tree);
         let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         let mut expected = Vec::with_capacity(
             tree.num_roots() * usize::pow(samples_per_var, vardata.len() as u32),

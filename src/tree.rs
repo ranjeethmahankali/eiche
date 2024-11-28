@@ -174,7 +174,7 @@ const fn matsize(dims: (usize, usize)) -> usize {
 impl Tree {
     pub fn from_nodes(nodes: Vec<Node>, dims: (usize, usize)) -> MaybeTree {
         let t = Tree { nodes, dims };
-        return t.validated();
+        t.validated()
     }
 
     /// Create a tree representing a constant value.
@@ -197,13 +197,13 @@ impl Tree {
         deduper.run(&mut nodes)?;
         let mut pruner = Pruner::new();
         let (nodes, _) = pruner.run_from_range(nodes, roots)?;
-        return Tree::from_nodes(nodes, self.dims);
+        Tree::from_nodes(nodes, self.dims)
     }
     /// Prunes the tree and topologically sorts the nodes.
     pub fn prune(self, pruner: &mut Pruner) -> MaybeTree {
         let roots = self.root_indices();
         let (nodes, _) = pruner.run_from_range(self.nodes, roots)?;
-        return Tree::from_nodes(nodes, self.dims);
+        Tree::from_nodes(nodes, self.dims)
     }
 
     /// Create a tree representing a symbol with the given `label`.
@@ -240,13 +240,13 @@ impl Tree {
         // concatenations makes sure all the root nodes are at the end.
         lhs.nodes[(llen - lsize)..(llen + rlen - rsize)].rotate_left(lsize);
         lhs.dims = (lsize + rsize, 1);
-        return Ok(lhs);
+        Ok(lhs)
     }
 
     /// Get a piece wise expression from the given condition, value when true
     /// and value when false.
     pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
-        return cond?.ternary_op(iftrue?, iffalse?, Choose);
+        cond?.ternary_op(iftrue?, iffalse?, Choose)
     }
 
     /// The number of nodes in this tree.
@@ -334,7 +334,7 @@ impl Tree {
         indices.sort_by(|a, b| symbols[*a].cmp(&symbols[*b]));
         indices.dedup_by(|a, b| symbols[*a] == symbols[*b]);
         indices.sort();
-        return indices.iter().map(|i| symbols[*i]).collect();
+        indices.iter().map(|i| symbols[*i]).collect()
     }
 
     /// Check the tree for errors and return a Result that contains the tree if
@@ -374,14 +374,14 @@ impl Tree {
             return Err(Error::DependentRootNodes);
         }
         // Maybe add more checks later.
-        return Ok(self);
+        Ok(self)
     }
 
     fn unary_op(mut self, op: UnaryOp) -> MaybeTree {
         for root in self.root_indices() {
             self.nodes.push(Unary(op, root));
         }
-        return Ok(self);
+        Ok(self)
     }
 
     fn binary_op(mut self, other: Tree, op: BinaryOp) -> MaybeTree {
@@ -408,7 +408,7 @@ impl Tree {
                 self.nodes.push(Binary(op, l, r + offset));
             }
         }
-        return Ok(self);
+        Ok(self)
     }
 
     fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> MaybeTree {
@@ -440,19 +440,19 @@ impl Tree {
                     .push(Ternary(op, r, ar + a_offset, br + b_offset));
             }
         }
-        return Ok(self);
+        Ok(self)
     }
 
     fn push_nodes(&mut self, other: &Tree) -> usize {
         let offset: usize = self.nodes.len();
         self.nodes.extend(other.nodes.iter().map(|node| match node {
             Constant(value) => Constant(*value),
-            Symbol(label) => Symbol(label.clone()),
+            Symbol(label) => Symbol(*label),
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
             Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
         }));
-        return offset;
+        offset
     }
 }
 
@@ -536,7 +536,7 @@ impl From<bool> for Tree {
 
 impl From<char> for Tree {
     fn from(c: char) -> Self {
-        return Self::symbol(c);
+        Self::symbol(c)
     }
 }
 

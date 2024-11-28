@@ -70,7 +70,7 @@ impl DepthWalker {
             unique,
             ordering,
             walker: self,
-            nodes: &nodes,
+            nodes,
             last_pushed: 0,
         }
     }
@@ -123,7 +123,7 @@ pub struct DepthIterator<'a, const CHECK_FOR_CYCLES: bool> {
     nodes: &'a [Node],
 }
 
-impl<'a, const CHECK_FOR_CYCLES: bool> DepthIterator<'a, CHECK_FOR_CYCLES> {
+impl<const CHECK_FOR_CYCLES: bool> DepthIterator<'_, CHECK_FOR_CYCLES> {
     fn sort_children(&self, parent: &Node, children: &mut [usize]) {
         use std::cmp::Ordering;
         use NodeOrdering::*;
@@ -217,7 +217,7 @@ impl<'a, const CHECK_FOR_CYCLES: bool> DepthIterator<'a, CHECK_FOR_CYCLES> {
     }
 }
 
-impl<'a> Iterator for DepthIterator<'a, false> {
+impl Iterator for DepthIterator<'_, false> {
     type Item = (usize, Option<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -235,11 +235,11 @@ impl<'a> Iterator for DepthIterator<'a, false> {
         };
         self.push_children(index);
         self.walker.visited[index] = true;
-        return Some((index, parent));
+        Some((index, parent))
     }
 }
 
-impl<'a> Iterator for DepthIterator<'a, true> {
+impl Iterator for DepthIterator<'_, true> {
     type Item = Result<(usize, Option<usize>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -275,7 +275,7 @@ impl<'a> Iterator for DepthIterator<'a, true> {
         });
         self.push_children(index);
         self.walker.visited[index] = true;
-        return Some(Ok((index, parent)));
+        Some(Ok((index, parent)))
     }
 }
 
@@ -292,11 +292,9 @@ mod test {
             // Make sure two successive traversal yield the same nodes.
             let a: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
                 .collect();
             let b: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
         }
@@ -305,12 +303,10 @@ mod test {
             let tree = deftree!(+ (pow x 3.) (pow y 3.)).unwrap();
             let a: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
                 .collect();
             let tree2 = tree.clone();
             let b: Vec<_> = walker
                 .walk_tree(&tree2, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
         }

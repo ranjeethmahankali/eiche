@@ -30,7 +30,7 @@ impl std::fmt::Display for Tree {
                 let mut tokens: Vec<Token> = Vec::with_capacity(self.len()); // Likely need more memory.
                 let mut walker = DepthWalker::new();
                 let mut node_depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
-                for (index, parent) in walker.walk_tree(&self, false, NodeOrdering::Original) {
+                for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
                     if let Some(pi) = parent {
                         node_depths[index] = node_depths[pi] + 1;
                     }
@@ -71,18 +71,18 @@ impl std::fmt::Display for Tree {
             tokens
         };
         // Write all the tokens out.
-        write!(f, "\n")?;
+        writeln!(f)?;
         for token in tokens.iter() {
             match token {
                 Branch => write!(f, " ├── ")?,
                 Pass => write!(f, " │   ")?,
                 Turn => write!(f, " └── ")?,
                 Gap => write!(f, "     ")?,
-                Newline => write!(f, "\n")?,
+                Newline => writeln!(f)?,
                 NodeIndex(index) => write!(f, "[{}] {}", *index, &self.node(*index))?,
             };
         }
-        write!(f, "\n")
+        writeln!(f)
     }
 }
 

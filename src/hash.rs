@@ -11,7 +11,7 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     for index in 0..nodes.len() {
         let hash: u64 = match nodes[index] {
             Constant(value) => match value {
-                Scalar(value) => value.to_bits().into(),
+                Scalar(value) => value.to_bits(),
                 Bool(value) => value as u64,
             },
             Symbol(label) => {
@@ -66,7 +66,7 @@ impl Tree {
         for h in &hashbuf[self.root_indices()] {
             h.hash(&mut s);
         }
-        return s.finish();
+        s.finish()
     }
 }
 

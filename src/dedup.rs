@@ -23,6 +23,12 @@ pub struct Deduplicater {
     hash_to_index: HashMap<u64, usize>,
 }
 
+impl Default for Deduplicater {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Deduplicater {
     /// Create a new deduplicater.
     pub fn new() -> Self {
@@ -49,7 +55,7 @@ impl Deduplicater {
         // Compute unique indices after deduplication.
         self.indices.clear();
         self.indices.extend(0..nodes.len());
-        hash_nodes(&nodes, &mut self.hashes);
+        hash_nodes(nodes, &mut self.hashes);
         self.hash_to_index.clear();
         for i in 0..self.hashes.len() {
             let h = self.hashes[i];
@@ -58,8 +64,8 @@ impl Deduplicater {
                 && equivalent(
                     *entry,
                     i,
-                    &nodes,
-                    &nodes,
+                    nodes,
+                    nodes,
                     &mut self.walker1,
                     &mut self.walker2,
                 )?
@@ -91,7 +97,7 @@ impl Deduplicater {
                 }
             }
         }
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -116,7 +122,7 @@ pub fn equivalent_trees(
 ) -> bool {
     let lwalk = lwalker.walk_tree(ltree, false, NodeOrdering::Deterministic);
     let rwalk = rwalker.walk_tree(rtree, false, NodeOrdering::Deterministic);
-    return depth_walk_equivalent_trees(lwalk, rwalk, ltree, rtree);
+    depth_walk_equivalent_trees(lwalk, rwalk, ltree, rtree)
 }
 
 /// Check if the subtrees starting at 'left' and 'right' are equivalent.
@@ -138,7 +144,7 @@ pub fn equivalent(
         false,
         NodeOrdering::Deterministic,
     );
-    return depth_walk_equivalent_nodes(liter, riter, lnodes, rnodes);
+    depth_walk_equivalent_nodes(liter, riter, lnodes, rnodes)
 }
 
 /// Walk the depth iterators and compare the nodes for equivalence. The
@@ -227,7 +233,7 @@ impl Tree {
     pub fn deduplicate(self, dedup: &mut Deduplicater) -> MaybeTree {
         let (mut nodes, dims) = self.take();
         dedup.run(&mut nodes)?; // We don't need to check because the nodes came from a tree.
-        return Tree::from_nodes(nodes, dims);
+        Tree::from_nodes(nodes, dims)
     }
 
     pub fn equivalent(&self, other: &Tree) -> bool {
@@ -236,7 +242,7 @@ impl Tree {
         }
         let mut lwalker = DepthWalker::new();
         let mut rwalker = DepthWalker::new();
-        return equivalent_trees(&self, &other, &mut lwalker, &mut rwalker);
+        equivalent_trees(self, other, &mut lwalker, &mut rwalker)
     }
 }
 

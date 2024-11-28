@@ -52,7 +52,7 @@ fn complete_capture(capture: &TemplateCapture, src: &Tree, dst: &Tree) -> bool {
     if lhs != rhs {
         return false;
     }
-    return true;
+    true
 }
 
 impl Template {
@@ -74,7 +74,7 @@ impl Template {
                 None => return None,
             }
         }
-        return Some(self);
+        Some(self)
     }
 
     fn mirrored(&self) -> Option<Template> {
@@ -100,7 +100,7 @@ impl Template {
         {
             return None;
         }
-        return Some(out);
+        Some(out)
     }
 
     pub fn ping(&self) -> &Tree {
@@ -301,7 +301,7 @@ pub mod test {
         checked: &mut HashSet<&str>,
     ) {
         for name in names {
-            check_one_template(*name, vardata, eps, checked);
+            check_one_template(name, vardata, eps, checked);
         }
     }
 

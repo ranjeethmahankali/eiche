@@ -9,7 +9,7 @@ impl Tree {
         let roots = self.roots();
         let (rows, cols) = self.dims();
         if rows == 1 && cols == 1 {
-            return to_latex(&roots[0], self.nodes());
+            to_latex(&roots[0], self.nodes())
         } else {
             let mut lx = "\\begin{bmatrix}".to_string();
             for row in 0..rows {
@@ -26,7 +26,7 @@ impl Tree {
                 }
             }
             lx.push_str("\\end{bmatrix}");
-            return lx;
+            lx
         }
     }
 }

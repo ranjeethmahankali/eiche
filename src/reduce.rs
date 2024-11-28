@@ -88,7 +88,7 @@ impl Heuristic {
             counter += 1;
             prevdepth = depth;
         }
-        return sum;
+        sum
     }
 
     fn cost(&mut self, tree: &Tree) -> usize {
@@ -182,7 +182,7 @@ pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
         i = cand.prev;
     }
     steps.reverse();
-    return Ok(steps);
+    Ok(steps)
 }
 
 #[cfg(test)]

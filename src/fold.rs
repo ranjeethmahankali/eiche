@@ -74,7 +74,7 @@ pub fn fold_nodes(nodes: &mut Vec<Node>) -> Result<(), Error> {
             nodes[index] = node;
         }
     }
-    return Ok(());
+    Ok(())
 }
 
 impl Tree {
@@ -87,7 +87,7 @@ impl Tree {
     pub fn fold(self) -> MaybeTree {
         let (mut nodes, dims) = self.take();
         fold_nodes(&mut nodes)?;
-        return Tree::from_nodes(nodes, dims);
+        Tree::from_nodes(nodes, dims)
     }
 }
 
