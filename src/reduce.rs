@@ -88,7 +88,7 @@ impl Heuristic {
             counter += 1;
             prevdepth = depth;
         }
-        return sum;
+        sum
     }
 
     fn cost(&mut self, tree: &Tree) -> usize {
@@ -111,7 +111,7 @@ impl Candidate {
 
 impl PartialOrd for Candidate {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        other.cost().partial_cmp(&self.cost())
+        Some(self.cmp(other))
     }
 }
 
@@ -182,7 +182,7 @@ pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
         i = cand.prev;
     }
     steps.reverse();
-    return Ok(steps);
+    Ok(steps)
 }
 
 #[cfg(test)]

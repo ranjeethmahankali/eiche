@@ -27,6 +27,12 @@ pub struct Pruner {
     on_path: Vec<bool>,
 }
 
+impl Default for Pruner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Pruner {
     /// Create a new `Pruner` instance.
     pub fn new() -> Pruner {
@@ -52,16 +58,16 @@ impl Pruner {
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
         self.init_traverse(nodes.len(), root_indices.clone());
-        self.sort_nodes(&mut nodes, false)?;
+        self.sort_nodes(&nodes, false)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
-        self.compute_heights(&mut nodes);
+        self.compute_heights(&nodes);
         // Second pass now using heights.
         let root_indices = (nodes.len() - root_indices.len())..nodes.len();
         // self.init_traverse(nodes.len(), root_indices.clone());
         self.init_traverse(nodes.len(), root_indices.clone());
-        self.sort_nodes(&mut nodes, true)?;
+        self.sort_nodes(&nodes, true)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
-        return Ok((nodes, root_indices));
+        Ok((nodes, root_indices))
     }
 
     /// Run the pruning and topological sorting using root node indices provided as a slice.
@@ -74,10 +80,10 @@ impl Pruner {
         // sorted. So we prune and sort them once without caring about their
         // heights, then compute the heights of all nodes, then sort them again
         // but this time we take the computed heights into account.
-        self.init_traverse(nodes.len(), roots.iter().map(|r| *r));
+        self.init_traverse(nodes.len(), roots.iter().copied());
         self.sort_nodes(&nodes, false)?;
         std::mem::swap(&mut self.sorted, &mut nodes);
-        self.compute_heights(&mut nodes);
+        self.compute_heights(&nodes);
         // Second pass after computing heights.
         let newroots = (nodes.len() - roots.len())..nodes.len();
         self.init_traverse(nodes.len(), newroots.clone());
@@ -86,7 +92,7 @@ impl Pruner {
         for (r, i) in roots.iter_mut().zip(newroots) {
             *r = i;
         }
-        return Ok(nodes);
+        Ok(nodes)
     }
 
     /// Prune and sort the nodes. This function does a depth-first traversal of
@@ -178,7 +184,7 @@ impl Pruner {
             }
         }
         // Push the roots.
-        self.sorted.extend(self.roots.drain(..));
+        self.sorted.append(&mut self.roots);
         // Update the inputs of all the nodes with our index map.
         for node in &mut self.sorted {
             match node {
@@ -195,7 +201,7 @@ impl Pruner {
                 }
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Clear all the temporary storage and prepare for a new depth-first

@@ -29,18 +29,20 @@ impl<'ctx> JitEvaluator<'ctx> {
         num_outputs: usize,
     ) -> JitEvaluator<'ctx> {
         // Construct evaluator
-        let eval = JitEvaluator {
+        JitEvaluator {
             func,
             num_inputs,
             outputs: vec![f64::NAN; num_outputs],
-        };
-        eval
+        }
     }
 }
 
 impl Tree {
     /// JIT compile a tree and return a native evaluator.
-    pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitEvaluator, Error> {
+    pub fn jit_compile<'ctx>(
+        &'ctx self,
+        context: &'ctx JitContext,
+    ) -> Result<JitEvaluator<'ctx>, Error> {
         const FUNC_NAME: &str = "eiche_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
@@ -387,7 +389,7 @@ impl Tree {
                 .get_function(FUNC_NAME)
                 .map_err(|e| Error::JitCompilationError(e.to_string()))?
         };
-        return Ok(JitEvaluator::create(func, symbols.len(), num_roots));
+        Ok(JitEvaluator::create(func, symbols.len(), num_roots))
     }
 }
 
@@ -449,7 +451,7 @@ fn build_float_binary_intrinsic<'ctx>(
         .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
-impl<'ctx> JitEvaluator<'ctx> {
+impl JitEvaluator<'_> {
     /// Run the JIT evaluator with the given input values. The number of input
     /// values is expected to be the same as the number of variables in the
     /// tree. The variables are substituted with the input values in the same

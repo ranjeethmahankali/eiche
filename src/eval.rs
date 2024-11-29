@@ -147,20 +147,20 @@ where
             out_regs: root_regs,
         } = compile(tree);
         let num_roots = root_regs.len();
-        return Evaluator {
+        Evaluator {
             ops,
             regs: vec![T::from_scalar(0.).unwrap(); num_regs],
             vars: Vec::new(),
             root_regs,
             outputs: vec![T::from_scalar(0.).unwrap(); num_roots],
-        };
+        }
     }
 
     /// Get the number of registers used by this evaluator. This is not the same
     /// as the number of nodes in the tree, because registers are allocated as
     /// needed, and reused where possible.
     pub fn num_regs(&self) -> usize {
-        return self.regs.len();
+        self.regs.len()
     }
 
     /// Set the value of a scalar variable with the given label. You'd do this
@@ -197,7 +197,7 @@ where
         self.outputs.clear();
         self.outputs
             .extend(self.root_regs.iter().map(|r| self.regs[*r]));
-        return Ok(&self.outputs);
+        Ok(&self.outputs)
     }
 }
 
@@ -218,7 +218,7 @@ mod test {
         let mut eval = ValueEvaluator::new(&x);
         match eval.run() {
             Ok(val) => assert_eq!(val, &[Value::Scalar(std::f64::consts::PI)]),
-            _ => assert!(false),
+            _ => panic!(),
         }
     }
 
@@ -239,7 +239,7 @@ mod test {
             eval.set_value('y', y.into());
             match eval.run() {
                 Ok(val) => assert_eq!(val, &[expected]),
-                _ => assert!(false),
+                _ => panic!(),
             }
         }
     }

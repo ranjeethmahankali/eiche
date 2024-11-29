@@ -181,12 +181,12 @@ impl ValueType for Interval {
                     };
                     Interval::from_boolean(lo, hi)
                 }
-                And | Or => return Err(Error::TypeMismatch),
+                And | Or => Err(Error::TypeMismatch),
             },
             (Boolean(llo, lhi), Boolean(rlo, rhi)) => match op {
                 Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
                 | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => {
-                    return Err(Error::TypeMismatch)
+                    Err(Error::TypeMismatch)
                 }
                 And => {
                     let (lo, hi) = match (llo, lhi, rlo, rhi) {
@@ -205,7 +205,7 @@ impl ValueType for Interval {
                     Interval::from_boolean(lo, hi)
                 }
             },
-            _ => return Err(Error::TypeMismatch),
+            _ => Err(Error::TypeMismatch),
         }
     }
 
@@ -221,7 +221,7 @@ impl ValueType for Interval {
                         f64::max(b.sup(), c.sup()),
                     ),
                     (Scalar(_), Boolean(_, _)) | (Boolean(_, _), Scalar(_)) => {
-                        return Err(Error::TypeMismatch)
+                        Err(Error::TypeMismatch)
                     }
                     (Boolean(blo, bhi), Boolean(clo, chi)) => {
                         if blo == bhi && blo == clo && blo == chi {
@@ -331,7 +331,7 @@ mod test {
                     let inf = lower + local_idx * step;
                     intervals.push(inari::interval!(inf, inf + step).unwrap());
                     multiplier *= intervals_per_var;
-                    return (idx, intervals, multiplier);
+                    (idx, intervals, multiplier)
                 },
             );
             assert!(index < computed.len());

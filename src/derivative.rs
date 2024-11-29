@@ -47,10 +47,10 @@ impl Tree {
                 &mut derivs,
                 &mut derivmap,
             );
-            nodes.extend(derivs.drain(..));
-            for ri in root_start..root_end {
-                rootnodes.push(match derivmap[ri] {
-                    Some(deriv) => deriv,
+            nodes.append(&mut derivs);
+            for item in &derivmap[root_start..root_end] {
+                rootnodes.push(match item {
+                    Some(deriv) => *deriv,
                     None => return Err(Error::CannotComputeSymbolicDerivative),
                 });
             }
@@ -64,7 +64,7 @@ impl Tree {
         let mut nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
         fold_nodes(&mut nodes)?;
         let nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
-        return Tree::from_nodes(nodes, (root_end - root_start, params.len()));
+        Tree::from_nodes(nodes, (root_end - root_start, params.len()))
     }
 
     /// Get a tree representing the numerical derivative of the input `tree` with
@@ -239,7 +239,7 @@ fn compute_symbolic_deriv(
 fn push_node(node: Node, dst: &mut Vec<Node>) -> usize {
     let idx = dst.len();
     dst.push(node);
-    return idx;
+    idx
 }
 
 #[cfg(test)]

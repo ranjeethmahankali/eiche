@@ -61,7 +61,7 @@ impl Tree {
         // Instead of prepending the new tree nodes, we append them and rotate the the whole slice.
         nodes.extend(new.nodes().iter());
         nodes.rotate_right(new.len());
-        return Tree::from_nodes(nodes, dims);
+        Tree::from_nodes(nodes, dims)
     }
 }
 

@@ -61,11 +61,11 @@ pub fn compile(tree: &Tree) -> Instructions {
     }
     root_regs.reverse();
     ops.reverse();
-    return Instructions {
+    Instructions {
         ops,
         num_regs: alive.len(),
         out_regs: root_regs,
-    };
+    }
 }
 
 /// Get the first register that isn't alive, i.e. is not in use. If all
@@ -86,5 +86,5 @@ fn get_register(valregs: &mut [Option<usize>], alive: &mut Vec<bool>, index: usi
         }
     };
     valregs[index] = Some(reg);
-    return reg;
+    reg
 }
