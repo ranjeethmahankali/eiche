@@ -80,7 +80,6 @@ impl<'ctx> JitCompiler<'ctx> {
     }
 }
 
-pub mod pruned;
 pub mod single;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
