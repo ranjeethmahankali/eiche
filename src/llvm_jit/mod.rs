@@ -1,7 +1,8 @@
 use crate::error::Error;
 use inkwell::{
-    builder::Builder,
+    builder::{Builder, BuilderError},
     context::Context,
+    execution_engine::FunctionLookupError,
     module::Module,
     passes::PassManager,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
@@ -26,6 +27,18 @@ impl Default for JitContext {
         JitContext {
             inner: Context::create(),
         }
+    }
+}
+
+impl From<BuilderError> for Error {
+    fn from(value: BuilderError) -> Self {
+        Error::JitCompilationError(value.to_string())
+    }
+}
+
+impl From<FunctionLookupError> for Error {
+    fn from(value: FunctionLookupError) -> Self {
+        Error::JitCompilationError(value.to_string())
     }
 }
 
