@@ -73,34 +73,24 @@ impl Tree {
                         .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
                         .into_pointer_value();
                     let ptr = unsafe {
-                        builder
-                            .build_gep(
-                                inputs,
-                                &[context.i64_type().const_int(
-                                    symbols.iter().position(|c| c == label).ok_or(
-                                        Error::JitCompilationError(
-                                            "Cannot find symbol".to_string(),
-                                        ),
-                                    )? as u64,
-                                    false,
-                                )],
-                                &format!("arg_{}", *label),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?
+                        builder.build_gep(
+                            inputs,
+                            &[context.i64_type().const_int(
+                                symbols.iter().position(|c| c == label).ok_or(
+                                    Error::JitCompilationError("Cannot find symbol".to_string()),
+                                )? as u64,
+                                false,
+                            )],
+                            &format!("arg_{}", *label),
+                        )?
                     };
-                    builder
-                        .build_load(ptr, &format!("reg_{}", *label))
-                        .map_err(|e| Error::JitCompilationError(e.to_string()))?
+                    builder.build_load(ptr, &format!("reg_{}", *label))?
                 }
                 Unary(op, input) => match op {
-                    Negate => BasicValueEnum::FloatValue(
-                        builder
-                            .build_float_neg(
-                                regs[*input].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
+                    Negate => BasicValueEnum::FloatValue(builder.build_float_neg(
+                        regs[*input].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
                     Sqrt => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
@@ -150,15 +140,11 @@ impl Tree {
                             regs[*input],
                             f64_type,
                         )?;
-                        BasicValueEnum::FloatValue(
-                            builder
-                                .build_float_div(
-                                    sin.into_float_value(),
-                                    cos.into_float_value(),
-                                    &format!("reg_{}", ni),
-                                )
-                                .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                        )
+                        BasicValueEnum::FloatValue(builder.build_float_div(
+                            sin.into_float_value(),
+                            cos.into_float_value(),
+                            &format!("reg_{}", ni),
+                        )?)
                     }
                     Log => build_float_unary_intrinsic(
                         builder,
@@ -185,48 +171,30 @@ impl Tree {
                         f64_type,
                     )?,
                     Not => BasicValueEnum::IntValue(
-                        builder
-                            .build_not(regs[*input].into_int_value(), &format!("reg_{}", ni))
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
+                        builder.build_not(regs[*input].into_int_value(), &format!("reg_{}", ni))?,
                     ),
                 },
                 Binary(op, lhs, rhs) => match op {
-                    Add => BasicValueEnum::FloatValue(
-                        builder
-                            .build_float_add(
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    Subtract => BasicValueEnum::FloatValue(
-                        builder
-                            .build_float_sub(
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    Multiply => BasicValueEnum::FloatValue(
-                        builder
-                            .build_float_mul(
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    Divide => BasicValueEnum::FloatValue(
-                        builder
-                            .build_float_div(
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
+                    Add => BasicValueEnum::FloatValue(builder.build_float_add(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    Subtract => BasicValueEnum::FloatValue(builder.build_float_sub(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    Multiply => BasicValueEnum::FloatValue(builder.build_float_mul(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    Divide => BasicValueEnum::FloatValue(builder.build_float_div(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
                     Pow => build_float_binary_intrinsic(
                         builder,
                         &compiler.module,
@@ -254,103 +222,65 @@ impl Tree {
                         regs[*rhs],
                         f64_type,
                     )?,
-                    Remainder => BasicValueEnum::FloatValue(
-                        builder
-                            .build_float_rem(
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    Less => BasicValueEnum::IntValue(
-                        builder
-                            .build_float_compare(
-                                FloatPredicate::ULT,
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    LessOrEqual => BasicValueEnum::IntValue(
-                        builder
-                            .build_float_compare(
-                                FloatPredicate::ULE,
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    Equal => BasicValueEnum::IntValue(
-                        builder
-                            .build_float_compare(
-                                FloatPredicate::UEQ,
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    NotEqual => BasicValueEnum::IntValue(
-                        builder
-                            .build_float_compare(
-                                FloatPredicate::UNE,
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    Greater => BasicValueEnum::IntValue(
-                        builder
-                            .build_float_compare(
-                                FloatPredicate::UGT,
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    GreaterOrEqual => BasicValueEnum::IntValue(
-                        builder
-                            .build_float_compare(
-                                FloatPredicate::UGE,
-                                regs[*lhs].into_float_value(),
-                                regs[*rhs].into_float_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    And => BasicValueEnum::IntValue(
-                        builder
-                            .build_and(
-                                regs[*lhs].into_int_value(),
-                                regs[*rhs].into_int_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
-                    Or => BasicValueEnum::IntValue(
-                        builder
-                            .build_or(
-                                regs[*lhs].into_int_value(),
-                                regs[*rhs].into_int_value(),
-                                &format!("reg_{}", ni),
-                            )
-                            .map_err(|e| Error::JitCompilationError(e.to_string()))?,
-                    ),
+                    Remainder => BasicValueEnum::FloatValue(builder.build_float_rem(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    Less => BasicValueEnum::IntValue(builder.build_float_compare(
+                        FloatPredicate::ULT,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    LessOrEqual => BasicValueEnum::IntValue(builder.build_float_compare(
+                        FloatPredicate::ULE,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    Equal => BasicValueEnum::IntValue(builder.build_float_compare(
+                        FloatPredicate::UEQ,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    NotEqual => BasicValueEnum::IntValue(builder.build_float_compare(
+                        FloatPredicate::UNE,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    Greater => BasicValueEnum::IntValue(builder.build_float_compare(
+                        FloatPredicate::UGT,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    GreaterOrEqual => BasicValueEnum::IntValue(builder.build_float_compare(
+                        FloatPredicate::UGE,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    And => BasicValueEnum::IntValue(builder.build_and(
+                        regs[*lhs].into_int_value(),
+                        regs[*rhs].into_int_value(),
+                        &format!("reg_{}", ni),
+                    )?),
+                    Or => BasicValueEnum::IntValue(builder.build_or(
+                        regs[*lhs].into_int_value(),
+                        regs[*rhs].into_int_value(),
+                        &format!("reg_{}", ni),
+                    )?),
                 },
                 Ternary(op, a, b, c) => match op {
-                    Choose => builder
-                        .build_select(
-                            regs[*a].into_int_value(),
-                            regs[*b].into_float_value(),
-                            regs[*c].into_float_value(),
-                            &format!("reg_{}", ni),
-                        )
-                        .map_err(|e| Error::JitCompilationError(e.to_string()))?,
+                    Choose => builder.build_select(
+                        regs[*a].into_int_value(),
+                        regs[*b].into_float_value(),
+                        regs[*c].into_float_value(),
+                        &format!("reg_{}", ni),
+                    )?,
                 },
             };
             regs.push(reg);
@@ -364,31 +294,21 @@ impl Tree {
             .into_pointer_value();
         for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
             let dst = unsafe {
-                builder
-                    .build_gep(
-                        outputs,
-                        &[context.i64_type().const_int(i as u64, false)],
-                        &format!("output_{}", i),
-                    )
-                    .map_err(|e| Error::JitCompilationError(e.to_string()))?
+                builder.build_gep(
+                    outputs,
+                    &[context.i64_type().const_int(i as u64, false)],
+                    &format!("output_{}", i),
+                )?
             };
-            builder
-                .build_store(dst, *reg)
-                .map_err(|e| Error::JitCompilationError(e.to_string()))?;
+            builder.build_store(dst, *reg)?;
         }
-        builder
-            .build_return(None)
-            .map_err(|e| Error::JitCompilationError(e.to_string()))?;
+        builder.build_return(None)?;
         compiler.run_passes();
         let engine = compiler
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
-        let func = unsafe {
-            engine
-                .get_function(FUNC_NAME)
-                .map_err(|e| Error::JitCompilationError(e.to_string()))?
-        };
+        let func = unsafe { engine.get_function(FUNC_NAME)? };
         Ok(JitEvaluator::create(func, symbols.len(), num_roots))
     }
 }
