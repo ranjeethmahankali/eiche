@@ -396,7 +396,7 @@ impl Tree {
             return Err(Error::DimensionMismatch(self.dims, other.dims));
         }
         self.nodes
-            .reserve(self.nodes.len() + other.nodes.len() + usize::max(nroots, other_nroots));
+            .reserve(other.nodes.len() + usize::max(nroots, other_nroots));
         let offset = self.push_nodes(&other);
         if nroots == 1 {
             let root = offset - 1;
@@ -426,8 +426,7 @@ impl Tree {
         if nroots != 1 && nroots != anroots {
             return Err(Error::DimensionMismatch(self.dims, a.dims));
         }
-        self.nodes
-            .reserve(self.nodes.len() + a.nodes.len() + b.nodes.len() + 1);
+        self.nodes.reserve(a.nodes.len() + b.nodes.len() + 1);
         let a_offset = self.push_nodes(&a);
         let b_offset = self.push_nodes(&b);
         if nroots == 1 {
