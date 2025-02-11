@@ -874,7 +874,7 @@ mod perft {
 
     fn _sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
         use rand::Rng;
-        range.0 + rng.gen::<f64>() * (range.1 - range.0)
+        range.0 + rng.random::<f64>() * (range.1 - range.0)
     }
     const _RADIUS_RANGE: (f64, f64) = (0.2, 2.);
     const _X_RANGE: (f64, f64) = (0., 100.);

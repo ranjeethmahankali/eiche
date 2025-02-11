@@ -251,7 +251,7 @@ mod test {
         let mut eval = ValueEvaluator::new(&sum);
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
-            let x: f64 = PI_2 * rng.gen::<f64>();
+            let x: f64 = PI_2 * rng.random::<f64>();
             eval.set_value('x', x.into());
             let val = eval.run().unwrap();
             assert_eq!(val.len(), 1);
