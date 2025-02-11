@@ -54,7 +54,7 @@ impl Sampler {
         for &(_label, lower, upper) in vardata {
             let span = upper - lower;
             for _ in 0..samples_per_var {
-                var_samples.push(lower + rng.gen::<f64>() * span);
+                var_samples.push(lower + rng.random::<f64>() * span);
             }
         }
         Sampler {

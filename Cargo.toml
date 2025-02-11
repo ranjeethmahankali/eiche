@@ -1,6 +1,6 @@
 [package]
 name = "eiche"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Ranjeeth Mahankali <ranjeethmahankali@gmail.com>"]
 description = "A library with tools for working with symbolic expressions."
@@ -13,11 +13,10 @@ categories = ["mathematics"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand = "0.8"
-inkwell = { version = "0.4", features = ["llvm14-0"], optional = true }
-inari = { version = "2.0", optional = true }
+rand = "0.9.0"
+inkwell = { version = "0.5.0", features = ["llvm14-0"], optional = true }
+inari = { version = "2.0.0", optional = true }
 
 [features]
-default = ["llvm-jit", "inari-intervals"]
 llvm-jit = ["dep:inkwell"]
 inari-intervals = ["dep:inari"]

@@ -377,8 +377,8 @@ mod test {
         let mut rng = StdRng::seed_from_u64(42);
         const MAX_VAL: f64 = 32.;
         for _ in 0..100 {
-            let lo = MAX_VAL * rng.gen::<f64>();
-            let hi = MAX_VAL * rng.gen::<f64>();
+            let lo = MAX_VAL * rng.random::<f64>();
+            let hi = MAX_VAL * rng.random::<f64>();
             let (outlo, outhi) = {
                 let mut outlo = lo * lo;
                 let mut outhi = hi * hi;
