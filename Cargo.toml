@@ -1,6 +1,6 @@
 [package]
 name = "eiche"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 authors = ["Ranjeeth Mahankali <ranjeethmahankali@gmail.com>"]
 description = "A library with tools for working with symbolic expressions."
