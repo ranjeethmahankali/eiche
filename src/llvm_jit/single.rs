@@ -74,7 +74,7 @@ impl Tree {
                         .into_pointer_value();
                     let ptr = unsafe {
                         builder.build_gep(
-                            f64_type.array_type(symbols.len() as u32),
+                            f64_type,
                             inputs,
                             &[context.i64_type().const_int(
                                 symbols.iter().position(|c| c == label).ok_or(
@@ -296,7 +296,7 @@ impl Tree {
         for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
             let dst = unsafe {
                 builder.build_gep(
-                    f64_type.array_type(num_roots as u32),
+                    f64_type,
                     outputs,
                     &[context.i64_type().const_int(i as u64, false)],
                     &format!("output_{}", i),
@@ -405,6 +405,16 @@ mod test {
             vardata,
             samples_per_var,
             eps,
+        );
+    }
+
+    #[test]
+    fn t_sum() {
+        check_jit_eval(
+            &deftree!(+ x y).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            100,
+            0.,
         );
     }
 

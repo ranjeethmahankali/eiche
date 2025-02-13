@@ -337,7 +337,7 @@ impl Tree {
                         fvec_type,
                         unsafe {
                             builder.build_gep(
-                                fvec_type.array_type(symbols.len() as u32),
+                                fvec_type,
                                 inputs,
                                 &[offset],
                                 &format!("arg_{}", label),
