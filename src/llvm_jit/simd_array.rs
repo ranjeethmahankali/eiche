@@ -284,7 +284,7 @@ impl Tree {
         let float_type = <Wfloat as SimdVec<T>>::float_type(context);
         let i64_type = context.i64_type();
         let fvec_type = float_type.vec_type(<Wfloat as SimdVec<T>>::SIMD_VEC_SIZE as u32);
-        let fptr_type = fvec_type.ptr_type(AddressSpace::default());
+        let fptr_type = context.ptr_type(AddressSpace::default());
         let fn_type = context.void_type().fn_type(
             &[fptr_type.into(), fptr_type.into(), i64_type.into()],
             false,
@@ -334,7 +334,15 @@ impl Tree {
                         &format!("input_offset_add_{}", label),
                     )?;
                     builder.build_load(
-                        unsafe { builder.build_gep(inputs, &[offset], &format!("arg_{}", label)) }?,
+                        fvec_type,
+                        unsafe {
+                            builder.build_gep(
+                                fvec_type,
+                                inputs,
+                                &[offset],
+                                &format!("arg_{}", label),
+                            )
+                        }?,
                         &format!("arg_{}", label),
                     )?
                 }
@@ -555,7 +563,9 @@ impl Tree {
                 i64_type.const_int(i as u64, false),
                 "offset_add",
             )?;
-            let dst = unsafe { builder.build_gep(outputs, &[offset], &format!("output_{}", i))? };
+            let dst = unsafe {
+                builder.build_gep(fvec_type, outputs, &[offset], &format!("output_{}", i))?
+            };
             builder.build_store(dst, *reg)?;
         }
         // Check to see if the loop should go on.

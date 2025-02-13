@@ -50,7 +50,7 @@ impl Tree {
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
         let f64_type = context.f64_type();
-        let f64_ptr_type = f64_type.ptr_type(AddressSpace::default());
+        let f64_ptr_type = context.ptr_type(AddressSpace::default());
         let bool_type = context.bool_type();
         let fn_type = context
             .void_type()
@@ -74,6 +74,7 @@ impl Tree {
                         .into_pointer_value();
                     let ptr = unsafe {
                         builder.build_gep(
+                            f64_type,
                             inputs,
                             &[context.i64_type().const_int(
                                 symbols.iter().position(|c| c == label).ok_or(
@@ -84,7 +85,7 @@ impl Tree {
                             &format!("arg_{}", *label),
                         )?
                     };
-                    builder.build_load(ptr, &format!("reg_{}", *label))?
+                    builder.build_load(f64_type, ptr, &format!("reg_{}", *label))?
                 }
                 Unary(op, input) => match op {
                     Negate => BasicValueEnum::FloatValue(builder.build_float_neg(
@@ -295,6 +296,7 @@ impl Tree {
         for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
             let dst = unsafe {
                 builder.build_gep(
+                    f64_type,
                     outputs,
                     &[context.i64_type().const_int(i as u64, false)],
                     &format!("output_{}", i),
@@ -403,6 +405,16 @@ mod test {
             vardata,
             samples_per_var,
             eps,
+        );
+    }
+
+    #[test]
+    fn t_sum() {
+        check_jit_eval(
+            &deftree!(+ x y).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            100,
+            0.,
         );
     }
 

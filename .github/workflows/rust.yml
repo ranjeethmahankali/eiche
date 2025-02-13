@@ -1,4 +1,4 @@
-name: Build and Run Tests
+name: CI
 
 on:
   push:
@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-test-linux:
+  linux:
     runs-on: ubuntu-latest
     steps:
     - name: Update Rust
@@ -19,7 +19,7 @@ jobs:
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v1
       with:
-        version: "14.0"
+        version: "15.0"
     - name: Build
       run: cargo build --verbose --all-features --all-targets
     - name: Check formatting
@@ -29,7 +29,7 @@ jobs:
     - name: Run tests
       run: cargo test --verbose --all-targets --all-features
 
-  build-and-test-windows:
+  windows:
     runs-on: windows-latest
     steps:
     - name: Update Rust
