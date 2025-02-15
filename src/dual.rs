@@ -183,6 +183,8 @@ pub type DualEvaluator<const DIM: usize> = Evaluator<Dual<DIM>>;
 
 #[cfg(test)]
 mod test {
+    use core::f64;
+
     use crate::{
         deftree,
         dual::Dual,
@@ -193,7 +195,7 @@ mod test {
 
     use super::DualEvaluator;
 
-    fn check_dual_eval<const DIM: usize>(tree: &Tree, vardata: &[(char, f64, f64)]) {
+    fn check_dual_eval<const DIM: usize>(tree: &Tree, vardata: &[(char, f64, f64)], eps: f64) {
         let nroots = tree.num_roots();
         let mut dual = DualEvaluator::<DIM>::new(&tree);
         let mut eval = ValueEvaluator::new(&tree);
@@ -226,11 +228,11 @@ mod test {
                     // Compare the values.
                     match (dual, val) {
                         (Dual::Scalar(real, dual), Value::Scalar(expected)) => {
-                            assert_float_eq!(real, expected);
+                            assert_float_eq!(real, expected, eps);
                             for (d, expected) in dual.iter().zip(deriv.iter()) {
                                 match expected {
                                     Value::Bool(_) => panic!("Type mismatch"),
-                                    Value::Scalar(expected) => assert_float_eq!(d, expected),
+                                    Value::Scalar(expected) => assert_float_eq!(d, expected, eps),
                                 }
                             }
                         }
@@ -242,8 +244,8 @@ mod test {
                 }
                 match (dual, val, deriv) {
                     (Dual::Scalar(real, dual), Value::Scalar(val), Value::Scalar(deriv)) => {
-                        assert_float_eq!(real, val);
-                        assert_float_eq!(dual[0], deriv);
+                        assert_float_eq!(real, val, eps);
+                        assert_float_eq!(dual[0], deriv, eps);
                     }
                     _ => panic!("Unexpected data type"),
                 }
@@ -253,25 +255,115 @@ mod test {
 
     #[test]
     fn t_add_sub() {
+        let eps = f64::EPSILON;
         // add
-        check_dual_eval::<1>(&deftree!(+ x 1).unwrap(), &[('x', -1., 1.)]);
-        check_dual_eval::<1>(&deftree!(+ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<2>(&deftree!(+ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<3>(&deftree!(+ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        check_dual_eval::<1>(&deftree!(+ x 1).unwrap(), &[('x', -1., 1.)], eps);
+        check_dual_eval::<1>(
+            &deftree!(+ x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<2>(
+            &deftree!(+ x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<3>(
+            &deftree!(+ x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
         // sub
-        check_dual_eval::<1>(&deftree!(- x 1).unwrap(), &[('x', -1., 1.)]);
-        check_dual_eval::<1>(&deftree!(- x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<2>(&deftree!(- x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<3>(&deftree!(- x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        check_dual_eval::<1>(&deftree!(- x 1).unwrap(), &[('x', -1., 1.)], eps);
+        check_dual_eval::<1>(
+            &deftree!(- x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<2>(
+            &deftree!(- x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<3>(
+            &deftree!(- x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
     }
 
     #[test]
     fn t_mul_div() {
-        check_dual_eval::<1>(&deftree!(* x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<2>(&deftree!(* x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<3>(&deftree!(* x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<1>(&deftree!(/ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<2>(&deftree!(/ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
-        check_dual_eval::<3>(&deftree!(/ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        let eps = f64::EPSILON;
+        check_dual_eval::<1>(
+            &deftree!(* x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<2>(
+            &deftree!(* x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<3>(
+            &deftree!(* x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<1>(
+            &deftree!(/ x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<2>(
+            &deftree!(/ x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+        check_dual_eval::<3>(
+            &deftree!(/ x y).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            eps,
+        );
+    }
+
+    #[test]
+    fn t_polynomial() {
+        check_dual_eval::<1>(&deftree!(pow x 2).unwrap(), &[('x', -10., 10.)], 1e-14);
+        check_dual_eval::<2>(&deftree!(pow x 2).unwrap(), &[('x', -10., 10.)], 1e-14);
+        check_dual_eval::<1>(&deftree!(pow x 3).unwrap(), &[('x', -10., 10.)], 1e-13);
+        check_dual_eval::<1>(
+            &deftree!(+ (* 1.5 (pow x 2)) (+ (* 2.3 x) 3.46)).unwrap(),
+            &[('x', -10., 10.)],
+            1e-14,
+        );
+        check_dual_eval::<1>(
+            &deftree!(+ (* 1.2 (pow x 3)) (+ (* 2.3 (pow x 2)) (+ (* 3.4 x) 4.5))).unwrap(),
+            &[('x', -10., 10.)],
+            1e-13,
+        );
+    }
+
+    #[test]
+    fn t_gradient_2d() {
+        check_dual_eval::<2>(
+            &deftree!(- (+ (pow x 2) (pow y 2)) 5).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            1e-14,
+        );
+        check_dual_eval::<2>(
+            &deftree!(+ (* 2 x) (log y)).unwrap(),
+            &[('x', -10., 10.), ('y', 0.1, 10.)],
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_mat_2x2() {
+        check_dual_eval::<2>(
+            &deftree!(concat (+ (pow x 2) (pow y 2)) (+ (* 2 x) (log y))).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            1e-14,
+        );
     }
 }
