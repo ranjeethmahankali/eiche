@@ -439,4 +439,23 @@ mod test {
             1e-12,
         )
     }
+
+    #[test]
+    fn t_mat_3x3() {
+        check_dual_eval::<1>(
+            &deftree!(- (sqrt (+ (+ (pow (- x 1) 2) (pow (- y 2) 2)) (pow (- z 3) 2))) 5.).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+            1e-14,
+        );
+        check_dual_eval::<2>(
+            &deftree!(- (sqrt (+ (+ (pow (- x 1) 2) (pow (- y 2) 2)) (pow (- z 3) 2))) 5.).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+            1e-14,
+        );
+        check_dual_eval::<3>(
+            &deftree!(- (sqrt (+ (+ (pow (- x 1) 2) (pow (- y 2) 2)) (pow (- z 3) 2))) 5.).unwrap(),
+            &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
+            1e-14,
+        );
+    }
 }
