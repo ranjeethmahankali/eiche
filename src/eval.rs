@@ -429,4 +429,15 @@ mod test {
             1e-14,
         );
     }
+
+    #[test]
+    fn t_bug_repro() {
+        let tree = deftree!(concat 1 (const -1.))
+            .unwrap()
+            .reshape(1, 2)
+            .unwrap();
+        let mut eval = ValueEvaluator::new(&tree);
+        let output = eval.run().unwrap();
+        assert_eq!(&[Value::Scalar(1.), Value::Scalar(-1.)], output);
+    }
 }
