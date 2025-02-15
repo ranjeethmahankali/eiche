@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::{
     compile::{compile, Instructions},
     error::Error,
@@ -12,7 +14,7 @@ use crate::{
 };
 
 /// Size of a value type must be known at compile time.
-pub trait ValueType: Sized + Copy {
+pub trait ValueType: Sized + Copy + Debug {
     fn from_scalar(val: f64) -> Result<Self, Error>;
     fn from_boolean(val: bool) -> Result<Self, Error>;
     fn from_value(val: Value) -> Result<Self, Error>;
