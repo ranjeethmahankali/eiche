@@ -24,7 +24,7 @@ fn map2<const DIM: usize>(
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Dual<const DIM: usize> {
     Scalar(f64, [f64; DIM]),
-    Boolean(bool),
+    Bool(bool),
 }
 
 impl<const DIM: usize> Dual<DIM> {
@@ -49,12 +49,12 @@ impl<const DIM: usize> ValueType for Dual<DIM> {
     }
 
     fn from_boolean(val: bool) -> Result<Self, Error> {
-        Ok(Dual::Boolean(val))
+        Ok(Dual::Bool(val))
     }
 
     fn from_value(val: Value) -> Result<Self, Error> {
         Ok(match val {
-            Value::Bool(f) => Dual::Boolean(f),
+            Value::Bool(f) => Dual::Bool(f),
             Value::Scalar(v) => Dual::Scalar(v, [0.; DIM]),
         })
     }
@@ -91,11 +91,11 @@ impl<const DIM: usize> ValueType for Dual<DIM> {
                 Floor => Scalar(f64::floor(real), [0.; DIM]),
                 Not => return Err(Error::TypeMismatch),
             },
-            Boolean(flag) => match op {
+            Bool(flag) => match op {
                 Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
                     return Err(Error::TypeMismatch)
                 }
-                Not => Boolean(!flag),
+                Not => Bool(!flag),
             },
         })
     }
@@ -142,21 +142,21 @@ impl<const DIM: usize> ValueType for Dual<DIM> {
                     let rem = a.rem_euclid(c);
                     Scalar(a - rem * c, map2(b, d, |b, d| b - rem * d))
                 }
-                Less => Boolean((a, b) < (c, d)),
-                LessOrEqual => Boolean((a, b) <= (c, d)),
-                Equal => Boolean((a, b) == (c, d)),
-                NotEqual => Boolean((a, b) != (c, d)),
-                Greater => Boolean((a, b) > (c, d)),
-                GreaterOrEqual => Boolean((a, b) >= (c, d)),
+                Less => Bool((a, b) < (c, d)),
+                LessOrEqual => Bool((a, b) <= (c, d)),
+                Equal => Bool((a, b) == (c, d)),
+                NotEqual => Bool((a, b) != (c, d)),
+                Greater => Bool((a, b) > (c, d)),
+                GreaterOrEqual => Bool((a, b) >= (c, d)),
                 And | Or => return Err(Error::TypeMismatch),
             },
-            (Boolean(f1), Boolean(f2)) => match op {
+            (Bool(f1), Bool(f2)) => match op {
                 Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
                 | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => {
                     return Err(Error::TypeMismatch)
                 }
-                And => Boolean(f1 && f2),
-                Or => Boolean(f1 || f2),
+                And => Bool(f1 && f2),
+                Or => Bool(f1 || f2),
             },
             _ => return Err(Error::TypeMismatch),
         })
@@ -166,7 +166,7 @@ impl<const DIM: usize> ValueType for Dual<DIM> {
         use Dual::*;
         match op {
             Choose => match (a, b, c) {
-                (Boolean(f), b, c) => {
+                (Bool(f), b, c) => {
                     if f {
                         Ok(b)
                     } else {
@@ -194,9 +194,12 @@ mod test {
     use super::DualEvaluator;
 
     fn check_dual_eval<const DIM: usize>(tree: &Tree, vardata: &[(char, f64, f64)]) {
+        let nroots = tree.num_roots();
         let mut dual = DualEvaluator::<DIM>::new(&tree);
         let mut eval = ValueEvaluator::new(&tree);
-        let deriv = tree.symbolic_deriv("x").unwrap();
+        let varstr: String = vardata.iter().map(|(c, ..)| *c).collect();
+        let nvars = varstr.len();
+        let deriv = tree.symbolic_deriv(&varstr).unwrap();
         let mut deval = ValueEvaluator::new(&deriv);
         let mut sampler = Sampler::new(vardata, 10, 42);
         let symbols: Vec<_> = vardata.iter().map(|(c, ..)| *c).collect();
@@ -209,15 +212,36 @@ mod test {
             let result_dual = dual.run().unwrap();
             let result_val = eval.run().unwrap();
             let result_deriv = deval.run().unwrap();
-            assert_eq!(result_dual.len(), result_val.len());
-            assert_eq!(result_val.len(), result_deriv.len());
+            assert_eq!(result_val.len(), nroots);
+            assert_eq!(result_dual.len(), nroots);
+            assert_eq!(result_deriv.len(), nvars * nroots);
             for (dual, (val, deriv)) in result_dual
                 .iter()
                 .zip(result_val.iter().zip(result_deriv.iter()))
             {
+                for i in 0..nroots {
+                    let dual = result_dual[i];
+                    let val = result_val[i];
+                    let deriv = &result_deriv[(i * nvars)..((i + 1) * nvars)];
+                    // Compare the values.
+                    match (dual, val) {
+                        (Dual::Scalar(real, dual), Value::Scalar(expected)) => {
+                            assert_float_eq!(real, expected);
+                            for (d, expected) in dual.iter().zip(deriv.iter()) {
+                                match expected {
+                                    Value::Bool(_) => panic!("Type mismatch"),
+                                    Value::Scalar(expected) => assert_float_eq!(d, expected),
+                                }
+                            }
+                        }
+                        (Dual::Bool(flag), Value::Bool(expected)) => {
+                            assert_eq!(flag, expected)
+                        }
+                        _ => panic!("Datatype mismatch"),
+                    }
+                }
                 match (dual, val, deriv) {
                     (Dual::Scalar(real, dual), Value::Scalar(val), Value::Scalar(deriv)) => {
-                        assert_eq!(1, dual.len());
                         assert_float_eq!(real, val);
                         assert_float_eq!(dual[0], deriv);
                     }
@@ -229,6 +253,8 @@ mod test {
 
     #[test]
     fn t_add_sub() {
-        check_dual_eval::<1>(&deftree!(+ x (pow x 2)).unwrap(), &[('x', -1., 1.)]);
+        check_dual_eval::<1>(&deftree!(+ x 1).unwrap(), &[('x', -1., 1.)]);
+        check_dual_eval::<1>(&deftree!(+ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        check_dual_eval::<2>(&deftree!(+ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
     }
 }
