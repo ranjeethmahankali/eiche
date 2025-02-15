@@ -328,7 +328,7 @@ mod test {
             &deftree!(pow (/ 1 (cos x)) 2).unwrap(),
             &[('x', -1.5, 1.5)],
             100,
-            1e-3,
+            1e-14,
         );
         compare_trees(
             &deftree!(sderiv (sin (pow x 2)) x).unwrap(),

@@ -31,12 +31,22 @@ pub fn compile(tree: &Tree) -> Instructions {
         if roots.contains(&index) {
             root_regs.push(outreg);
         }
-        // We immediately mark the output register as not alive, i.e. not in
-        // use, because we want this register to be re-used by one of the
-        // inputs. For example, a long chain of unary ops can all be
-        // performed on the same register without ever allocating a second
-        // register.
-        alive[outreg] = false;
+        /*
+        We immediately mark the output register as not alive, i.e. not in
+        use, because we want this register to be re-used by one of the
+        inputs. For example, a long chain of unary ops can all be
+        performed on the same register without ever allocating a second
+        register.
+
+        This optimization is only possible when a tree has one output. With one
+        output, we can assume that all instructions before the last instruction
+        are just dependencies of the last instruction. And we can reuse the
+        registers as we wish. When you have multiple outputs, you can track
+        multiple paths of dependencies through the tree, each starting at a root
+        node. A simple solution for this is to keep the root registers alive
+        when the tree has multiple outputs.
+        */
+        alive[outreg] = roots.len() > 1 && roots.contains(&index);
         valregs[index] = None;
         let op = match node {
             Constant(val) => (Constant(*val), outreg),

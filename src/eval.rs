@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::{
     compile::{compile, Instructions},
     error::Error,
@@ -12,7 +14,7 @@ use crate::{
 };
 
 /// Size of a value type must be known at compile time.
-pub trait ValueType: Sized + Copy {
+pub trait ValueType: Sized + Copy + Debug {
     fn from_scalar(val: f64) -> Result<Self, Error>;
     fn from_boolean(val: bool) -> Result<Self, Error>;
     fn from_value(val: Value) -> Result<Self, Error>;
@@ -428,5 +430,16 @@ mod test {
             100,
             1e-14,
         );
+    }
+
+    #[test]
+    fn t_bug_repro() {
+        let tree = deftree!(concat 1 (const -1.))
+            .unwrap()
+            .reshape(1, 2)
+            .unwrap();
+        let mut eval = ValueEvaluator::new(&tree);
+        let output = eval.run().unwrap();
+        assert_eq!(&[Value::Scalar(1.), Value::Scalar(-1.)], output);
     }
 }
