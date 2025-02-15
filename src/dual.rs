@@ -264,4 +264,14 @@ mod test {
         check_dual_eval::<2>(&deftree!(- x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
         check_dual_eval::<3>(&deftree!(- x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
     }
+
+    #[test]
+    fn t_mul_div() {
+        check_dual_eval::<1>(&deftree!(* x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        check_dual_eval::<2>(&deftree!(* x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        check_dual_eval::<3>(&deftree!(* x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        check_dual_eval::<1>(&deftree!(/ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        check_dual_eval::<2>(&deftree!(/ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+        check_dual_eval::<3>(&deftree!(/ x y).unwrap(), &[('x', -1., 1.), ('y', -1., 1.)]);
+    }
 }
