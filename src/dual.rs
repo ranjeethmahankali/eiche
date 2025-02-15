@@ -17,7 +17,7 @@ pub enum Dual {
 
 impl ValueType for Dual {
     fn from_scalar(val: f64) -> Result<Self, Error> {
-        Ok(Dual::Scalar(val, 1.))
+        Ok(Dual::Scalar(val, 0.))
     }
 
     fn from_boolean(val: bool) -> Result<Self, Error> {
@@ -27,7 +27,7 @@ impl ValueType for Dual {
     fn from_value(val: Value) -> Result<Self, Error> {
         Ok(match val {
             Value::Bool(f) => Dual::Boolean(f),
-            Value::Scalar(v) => Dual::Scalar(v, 1.),
+            Value::Scalar(v) => Dual::Scalar(v, 0.),
         })
     }
 
@@ -81,7 +81,15 @@ impl ValueType for Dual {
                 Divide => Scalar(a / c, (b * c - d * a) / (c * c)),
                 Pow => {
                     let ac = f64::powf(a, c);
-                    Scalar(ac, c * f64::powf(a, c - 1.) * b + f64::ln(a) * ac * d)
+                    Scalar(
+                        ac,
+                        c * f64::powf(a, c - 1.) * b
+                            + if ac > 0. && d > 0. {
+                                f64::ln(a) * ac * d
+                            } else {
+                                0.
+                            },
+                    )
                 }
                 Min => {
                     // Rust's tuple comparison is lexicographical, which is what we want.
@@ -141,3 +149,54 @@ impl ValueType for Dual {
 }
 
 pub type DualEvaluator = Evaluator<Dual>;
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        deftree,
+        dual::Dual,
+        eval::ValueEvaluator,
+        test::{assert_float_eq, Sampler},
+        tree::{Tree, Value},
+    };
+
+    use super::DualEvaluator;
+
+    fn check_dual_eval(tree: &Tree, vardata: &[(char, f64, f64)]) {
+        let mut dual = DualEvaluator::new(&tree);
+        let mut eval = ValueEvaluator::new(&tree);
+        let deriv = tree.symbolic_deriv("x").unwrap();
+        let mut deval = ValueEvaluator::new(&deriv);
+        let mut sampler = Sampler::new(vardata, 10, 42);
+        let symbols: Vec<_> = vardata.iter().map(|(c, ..)| *c).collect();
+        while let Some(sample) = sampler.next() {
+            for (&label, &value) in symbols.iter().zip(sample.iter()) {
+                dual.set_value(label, Dual::Scalar(value, 1.));
+                eval.set_value(label, value.into());
+                deval.set_value(label, value.into());
+            }
+            let result_dual = dual.run().unwrap();
+            let result_val = eval.run().unwrap();
+            let result_deriv = deval.run().unwrap();
+            assert_eq!(result_dual.len(), result_val.len());
+            assert_eq!(result_val.len(), result_deriv.len());
+            for (dual, (val, deriv)) in result_dual
+                .iter()
+                .zip(result_val.iter().zip(result_deriv.iter()))
+            {
+                match (dual, val, deriv) {
+                    (Dual::Scalar(real, dual), Value::Scalar(val), Value::Scalar(deriv)) => {
+                        assert_float_eq!(real, val);
+                        assert_float_eq!(dual, deriv);
+                    }
+                    _ => panic!("Unexpected data type"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn t_add_sub() {
+        check_dual_eval(&deftree!(+ x (pow x 2)).unwrap(), &[('x', -1., 1.)]);
+    }
+}
