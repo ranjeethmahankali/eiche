@@ -1,4 +1,5 @@
 pub mod derivative;
+pub mod dual;
 pub mod error;
 pub mod eval;
 pub mod prune;
