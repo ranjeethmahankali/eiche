@@ -1,7 +1,12 @@
 use crate::{
     error::Error,
-    eval::ValueType,
-    tree::{BinaryOp, BinaryOp::*, TernaryOp, UnaryOp, UnaryOp::*, Value},
+    eval::{Evaluator, ValueType},
+    tree::{
+        BinaryOp::{self, *},
+        TernaryOp::{self, *},
+        UnaryOp::{self, *},
+        Value,
+    },
 };
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -79,52 +84,60 @@ impl ValueType for Dual {
                     Scalar(ac, c * f64::powf(a, c - 1.) * b + f64::ln(a) * ac * d)
                 }
                 Min => {
-                    if a < c {
+                    // Rust's tuple comparison is lexicographical, which is what we want.
+                    if (a, b) < (c, d) {
                         Scalar(a, b)
                     } else {
                         Scalar(c, d)
                     }
                 }
                 Max => {
-                    if a > c {
+                    // Rust's tuple comparison is lexicographical, which is what we want.
+                    if (a, b) > (c, d) {
                         Scalar(a, b)
                     } else {
                         Scalar(c, d)
                     }
                 }
-                Remainder => todo!(),
-                Less => todo!(),
-                LessOrEqual => todo!(),
-                Equal => todo!(),
-                NotEqual => todo!(),
-                Greater => todo!(),
-                GreaterOrEqual => todo!(),
-                And => todo!(),
-                Or => todo!(),
+                Remainder => {
+                    let rem = a.rem_euclid(c);
+                    Scalar(a - rem * c, b - rem * d)
+                }
+                Less => Boolean((a, b) < (c, d)),
+                LessOrEqual => Boolean((a, b) <= (c, d)),
+                Equal => Boolean((a, b) == (c, d)),
+                NotEqual => Boolean((a, b) != (c, d)),
+                Greater => Boolean((a, b) > (c, d)),
+                GreaterOrEqual => Boolean((a, b) >= (c, d)),
+                And | Or => return Err(Error::TypeMismatch),
             },
             (Boolean(f1), Boolean(f2)) => match op {
-                Add => todo!(),
-                Subtract => todo!(),
-                Multiply => todo!(),
-                Divide => todo!(),
-                Pow => todo!(),
-                Min => todo!(),
-                Max => todo!(),
-                Remainder => todo!(),
-                Less => todo!(),
-                LessOrEqual => todo!(),
-                Equal => todo!(),
-                NotEqual => todo!(),
-                Greater => todo!(),
-                GreaterOrEqual => todo!(),
-                And => todo!(),
-                Or => todo!(),
+                Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
+                | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => {
+                    return Err(Error::TypeMismatch)
+                }
+                And => Boolean(f1 && f2),
+                Or => Boolean(f1 || f2),
             },
             _ => return Err(Error::TypeMismatch),
         })
     }
 
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
-        todo!()
+        use Dual::*;
+        match op {
+            Choose => match (a, b, c) {
+                (Boolean(f), b, c) => {
+                    if f {
+                        Ok(b)
+                    } else {
+                        Ok(c)
+                    }
+                }
+                _ => Err(Error::TypeMismatch),
+            },
+        }
     }
 }
+
+pub type DualEvaluator = Evaluator<Dual>;
