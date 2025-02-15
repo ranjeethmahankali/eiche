@@ -323,6 +323,21 @@ impl Tree {
 
     /// Get a unique list of all symbols in this tree. The symbols will appear
     /// in the same order as they first appear in the tree.
+    /// ```
+    /// use eiche::deftree;
+    /// assert_eq!(
+    ///     deftree!(* (+ x y) a).unwrap().symbols(),
+    ///     vec!['x', 'y', 'a']
+    /// );
+    /// assert_eq!(
+    ///     deftree!(* (+ a x) y).unwrap().symbols(),
+    ///     vec!['a', 'x', 'y']
+    /// );
+    /// assert_eq!(
+    ///     deftree!(* (+ a y) x).unwrap().symbols(),
+    ///     vec!['a', 'y', 'x']
+    /// );
+    /// ```
     pub fn symbols(&self) -> Vec<char> {
         let symbols: Vec<_> = self
             .nodes
@@ -751,7 +766,17 @@ mod test {
 
     #[test]
     fn t_symbols() {
-        let tree = deftree!(* (+ x y) a).unwrap();
-        assert_eq!(tree.symbols(), vec!['x', 'y', 'a']);
+        assert_eq!(
+            deftree!(* (+ x y) a).unwrap().symbols(),
+            vec!['x', 'y', 'a']
+        );
+        assert_eq!(
+            deftree!(* (+ a x) y).unwrap().symbols(),
+            vec!['a', 'x', 'y']
+        );
+        assert_eq!(
+            deftree!(* (+ a y) x).unwrap().symbols(),
+            vec!['a', 'y', 'x']
+        );
     }
 }
