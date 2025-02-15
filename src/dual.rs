@@ -194,8 +194,8 @@ mod test {
 
     fn check_dual_eval<const DIM: usize>(tree: &Tree, vardata: &[(char, f64, f64)], eps: f64) {
         let nroots = tree.num_roots();
-        let mut dual = DualEvaluator::<DIM>::new(&tree);
-        let mut eval = ValueEvaluator::new(&tree);
+        let mut dual = DualEvaluator::<DIM>::new(tree);
+        let mut eval = ValueEvaluator::new(tree);
         let varstr: String = vardata.iter().map(|(c, ..)| *c).collect();
         let nvars = varstr.len();
         let deriv = tree.symbolic_deriv(&varstr).unwrap();
