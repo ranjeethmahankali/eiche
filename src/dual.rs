@@ -138,10 +138,7 @@ impl<const DIM: usize> ValueType for Dual<DIM> {
                         Scalar(c, d)
                     }
                 }
-                Remainder => {
-                    let rem = a.rem_euclid(c);
-                    Scalar(a - rem * c, map2(b, d, |b, d| b - rem * d))
-                }
+                Remainder => Scalar(a.rem_euclid(c), map2(b, d, |b, d| b - (a / c).floor() * d)),
                 Less => Bool((a, b) < (c, d)),
                 LessOrEqual => Bool((a, b) <= (c, d)),
                 Equal => Bool((a, b) == (c, d)),
@@ -224,12 +221,13 @@ mod test {
                 for i in 0..nroots {
                     let dual = result_dual[i];
                     let val = result_val[i];
-                    let deriv = &result_deriv[(i * nvars)..((i + 1) * nvars)];
-                    // Compare the values.
+                    // For this root, iterate over it's partial derivative w.r.t all variables.
+                    // Below iterator does that by walking the row of a col-major matrix.
+                    let deriv = (0..nvars).map(|vi| &result_deriv[i + nroots * vi]);
                     match (dual, val) {
                         (Dual::Scalar(real, dual), Value::Scalar(expected)) => {
                             assert_float_eq!(real, expected, eps);
-                            for (d, expected) in dual.iter().zip(deriv.iter()) {
+                            for (d, expected) in dual.iter().zip(deriv) {
                                 match expected {
                                     Value::Bool(_) => panic!("Type mismatch"),
                                     Value::Scalar(expected) => assert_float_eq!(d, expected, eps),
@@ -362,8 +360,83 @@ mod test {
     fn t_mat_2x2() {
         check_dual_eval::<2>(
             &deftree!(concat (+ (pow x 2) (pow y 2)) (+ (* 2 x) (log y))).unwrap(),
-            &[('x', -10., 10.), ('y', -10., 10.)],
+            &[('x', -10., 10.), ('y', 0.1, 10.)],
             1e-14,
         );
+    }
+
+    #[test]
+    fn t_trigonometry() {
+        check_dual_eval::<1>(&deftree!(pow (sin x) 2).unwrap(), &[('x', -5., 5.)], 1e-15);
+        check_dual_eval::<1>(&deftree!(pow (cos x) 2).unwrap(), &[('x', -5., 5.)], 1e-15);
+        check_dual_eval::<1>(&deftree!(tan x).unwrap(), &[('x', -1.5, 1.5)], 1e-14);
+        check_dual_eval::<1>(&deftree!(sin (pow x 2)).unwrap(), &[('x', -2., 2.)], 1e-14);
+    }
+
+    #[test]
+    fn t_sqrt() {
+        check_dual_eval::<1>(&deftree!(sqrt x).unwrap(), &[('x', 0.01, 10.)], 1e-15);
+        check_dual_eval::<1>(&deftree!(* x (sqrt x)).unwrap(), &[('x', 0.01, 10.)], 1e-15);
+    }
+
+    #[test]
+    fn t_abs() {
+        check_dual_eval::<1>(&deftree!(abs x).unwrap(), &[('x', -10., 10.)], 0.);
+    }
+
+    #[test]
+    fn t_log() {
+        check_dual_eval::<1>(
+            &deftree!(log (pow x 2)).unwrap(),
+            &[('x', 0.01, 10.)],
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_exp() {
+        check_dual_eval::<1>(&deftree!(exp x).unwrap(), &[('x', -10., 10.)], 0.);
+        check_dual_eval::<1>(&deftree!(exp (pow x 2)).unwrap(), &[('x', -4., 4.)], 1e-8);
+    }
+
+    #[test]
+    fn t_min_max() {
+        check_dual_eval::<1>(
+            &deftree!(min x (pow x 2)).unwrap(),
+            &[('x', -3., 3.)],
+            1e-14,
+        );
+        check_dual_eval::<1>(
+            &deftree!(max x (pow x 2)).unwrap(),
+            &[('x', -3., 3.)],
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn t_ternary() {
+        check_dual_eval::<1>(
+            &deftree!(sderiv (min x (pow x 2)) x).unwrap(),
+            &[('x', -3., 5.)],
+            1e-15,
+        );
+    }
+
+    #[test]
+    fn t_floor() {
+        check_dual_eval::<1>(
+            &deftree!(floor (+ x y)).unwrap(),
+            &[('x', -1., 1.), ('y', -1., 1.)],
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_remainder() {
+        check_dual_eval::<1>(
+            &deftree!(rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)).unwrap(),
+            &[('x', -1., 1.)],
+            1e-12,
+        )
     }
 }
