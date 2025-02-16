@@ -1,4 +1,4 @@
-use crate::{dedup::Deduplicater, error::Error, fold::fold_nodes, prune::Pruner};
+use crate::{dedup::Deduplicater, error::Error, fold::fold, prune::Pruner};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -186,7 +186,7 @@ impl Tree {
     /// Fold the constants, deduplicate subtrees, prune unused subtrees and
     /// return a topologically sorted compacted equivalent to this tree.
     pub fn compacted(mut self) -> Result<Tree, Error> {
-        fold_nodes(&mut self.nodes)?;
+        fold(&mut self.nodes)?;
         let mut pruner = Pruner::new();
         let roots = self.root_indices();
         let (mut nodes, roots) = pruner.run_from_range(self.nodes, roots)?;

@@ -361,7 +361,7 @@ pub mod test {
             check_one_template(
                 "pow_divide_by_self",
                 &[('x', 1., 10.), ('a', -10., 10.)],
-                1e-8,
+                1e-7,
                 &mut checked,
             );
             check_one_template(

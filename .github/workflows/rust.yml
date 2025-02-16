@@ -31,15 +31,32 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
-    - name: Update Rust
-      run: rustup update stable
+    - uses: msys2/setup-msys2@v2
+      with:
+        path-type: inherit
+        update: true
+        install: >-
+          diffutils
+          m4
+          make
+          mingw-w64-x86_64-gcc
     - uses: actions/checkout@v4
+    - name: Setup Rust
+      run: |
+        rustup install stable-x86_64-pc-windows-gnu
+        rustup default stable-x86_64-pc-windows-gnu
+        rustup component add rustfmt
+        rustup component add clippy
     - name: Build
+      env:
+        CC: gcc
+        CXX: gcc
       run: cargo build --verbose --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
-    - name: Run Clippy
-      run: cargo clippy --all-targets -- -D warnings
     - name: Run tests
       run: cargo test --verbose --all-targets

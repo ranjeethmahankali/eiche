@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::{
     dedup::Deduplicater,
     error::Error,
-    fold::fold_nodes,
+    fold::fold,
     prune::Pruner,
     template::{Template, TEMPLATES},
     tree::{Node, Node::*, Tree},
@@ -105,7 +105,7 @@ impl TemplateCapture {
         root_indices: Range<usize>,
     ) -> Result<Tree, Error> {
         let (mut nodes, root_indices) = self.pruner.run_from_range(nodes, root_indices)?;
-        fold_nodes(&mut nodes)?;
+        fold(&mut nodes)?;
         // We don't need to check for valid topological order because we just ran the pruner on these nodes, which sorts them.
         self.deduper.run(&mut nodes)?;
         let root_indices = (nodes.len() - root_indices.len())..nodes.len();
