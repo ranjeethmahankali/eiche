@@ -16,7 +16,7 @@ Compute the results of operations on constants and fold those into
 constant nodes. The unused nodes after folding are not
 pruned. Use a pruner for that.
 */
-pub fn fold_nodes(nodes: &mut [Node]) -> Result<(), Error> {
+pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
     for index in 0..nodes.len() {
         let folded = match nodes[index] {
             Constant(_) => None,
@@ -85,7 +85,7 @@ impl Tree {
     /// the appropriate `Error` is returned.
     pub fn fold(self) -> Result<Tree, Error> {
         let (mut nodes, dims) = self.take();
-        fold_nodes(&mut nodes)?;
+        fold(&mut nodes)?;
         Tree::from_nodes(nodes, dims)
     }
 }
