@@ -31,9 +31,20 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
     - name: Update Rust
       run: rustup update stable
+    - uses: msys2/setup-msys2@v2
+      with:
+        update: true
+        install: >-
+          diffutils
+          m4
+          make
+          mingw-w64-x86_64-gcc
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose --all-targets
