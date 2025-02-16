@@ -35,8 +35,6 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-    - name: Update Rust
-      run: rustup update stable
     - uses: msys2/setup-msys2@v2
       with:
         path-type: inherit
@@ -47,6 +45,8 @@ jobs:
           make
           mingw-w64-x86_64-gcc
     - uses: actions/checkout@v4
+    - name: Update Rust
+      run: rustup update stable
     - name: Build
       run: cargo build --verbose --all-targets
     - name: Check formatting
