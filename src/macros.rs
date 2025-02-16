@@ -34,7 +34,7 @@ macro_rules! deftree {
     };
     // Constants.
     (const $tt:expr) => {{
-        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant({$tt}.into()));
+        let out: Result<$crate::tree::Tree, $crate::error::Error>  = Ok($crate::tree::Tree::constant({$tt}.into()));
         out
     }};
     // Unary ops with functions names.
@@ -81,7 +81,7 @@ macro_rules! deftree {
     };
     // Constants
     ($a:literal) => {{
-        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::constant(($a).into()));
+        let out: Result<$crate::tree::Tree, $crate::error::Error> = Ok($crate::tree::Tree::constant(($a).into()));
         out
     }};
     // Conditional / piecewise
@@ -92,7 +92,7 @@ macro_rules! deftree {
     ($a:ident) => {{
         const LABEL: &str = {stringify!($a)};
         const {assert!(LABEL.len() == 1, "Symbols can only have a single character as an identifier.")};
-        let out: $crate::tree::MaybeTree = Ok($crate::tree::Tree::symbol(LABEL.chars().next().unwrap()));
+        let out: Result<$crate::tree::Tree, $crate::error::Error> = Ok($crate::tree::Tree::symbol(LABEL.chars().next().unwrap()));
         out
     }};
 }

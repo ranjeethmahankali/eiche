@@ -248,7 +248,12 @@ pub type IntervalEvaluator = Evaluator<Interval>;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, eval::ValueEvaluator, test::assert_float_eq, test::Sampler, tree::Tree};
+    use crate::{
+        deftree,
+        eval::ValueEvaluator,
+        test::{assert_float_eq, Sampler},
+        tree::Tree,
+    };
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
     /**

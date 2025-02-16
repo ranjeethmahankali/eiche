@@ -876,8 +876,7 @@ mod perft {
         eval::ValueEvaluator,
         prune::Pruner,
         test::assert_float_eq,
-        // test::util::assert_float_eq,
-        tree::{min, MaybeTree, Tree},
+        tree::{min, Tree},
     };
     use rand::{rngs::StdRng, SeedableRng};
     use std::time::{Duration, Instant};
@@ -895,7 +894,7 @@ mod perft {
 
     fn _sphere_union() -> Tree {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut make_sphere = || -> MaybeTree {
+        let mut make_sphere = || -> Result<Tree, Error> {
             deftree!(- (sqrt (+ (+
                                  (pow (- x (const _sample_range(_X_RANGE, &mut rng))) 2)
                                  (pow (- y (const _sample_range(_Y_RANGE, &mut rng))) 2))

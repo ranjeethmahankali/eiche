@@ -2,17 +2,14 @@ use crate::{
     error::Error,
     fold::fold_nodes,
     prune::Pruner,
-    tree::{
-        add, div, sub, BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*,
-        Value::*,
-    },
+    tree::{add, div, sub, BinaryOp::*, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 
 /// Compute the symbolic derivative of `tree` with respect to
 /// `params`. Irrespective of the dimensions of the input `tree`, it is
 /// flattened into a vector of length, say, 'n'. The symbolic derivative is a
 /// Jacobian matrix of dimensions n x params.len().
-pub fn symbolic_deriv(tree: MaybeTree, params: &str) -> MaybeTree {
+pub fn symbolic_deriv(tree: Result<Tree, Error>, params: &str) -> Result<Tree, Error> {
     tree?.symbolic_deriv(params)
 }
 
@@ -21,7 +18,7 @@ pub fn symbolic_deriv(tree: MaybeTree, params: &str) -> MaybeTree {
 /// dimensions of the input `tree`, it is flattened into a vector of length,
 /// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
 /// params.len().
-pub fn numerical_deriv(tree: MaybeTree, params: &str, eps: f64) -> MaybeTree {
+pub fn numerical_deriv(tree: Result<Tree, Error>, params: &str, eps: f64) -> Result<Tree, Error> {
     tree?.numerical_deriv(params, eps)
 }
 
@@ -30,7 +27,7 @@ impl Tree {
     /// `params`. Irrespective of the dimensions of the input `tree`, it is
     /// flattened into a vector of length, say, 'n'. The symbolic derivative is a
     /// Jacobian matrix of dimensions n x params.len().
-    pub fn symbolic_deriv(&self, params: &str) -> MaybeTree {
+    pub fn symbolic_deriv(&self, params: &str) -> Result<Tree, Error> {
         let (root_start, root_end) = {
             let root_indices = self.root_indices();
             (root_indices.start, root_indices.end)
@@ -72,7 +69,7 @@ impl Tree {
     /// dimensions of the input `tree`, it is flattened into a vector of length,
     /// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
     /// params.len().
-    pub fn numerical_deriv(&self, params: &str, eps: f64) -> MaybeTree {
+    pub fn numerical_deriv(&self, params: &str, eps: f64) -> Result<Tree, Error> {
         let mut deriv = None;
         for param in params.chars() {
             let (left, right) = {
