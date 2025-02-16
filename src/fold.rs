@@ -3,7 +3,6 @@ use crate::{
     eval::ValueType,
     tree::{
         BinaryOp::*,
-        MaybeTree,
         Node::{self, *},
         TernaryOp::*,
         Tree,
@@ -84,7 +83,7 @@ impl Tree {
     /// folded. The resulting tree is pruned and checked for validity
     /// befoore it is returned. If the resulting tree is not valid,
     /// the appropriate `Error` is returned.
-    pub fn fold(self) -> MaybeTree {
+    pub fn fold(self) -> Result<Tree, Error> {
         let (mut nodes, dims) = self.take();
         fold_nodes(&mut nodes)?;
         Tree::from_nodes(nodes, dims)

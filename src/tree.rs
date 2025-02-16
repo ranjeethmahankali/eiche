@@ -165,14 +165,12 @@ pub struct Tree {
     dims: (usize, usize),
 }
 
-pub type MaybeTree = Result<Tree, Error>;
-
 const fn matsize(dims: (usize, usize)) -> usize {
     dims.0 * dims.1
 }
 
 impl Tree {
-    pub fn from_nodes(nodes: Vec<Node>, dims: (usize, usize)) -> MaybeTree {
+    pub fn from_nodes(nodes: Vec<Node>, dims: (usize, usize)) -> Result<Tree, Error> {
         let t = Tree { nodes, dims };
         t.validated()
     }
@@ -187,7 +185,7 @@ impl Tree {
 
     /// Fold the constants, deduplicate subtrees, prune unused subtrees and
     /// return a topologically sorted compacted equivalent to this tree.
-    pub fn compacted(mut self) -> MaybeTree {
+    pub fn compacted(mut self) -> Result<Tree, Error> {
         fold_nodes(&mut self.nodes)?;
         let mut pruner = Pruner::new();
         let roots = self.root_indices();
@@ -200,7 +198,7 @@ impl Tree {
         Tree::from_nodes(nodes, self.dims)
     }
     /// Prunes the tree and topologically sorts the nodes.
-    pub fn prune(self, pruner: &mut Pruner) -> MaybeTree {
+    pub fn prune(self, pruner: &mut Pruner) -> Result<Tree, Error> {
         let roots = self.root_indices();
         let (nodes, _) = pruner.run_from_range(self.nodes, roots)?;
         Tree::from_nodes(nodes, self.dims)
@@ -218,7 +216,7 @@ impl Tree {
     /// matrices, they are flattened and then concatenated into a flat
     /// vector. If the caller doesn't want a vector, they can use the `reshape`
     /// function to reshape the tree after concatenation.
-    pub fn concat(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
+    pub fn concat(lhs: Result<Tree, Error>, rhs: Result<Tree, Error>) -> Result<Tree, Error> {
         let mut lhs = lhs?;
         let mut rhs = rhs?;
         let (llen, lsize) = (lhs.len(), lhs.num_roots());
@@ -245,7 +243,11 @@ impl Tree {
 
     /// Get a piece wise expression from the given condition, value when true
     /// and value when false.
-    pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
+    pub fn piecewise(
+        cond: Result<Tree, Error>,
+        iftrue: Result<Tree, Error>,
+        iffalse: Result<Tree, Error>,
+    ) -> Result<Tree, Error> {
         cond?.ternary_op(iftrue?, iffalse?, Choose)
     }
 
@@ -271,7 +273,7 @@ impl Tree {
 
     /// Change the shape of this tree. If the new shape doesn't correspond to
     /// the same number of elements, an error is returned.
-    pub fn reshape(self, rows: usize, cols: usize) -> MaybeTree {
+    pub fn reshape(self, rows: usize, cols: usize) -> Result<Tree, Error> {
         if matsize((rows, cols)) == self.num_roots() {
             Ok(Tree {
                 nodes: self.nodes,
@@ -359,7 +361,7 @@ impl Tree {
 
     /// Check the tree for errors and return a Result that contains the tree if
     /// no errors were found, or the first error encountered with the tree.
-    fn validated(self) -> MaybeTree {
+    fn validated(self) -> Result<Tree, Error> {
         /* We make sure the inputs of every node appear before that node
          * itself. This is important when evaluating the tree, but also ensures
          * there are no cycles in the tree.
@@ -397,14 +399,14 @@ impl Tree {
         Ok(self)
     }
 
-    fn unary_op(mut self, op: UnaryOp) -> MaybeTree {
+    fn unary_op(mut self, op: UnaryOp) -> Result<Tree, Error> {
         for root in self.root_indices() {
             self.nodes.push(Unary(op, root));
         }
         Ok(self)
     }
 
-    fn binary_op(mut self, other: Tree, op: BinaryOp) -> MaybeTree {
+    fn binary_op(mut self, other: Tree, op: BinaryOp) -> Result<Tree, Error> {
         let nroots = self.num_roots();
         let other_nroots = other.num_roots();
         if nroots != 1 && other_nroots != 1 && nroots != other_nroots {
@@ -431,7 +433,7 @@ impl Tree {
         Ok(self)
     }
 
-    fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> MaybeTree {
+    fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> Result<Tree, Error> {
         let anroots = a.num_roots();
         let bnroots = b.num_roots();
         if anroots != bnroots {
@@ -477,7 +479,7 @@ impl Tree {
 
 macro_rules! unary_func {
     ($name:ident, $op:ident) => {
-        pub fn $name(tree: MaybeTree) -> MaybeTree {
+        pub fn $name(tree: Result<Tree, Error>) -> Result<Tree, Error> {
             tree?.unary_op($op)
         }
     };
@@ -496,7 +498,7 @@ unary_func!(not, Not);
 
 macro_rules! binary_func {
     ($name:ident, $op:ident) => {
-        pub fn $name(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
+        pub fn $name(lhs: Result<Tree, Error>, rhs: Result<Tree, Error>) -> Result<Tree, Error> {
             lhs?.binary_op(rhs?, $op)
         }
     };
@@ -519,7 +521,7 @@ binary_func!(geq, GreaterOrEqual);
 binary_func!(and, And);
 binary_func!(or, Or);
 
-pub fn reshape(tree: MaybeTree, rows: usize, cols: usize) -> MaybeTree {
+pub fn reshape(tree: Result<Tree, Error>, rows: usize, cols: usize) -> Result<Tree, Error> {
     tree?.reshape(rows, cols)
 }
 

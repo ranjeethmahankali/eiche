@@ -2,7 +2,6 @@ use crate::{
     error::Error,
     hash::hash_nodes,
     tree::{
-        MaybeTree,
         Node::{self, *},
         Tree,
     },
@@ -230,7 +229,7 @@ fn depth_walk_equivalent_trees<'a>(
 
 impl Tree {
     /// Deduplicate the common subtrees in this tree.
-    pub fn deduplicate(self, dedup: &mut Deduplicater) -> MaybeTree {
+    pub fn deduplicate(self, dedup: &mut Deduplicater) -> Result<Tree, Error> {
         let (mut nodes, dims) = self.take();
         dedup.run(&mut nodes)?; // We don't need to check because the nodes came from a tree.
         Tree::from_nodes(nodes, dims)
