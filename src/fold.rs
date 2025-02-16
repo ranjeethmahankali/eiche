@@ -194,28 +194,27 @@ pub(crate) fn fold_with_interval(
                     }
                     let choice = match (op, values[li], values[ri]) {
                         (Add, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                            if ileft.is_singleton() && ileft.inf() == 0. {
-                                Choice::Right
-                            } else if iright.is_singleton() && iright.inf() == 0. {
-                                Choice::Left
-                            } else {
-                                Choice::None
+                            match (ileft.is_singleton(), iright.is_singleton()) {
+                                (true, true) => Choice::Custom(
+                                    Constant(Scalar(ileft.inf() + iright.inf())),
+                                    Interval::Scalar(ileft + iright),
+                                ),
+                                (true, false) => todo!(),
+                                (false, true) => todo!(),
+                                (false, false) => todo!(),
                             }
                         }
-                        (Subtract, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                            if iright.is_singleton() && iright.inf() == 0. {
-                                Choice::Left
-                            } else {
-                                Choice::None
-                            }
-                        }
+                        (Subtract, Interval::Scalar(_), Interval::Scalar(iright)) => todo!(),
                         (Multiply, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                            if ileft.is_singleton() && ileft.inf() == 1. {
-                                Choice::Right
-                            } else if iright.is_singleton() && iright.inf() == 1. {
-                                Choice::Left
-                            } else {
-                                Choice::None
+                            match (ileft.is_singleton(), iright.is_singleton()) {
+                                (true, true) => Choice::Custom(
+                                    Constant(Scalar(ileft.inf() * iright.inf())),
+                                    Interval::Scalar(ileft * iright),
+                                ),
+                                (true, false) => todo!(),
+                                (false, true) => todo!(),
+                                (false, false) => todo!(),
+                                _ => Choice::None,
                             }
                         }
                         (Divide, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
