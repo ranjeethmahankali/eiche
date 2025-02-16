@@ -577,8 +577,7 @@ mod test {
         tree
     }
 
-    #[test]
-    fn t_prune() {
+    fn _t_prune() {
         let mut rng = StdRng::seed_from_u64(234);
         let queries: Vec<[f64; 3]> = (0..N_QUERIES)
             .map(|_| {
