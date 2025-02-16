@@ -2,7 +2,7 @@ pub mod derivative;
 pub mod dual;
 pub mod error;
 pub mod eval;
-pub mod inari_interval;
+pub mod interval;
 pub mod prune;
 pub mod reduce;
 pub mod tree;
