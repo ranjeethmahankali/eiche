@@ -6,7 +6,7 @@ use crate::{
     fold::fold_nodes,
     prune::Pruner,
     template::{Template, TEMPLATES},
-    tree::{MaybeTree, Node, Node::*, Tree},
+    tree::{Node, Node::*, Tree},
 };
 
 /// Iterator that produces all mutations of a tree.
@@ -103,7 +103,7 @@ impl TemplateCapture {
         nodes: Vec<Node>,
         dims: (usize, usize),
         root_indices: Range<usize>,
-    ) -> MaybeTree {
+    ) -> Result<Tree, Error> {
         let (mut nodes, root_indices) = self.pruner.run_from_range(nodes, root_indices)?;
         fold_nodes(&mut nodes)?;
         // We don't need to check for valid topological order because we just ran the pruner on these nodes, which sorts them.
@@ -115,7 +115,7 @@ impl TemplateCapture {
 
     /// Compact the tree using the deduper and pruner instances in this template
     /// capture. This can avoid reallocating memory by using existing instances.
-    pub fn compact_tree(&mut self, tree: Tree) -> MaybeTree {
+    pub fn compact_tree(&mut self, tree: Tree) -> Result<Tree, Error> {
         let root_indices = tree.root_indices();
         let (nodes, dims) = tree.take();
         self.make_compact_tree(nodes, dims, root_indices)
