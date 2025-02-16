@@ -1,15 +1,83 @@
+use std::collections::BTreeMap;
+
 use crate::{
     error::Error,
     eval::ValueType,
+    inari_interval::Interval,
     tree::{
-        BinaryOp::*,
+        BinaryOp::{self, *},
         Node::{self, *},
-        TernaryOp::*,
+        TernaryOp::{self, *},
         Tree,
-        UnaryOp::*,
+        UnaryOp::{self, *},
         Value::{self, *},
     },
 };
+
+fn fold_unary_op(op: UnaryOp, input: usize, nodes: &[Node]) -> Result<Option<Node>, Error> {
+    Ok(if let Constant(value) = nodes[input] {
+        Some(Constant(Value::unary_op(op, value)?))
+    } else {
+        None
+    })
+}
+
+fn fold_binary_op(
+    op: BinaryOp,
+    li: usize,
+    ri: usize,
+    nodes: &[Node],
+) -> Result<Option<Node>, Error> {
+    Ok(match (op, &nodes[li], &nodes[ri]) {
+        // Constant folding.
+        (op, Constant(a), Constant(b)) => Some(Constant(Value::binary_op(op, *a, *b)?)),
+        // Identity ops.
+        (Add, lhs, Constant(val)) if *val == 0. => Some(*lhs),
+        (Add, Constant(val), rhs) if *val == 0. => Some(*rhs),
+        (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
+        (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
+        (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
+        (Pow, base, Constant(val)) if *val == 1. => Some(*base),
+        (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
+        (Or, lhs, Constant(rhs)) if *rhs == false => Some(*lhs),
+        (Or, Constant(lhs), rhs) if *lhs == false => Some(*rhs),
+        (And, lhs, Constant(rhs)) if *rhs == true => Some(*lhs),
+        (And, Constant(lhs), rhs) if *lhs == true => Some(*rhs),
+        // Other ops.
+        (Subtract, Constant(val), _rhs) if *val == 0. => Some(Unary(Negate, ri)),
+        (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(Scalar(1.))),
+        (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(Scalar(0.))),
+        (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
+        (Divide, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
+        (Or, _lhs, Constant(rhs)) if *rhs == true => Some(Constant(Bool(true))),
+        (Or, Constant(lhs), _rhs) if *lhs == true => Some(Constant(Bool(true))),
+        (And, _lhs, Constant(rhs)) if *rhs == false => Some(Constant(Bool(false))),
+        (And, Constant(lhs), _rhs) if *lhs == false => Some(Constant(Bool(false))),
+        _ => None,
+    })
+}
+
+fn fold_ternary_op(
+    op: TernaryOp,
+    a: usize,
+    b: usize,
+    c: usize,
+    nodes: &[Node],
+) -> Result<Option<Node>, Error> {
+    Ok(match (op, &nodes[a], &nodes[b], &nodes[c]) {
+        (op, Constant(a), Constant(b), Constant(c)) => {
+            Some(Constant(Value::ternary_op(op, *a, *b, *c)?))
+        }
+        (Choose, Constant(flag), left, right) => {
+            if flag.boolean()? {
+                Some(*left)
+            } else {
+                Some(*right)
+            }
+        }
+        _ => None,
+    })
+}
 
 /**
 Compute the results of operations on constants and fold those into
@@ -18,60 +86,103 @@ pruned. Use a pruner for that.
 */
 pub(crate) fn fold(nodes: &mut [Node]) -> Result<(), Error> {
     for index in 0..nodes.len() {
-        let folded = match nodes[index] {
+        if let Some(node) = match nodes[index] {
             Constant(_) => None,
             Symbol(_) => None,
-            Unary(op, input) => {
-                if let Constant(value) = nodes[input] {
-                    Some(Constant(Value::unary_op(op, value)?))
-                } else {
-                    None
-                }
-            }
-            Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
-                // Constant folding.
-                (op, Constant(a), Constant(b)) => Some(Constant(Value::binary_op(op, *a, *b)?)),
-                // Identity ops.
-                (Add, lhs, Constant(val)) if *val == 0. => Some(*lhs),
-                (Add, Constant(val), rhs) if *val == 0. => Some(*rhs),
-                (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
-                (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
-                (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
-                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
-                (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
-                (Or, lhs, Constant(rhs)) if *rhs == false => Some(*lhs),
-                (Or, Constant(lhs), rhs) if *lhs == false => Some(*rhs),
-                (And, lhs, Constant(rhs)) if *rhs == true => Some(*lhs),
-                (And, Constant(lhs), rhs) if *lhs == true => Some(*rhs),
-                // Other ops.
-                (Subtract, Constant(val), _rhs) if *val == 0. => Some(Unary(Negate, ri)),
-                (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(Scalar(1.))),
-                (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(Scalar(0.))),
-                (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
-                (Divide, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
-                (Or, _lhs, Constant(rhs)) if *rhs == true => Some(Constant(Bool(true))),
-                (Or, Constant(lhs), _rhs) if *lhs == true => Some(Constant(Bool(true))),
-                (And, _lhs, Constant(rhs)) if *rhs == false => Some(Constant(Bool(false))),
-                (And, Constant(lhs), _rhs) if *lhs == false => Some(Constant(Bool(false))),
-                _ => None,
+            Unary(op, input) => fold_unary_op(op, input, nodes)?,
+            Binary(op, li, ri) => fold_binary_op(op, li, ri, nodes)?,
+            Ternary(op, a, b, c) => fold_ternary_op(op, a, b, c, nodes)?,
+        } {
+            nodes[index] = node;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn fold_with_interval(
+    nodes: &mut [Node],
+    vars: &BTreeMap<char, Interval>,
+) -> Result<(), Error> {
+    // This is similar to the folding above, except we use the results of the
+    // interval evaluation instead of hardcoding the rules.
+    let mut values: Vec<Interval> = Vec::with_capacity(nodes.len());
+    for index in 0..nodes.len() {
+        let (folded, value) = match nodes[index] {
+            Constant(val) => (None, Interval::from_value(val)?),
+            Symbol(label) => (
+                None,
+                vars.get(&label)
+                    .copied()
+                    .ok_or(Error::VariableNotFound(label))?,
+            ),
+            Unary(op, input) => match fold_unary_op(op, input, nodes)? {
+                Some(folded) => (
+                    Some(folded),
+                    match &folded {
+                        Constant(value) => Interval::from_value(*value)?,
+                        Symbol(label) => vars
+                            .get(&label)
+                            .copied()
+                            .ok_or(Error::VariableNotFound(*label))?,
+                        Unary(op, input) => Interval::unary_op(*op, values[*input])?,
+                        Binary(op, lhs, rhs) => {
+                            Interval::binary_op(*op, values[*lhs], values[*rhs])?
+                        }
+                        Ternary(op, a, b, c) => {
+                            Interval::ternary_op(*op, values[*a], values[*b], values[*c])?
+                        }
+                    },
+                ),
+                None => (None, Interval::unary_op(op, values[input])?),
             },
-            Ternary(op, a, b, c) => match (op, &nodes[a], &nodes[b], &nodes[c]) {
-                (op, Constant(a), Constant(b), Constant(c)) => {
-                    Some(Constant(Value::ternary_op(op, *a, *b, *c)?))
-                }
-                (Choose, Constant(flag), left, right) => {
-                    if flag.boolean()? {
-                        Some(*left)
-                    } else {
-                        Some(*right)
-                    }
-                }
-                _ => None,
+            Binary(op, li, ri) => match fold_binary_op(op, li, ri, nodes)? {
+                Some(folded) => (
+                    Some(folded),
+                    match &folded {
+                        Constant(value) => Interval::from_value(*value)?,
+                        Symbol(label) => vars
+                            .get(&label)
+                            .copied()
+                            .ok_or(Error::VariableNotFound(*label))?,
+                        Unary(op, input) => Interval::unary_op(*op, values[*input])?,
+                        Binary(op, lhs, rhs) => {
+                            Interval::binary_op(*op, values[*lhs], values[*rhs])?
+                        }
+                        Ternary(op, a, b, c) => {
+                            Interval::ternary_op(*op, values[*a], values[*b], values[*c])?
+                        }
+                    },
+                ),
+                None => (None, Interval::binary_op(op, values[li], values[ri])?),
+            },
+            Ternary(op, a, b, c) => match fold_ternary_op(op, a, b, c, nodes)? {
+                Some(folded) => (
+                    Some(folded),
+                    match &folded {
+                        Constant(value) => Interval::from_value(*value)?,
+                        Symbol(label) => vars
+                            .get(&label)
+                            .copied()
+                            .ok_or(Error::VariableNotFound(*label))?,
+                        Unary(op, input) => Interval::unary_op(*op, values[*input])?,
+                        Binary(op, lhs, rhs) => {
+                            Interval::binary_op(*op, values[*lhs], values[*rhs])?
+                        }
+                        Ternary(op, a, b, c) => {
+                            Interval::ternary_op(*op, values[*a], values[*b], values[*c])?
+                        }
+                    },
+                ),
+                None => (
+                    None,
+                    Interval::ternary_op(op, values[a], values[b], values[c])?,
+                ),
             },
         };
         if let Some(node) = folded {
             nodes[index] = node;
         }
+        values.push(value);
     }
     Ok(())
 }
