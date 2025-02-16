@@ -45,11 +45,12 @@ jobs:
           make
           mingw-w64-x86_64-gcc
     - uses: actions/checkout@v4
-    - name: Update Rust
+    - name: Setup Rust
       run: |
-        rustup update stable
         rustup install stable-x86_64-pc-windows-gnu
         rustup default stable-x86_64-pc-windows-gnu
+        rustup component add rustfmt
+        rustup component add clippy
     - name: Build
       env:
         CC: gcc
