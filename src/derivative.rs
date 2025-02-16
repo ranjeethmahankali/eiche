@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    fold::fold_nodes,
+    fold::fold,
     prune::Pruner,
     tree::{add, div, sub, BinaryOp::*, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
@@ -59,7 +59,7 @@ impl Tree {
         // reuse the resources and avoid repeated allocations.
         let mut pruner = Pruner::new();
         let mut nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
-        fold_nodes(&mut nodes)?;
+        fold(&mut nodes)?;
         let nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
         Tree::from_nodes(nodes, (root_end - root_start, params.len()))
     }

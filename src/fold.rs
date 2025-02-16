@@ -16,7 +16,7 @@ Compute the results of operations on constants and fold those into
 constant nodes. The unused nodes after folding are not
 pruned. Use a pruner for that.
 */
-pub fn fold_nodes(nodes: &mut [Node]) -> Result<(), Error> {
+pub(crate) fn fold(nodes: &mut [Node]) -> Result<(), Error> {
     for index in 0..nodes.len() {
         let folded = match nodes[index] {
             Constant(_) => None,
@@ -85,7 +85,7 @@ impl Tree {
     /// the appropriate `Error` is returned.
     pub fn fold(self) -> Result<Tree, Error> {
         let (mut nodes, dims) = self.take();
-        fold_nodes(&mut nodes)?;
+        fold(&mut nodes)?;
         Tree::from_nodes(nodes, dims)
     }
 }
@@ -93,7 +93,8 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, prune::Pruner, test::compare_trees};
+    use crate::{dedup::Deduplicater, deftree, prune::Pruner, test::compare_trees, tree::min};
+    use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
     fn t_sconstant_folding_0() {
@@ -343,5 +344,60 @@ mod test {
             .prune(&mut pruner)
             .unwrap()
             .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),);
+    }
+
+    const RADIUS_RANGE: (f64, f64) = (0.2, 2.);
+    const X_RANGE: (f64, f64) = (0., 100.);
+    const Y_RANGE: (f64, f64) = (0., 100.);
+    const Z_RANGE: (f64, f64) = (0., 100.);
+    const N_SPHERES: usize = 5000;
+    const N_QUERIES: usize = 5000;
+
+    fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
+        use rand::Rng;
+        range.0 + rng.random::<f64>() * (range.1 - range.0)
+    }
+
+    fn sphere_union() -> Tree {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut make_sphere = || -> Result<Tree, Error> {
+            deftree!(- (sqrt (+ (+
+                                 (pow (- x (const sample_range(X_RANGE, &mut rng))) 2)
+                                 (pow (- y (const sample_range(Y_RANGE, &mut rng))) 2))
+                              (pow (- z (const sample_range(Z_RANGE, &mut rng))) 2)))
+                     (const sample_range(RADIUS_RANGE, &mut rng)))
+        };
+        let mut tree = make_sphere();
+        for _ in 1..N_SPHERES {
+            tree = min(tree, make_sphere());
+        }
+        let tree = tree.unwrap();
+        assert_eq!(tree.dims(), (1, 1));
+        tree
+    }
+
+    #[test]
+    fn t_prune() {
+        let mut rng = StdRng::seed_from_u64(234);
+        let queries: Vec<[f64; 3]> = (0..N_QUERIES)
+            .map(|_| {
+                [
+                    sample_range(X_RANGE, &mut rng),
+                    sample_range(Y_RANGE, &mut rng),
+                    sample_range(Z_RANGE, &mut rng),
+                ]
+            })
+            .collect();
+        let tree = {
+            let mut dedup = Deduplicater::new();
+            let mut pruner = Pruner::new();
+            sphere_union()
+                .fold()
+                .unwrap()
+                .deduplicate(&mut dedup)
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+        };
     }
 }

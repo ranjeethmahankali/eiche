@@ -247,12 +247,7 @@ impl Pruner {
 mod test {
     use {
         super::*,
-        crate::{
-            dedup::Deduplicater,
-            deftree,
-            tree::{min, BinaryOp::*, Tree, UnaryOp::*, Value::*},
-        },
-        rand::{rngs::StdRng, SeedableRng},
+        crate::tree::{BinaryOp::*, UnaryOp::*, Value::*},
     };
 
     #[test]
@@ -451,60 +446,5 @@ mod test {
             ),
             Err(Error::CyclicGraph)
         ));
-    }
-
-    const RADIUS_RANGE: (f64, f64) = (0.2, 2.);
-    const X_RANGE: (f64, f64) = (0., 100.);
-    const Y_RANGE: (f64, f64) = (0., 100.);
-    const Z_RANGE: (f64, f64) = (0., 100.);
-    const N_SPHERES: usize = 5000;
-    const N_QUERIES: usize = 5000;
-
-    fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
-        use rand::Rng;
-        range.0 + rng.random::<f64>() * (range.1 - range.0)
-    }
-
-    fn sphere_union() -> Tree {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut make_sphere = || -> Result<Tree, Error> {
-            deftree!(- (sqrt (+ (+
-                                 (pow (- x (const sample_range(X_RANGE, &mut rng))) 2)
-                                 (pow (- y (const sample_range(Y_RANGE, &mut rng))) 2))
-                              (pow (- z (const sample_range(Z_RANGE, &mut rng))) 2)))
-                     (const sample_range(RADIUS_RANGE, &mut rng)))
-        };
-        let mut tree = make_sphere();
-        for _ in 1..N_SPHERES {
-            tree = min(tree, make_sphere());
-        }
-        let tree = tree.unwrap();
-        assert_eq!(tree.dims(), (1, 1));
-        tree
-    }
-
-    #[test]
-    fn t_prune() {
-        let mut rng = StdRng::seed_from_u64(234);
-        let queries: Vec<[f64; 3]> = (0..N_QUERIES)
-            .map(|_| {
-                [
-                    sample_range(X_RANGE, &mut rng),
-                    sample_range(Y_RANGE, &mut rng),
-                    sample_range(Z_RANGE, &mut rng),
-                ]
-            })
-            .collect();
-        let tree = {
-            let mut dedup = Deduplicater::new();
-            let mut pruner = Pruner::new();
-            sphere_union()
-                .fold()
-                .unwrap()
-                .deduplicate(&mut dedup)
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-        };
     }
 }
