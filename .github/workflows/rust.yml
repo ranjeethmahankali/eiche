@@ -31,9 +31,6 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
     - name: Update Rust
       run: rustup update stable
@@ -47,6 +44,7 @@ jobs:
           mingw-w64-x86_64-gcc
     - uses: actions/checkout@v4
     - name: Build
+      shell: msys2 {0}
       run: cargo build --verbose --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
