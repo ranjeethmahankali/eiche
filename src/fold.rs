@@ -133,7 +133,39 @@ pub(crate) fn fold_with_interval(
                         }
                     },
                 ),
-                None => (None, Interval::unary_op(op, values[input])?),
+                None => {
+                    let tofold = match (op, values[input]) {
+                        (Negate, Interval::Scalar(ii)) => ii.is_singleton() && ii.inf() == 0.,
+                        (Sqrt, Interval::Scalar(ii)) => {
+                            ii.is_singleton() && (ii.inf() == 0. || ii.inf() == 1.)
+                        }
+                        (Abs, Interval::Scalar(ii)) => ii.inf() >= 0.,
+                        (Sin, Interval::Scalar(ii)) => ii.is_singleton() && ii.inf() == 0.,
+                        (Cos, Interval::Scalar(_))
+                        | (Tan, Interval::Scalar(_))
+                        | (Log, Interval::Scalar(_))
+                        | (Exp, Interval::Scalar(_)) => false,
+                        (Floor, Interval::Scalar(ii)) => {
+                            ii.is_singleton() && ii.inf().fract() == 0.
+                        }
+                        (Not, Interval::Boolean(_, _)) => false, // This should be taken care of by folding.
+                        (Negate, Interval::Boolean(_, _))
+                        | (Sqrt, Interval::Boolean(_, _))
+                        | (Abs, Interval::Boolean(_, _))
+                        | (Sin, Interval::Boolean(_, _))
+                        | (Cos, Interval::Boolean(_, _))
+                        | (Tan, Interval::Boolean(_, _))
+                        | (Log, Interval::Boolean(_, _))
+                        | (Exp, Interval::Boolean(_, _))
+                        | (Floor, Interval::Boolean(_, _))
+                        | (Not, Interval::Scalar(_)) => return Err(Error::TypeMismatch),
+                    };
+                    if tofold {
+                        (Some(nodes[input]), values[input])
+                    } else {
+                        (None, Interval::unary_op(op, values[input])?)
+                    }
+                }
             },
             Binary(op, li, ri) => match fold_binary_op(op, li, ri, nodes)? {
                 Some(folded) => (
@@ -153,7 +185,65 @@ pub(crate) fn fold_with_interval(
                         }
                     },
                 ),
-                None => (None, Interval::binary_op(op, values[li], values[ri])?),
+                None => {
+                    enum Choice {
+                        Left,
+                        Right,
+                        Custom(Node, Interval),
+                        None,
+                    }
+                    let choice = match (op, values[li], values[ri]) {
+                        (Add, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                            if ileft.is_singleton() && ileft.inf() == 0. {
+                                Choice::Right
+                            } else if iright.is_singleton() && iright.inf() == 0. {
+                                Choice::Left
+                            } else {
+                                Choice::None
+                            }
+                        }
+                        (Subtract, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                            if iright.is_singleton() && iright.inf() == 0. {
+                                Choice::Left
+                            } else {
+                                Choice::None
+                            }
+                        }
+                        (Multiply, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                            if ileft.is_singleton() && ileft.inf() == 1. {
+                                Choice::Right
+                            } else if iright.is_singleton() && iright.inf() == 1. {
+                                Choice::Left
+                            } else {
+                                Choice::None
+                            }
+                        }
+                        (Divide, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (Pow, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (Min, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (Max, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (Remainder, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (Less, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (LessOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                            todo!()
+                        }
+                        (Equal, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (NotEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (Greater, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                        (GreaterOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                            todo!()
+                        }
+                        (And, Interval::Boolean(_, _), Interval::Boolean(_, _)) => todo!(),
+                        (Or, Interval::Boolean(_, _), Interval::Boolean(_, _)) => todo!(),
+                        _ => return Err(Error::TypeMismatch),
+                    };
+                    match choice {
+                        Choice::Left => (Some(nodes[li]), values[li]),
+                        Choice::Right => (Some(nodes[ri]), values[ri]),
+                        Choice::Custom(node, value) => (Some(node), value),
+                        Choice::None => (None, Interval::binary_op(op, values[li], values[ri])?),
+                    }
+                }
             },
             Ternary(op, a, b, c) => match fold_ternary_op(op, a, b, c, nodes)? {
                 Some(folded) => (
