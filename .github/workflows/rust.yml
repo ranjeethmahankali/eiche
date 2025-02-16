@@ -43,12 +43,14 @@ jobs:
           diffutils
           m4
           make
-          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-clang
     - uses: actions/checkout@v4
     - name: Update Rust
       run: rustup update stable
     - name: Build
       run: cargo build --verbose --all-targets
+      env:
+        CC: clang
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run Clippy
