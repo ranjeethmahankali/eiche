@@ -292,8 +292,59 @@ pub(crate) fn fold_for_interval(
                 },
                 _ => (None, Interval::unary_op(*op, values[*input])?),
             },
-            Binary(op, li, ri) => match (&values[*li], &values[*ri]) {
-                (Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+            Binary(op, li, ri) => match (op, &values[*li], &values[*ri]) {
+                (Min, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                    match ileft.overlap(*iright) {
+                        inari::Overlap::Before | inari::Overlap::Meets => todo!("Choose left"),
+                        inari::Overlap::MetBy | inari::Overlap::After => todo!("Choose right"),
+                        _ => todo!("Default"),
+                    }
+                }
+                (Max, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                    match ileft.overlap(*iright) {
+                        inari::Overlap::Before | inari::Overlap::Meets => todo!("Choose right"),
+                        inari::Overlap::MetBy | inari::Overlap::After => todo!("Choose left"),
+                        _ => todo!("Default"),
+                    }
+                }
+                (Less, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                    match ileft.overlap(*iright) {
+                        inari::Overlap::Before => todo!("true always"),
+                        inari::Overlap::After => todo!("false always"),
+                        _ => todo!("Default"),
+                    }
+                }
+                (LessOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                    match ileft.overlap(*iright) {
+                        inari::Overlap::Before | inari::Overlap::Meets => todo!("always true"),
+                        inari::Overlap::After => todo!("always false"),
+                        _ => todo!("Default"),
+                    }
+                }
+                (NotEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                    match ileft.overlap(*iright) {
+                        inari::Overlap::FirstEmpty
+                        | inari::Overlap::SecondEmpty
+                        | inari::Overlap::Before
+                        | inari::Overlap::After => todo!("Always true"),
+                        _ => todo!("Default"),
+                    }
+                }
+                (Greater, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                    match ileft.overlap(*iright) {
+                        inari::Overlap::Before => todo!("always false"),
+                        inari::Overlap::After => todo!("always true"),
+                        _ => todo!("Default"),
+                    }
+                }
+                (GreaterOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                    match ileft.overlap(*iright) {
+                        inari::Overlap::Before => todo!("always false"),
+                        inari::Overlap::MetBy | inari::Overlap::After => todo!("always false"),
+                        _ => todo!("Default"),
+                    }
+                }
+                (op, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
                     match (ileft.is_singleton(), iright.is_singleton()) {
                         (true, true) => {
                             let val = Value::binary_op(
@@ -357,9 +408,9 @@ pub(crate) fn fold_for_interval(
                         ),
                     }
                 }
-                (Interval::Bool(llo, lhi), Interval::Bool(rlo, rhi)) => todo!(),
-                (Interval::Scalar(interval), Interval::Bool(_, _))
-                | (Interval::Bool(_, _), Interval::Scalar(interval)) => {
+                (op, Interval::Bool(llo, lhi), Interval::Bool(rlo, rhi)) => todo!(),
+                (_, Interval::Scalar(interval), Interval::Bool(_, _))
+                | (_, Interval::Bool(_, _), Interval::Scalar(interval)) => {
                     return Err(Error::TypeMismatch)
                 }
             },
