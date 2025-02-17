@@ -186,9 +186,8 @@ pub(crate) fn fold_for_interval(
 }
 
 impl Tree {
-    pub fn fold_for_interval(self, vars: &BTreeMap<char, Interval>) -> Result<Tree, Error> {
-        let (nodes, dims) = self.take();
-        Tree::from_nodes(fold_for_interval(&nodes, vars)?, dims)
+    pub fn fold_for_interval(&self, vars: &BTreeMap<char, Interval>) -> Result<Tree, Error> {
+        Tree::from_nodes(fold_for_interval(self.nodes(), vars)?, self.dims())
     }
 }
 
