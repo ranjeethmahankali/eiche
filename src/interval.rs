@@ -292,8 +292,8 @@ pub(crate) fn fold_for_interval(
                 },
                 _ => (None, Interval::unary_op(*op, values[*input])?),
             },
-            Binary(op, li, ri) => match (op, &values[*li], &values[*ri]) {
-                (Add, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+            Binary(op, li, ri) => match (&values[*li], &values[*ri]) {
+                (Interval::Scalar(ileft), Interval::Scalar(iright)) => {
                     match (ileft.is_singleton(), iright.is_singleton()) {
                         (true, true) => {
                             let val = Value::binary_op(
@@ -303,27 +303,58 @@ pub(crate) fn fold_for_interval(
                             )?;
                             (Some(Constant(val)), Interval::from_value(val)?)
                         }
-                        (true, false) => todo!(),
-                        (false, true) => todo!(),
+                        (true, false) => match &nodes[*li] {
+                            Constant(_) | Symbol(_) => (
+                                None,
+                                Interval::binary_op(
+                                    *op,
+                                    Interval::Scalar(*ileft),
+                                    Interval::Scalar(*iright),
+                                )?,
+                            ),
+                            Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _) => {
+                                let ni = out.len();
+                                out.push(Constant(Value::Scalar(ileft.inf())));
+                                (
+                                    Some(Binary(*op, ni, *ri)),
+                                    Interval::binary_op(
+                                        *op,
+                                        Interval::Scalar(*ileft),
+                                        Interval::Scalar(*iright),
+                                    )?,
+                                )
+                            }
+                        },
+                        (false, true) => match &nodes[*ri] {
+                            Constant(_) | Symbol(_) => (
+                                None,
+                                Interval::binary_op(
+                                    *op,
+                                    Interval::Scalar(*ileft),
+                                    Interval::Scalar(*iright),
+                                )?,
+                            ),
+                            Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _) => {
+                                let ni = out.len();
+                                out.push(Constant(Value::Scalar(iright.inf())));
+                                (
+                                    Some(Binary(*op, *li, ni)),
+                                    Interval::binary_op(
+                                        *op,
+                                        Interval::Scalar(*ileft),
+                                        Interval::Scalar(*iright),
+                                    )?,
+                                )
+                            }
+                        },
                         (false, false) => todo!(),
                     }
                 }
-                (Subtract, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Multiply, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Divide, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Pow, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Min, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Max, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Remainder, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Less, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (LessOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Equal, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (NotEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (Greater, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (GreaterOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
-                (And, Interval::Bool(_, _), Interval::Bool(_, _)) => todo!(),
-                (Or, Interval::Bool(_, _), Interval::Bool(_, _)) => todo!(),
-                _ => (None, Interval::binary_op(*op, values[*li], values[*ri])?),
+                (Interval::Bool(_, _), Interval::Bool(_, _)) => todo!(),
+                (Interval::Scalar(interval), Interval::Bool(_, _))
+                | (Interval::Bool(_, _), Interval::Scalar(interval)) => {
+                    return Err(Error::TypeMismatch)
+                }
             },
             Ternary(op, _, _, _) => todo!(),
         };
