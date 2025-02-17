@@ -35,19 +35,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
-    - uses: msys2/setup-msys2@v2
-      with:
-        path-type: inherit
-        update: true
-        install: >-
-          diffutils
-          m4
-          make
-          mingw-w64-x86_64-gcc
     - uses: actions/checkout@v4
     - name: Setup Rust
       run: |
@@ -56,9 +44,6 @@ jobs:
         rustup component add rustfmt
         rustup component add clippy
     - name: Build
-      env:
-        CC: gcc
-        CXX: gcc
       run: cargo build --verbose --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
