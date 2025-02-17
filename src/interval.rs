@@ -293,16 +293,22 @@ pub(crate) fn fold_for_interval(
                 _ => (None, Interval::unary_op(*op, values[*input])?),
             },
             Binary(op, li, ri) => match (op, &values[*li], &values[*ri]) {
+                (And | Or, Interval::Scalar(_), Interval::Scalar(_)) => {
+                    return Err(Error::TypeMismatch)
+                }
                 (op, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
                     match (op, ileft.overlap(*iright)) {
+                        // Choose left
                         (Min, inari::Overlap::Before | inari::Overlap::Meets)
                         | (Max, inari::Overlap::MetBy | inari::Overlap::After) => {
                             (Some(nodes[*li]), Interval::Scalar(*ileft))
                         }
+                        // Choose right
                         (Min, inari::Overlap::MetBy | inari::Overlap::After)
                         | (Max, inari::Overlap::Before | inari::Overlap::Meets) => {
                             (Some(nodes[*ri]), Interval::Scalar(*iright))
                         }
+                        // Always true
                         (Less, inari::Overlap::Before)
                         | (LessOrEqual, inari::Overlap::Before | inari::Overlap::Meets)
                         | (
@@ -317,6 +323,7 @@ pub(crate) fn fold_for_interval(
                             Some(Constant(Value::Bool(true))),
                             Interval::Bool(true, true),
                         ),
+                        // Always false
                         (Less, inari::Overlap::After)
                         | (LessOrEqual, inari::Overlap::After)
                         | (Greater, inari::Overlap::Before)
