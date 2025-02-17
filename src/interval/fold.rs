@@ -3,26 +3,23 @@ use crate::{
     error::Error,
     eval::ValueType,
     fold::fold,
-    prune::Pruner,
     tree::{
         BinaryOp::*,
         Node::{self, *},
         TernaryOp::*,
+        Tree,
         UnaryOp::*,
         Value,
     },
 };
-use std::{collections::BTreeMap, ops::Range};
+use std::collections::BTreeMap;
 
 pub(crate) fn fold_for_interval(
     nodes: &[Node],
     vars: &BTreeMap<char, Interval>,
-    roots: Range<usize>,
-    pruner: &mut Pruner,
 ) -> Result<Vec<Node>, Error> {
     let mut values: Vec<Interval> = Vec::with_capacity(nodes.len());
     let mut out = Vec::with_capacity(nodes.len());
-    let nroots = roots.len();
     for node in nodes {
         let (folded, value) = match node {
             Constant(value) => (None, Interval::from_value(*value)?),
@@ -181,15 +178,18 @@ pub(crate) fn fold_for_interval(
                 (Choose, Interval::Scalar(_)) => return Err(Error::TypeMismatch),
             },
         };
-        if let Some(node) = folded {
-            out.push(node);
-        }
+        out.push(folded.unwrap_or(*node));
         values.push(value);
     }
     fold(&mut out)?;
-    let roots = (out.len() - nroots)..out.len();
-    let (out, _newroots) = pruner.run_from_range(out, roots)?;
     Ok(out)
+}
+
+impl Tree {
+    pub fn fold_for_interval(self, vars: &BTreeMap<char, Interval>) -> Result<Tree, Error> {
+        let (nodes, dims) = self.take();
+        Tree::from_nodes(fold_for_interval(&nodes, vars)?, dims)
+    }
 }
 
 #[cfg(test)]
@@ -197,7 +197,7 @@ mod test {
     use std::collections::BTreeMap;
 
     use super::fold_for_interval;
-    use crate::{deftree, error::Error, interval::Interval, prune::Pruner, tree::Tree};
+    use crate::{deftree, error::Error, interval::Interval, tree::Tree};
 
     fn sphere(cx: f64, cy: f64, cz: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+
@@ -209,15 +209,24 @@ mod test {
     }
 
     #[test]
+    fn t_two_planes() {
+        assert!(deftree!(min (- x 1) (- 6 x)) // Union of two planes.
+            .unwrap()
+            .fold_for_interval(&BTreeMap::from([(
+                'x',
+                Interval::from_scalar(0., 1.).unwrap(),
+            )]))
+            .unwrap()
+            .equivalent(&deftree!(- x 1).unwrap())); // Should get back one plane after pruning.
+    }
+
+    #[test]
     fn t_two_spheres() {
         let union = deftree!(min {sphere(0., 0., 0., 1.)} {sphere(4., 0., 0., 1.)}).unwrap();
-        let mut pruner = Pruner::default();
         let smaller = Tree::from_nodes(
             fold_for_interval(
                 union.nodes(),
                 &BTreeMap::from([('x', Interval::from_scalar(0., 1.).unwrap())]),
-                union.root_indices(),
-                &mut pruner,
             )
             .unwrap(),
             union.dims(),
