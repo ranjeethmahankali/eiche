@@ -14,7 +14,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
-pub(crate) fn fold_for_interval(
+pub(crate) fn folded_for_interval(
     nodes: &[Node],
     vars: &BTreeMap<char, Interval>,
 ) -> Result<Vec<Node>, Error> {
@@ -186,8 +186,8 @@ pub(crate) fn fold_for_interval(
 }
 
 impl Tree {
-    pub fn fold_for_interval(&self, vars: &BTreeMap<char, Interval>) -> Result<Tree, Error> {
-        Tree::from_nodes(fold_for_interval(self.nodes(), vars)?, self.dims())
+    pub fn folded_for_interval(&self, vars: &BTreeMap<char, Interval>) -> Result<Tree, Error> {
+        Tree::from_nodes(folded_for_interval(self.nodes(), vars)?, self.dims())
     }
 }
 
@@ -213,7 +213,7 @@ mod test {
     fn t_two_planes() {
         assert!(deftree!(min (- x 1) (- 6 x)) // Union of two planes.
             .unwrap()
-            .fold_for_interval(&BTreeMap::from([(
+            .folded_for_interval(&BTreeMap::from([(
                 'x',
                 Interval::from_scalar(0., 1.).unwrap(),
             )]))
@@ -225,7 +225,7 @@ mod test {
     fn t_two_circles() {
         assert!(deftree!(min {circle(0., 0., 1.)} {circle(4., 0., 1.)})
             .unwrap()
-            .fold_for_interval(&BTreeMap::from([
+            .folded_for_interval(&BTreeMap::from([
                 ('x', Interval::from_scalar(0., 1.).unwrap()),
                 ('y', Interval::from_scalar(0., 1.).unwrap()),
             ]))
@@ -238,7 +238,7 @@ mod test {
         assert!(
             deftree!(min {sphere(0., 0., 0., 1.)} {sphere(4., 0., 0., 1.)})
                 .unwrap()
-                .fold_for_interval(&BTreeMap::from([
+                .folded_for_interval(&BTreeMap::from([
                     ('x', Interval::from_scalar(0., 1.).unwrap()),
                     ('y', Interval::from_scalar(0., 1.).unwrap()),
                     ('z', Interval::from_scalar(0., 1.).unwrap())
