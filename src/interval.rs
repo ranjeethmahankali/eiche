@@ -419,7 +419,8 @@ pub(crate) fn fold_for_interval(
         values.push(value);
     }
     fold(&mut out)?;
-    Ok(pruner.run_from_range(out, roots)?.0)
+    let (out, _newroots) = pruner.run_from_range(out, roots)?;
+    Ok(out)
 }
 
 #[cfg(test)]
