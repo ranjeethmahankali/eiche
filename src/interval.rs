@@ -252,6 +252,89 @@ impl From<inari::Interval> for Interval {
 
 pub type IntervalEvaluator = Evaluator<Interval>;
 
+pub(crate) fn fold_for_interval(
+    nodes: &[Node],
+    vars: &BTreeMap<char, Interval>,
+) -> Result<Vec<Node>, Error> {
+    let mut values: Vec<Interval> = Vec::with_capacity(nodes.len());
+    let mut out = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let (folded, value) = match node {
+            Constant(value) => (None, Interval::from_value(*value)?),
+            Symbol(label) => match vars.get(label) {
+                Some(value) => (None, *value),
+                None => (None, Interval::Scalar(inari::Interval::ENTIRE)),
+            },
+            Unary(op, input) => match &values[*input] {
+                Interval::Scalar(ii) if ii.is_singleton() => match &nodes[*input] {
+                    Constant(_) | Symbol(_) => {
+                        (None, Interval::unary_op(*op, Interval::Scalar(*ii))?)
+                    }
+                    Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _) => {
+                        let ni = out.len();
+                        out.push(Constant(Value::Scalar(ii.inf())));
+                        (
+                            Some(Unary(*op, ni)),
+                            Interval::unary_op(*op, Interval::Scalar(*ii))?,
+                        )
+                    }
+                },
+                Interval::Bool(lo, hi) => match (lo, hi) {
+                    (true, true) => (
+                        Some(Constant(Value::Bool(false))),
+                        Interval::Bool(false, false),
+                    ),
+                    (true, false) | (false, true) => (None, Interval::Bool(*lo, *hi)),
+                    (false, false) => (
+                        Some(Constant(Value::Bool(true))),
+                        Interval::Bool(true, true),
+                    ),
+                },
+                _ => (None, Interval::unary_op(*op, values[*input])?),
+            },
+            Binary(op, li, ri) => match (op, &values[*li], &values[*ri]) {
+                (Add, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
+                    match (ileft.is_singleton(), iright.is_singleton()) {
+                        (true, true) => {
+                            let val = Value::binary_op(
+                                *op,
+                                Value::Scalar(ileft.inf()),
+                                Value::Scalar(iright.inf()),
+                            )?;
+                            (Some(Constant(val)), Interval::from_value(val)?)
+                        }
+                        (true, false) => todo!(),
+                        (false, true) => todo!(),
+                        (false, false) => todo!(),
+                    }
+                }
+                (Subtract, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Multiply, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Divide, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Pow, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Min, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Max, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Remainder, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Less, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (LessOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Equal, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (NotEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (Greater, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (GreaterOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => todo!(),
+                (And, Interval::Bool(_, _), Interval::Bool(_, _)) => todo!(),
+                (Or, Interval::Bool(_, _), Interval::Bool(_, _)) => todo!(),
+                _ => (None, Interval::binary_op(*op, values[*li], values[*ri])?),
+            },
+            Ternary(op, _, _, _) => todo!(),
+        };
+        if let Some(node) = folded {
+            out.push(node);
+        }
+        values.push(value);
+    }
+    todo!()
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
