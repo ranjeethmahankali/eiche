@@ -1,14 +1,20 @@
 use crate::{
     error::Error,
     eval::{Evaluator, ValueType},
-    tree::{BinaryOp, BinaryOp::*, TernaryOp, UnaryOp, UnaryOp::*, Value},
+    tree::{
+        BinaryOp::{self, *},
+        TernaryOp::{self, *},
+        UnaryOp::{self, *},
+        Value,
+    },
 };
 use std::ops::{Add, Div, Mul, Neg, Sub};
+pub mod fold;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Interval {
     Scalar(inari::Interval),
-    Boolean(bool, bool),
+    Bool(bool, bool),
 }
 
 impl Interval {
@@ -21,16 +27,16 @@ impl Interval {
 
     pub fn boolean(&self) -> Result<(bool, bool), Error> {
         match self {
-            Interval::Boolean(lower, upper) => Ok((*lower, *upper)),
+            Interval::Bool(lower, upper) => Ok((*lower, *upper)),
             _ => Err(Error::TypeMismatch),
         }
     }
 
     pub fn from_boolean(lower: bool, upper: bool) -> Result<Interval, Error> {
         Ok(if lower != upper && lower {
-            Interval::Boolean(upper, lower)
+            Interval::Bool(upper, lower)
         } else {
-            Interval::Boolean(lower, upper)
+            Interval::Bool(lower, upper)
         })
     }
 
@@ -50,12 +56,12 @@ impl ValueType for Interval {
     }
 
     fn from_boolean(val: bool) -> Result<Self, Error> {
-        Ok(Interval::Boolean(val, val))
+        Ok(Interval::Bool(val, val))
     }
 
     fn from_value(val: Value) -> Result<Self, Error> {
         match val {
-            Value::Bool(val) => Ok(Interval::Boolean(val, val)),
+            Value::Bool(val) => Ok(Interval::Bool(val, val)),
             Value::Scalar(val) => Interval::from_scalar(val, val),
         }
     }
@@ -74,7 +80,7 @@ impl ValueType for Interval {
                 Floor => it.floor(),
                 Not => return Err(Error::TypeMismatch),
             }),
-            Interval::Boolean(lower, upper) => match op {
+            Interval::Bool(lower, upper) => match op {
                 Not => {
                     let (lower, upper) = match (lower, upper) {
                         (true, true) => (false, false),
@@ -183,7 +189,7 @@ impl ValueType for Interval {
                 }
                 And | Or => Err(Error::TypeMismatch),
             },
-            (Boolean(llo, lhi), Boolean(rlo, rhi)) => match op {
+            (Bool(llo, lhi), Bool(rlo, rhi)) => match op {
                 Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
                 | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => {
                     Err(Error::TypeMismatch)
@@ -211,7 +217,6 @@ impl ValueType for Interval {
 
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
         use Interval::*;
-        use TernaryOp::*;
         match op {
             Choose => match a.boolean()? {
                 (true, true) => Ok(b),
@@ -220,10 +225,8 @@ impl ValueType for Interval {
                         f64::min(b.inf(), c.inf()),
                         f64::max(b.sup(), c.sup()),
                     ),
-                    (Scalar(_), Boolean(_, _)) | (Boolean(_, _), Scalar(_)) => {
-                        Err(Error::TypeMismatch)
-                    }
-                    (Boolean(blo, bhi), Boolean(clo, chi)) => {
+                    (Scalar(_), Bool(_, _)) | (Bool(_, _), Scalar(_)) => Err(Error::TypeMismatch),
+                    (Bool(blo, bhi), Bool(clo, chi)) => {
                         if blo == bhi && blo == clo && blo == chi {
                             Interval::from_boolean(false, true)
                         } else {
