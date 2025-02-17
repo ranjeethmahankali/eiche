@@ -347,10 +347,17 @@ pub(crate) fn fold_for_interval(
                                 )
                             }
                         },
-                        (false, false) => todo!(),
+                        (false, false) => (
+                            None,
+                            Interval::binary_op(
+                                *op,
+                                Interval::Scalar(*ileft),
+                                Interval::Scalar(*iright),
+                            )?,
+                        ),
                     }
                 }
-                (Interval::Bool(_, _), Interval::Bool(_, _)) => todo!(),
+                (Interval::Bool(llo, lhi), Interval::Bool(rlo, rhi)) => todo!(),
                 (Interval::Scalar(interval), Interval::Bool(_, _))
                 | (Interval::Bool(_, _), Interval::Scalar(interval)) => {
                     return Err(Error::TypeMismatch)
