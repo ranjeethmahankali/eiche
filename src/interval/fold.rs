@@ -208,6 +208,10 @@ mod test {
                  (const r))
     }
 
+    fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
+        deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
+    }
+
     #[test]
     fn t_two_planes() {
         assert!(deftree!(min (- x 1) (- 6 x)) // Union of two planes.
@@ -218,6 +222,22 @@ mod test {
             )]))
             .unwrap()
             .equivalent(&deftree!(- x 1).unwrap())); // Should get back one plane after pruning.
+    }
+
+    #[test]
+    fn t_two_circles() {
+        let union = deftree!(min {circle(0., 0., 1.)} {circle(4., 0., 1.)}).unwrap();
+        let smaller = Tree::from_nodes(
+            fold_for_interval(
+                union.nodes(),
+                &BTreeMap::from([('x', Interval::from_scalar(0., 1.).unwrap())]),
+            )
+            .unwrap(),
+            union.dims(),
+        )
+        .unwrap();
+        println!("\n${}$\n\n", union.to_latex());
+        println!("\n${}$\n\n", smaller.to_latex());
     }
 
     #[test]
