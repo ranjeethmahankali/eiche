@@ -265,105 +265,79 @@ pub(crate) fn fold_for_interval(
                 Some(value) => (None, *value),
                 None => (None, Interval::Scalar(inari::Interval::ENTIRE)),
             },
-            Unary(op, input) => match &values[*input] {
-                Interval::Scalar(ii) if ii.is_singleton() => match &nodes[*input] {
-                    Constant(_) | Symbol(_) => {
-                        (None, Interval::unary_op(*op, Interval::Scalar(*ii))?)
-                    }
-                    Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _) => {
-                        let ni = out.len();
-                        out.push(Constant(Value::Scalar(ii.inf())));
-                        (
-                            Some(Unary(*op, ni)),
-                            Interval::unary_op(*op, Interval::Scalar(*ii))?,
-                        )
-                    }
-                },
-                Interval::Bool(lo, hi) => match (lo, hi) {
-                    (true, true) => (
-                        Some(Constant(Value::Bool(false))),
-                        Interval::Bool(false, false),
-                    ),
-                    (true, false) | (false, true) => (None, Interval::Bool(*lo, *hi)),
-                    (false, false) => (
-                        Some(Constant(Value::Bool(true))),
-                        Interval::Bool(true, true),
-                    ),
-                },
+            Unary(op, input) => match (op, &values[*input], &nodes[*input]) {
+                // Singleton intervals that don't come from constants can be replaced with constants.
+                (_, Interval::Scalar(ii), Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _))
+                    if ii.is_singleton() =>
+                {
+                    let ni = out.len();
+                    out.push(Constant(Value::Scalar(ii.inf())));
+                    (
+                        Some(Unary(*op, ni)),
+                        Interval::unary_op(*op, Interval::Scalar(*ii))?,
+                    )
+                }
+                (Not, Interval::Bool(true, true), _) => (
+                    Some(Constant(Value::Bool(false))),
+                    Interval::Bool(false, false),
+                ),
+                (Not, Interval::Bool(false, false), _) => (
+                    Some(Constant(Value::Bool(true))),
+                    Interval::Bool(true, true),
+                ),
+                // No folding, no optimization, default interval.
                 _ => (None, Interval::unary_op(*op, values[*input])?),
             },
             Binary(op, li, ri) => match (op, &values[*li], &values[*ri]) {
-                (Min, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                    match ileft.overlap(*iright) {
-                        inari::Overlap::Before | inari::Overlap::Meets => todo!("Choose left"),
-                        inari::Overlap::MetBy | inari::Overlap::After => todo!("Choose right"),
-                        _ => todo!("Default"),
-                    }
-                }
-                (Max, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                    match ileft.overlap(*iright) {
-                        inari::Overlap::Before | inari::Overlap::Meets => todo!("Choose right"),
-                        inari::Overlap::MetBy | inari::Overlap::After => todo!("Choose left"),
-                        _ => todo!("Default"),
-                    }
-                }
-                (Less, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                    match ileft.overlap(*iright) {
-                        inari::Overlap::Before => todo!("true always"),
-                        inari::Overlap::After => todo!("false always"),
-                        _ => todo!("Default"),
-                    }
-                }
-                (LessOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                    match ileft.overlap(*iright) {
-                        inari::Overlap::Before | inari::Overlap::Meets => todo!("always true"),
-                        inari::Overlap::After => todo!("always false"),
-                        _ => todo!("Default"),
-                    }
-                }
-                (NotEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                    match ileft.overlap(*iright) {
-                        inari::Overlap::FirstEmpty
-                        | inari::Overlap::SecondEmpty
-                        | inari::Overlap::Before
-                        | inari::Overlap::After => todo!("Always true"),
-                        _ => todo!("Default"),
-                    }
-                }
-                (Greater, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                    match ileft.overlap(*iright) {
-                        inari::Overlap::Before => todo!("always false"),
-                        inari::Overlap::After => todo!("always true"),
-                        _ => todo!("Default"),
-                    }
-                }
-                (GreaterOrEqual, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                    match ileft.overlap(*iright) {
-                        inari::Overlap::Before => todo!("always false"),
-                        inari::Overlap::MetBy | inari::Overlap::After => todo!("always false"),
-                        _ => todo!("Default"),
-                    }
-                }
                 (op, Interval::Scalar(ileft), Interval::Scalar(iright)) => {
-                    match (ileft.is_singleton(), iright.is_singleton()) {
-                        (true, true) => {
-                            let val = Value::binary_op(
-                                *op,
-                                Value::Scalar(ileft.inf()),
-                                Value::Scalar(iright.inf()),
-                            )?;
-                            (Some(Constant(val)), Interval::from_value(val)?)
+                    match (op, ileft.overlap(*iright)) {
+                        (Min, inari::Overlap::Before | inari::Overlap::Meets)
+                        | (Max, inari::Overlap::MetBy | inari::Overlap::After) => {
+                            (Some(nodes[*li]), Interval::Scalar(*ileft))
                         }
-                        (true, false) => match &nodes[*li] {
-                            Constant(_) | Symbol(_) => (
-                                None,
-                                Interval::binary_op(
+                        (Min, inari::Overlap::MetBy | inari::Overlap::After)
+                        | (Max, inari::Overlap::Before | inari::Overlap::Meets) => {
+                            (Some(nodes[*ri]), Interval::Scalar(*iright))
+                        }
+                        (Less, inari::Overlap::Before)
+                        | (LessOrEqual, inari::Overlap::Before | inari::Overlap::Meets)
+                        | (
+                            NotEqual,
+                            inari::Overlap::FirstEmpty
+                            | inari::Overlap::SecondEmpty
+                            | inari::Overlap::Before
+                            | inari::Overlap::After,
+                        )
+                        | (Greater, inari::Overlap::After)
+                        | (GreaterOrEqual, inari::Overlap::MetBy | inari::Overlap::After) => (
+                            Some(Constant(Value::Bool(true))),
+                            Interval::Bool(true, true),
+                        ),
+                        (Less, inari::Overlap::After)
+                        | (LessOrEqual, inari::Overlap::After)
+                        | (Greater, inari::Overlap::Before)
+                        | (GreaterOrEqual, inari::Overlap::Before) => (
+                            Some(Constant(Value::Bool(false))),
+                            Interval::Bool(false, false),
+                        ),
+                        // Finally handle singleton intervals.
+                        _ => match (
+                            ileft.is_singleton(),
+                            iright.is_singleton(),
+                            &nodes[*li],
+                            &nodes[*ri],
+                        ) {
+                            // Fold constants.
+                            (true, true, ..) => {
+                                let val = Value::binary_op(
                                     *op,
-                                    Interval::Scalar(*ileft),
-                                    Interval::Scalar(*iright),
-                                )?,
-                            ),
-                            Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _) => {
+                                    Value::Scalar(ileft.inf()),
+                                    Value::Scalar(iright.inf()),
+                                )?;
+                                (Some(Constant(val)), Interval::from_value(val)?)
+                            }
+                            // Fold constant on left.
+                            (true, false, Unary(..) | Binary(..) | Ternary(..), _) => {
                                 let ni = out.len();
                                 out.push(Constant(Value::Scalar(ileft.inf())));
                                 (
@@ -375,17 +349,8 @@ pub(crate) fn fold_for_interval(
                                     )?,
                                 )
                             }
-                        },
-                        (false, true) => match &nodes[*ri] {
-                            Constant(_) | Symbol(_) => (
-                                None,
-                                Interval::binary_op(
-                                    *op,
-                                    Interval::Scalar(*ileft),
-                                    Interval::Scalar(*iright),
-                                )?,
-                            ),
-                            Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _) => {
+                            // Fold constant on right.
+                            (false, true, _, Unary(..) | Binary(..) | Ternary(..)) => {
                                 let ni = out.len();
                                 out.push(Constant(Value::Scalar(iright.inf())));
                                 (
@@ -397,24 +362,52 @@ pub(crate) fn fold_for_interval(
                                     )?,
                                 )
                             }
+                            // No folding, no optimization, default interval.
+                            _ => (
+                                None,
+                                Interval::binary_op(
+                                    *op,
+                                    Interval::Scalar(*ileft),
+                                    Interval::Scalar(*iright),
+                                )?,
+                            ),
                         },
-                        (false, false) => (
-                            None,
-                            Interval::binary_op(
-                                *op,
-                                Interval::Scalar(*ileft),
-                                Interval::Scalar(*iright),
-                            )?,
-                        ),
                     }
                 }
-                (op, Interval::Bool(llo, lhi), Interval::Bool(rlo, rhi)) => todo!(),
-                (_, Interval::Scalar(interval), Interval::Bool(_, _))
-                | (_, Interval::Bool(_, _), Interval::Scalar(interval)) => {
+                (
+                    Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
+                    | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual,
+                    Interval::Bool(..),
+                    Interval::Bool(..),
+                )
+                | (_, Interval::Scalar(_), Interval::Bool(_, _))
+                | (_, Interval::Bool(_, _), Interval::Scalar(_)) => {
                     return Err(Error::TypeMismatch)
                 }
+                (And, Interval::Bool(true, true), Interval::Bool(true, true))
+                | (Or, Interval::Bool(true, true), _)
+                | (Or, _, Interval::Bool(true, true)) => (
+                    Some(Constant(Value::Bool(true))),
+                    Interval::Bool(true, true),
+                ),
+                (And, Interval::Bool(false, false), _)
+                | (And, _, Interval::Bool(false, false))
+                | (Or, Interval::Bool(false, false), Interval::Bool(false, false)) => (
+                    Some(Constant(Value::Bool(false))),
+                    Interval::Bool(false, false),
+                ),
+                // No folding, no optimization, default interval.
+                (op, lhs, rhs) => (None, Interval::binary_op(*op, *lhs, *rhs)?),
             },
-            Ternary(op, _, _, _) => todo!(),
+            Ternary(op, a, b, c) => match (op, &values[*a]) {
+                (Choose, Interval::Bool(true, true)) => (Some(nodes[*b]), values[*b]),
+                (Choose, Interval::Bool(false, false)) => (Some(nodes[*c]), values[*c]),
+                (Choose, Interval::Bool(_, _)) => (
+                    None,
+                    Interval::ternary_op(*op, values[*a], values[*b], values[*c])?,
+                ),
+                (Choose, Interval::Scalar(_)) => return Err(Error::TypeMismatch),
+            },
         };
         if let Some(node) = folded {
             out.push(node);
