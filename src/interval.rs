@@ -1,6 +1,8 @@
 use crate::{
     error::Error,
     eval::{Evaluator, ValueType},
+    fold::fold,
+    prune::Pruner,
     tree::{
         BinaryOp::{self, *},
         Node::{self, *},
@@ -11,7 +13,7 @@ use crate::{
 };
 use std::{
     collections::BTreeMap,
-    ops::{Add, Div, Mul, Neg, Sub},
+    ops::{Add, Div, Mul, Neg, Range, Sub},
 };
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -255,6 +257,8 @@ pub type IntervalEvaluator = Evaluator<Interval>;
 pub(crate) fn fold_for_interval(
     nodes: &[Node],
     vars: &BTreeMap<char, Interval>,
+    roots: Range<usize>,
+    pruner: &mut Pruner,
 ) -> Result<Vec<Node>, Error> {
     let mut values: Vec<Interval> = Vec::with_capacity(nodes.len());
     let mut out = Vec::with_capacity(nodes.len());
@@ -414,7 +418,8 @@ pub(crate) fn fold_for_interval(
         }
         values.push(value);
     }
-    todo!()
+    fold(&mut out)?;
+    Ok(pruner.run_from_range(out, roots)?.0)
 }
 
 #[cfg(test)]
