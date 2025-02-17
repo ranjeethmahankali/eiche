@@ -194,10 +194,8 @@ impl Tree {
 
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeMap;
-
-    use super::fold_for_interval;
     use crate::{deftree, error::Error, interval::Interval, tree::Tree};
+    use std::collections::BTreeMap;
 
     fn sphere(cx: f64, cy: f64, cz: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+
@@ -226,33 +224,28 @@ mod test {
 
     #[test]
     fn t_two_circles() {
-        let union = deftree!(min {circle(0., 0., 1.)} {circle(4., 0., 1.)}).unwrap();
-        let smaller = Tree::from_nodes(
-            fold_for_interval(
-                union.nodes(),
-                &BTreeMap::from([('x', Interval::from_scalar(0., 1.).unwrap())]),
-            )
-            .unwrap(),
-            union.dims(),
-        )
-        .unwrap();
-        println!("\n${}$\n\n", union.to_latex());
-        println!("\n${}$\n\n", smaller.to_latex());
+        assert!(deftree!(min {circle(0., 0., 1.)} {circle(4., 0., 1.)})
+            .unwrap()
+            .fold_for_interval(&BTreeMap::from([
+                ('x', Interval::from_scalar(0., 1.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+            ]))
+            .unwrap()
+            .equivalent(&circle(0., 0., 1.).unwrap().fold().unwrap()));
     }
 
     #[test]
     fn t_two_spheres() {
-        let union = deftree!(min {sphere(0., 0., 0., 1.)} {sphere(4., 0., 0., 1.)}).unwrap();
-        let smaller = Tree::from_nodes(
-            fold_for_interval(
-                union.nodes(),
-                &BTreeMap::from([('x', Interval::from_scalar(0., 1.).unwrap())]),
-            )
-            .unwrap(),
-            union.dims(),
-        )
-        .unwrap();
-        println!("\n${}$\n\n", union.to_latex());
-        println!("\n${}$\n\n", smaller.to_latex());
+        assert!(
+            deftree!(min {sphere(0., 0., 0., 1.)} {sphere(4., 0., 0., 1.)})
+                .unwrap()
+                .fold_for_interval(&BTreeMap::from([
+                    ('x', Interval::from_scalar(0., 1.).unwrap()),
+                    ('y', Interval::from_scalar(0., 1.).unwrap()),
+                    ('z', Interval::from_scalar(0., 1.).unwrap())
+                ]))
+                .unwrap()
+                .equivalent(&sphere(0., 0., 0., 1.).unwrap().fold().unwrap())
+        );
     }
 }
