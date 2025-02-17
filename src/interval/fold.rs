@@ -22,6 +22,7 @@ pub(crate) fn fold_for_interval(
 ) -> Result<Vec<Node>, Error> {
     let mut values: Vec<Interval> = Vec::with_capacity(nodes.len());
     let mut out = Vec::with_capacity(nodes.len());
+    let nroots = roots.len();
     for node in nodes {
         let (folded, value) = match node {
             Constant(value) => (None, Interval::from_value(*value)?),
@@ -186,6 +187,43 @@ pub(crate) fn fold_for_interval(
         values.push(value);
     }
     fold(&mut out)?;
+    let roots = (out.len() - nroots)..out.len();
     let (out, _newroots) = pruner.run_from_range(out, roots)?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::BTreeMap;
+
+    use super::fold_for_interval;
+    use crate::{deftree, error::Error, interval::Interval, prune::Pruner, tree::Tree};
+
+    fn sphere(cx: f64, cy: f64, cz: f64, r: f64) -> Result<Tree, Error> {
+        deftree!(- (sqrt (+
+                          (pow (- x (const cx)) 2)
+                          (+
+                           (pow (- y (const cy)) 2)
+                           (pow (- z (const cz)) 2))))
+                 (const r))
+    }
+
+    #[test]
+    fn t_two_spheres() {
+        let union = deftree!(min {sphere(0., 0., 0., 1.)} {sphere(4., 0., 0., 1.)}).unwrap();
+        let mut pruner = Pruner::default();
+        let smaller = Tree::from_nodes(
+            fold_for_interval(
+                union.nodes(),
+                &BTreeMap::from([('x', Interval::from_scalar(0., 1.).unwrap())]),
+                union.root_indices(),
+                &mut pruner,
+            )
+            .unwrap(),
+            union.dims(),
+        )
+        .unwrap();
+        println!("\n${}$\n\n", union.to_latex());
+        println!("\n${}$\n\n", smaller.to_latex());
+    }
 }
