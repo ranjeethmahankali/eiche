@@ -447,4 +447,38 @@ mod test {
             .unwrap()
             .equivalent(&deftree!(true).unwrap()));
     }
+
+    #[test]
+    fn t_choose_gt() {
+        let tree = deftree!(if (> x 1) true false).unwrap();
+        assert!(tree
+            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())].into())
+            .unwrap()
+            .equivalent(&deftree!(false).unwrap()));
+        assert!(tree
+            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())].into())
+            .unwrap()
+            .equivalent(&deftree!(true).unwrap()));
+        assert!(tree
+            .folded_for_interval(&[('x', Interval::from_scalar(1.0, 2.).unwrap())].into())
+            .unwrap()
+            .equivalent(&tree))
+    }
+
+    #[test]
+    fn t_choose_gte() {
+        let tree = deftree!(if (>= x 1) true false).unwrap();
+        assert!(tree
+            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())].into())
+            .unwrap()
+            .equivalent(&deftree!(false).unwrap()));
+        assert!(tree
+            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())].into())
+            .unwrap()
+            .equivalent(&deftree!(true).unwrap()));
+        assert!(tree
+            .folded_for_interval(&[('x', Interval::from_scalar(1., 2.).unwrap())].into())
+            .unwrap()
+            .equivalent(&deftree!(true).unwrap()));
+    }
 }
