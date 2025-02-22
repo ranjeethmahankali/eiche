@@ -11,70 +11,6 @@ use crate::{
     },
 };
 
-enum FoldResult {
-    NoFolding,
-    Folded(Node),
-    Failure(Error),
-}
-
-fn fold_node(node: Node, nodes: &[Node]) -> FoldResult {
-    use FoldResult::*;
-    match node {
-        Constant(_) | Symbol(_) => NoFolding,
-        Unary(op, input) => match nodes[input] {
-            Constant(value) => match Value::unary_op(op, value) {
-                Ok(result) => Folded(Constant(result)),
-                Err(e) => Failure(e),
-            },
-            _ => NoFolding,
-        },
-        Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
-            // Constant folding.
-            (op, Constant(a), Constant(b)) => match Value::binary_op(op, *a, *b) {
-                Ok(result) => Folded(Constant(result)),
-                Err(e) => Failure(e),
-            },
-            // Identity ops.
-            (Add, lhs, Constant(val)) if *val == 0. => Folded(*lhs),
-            (Add, Constant(val), rhs) if *val == 0. => Folded(*rhs),
-            (Subtract, lhs, Constant(val)) if *val == 0. => Folded(*lhs),
-            (Multiply, lhs, Constant(val)) if *val == 1. => Folded(*lhs),
-            (Multiply, Constant(val), rhs) if *val == 1. => Folded(*rhs),
-            (Pow, base, Constant(val)) if *val == 1. => Folded(*base),
-            (Divide, numerator, Constant(val)) if *val == 1. => Folded(*numerator),
-            (Or, lhs, Constant(rhs)) if *rhs == false => Folded(*lhs),
-            (Or, Constant(lhs), rhs) if *lhs == false => Folded(*rhs),
-            (And, lhs, Constant(rhs)) if *rhs == true => Folded(*lhs),
-            (And, Constant(lhs), rhs) if *lhs == true => Folded(*rhs),
-            // Other ops.
-            (Subtract, Constant(val), _rhs) if *val == 0. => Folded(Unary(Negate, ri)),
-            (Pow, _base, Constant(val)) if *val == 0. => Folded(Constant(Scalar(1.))),
-            (Multiply, _lhs, Constant(val)) if *val == 0. => Folded(Constant(Scalar(0.))),
-            (Multiply, Constant(val), _rhs) if *val == 0. => Folded(Constant(Scalar(0.))),
-            (Divide, Constant(val), _rhs) if *val == 0. => Folded(Constant(Scalar(0.))),
-            (Or, _lhs, Constant(rhs)) if *rhs == true => Folded(Constant(Bool(true))),
-            (Or, Constant(lhs), _rhs) if *lhs == true => Folded(Constant(Bool(true))),
-            (And, _lhs, Constant(rhs)) if *rhs == false => Folded(Constant(Bool(false))),
-            (And, Constant(lhs), _rhs) if *lhs == false => Folded(Constant(Bool(false))),
-            _ => NoFolding,
-        },
-        Ternary(op, a, b, c) => match (op, &nodes[a], &nodes[b], &nodes[c]) {
-            (op, Constant(a), Constant(b), Constant(c)) => {
-                match Value::ternary_op(op, *a, *b, *c) {
-                    Ok(result) => Folded(Constant(result)),
-                    Err(e) => Failure(e),
-                }
-            }
-            (Choose, Constant(flag), left, right) => match flag.boolean() {
-                Ok(true) => Folded(*left),
-                Ok(false) => Folded(*right),
-                Err(e) => Failure(e),
-            },
-            _ => NoFolding,
-        },
-    }
-}
-
 /**
 Compute the results of operations on constants and fold those into
 constant nodes. The unused nodes after folding are not
@@ -82,10 +18,59 @@ pruned. Use a pruner for that.
 */
 pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
     for index in 0..nodes.len() {
-        match fold_node(nodes[index], nodes) {
-            FoldResult::NoFolding => {}
-            FoldResult::Folded(node) => nodes[index] = node,
-            FoldResult::Failure(error) => return Err(error),
+        let folded = match nodes[index] {
+            Constant(_) => None,
+            Symbol(_) => None,
+            Unary(op, input) => {
+                if let Constant(value) = nodes[input] {
+                    Some(Constant(Value::unary_op(op, value)?))
+                } else {
+                    None
+                }
+            }
+            Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
+                // Constant folding.
+                (op, Constant(a), Constant(b)) => Some(Constant(Value::binary_op(op, *a, *b)?)),
+                // Identity ops.
+                (Add, lhs, Constant(val)) if *val == 0. => Some(*lhs),
+                (Add, Constant(val), rhs) if *val == 0. => Some(*rhs),
+                (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
+                (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
+                (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
+                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
+                (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
+                (Or, lhs, Constant(rhs)) if *rhs == false => Some(*lhs),
+                (Or, Constant(lhs), rhs) if *lhs == false => Some(*rhs),
+                (And, lhs, Constant(rhs)) if *rhs == true => Some(*lhs),
+                (And, Constant(lhs), rhs) if *lhs == true => Some(*rhs),
+                // Other ops.
+                (Subtract, Constant(val), _rhs) if *val == 0. => Some(Unary(Negate, ri)),
+                (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(Scalar(1.))),
+                (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(Scalar(0.))),
+                (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
+                (Divide, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
+                (Or, _lhs, Constant(rhs)) if *rhs == true => Some(Constant(Bool(true))),
+                (Or, Constant(lhs), _rhs) if *lhs == true => Some(Constant(Bool(true))),
+                (And, _lhs, Constant(rhs)) if *rhs == false => Some(Constant(Bool(false))),
+                (And, Constant(lhs), _rhs) if *lhs == false => Some(Constant(Bool(false))),
+                _ => None,
+            },
+            Ternary(op, a, b, c) => match (op, &nodes[a], &nodes[b], &nodes[c]) {
+                (op, Constant(a), Constant(b), Constant(c)) => {
+                    Some(Constant(Value::ternary_op(op, *a, *b, *c)?))
+                }
+                (Choose, Constant(flag), left, right) => {
+                    if flag.boolean()? {
+                        Some(*left)
+                    } else {
+                        Some(*right)
+                    }
+                }
+                _ => None,
+            },
+        };
+        if let Some(node) = folded {
+            nodes[index] = node;
         }
     }
     Ok(())
