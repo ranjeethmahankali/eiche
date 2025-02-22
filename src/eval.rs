@@ -1,5 +1,5 @@
 use crate::{
-    compile::{compile, CompilationCache, CompileTarget},
+    compile::{compile, CompileCache, CompileOutput},
     error::Error,
     tree::{
         BinaryOp::{self, *},
@@ -144,12 +144,12 @@ where
     pub fn new(tree: &Tree) -> Evaluator<T> {
         let mut ops = Vec::with_capacity(tree.len());
         let mut root_regs = Vec::with_capacity(tree.num_roots());
-        let mut cache = CompilationCache::default();
+        let mut cache = CompileCache::default();
         let num_regs = compile(
             tree.nodes(),
             tree.root_indices(),
             &mut cache,
-            CompileTarget {
+            CompileOutput {
                 ops: &mut ops,
                 out_regs: &mut root_regs,
             },

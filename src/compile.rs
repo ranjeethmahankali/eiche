@@ -9,13 +9,13 @@ Compile the tree into instructions. In theory one can just walk the nodes of the
 // Allocator: https://www.mattkeeter.com/blog/2022-10-04-ssra/
  */
 
-pub struct CompileTarget<'a> {
+pub struct CompileOutput<'a> {
     pub ops: &'a mut Vec<(Node, usize)>,
     pub out_regs: &'a mut Vec<usize>,
 }
 
 #[derive(Default)]
-pub struct CompilationCache {
+pub struct CompileCache {
     valregs: Vec<Option<usize>>, // Track registers occupied by node values during compilation.
     alive: Vec<bool>,            // Track which registers are in use.
 }
@@ -23,8 +23,8 @@ pub struct CompilationCache {
 pub fn compile(
     nodes: &[Node],
     roots: Range<usize>,
-    cache: &mut CompilationCache,
-    mut out: CompileTarget,
+    cache: &mut CompileCache,
+    mut out: CompileOutput,
 ) -> usize {
     let valregs = &mut cache.valregs;
     let alive = &mut cache.alive;
