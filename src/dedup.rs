@@ -252,7 +252,7 @@ mod test {
         deftree,
         prune::Pruner,
         test::compare_trees,
-        tree::{is_topological_order, BinaryOp::*},
+        tree::{BinaryOp::*, is_topological_order},
     };
 
     #[test]
@@ -430,8 +430,10 @@ mod test {
 
     #[test]
     fn t_ternary() {
-        assert!(deftree!(if (< x 0) (log (* x 3)) (exp (+ x 3)))
-            .unwrap()
-            .equivalent(&deftree!(if (< x 0) (log (* 3 x)) (exp (+ 3 x))).unwrap()));
+        assert!(
+            deftree!(if (< x 0) (log (* x 3)) (exp (+ x 3)))
+                .unwrap()
+                .equivalent(&deftree!(if (< x 0) (log (* 3 x)) (exp (+ 3 x))).unwrap())
+        );
     }
 }

@@ -2,7 +2,7 @@ use crate::{
     error::Error,
     fold::fold,
     prune::Pruner,
-    tree::{add, div, sub, BinaryOp::*, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
+    tree::{BinaryOp::*, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*, add, div, sub},
 };
 
 /// Compute the symbolic derivative of `tree` with respect to
@@ -210,7 +210,7 @@ fn compute_symbolic_deriv(
                         Binary(Subtract, lderiv, gderiv_floorfg)
                     }
                     Less | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual | And | Or => {
-                        continue
+                        continue;
                     }
                 }
             }

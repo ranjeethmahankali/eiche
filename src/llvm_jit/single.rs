@@ -4,13 +4,13 @@ use crate::{
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 use inkwell::{
+    AddressSpace, FloatPredicate, OptimizationLevel,
     builder::Builder,
     execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
     types::{BasicTypeEnum, FloatType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
-    AddressSpace, FloatPredicate, OptimizationLevel,
 };
 
 type UnsafeFuncType = unsafe extern "C" fn(*const f64, *mut f64);
@@ -601,9 +601,9 @@ mod perft {
         prune::Pruner,
         test::assert_float_eq,
         // test::util::assert_float_eq,
-        tree::{min, Tree},
+        tree::{Tree, min},
     };
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
     use std::time::{Duration, Instant};
 
     fn _sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {

@@ -113,7 +113,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
             match op {
                 Choose => format!(
                     "\\left\\{{ \\begin{{array}}{{lr}} {{{bx}}}, & \\text{{if }} {{{ax}}}\\\\ {{{cx}}}, \\end{{array}} \\right\\}}"
-                )
+                ),
             }
         }
     }
@@ -353,7 +353,8 @@ mod test {
         );
         assert_eq!(
             "\\begin{bmatrix}{{x} + {y}} & {{x} - {y}} \\\\ {{x}.{y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
-            deftree!(concat (+ x y) (* x y) (- x y) (/ x y)).unwrap()
+            deftree!(concat (+ x y) (* x y) (- x y) (/ x y))
+                .unwrap()
                 .reshape(2, 2)
                 .unwrap()
                 .to_latex()
@@ -368,7 +369,9 @@ mod test {
         );
         assert_eq!(
             "\\begin{bmatrix}{{x} + {y}} \\\\ {{x}.{y}} \\\\ {{x} - {y}} \\\\ {\\dfrac{x}{y}}\\end{bmatrix}",
-            deftree!(concat (+ x y) (* x y) (- x y) (/ x y)).unwrap().to_latex()
+            deftree!(concat (+ x y) (* x y) (- x y) (/ x y))
+                .unwrap()
+                .to_latex()
         );
     }
 

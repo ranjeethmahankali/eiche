@@ -125,8 +125,8 @@ pub struct DepthIterator<'a, const CHECK_FOR_CYCLES: bool> {
 
 impl<const CHECK_FOR_CYCLES: bool> DepthIterator<'_, CHECK_FOR_CYCLES> {
     fn sort_children(&self, parent: &Node, children: &mut [usize]) {
-        use std::cmp::Ordering;
         use NodeOrdering::*;
+        use std::cmp::Ordering;
         if children.len() < 2 {
             // Nothing to sort.
             return;

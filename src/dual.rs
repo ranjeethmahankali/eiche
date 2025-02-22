@@ -93,7 +93,7 @@ impl<const DIM: usize> ValueType for Dual<DIM> {
             },
             Bool(flag) => match op {
                 Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
-                    return Err(Error::TypeMismatch)
+                    return Err(Error::TypeMismatch);
                 }
                 Not => Bool(!flag),
             },
@@ -150,7 +150,7 @@ impl<const DIM: usize> ValueType for Dual<DIM> {
             (Bool(f1), Bool(f2)) => match op {
                 Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
                 | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => {
-                    return Err(Error::TypeMismatch)
+                    return Err(Error::TypeMismatch);
                 }
                 And => Bool(f1 && f2),
                 Or => Bool(f1 || f2),
@@ -186,7 +186,7 @@ mod test {
         deftree,
         dual::Dual,
         eval::ValueEvaluator,
-        test::{assert_float_eq, Sampler},
+        test::{Sampler, assert_float_eq},
         tree::{Tree, Value},
     };
 

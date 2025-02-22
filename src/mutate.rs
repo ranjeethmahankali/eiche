@@ -5,7 +5,7 @@ use crate::{
     error::Error,
     fold::fold,
     prune::Pruner,
-    template::{Template, TEMPLATES},
+    template::{TEMPLATES, Template},
     tree::{Node, Node::*, Tree},
 };
 
