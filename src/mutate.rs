@@ -272,7 +272,7 @@ impl TemplateCapture {
                 }
             }
             (Unary(..), _) => (false, false),
-            (Binary(lop, mut l1, mut r1), Binary(rop, l2, r2)) => {
+            (&Binary(lop, mut l1, mut r1), &Binary(rop, l2, r2)) => {
                 if lop != rop {
                     return (false, false);
                 }
@@ -281,17 +281,17 @@ impl TemplateCapture {
                 }
                 let cpt = self.checkpoint();
                 let (mut found_left, comm_left) =
-                    self.match_node_commute(l1, ltree, *l2, rtree, commute);
+                    self.match_node_commute(l1, ltree, l2, rtree, commute);
                 if !found_left && comm_left {
                     self.restore(cpt);
-                    (found_left, _) = self.match_node_commute(l1, ltree, *l2, rtree, !commute);
+                    (found_left, _) = self.match_node_commute(l1, ltree, l2, rtree, !commute);
                 }
                 let cpt = self.checkpoint();
                 let (mut found_right, comm_right) =
-                    self.match_node_commute(r1, ltree, *r2, rtree, commute);
+                    self.match_node_commute(r1, ltree, r2, rtree, commute);
                 if !found_right && comm_right {
                     self.restore(cpt);
-                    (found_right, _) = self.match_node_commute(r1, ltree, *r2, rtree, !commute);
+                    (found_right, _) = self.match_node_commute(r1, ltree, r2, rtree, !commute);
                 }
                 (
                     found_left && found_right,
