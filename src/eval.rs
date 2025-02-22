@@ -1,7 +1,5 @@
-use std::fmt::Debug;
-
 use crate::{
-    compile::{Instructions, compile},
+    compile::{compile, CompilationCache, CompileTarget},
     error::Error,
     tree::{
         BinaryOp::{self, *},
@@ -12,6 +10,7 @@ use crate::{
         Value,
     },
 };
+use std::fmt::Debug;
 
 /// Size of a value type must be known at compile time.
 pub trait ValueType: Sized + Copy + Debug {
@@ -143,11 +142,18 @@ where
 {
     /// Create a new evaluator for `tree`.
     pub fn new(tree: &Tree) -> Evaluator<T> {
-        let Instructions {
-            ops,
-            num_regs,
-            out_regs: root_regs,
-        } = compile(tree);
+        let mut ops = Vec::with_capacity(tree.len());
+        let mut root_regs = Vec::with_capacity(tree.num_roots());
+        let mut cache = CompilationCache::default();
+        let num_regs = compile(
+            tree.nodes(),
+            tree.root_indices(),
+            &mut cache,
+            CompileTarget {
+                ops: &mut ops,
+                out_regs: &mut root_regs,
+            },
+        );
         let num_roots = root_regs.len();
         Evaluator {
             ops,

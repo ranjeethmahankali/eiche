@@ -1,4 +1,5 @@
-use crate::tree::{Node, Node::*, Tree};
+use crate::tree::{Node, Node::*};
+use std::ops::Range;
 
 /*
 Compile the tree into instructions. In theory one can just walk the nodes of the
@@ -8,28 +9,37 @@ Compile the tree into instructions. In theory one can just walk the nodes of the
 // Allocator: https://www.mattkeeter.com/blog/2022-10-04-ssra/
  */
 
-pub struct Instructions {
-    pub ops: Vec<(Node, usize)>,
-    pub num_regs: usize,
-    pub out_regs: Vec<usize>,
+pub struct CompileTarget<'a> {
+    pub ops: &'a mut Vec<(Node, usize)>,
+    pub out_regs: &'a mut Vec<usize>,
 }
 
-/// We "compile" the tree into a set of ops that closely mirror the nodes of the
-/// tree itself. The difference between the compiled ops and the tree nodes is
-/// that the former reference register indices, where the registers are
-/// reused. An 'instruction' is a tuple of a Node and a usize index pointing to
-/// the register that the output of the instruction should be written into.
-pub fn compile(tree: &Tree) -> Instructions {
-    let roots = tree.root_indices();
-    let mut root_regs = Vec::new();
-    let mut valregs = vec![None; tree.len()];
-    let mut alive: Vec<bool> = Vec::new();
-    let mut ops = Vec::new();
+#[derive(Default)]
+pub struct CompilationCache {
+    valregs: Vec<Option<usize>>, // Track registers occupied by node values during compilation.
+    alive: Vec<bool>,            // Track which registers are in use.
+}
+
+pub fn compile(
+    nodes: &[Node],
+    roots: Range<usize>,
+    cache: &mut CompilationCache,
+    mut out: CompileTarget,
+) -> usize {
+    let valregs = &mut cache.valregs;
+    let alive = &mut cache.alive;
+    valregs.clear();
+    valregs.resize(nodes.len(), None);
+    alive.clear();
+    let ops = &mut out.ops;
+    let num_ops = ops.len();
+    let outregs = &mut out.out_regs;
+    let num_outregs = outregs.len();
     // Iterate in reverse.
-    for (index, node) in tree.nodes().iter().enumerate().rev() {
-        let outreg = get_register(&mut valregs, &mut alive, index);
+    for (index, node) in nodes.iter().enumerate().rev() {
+        let outreg = get_register(valregs, alive, index);
         if roots.contains(&index) {
-            root_regs.push(outreg);
+            outregs.push(outreg);
         }
         /*
         We immediately mark the output register as not alive, i.e. not in
@@ -52,30 +62,26 @@ pub fn compile(tree: &Tree) -> Instructions {
             Constant(val) => (Constant(*val), outreg),
             Symbol(label) => (Symbol(*label), outreg),
             Unary(op, input) => {
-                let ireg = get_register(&mut valregs, &mut alive, *input);
+                let ireg = get_register(valregs, alive, *input);
                 (Unary(*op, ireg), outreg)
             }
             Binary(op, lhs, rhs) => {
-                let lreg = get_register(&mut valregs, &mut alive, *lhs);
-                let rreg = get_register(&mut valregs, &mut alive, *rhs);
+                let lreg = get_register(valregs, alive, *lhs);
+                let rreg = get_register(valregs, alive, *rhs);
                 (Binary(*op, lreg, rreg), outreg)
             }
             Ternary(op, a, b, c) => {
-                let areg = get_register(&mut valregs, &mut alive, *a);
-                let breg = get_register(&mut valregs, &mut alive, *b);
-                let creg = get_register(&mut valregs, &mut alive, *c);
+                let areg = get_register(valregs, alive, *a);
+                let breg = get_register(valregs, alive, *b);
+                let creg = get_register(valregs, alive, *c);
                 (Ternary(*op, areg, breg, creg), outreg)
             }
         };
         ops.push(op);
     }
-    root_regs.reverse();
-    ops.reverse();
-    Instructions {
-        ops,
-        num_regs: alive.len(),
-        out_regs: root_regs,
-    }
+    outregs[num_outregs..].reverse();
+    ops[num_ops..].reverse();
+    return alive.len();
 }
 
 /// Get the first register that isn't alive, i.e. is not in use. If all
