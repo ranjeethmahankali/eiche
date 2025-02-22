@@ -18,66 +18,59 @@ enum FoldResult {
 }
 
 fn fold_node(node: Node, nodes: &[Node]) -> FoldResult {
+    use FoldResult::*;
     match node {
-        Constant(_) | Symbol(_) => FoldResult::NoFolding,
+        Constant(_) | Symbol(_) => NoFolding,
         Unary(op, input) => match nodes[input] {
             Constant(value) => match Value::unary_op(op, value) {
-                Ok(result) => FoldResult::Folded(Constant(result)),
-                Err(e) => FoldResult::Failure(e),
+                Ok(result) => Folded(Constant(result)),
+                Err(e) => Failure(e),
             },
-            _ => FoldResult::NoFolding,
+            _ => NoFolding,
         },
         Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
             // Constant folding.
             (op, Constant(a), Constant(b)) => match Value::binary_op(op, *a, *b) {
-                Ok(result) => FoldResult::Folded(Constant(result)),
-                Err(e) => FoldResult::Failure(e),
+                Ok(result) => Folded(Constant(result)),
+                Err(e) => Failure(e),
             },
             // Identity ops.
-            (Add, lhs, Constant(val)) if *val == 0. => FoldResult::Folded(*lhs),
-            (Add, Constant(val), rhs) if *val == 0. => FoldResult::Folded(*rhs),
-            (Subtract, lhs, Constant(val)) if *val == 0. => FoldResult::Folded(*lhs),
-            (Multiply, lhs, Constant(val)) if *val == 1. => FoldResult::Folded(*lhs),
-            (Multiply, Constant(val), rhs) if *val == 1. => FoldResult::Folded(*rhs),
-            (Pow, base, Constant(val)) if *val == 1. => FoldResult::Folded(*base),
-            (Divide, numerator, Constant(val)) if *val == 1. => FoldResult::Folded(*numerator),
-            (Or, lhs, Constant(rhs)) if *rhs == false => FoldResult::Folded(*lhs),
-            (Or, Constant(lhs), rhs) if *lhs == false => FoldResult::Folded(*rhs),
-            (And, lhs, Constant(rhs)) if *rhs == true => FoldResult::Folded(*lhs),
-            (And, Constant(lhs), rhs) if *lhs == true => FoldResult::Folded(*rhs),
+            (Add, lhs, Constant(val)) if *val == 0. => Folded(*lhs),
+            (Add, Constant(val), rhs) if *val == 0. => Folded(*rhs),
+            (Subtract, lhs, Constant(val)) if *val == 0. => Folded(*lhs),
+            (Multiply, lhs, Constant(val)) if *val == 1. => Folded(*lhs),
+            (Multiply, Constant(val), rhs) if *val == 1. => Folded(*rhs),
+            (Pow, base, Constant(val)) if *val == 1. => Folded(*base),
+            (Divide, numerator, Constant(val)) if *val == 1. => Folded(*numerator),
+            (Or, lhs, Constant(rhs)) if *rhs == false => Folded(*lhs),
+            (Or, Constant(lhs), rhs) if *lhs == false => Folded(*rhs),
+            (And, lhs, Constant(rhs)) if *rhs == true => Folded(*lhs),
+            (And, Constant(lhs), rhs) if *lhs == true => Folded(*rhs),
             // Other ops.
-            (Subtract, Constant(val), _rhs) if *val == 0. => FoldResult::Folded(Unary(Negate, ri)),
-            (Pow, _base, Constant(val)) if *val == 0. => FoldResult::Folded(Constant(Scalar(1.))),
-            (Multiply, _lhs, Constant(val)) if *val == 0. => {
-                FoldResult::Folded(Constant(Scalar(0.)))
-            }
-            (Multiply, Constant(val), _rhs) if *val == 0. => {
-                FoldResult::Folded(Constant(Scalar(0.)))
-            }
-            (Divide, Constant(val), _rhs) if *val == 0. => FoldResult::Folded(Constant(Scalar(0.))),
-            (Or, _lhs, Constant(rhs)) if *rhs == true => FoldResult::Folded(Constant(Bool(true))),
-            (Or, Constant(lhs), _rhs) if *lhs == true => FoldResult::Folded(Constant(Bool(true))),
-            (And, _lhs, Constant(rhs)) if *rhs == false => {
-                FoldResult::Folded(Constant(Bool(false)))
-            }
-            (And, Constant(lhs), _rhs) if *lhs == false => {
-                FoldResult::Folded(Constant(Bool(false)))
-            }
-            _ => FoldResult::NoFolding,
+            (Subtract, Constant(val), _rhs) if *val == 0. => Folded(Unary(Negate, ri)),
+            (Pow, _base, Constant(val)) if *val == 0. => Folded(Constant(Scalar(1.))),
+            (Multiply, _lhs, Constant(val)) if *val == 0. => Folded(Constant(Scalar(0.))),
+            (Multiply, Constant(val), _rhs) if *val == 0. => Folded(Constant(Scalar(0.))),
+            (Divide, Constant(val), _rhs) if *val == 0. => Folded(Constant(Scalar(0.))),
+            (Or, _lhs, Constant(rhs)) if *rhs == true => Folded(Constant(Bool(true))),
+            (Or, Constant(lhs), _rhs) if *lhs == true => Folded(Constant(Bool(true))),
+            (And, _lhs, Constant(rhs)) if *rhs == false => Folded(Constant(Bool(false))),
+            (And, Constant(lhs), _rhs) if *lhs == false => Folded(Constant(Bool(false))),
+            _ => NoFolding,
         },
         Ternary(op, a, b, c) => match (op, &nodes[a], &nodes[b], &nodes[c]) {
             (op, Constant(a), Constant(b), Constant(c)) => {
                 match Value::ternary_op(op, *a, *b, *c) {
-                    Ok(result) => FoldResult::Folded(Constant(result)),
-                    Err(e) => FoldResult::Failure(e),
+                    Ok(result) => Folded(Constant(result)),
+                    Err(e) => Failure(e),
                 }
             }
             (Choose, Constant(flag), left, right) => match flag.boolean() {
-                Ok(true) => FoldResult::Folded(*left),
-                Ok(false) => FoldResult::Folded(*right),
-                Err(e) => FoldResult::Failure(e),
+                Ok(true) => Folded(*left),
+                Ok(false) => Folded(*right),
+                Err(e) => Failure(e),
             },
-            _ => FoldResult::NoFolding,
+            _ => NoFolding,
         },
     }
 }
