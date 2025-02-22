@@ -11,6 +11,77 @@ use crate::{
     },
 };
 
+enum FoldResult {
+    NoFolding,
+    Folded(Node),
+    Failure(Error),
+}
+
+fn fold_node(node: Node, nodes: &[Node]) -> FoldResult {
+    match node {
+        Constant(_) | Symbol(_) => FoldResult::NoFolding,
+        Unary(op, input) => match nodes[input] {
+            Constant(value) => match Value::unary_op(op, value) {
+                Ok(result) => FoldResult::Folded(Constant(result)),
+                Err(e) => FoldResult::Failure(e),
+            },
+            _ => FoldResult::NoFolding,
+        },
+        Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
+            // Constant folding.
+            (op, Constant(a), Constant(b)) => match Value::binary_op(op, *a, *b) {
+                Ok(result) => FoldResult::Folded(Constant(result)),
+                Err(e) => FoldResult::Failure(e),
+            },
+            // Identity ops.
+            (Add, lhs, Constant(val)) if *val == 0. => FoldResult::Folded(*lhs),
+            (Add, Constant(val), rhs) if *val == 0. => FoldResult::Folded(*rhs),
+            (Subtract, lhs, Constant(val)) if *val == 0. => FoldResult::Folded(*lhs),
+            (Multiply, lhs, Constant(val)) if *val == 1. => FoldResult::Folded(*lhs),
+            (Multiply, Constant(val), rhs) if *val == 1. => FoldResult::Folded(*rhs),
+            (Pow, base, Constant(val)) if *val == 1. => FoldResult::Folded(*base),
+            (Divide, numerator, Constant(val)) if *val == 1. => FoldResult::Folded(*numerator),
+            (Or, lhs, Constant(rhs)) if *rhs == false => FoldResult::Folded(*lhs),
+            (Or, Constant(lhs), rhs) if *lhs == false => FoldResult::Folded(*rhs),
+            (And, lhs, Constant(rhs)) if *rhs == true => FoldResult::Folded(*lhs),
+            (And, Constant(lhs), rhs) if *lhs == true => FoldResult::Folded(*rhs),
+            // Other ops.
+            (Subtract, Constant(val), _rhs) if *val == 0. => FoldResult::Folded(Unary(Negate, ri)),
+            (Pow, _base, Constant(val)) if *val == 0. => FoldResult::Folded(Constant(Scalar(1.))),
+            (Multiply, _lhs, Constant(val)) if *val == 0. => {
+                FoldResult::Folded(Constant(Scalar(0.)))
+            }
+            (Multiply, Constant(val), _rhs) if *val == 0. => {
+                FoldResult::Folded(Constant(Scalar(0.)))
+            }
+            (Divide, Constant(val), _rhs) if *val == 0. => FoldResult::Folded(Constant(Scalar(0.))),
+            (Or, _lhs, Constant(rhs)) if *rhs == true => FoldResult::Folded(Constant(Bool(true))),
+            (Or, Constant(lhs), _rhs) if *lhs == true => FoldResult::Folded(Constant(Bool(true))),
+            (And, _lhs, Constant(rhs)) if *rhs == false => {
+                FoldResult::Folded(Constant(Bool(false)))
+            }
+            (And, Constant(lhs), _rhs) if *lhs == false => {
+                FoldResult::Folded(Constant(Bool(false)))
+            }
+            _ => FoldResult::NoFolding,
+        },
+        Ternary(op, a, b, c) => match (op, &nodes[a], &nodes[b], &nodes[c]) {
+            (op, Constant(a), Constant(b), Constant(c)) => {
+                match Value::ternary_op(op, *a, *b, *c) {
+                    Ok(result) => FoldResult::Folded(Constant(result)),
+                    Err(e) => FoldResult::Failure(e),
+                }
+            }
+            (Choose, Constant(flag), left, right) => match flag.boolean() {
+                Ok(true) => FoldResult::Folded(*left),
+                Ok(false) => FoldResult::Folded(*right),
+                Err(e) => FoldResult::Failure(e),
+            },
+            _ => FoldResult::NoFolding,
+        },
+    }
+}
+
 /**
 Compute the results of operations on constants and fold those into
 constant nodes. The unused nodes after folding are not
@@ -18,59 +89,10 @@ pruned. Use a pruner for that.
 */
 pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
     for index in 0..nodes.len() {
-        let folded = match nodes[index] {
-            Constant(_) => None,
-            Symbol(_) => None,
-            Unary(op, input) => {
-                if let Constant(value) = nodes[input] {
-                    Some(Constant(Value::unary_op(op, value)?))
-                } else {
-                    None
-                }
-            }
-            Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
-                // Constant folding.
-                (op, Constant(a), Constant(b)) => Some(Constant(Value::binary_op(op, *a, *b)?)),
-                // Identity ops.
-                (Add, lhs, Constant(val)) if *val == 0. => Some(*lhs),
-                (Add, Constant(val), rhs) if *val == 0. => Some(*rhs),
-                (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
-                (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
-                (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
-                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
-                (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
-                (Or, lhs, Constant(rhs)) if *rhs == false => Some(*lhs),
-                (Or, Constant(lhs), rhs) if *lhs == false => Some(*rhs),
-                (And, lhs, Constant(rhs)) if *rhs == true => Some(*lhs),
-                (And, Constant(lhs), rhs) if *lhs == true => Some(*rhs),
-                // Other ops.
-                (Subtract, Constant(val), _rhs) if *val == 0. => Some(Unary(Negate, ri)),
-                (Pow, _base, Constant(val)) if *val == 0. => Some(Constant(Scalar(1.))),
-                (Multiply, _lhs, Constant(val)) if *val == 0. => Some(Constant(Scalar(0.))),
-                (Multiply, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
-                (Divide, Constant(val), _rhs) if *val == 0. => Some(Constant(Scalar(0.))),
-                (Or, _lhs, Constant(rhs)) if *rhs == true => Some(Constant(Bool(true))),
-                (Or, Constant(lhs), _rhs) if *lhs == true => Some(Constant(Bool(true))),
-                (And, _lhs, Constant(rhs)) if *rhs == false => Some(Constant(Bool(false))),
-                (And, Constant(lhs), _rhs) if *lhs == false => Some(Constant(Bool(false))),
-                _ => None,
-            },
-            Ternary(op, a, b, c) => match (op, &nodes[a], &nodes[b], &nodes[c]) {
-                (op, Constant(a), Constant(b), Constant(c)) => {
-                    Some(Constant(Value::ternary_op(op, *a, *b, *c)?))
-                }
-                (Choose, Constant(flag), left, right) => {
-                    if flag.boolean()? {
-                        Some(*left)
-                    } else {
-                        Some(*right)
-                    }
-                }
-                _ => None,
-            },
-        };
-        if let Some(node) = folded {
-            nodes[index] = node;
+        match fold_node(nodes[index], nodes) {
+            FoldResult::NoFolding => {}
+            FoldResult::Folded(node) => nodes[index] = node,
+            FoldResult::Failure(error) => return Err(error),
         }
     }
     Ok(())
@@ -152,15 +174,13 @@ mod test {
     #[test]
     fn t_add_zero() {
         let mut pruner = Pruner::new();
-        assert!(
-            deftree!(+ (pow x (+ y 0)) 0)
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(pow x y).unwrap())
-        );
+        assert!(deftree!(+ (pow x (+ y 0)) 0)
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(pow x y).unwrap()));
         assert!(
             deftree!(pow (+ (+ (cos (+ x 0)) (/ 1 (+ (sin y) 0))) 0) (* 2 (+ (+ x 0) y)))
                 .unwrap()
@@ -175,15 +195,13 @@ mod test {
     #[test]
     fn t_sub_zero() {
         let mut pruner = Pruner::new();
-        assert!(
-            deftree!(- (pow (- x 0) (+ y 0)) 0)
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(pow x y).unwrap()),
-        );
+        assert!(deftree!(- (pow (- x 0) (+ y 0)) 0)
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(pow x y).unwrap()),);
         assert!(
             deftree!(pow (+ (cos (+ (- x 0) 0)) (/ 1 (- (sin (- y 0)) 0))) (* 2 (+ x (- y 0))))
                 .unwrap()
@@ -198,39 +216,33 @@ mod test {
     #[test]
     fn t_mul_1() {
         let mut pruner = Pruner::new();
-        assert!(
-            deftree!(+ (pow (* 1 x) (* y 1)) 0)
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(pow x y).unwrap()),
-        );
-        assert!(
-            deftree!(pow (+ (cos (* x (* 1 (+ 1 (* 0 x)))))
-                          (/ 1 (* (sin (- y 0)) 1))) (* (* (+ 2 0) (+ x y)) 1))
+        assert!(deftree!(+ (pow (* 1 x) (* y 1)) 0)
             .unwrap()
             .fold()
             .unwrap()
             .prune(&mut pruner)
             .unwrap()
-            .equivalent(&deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()),
-        );
+            .equivalent(&deftree!(pow x y).unwrap()),);
+        assert!(deftree!(pow (+ (cos (* x (* 1 (+ 1 (* 0 x)))))
+                          (/ 1 (* (sin (- y 0)) 1))) (* (* (+ 2 0) (+ x y)) 1))
+        .unwrap()
+        .fold()
+        .unwrap()
+        .prune(&mut pruner)
+        .unwrap()
+        .equivalent(&deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()),);
     }
 
     #[test]
     fn t_pow_1() {
         let mut pruner = Pruner::new();
-        assert!(
-            deftree!(pow (pow (pow x 1) (pow y 1)) (pow 1 1))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(pow x y).unwrap())
-        );
+        assert!(deftree!(pow (pow (pow x 1) (pow y 1)) (pow 1 1))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(pow x y).unwrap()));
         assert!(
             deftree!(pow (+ (cos (pow x (pow x (* 0 x)))) (/ 1 (sin y))) (* 2 (+ x (pow y 1))))
                 .unwrap()
@@ -245,15 +257,13 @@ mod test {
     #[test]
     fn t_div_1() {
         let mut pruner = Pruner::new();
-        assert!(
-            deftree!(pow (/ x 1) (/ y (pow x (* t 0))))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(pow x y).unwrap()),
-        );
+        assert!(deftree!(pow (/ x 1) (/ y (pow x (* t 0))))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(pow x y).unwrap()),);
 
         assert!(
             deftree!(pow (+ (cos (/ x 1)) (/ 1 (sin (/ y (pow t (* 0 p)))))) (* 2 (+ x y)))
@@ -269,15 +279,13 @@ mod test {
     #[test]
     fn t_mul_0() {
         let mut pruner = Pruner::new();
-        assert!(
-            deftree!(pow (+ x (* t 0)) (+ y (* t 0)))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(pow x y).unwrap()),
-        );
+        assert!(deftree!(pow (+ x (* t 0)) (+ y (* t 0)))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(pow x y).unwrap()),);
         assert!(
             deftree!(pow (+ (cos (+ x (* 0 t))) (/ 1 (sin (- y (* t 0)))))
                      (* 2 (* (+ x y) (pow t (* 0 t)))))
@@ -293,15 +301,13 @@ mod test {
     #[test]
     fn t_pow_0() {
         let mut pruner = Pruner::new();
-        assert!(
-            deftree!(* (pow x (* t 0)) (pow (* x (pow t 0)) y))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(pow x y).unwrap()),
-        );
+        assert!(deftree!(* (pow x (* t 0)) (pow (* x (pow t 0)) y))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(pow x y).unwrap()),);
         assert!(
             deftree!(pow (+ (cos (* x (pow t 0))) (/ 1 (sin (* y (pow t (* x 0))))))
                      (* 2 (+ x (* y (pow x 0)))))
@@ -317,59 +323,47 @@ mod test {
     #[test]
     fn t_boolean() {
         let mut pruner = Pruner::new();
-        assert!(
-            deftree!(if (> 2 0) x (- x))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(x).unwrap()),
-        );
-        assert!(
-            deftree!(if (not (> 2 0)) x (- x))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(-x).unwrap()),
-        );
-        assert!(
-            deftree!(if (and (> x 0) (> 2 0)) x (-x))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),
-        );
-        assert!(
-            deftree!(if (and (> x 0) (> 0 2)) x (-x))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(-x).unwrap()),
-        );
-        assert!(
-            deftree!(if (or (> x 0) (> 2 0)) x (-x))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(x).unwrap()),
-        );
-        assert!(
-            deftree!(if (or (> x 0) (> 0 2)) x (-x))
-                .unwrap()
-                .fold()
-                .unwrap()
-                .prune(&mut pruner)
-                .unwrap()
-                .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),
-        );
+        assert!(deftree!(if (> 2 0) x (- x))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(x).unwrap()),);
+        assert!(deftree!(if (not (> 2 0)) x (- x))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(-x).unwrap()),);
+        assert!(deftree!(if (and (> x 0) (> 2 0)) x (-x))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),);
+        assert!(deftree!(if (and (> x 0) (> 0 2)) x (-x))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(-x).unwrap()),);
+        assert!(deftree!(if (or (> x 0) (> 2 0)) x (-x))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(x).unwrap()),);
+        assert!(deftree!(if (or (> x 0) (> 0 2)) x (-x))
+            .unwrap()
+            .fold()
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap()
+            .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),);
     }
 }
