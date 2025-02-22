@@ -2,7 +2,7 @@ use crate::{
     eval::ValueEvaluator,
     tree::{Tree, Value},
 };
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 /// Assert that the floating point numbers are equal within the given epsilon.
 macro_rules! assert_float_eq {

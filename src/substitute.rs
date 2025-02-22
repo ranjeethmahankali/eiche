@@ -43,11 +43,7 @@ impl Tree {
         let newroot = new.root_indices().start;
         let offset = newroot + 1;
         let map_input = move |i: usize| {
-            if flags[i] {
-                newroot
-            } else {
-                i + offset
-            }
+            if flags[i] { newroot } else { i + offset }
         };
         let (mut nodes, dims) = self.take();
         for node in &mut nodes {

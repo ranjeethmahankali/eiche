@@ -1,12 +1,12 @@
 use crate::error::Error;
 use inkwell::{
+    OptimizationLevel,
     builder::{Builder, BuilderError},
     context::Context,
     execution_engine::FunctionLookupError,
     module::Module,
     passes::PassManager,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
-    OptimizationLevel,
 };
 use std::path::Path;
 

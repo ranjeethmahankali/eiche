@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use crate::{
-    compile::{compile, Instructions},
+    compile::{Instructions, compile},
     error::Error,
     tree::{
         BinaryOp::{self, *},

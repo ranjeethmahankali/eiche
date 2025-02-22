@@ -1,4 +1,5 @@
 use inkwell::{
+    AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
     builder::Builder,
     context::Context,
     execution_engine::JitFunction,
@@ -6,7 +7,6 @@ use inkwell::{
     module::Module,
     types::{BasicTypeEnum, FloatType, VectorType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
-    AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
 };
 
 #[cfg(target_arch = "x86")]
@@ -651,7 +651,7 @@ mod test {
     use crate::{
         deftree,
         eval::ValueEvaluator,
-        test::{assert_float_eq, Sampler},
+        test::{Sampler, assert_float_eq},
     };
 
     use super::*;
@@ -876,9 +876,9 @@ mod perft {
         eval::ValueEvaluator,
         prune::Pruner,
         test::assert_float_eq,
-        tree::{min, Tree},
+        tree::{Tree, min},
     };
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
     use std::time::{Duration, Instant};
 
     fn _sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
