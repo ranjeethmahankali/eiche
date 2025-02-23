@@ -107,16 +107,17 @@ where
     ops: Stack<(Node, usize)>,
     val_regs: Vec<T>,
     interval_regs: Vec<Interval>,
-    vars: Vec<(char, T)>,
+    vars: BTreeMap<char, T>,
     num_roots: usize,
     root_regs: Stack<usize>,
     val_outputs: Vec<T>,
-    interval_outputs: Vec<Interval>,
+    interval_outputs: Stack<Interval>,
     interval_indices: Vec<usize>,
     intervals_per_level: usize,
-    divisions: f64,
+    divisions: BTreeMap<char, usize>,
     // Temp storage,
     temp_bounds: Vec<(char, Interval)>,
+    temp_intervals: Vec<Interval>,
     temp_nodes: Vec<Node>,
     compile_cache: CompileCache,
 }
@@ -125,6 +126,7 @@ where
 pub enum PruningError {
     UnexpectedEmptyState,
     CannotConstructInterval(inari::IntervalError),
+    UnknownVariable(char),
 }
 
 impl From<PruningError> for Error {
@@ -133,7 +135,14 @@ impl From<PruningError> for Error {
     }
 }
 
+impl From<inari::IntervalError> for PruningError {
+    fn from(value: inari::IntervalError) -> Self {
+        PruningError::CannotConstructInterval(value)
+    }
+}
+
 pub enum PruningState {
+    None,
     Valid(usize, usize),
     Failure(Error),
 }
@@ -144,9 +153,8 @@ where
 {
     pub fn new(
         tree: &Tree,
-        divisions: usize,
         estimated_depth: usize,
-        bounds: BTreeMap<char, Interval>,
+        intervals: BTreeMap<char, (Interval, usize)>,
     ) -> Self {
         let num_roots = tree.num_roots();
         let mut ops = Stack::with_capacity(estimated_depth, tree.len() * estimated_depth);
@@ -165,23 +173,34 @@ where
             root_regs.last_slice().map(|s| s.len()).unwrap_or(0),
             num_roots
         );
-        let num_bounds = bounds.len();
         PruningEvaluator {
-            bounds: Stack::from_iter(bounds.into_iter()),
+            bounds: Stack::from_iter(
+                intervals
+                    .iter()
+                    .map(|(label, (bounds, _divisions))| (*label, *bounds)),
+            ),
             nodes: tree.nodes().into(),
             num_regs: vec![num_regs],
             ops,
             val_regs: vec![T::default(); num_regs],
             interval_regs: vec![Interval::default(); num_regs],
-            vars: Vec::new(),
+            vars: BTreeMap::new(),
             num_roots,
             root_regs,
-            val_outputs: vec![T::from_scalar(0.).unwrap(); num_roots],
-            interval_outputs: vec![Interval::Scalar(inari::Interval::ENTIRE); num_roots],
+            val_outputs: Vec::with_capacity(num_roots),
+            interval_outputs: Stack::with_capacity(estimated_depth, num_roots * estimated_depth),
             interval_indices: vec![0],
-            intervals_per_level: divisions.pow(num_bounds as u32),
-            divisions: divisions as f64,
+            intervals_per_level: intervals
+                .iter()
+                .fold(1usize, |prod, (_label, (_bounds, divisions))| {
+                    prod * divisions
+                }),
+            divisions: intervals
+                .iter()
+                .map(|(label, (_bounds, divisions))| (*label, *divisions))
+                .collect(),
             temp_bounds: Vec::new(),
+            temp_intervals: Vec::new(),
             temp_nodes: Vec::with_capacity(tree.len()),
             compile_cache: cache,
         }
@@ -191,34 +210,49 @@ where
         self.interval_indices.len()
     }
 
-    pub fn push(&mut self) -> PruningState {
+    fn push_impl(&mut self, index: usize) -> PruningState {
+        debug_assert!(index < self.intervals_per_level);
         // Split the current intervals into 'divisions' and pick the first child.
         self.temp_bounds.clear();
         match match self.bounds.last_slice() {
-            Some(last) => last
-                .iter()
-                .try_fold(&mut self.temp_bounds, |bounds, (k, v)| {
-                    bounds.push((
-                        *k,
-                        match v {
-                            Interval::Scalar(ii) => inari::Interval::try_from((
-                                ii.inf(),
-                                ii.inf() + ii.wid() / self.divisions,
-                            ))?
-                            .into(),
-                            Interval::Bool(true, true) => Interval::Bool(true, true),
-                            Interval::Bool(false, false) => Interval::Bool(false, false),
-                            Interval::Bool(_, _) => Interval::Bool(false, true),
-                        },
-                    ));
-                    Ok(bounds)
-                }),
+            Some(last) => {
+                debug_assert_eq!(last.len(), self.divisions.len()); // This is required for proper indexing.
+                last.iter().zip(self.divisions.iter()).try_fold(
+                    (&mut self.temp_bounds, index),
+                    |(bounds, index),
+                     ((label, val), (divlabel, div))|
+                     -> Result<(&mut Vec<(char, Interval)>, usize), PruningError> {
+                        debug_assert_eq!(divlabel, label); // Ensure the labels aren't somehow out of order.
+                        let inext = index / div;
+                        let icurr = index % div;
+                        bounds.push((
+                            *label,
+                            match val {
+                                Interval::Scalar(ii) => {
+                                    let span = ii.wid() / (*div as f64);
+                                    let lo = ii.inf() + (span * icurr as f64);
+                                    let hi = lo + span;
+                                    inari::Interval::try_from((lo, hi))
+                                        .map_err(|e| PruningError::CannotConstructInterval(e))?
+                                        .into()
+                                }
+                                Interval::Bool(true, true) => Interval::Bool(true, true),
+                                Interval::Bool(false, false) => Interval::Bool(false, false),
+                                Interval::Bool(_, _) => Interval::Bool(false, true),
+                            },
+                        ));
+                        Ok((bounds, inext))
+                    },
+                )
+            }
             None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
         } {
-            Ok(bounds) => bounds,
-            Err(e) => {
-                return PruningState::Failure(PruningError::CannotConstructInterval(e).into())
+            Ok((bounds, rem_index)) => {
+                debug_assert_eq!(rem_index, 0); // Ensure we consumed the
+                                                // n-dimensional index fully, and that the index was not out of bounds.
+                bounds
             }
+            Err(e) => return PruningState::Failure(e.into()),
         };
         if let Err(e) = fold_for_interval(
             match self.nodes.last_slice() {
@@ -227,9 +261,14 @@ where
             },
             &self.temp_bounds,
             &mut self.temp_nodes,
+            &mut self.temp_intervals,
         ) {
             return PruningState::Failure(e);
         }
+        // Copy the output intervals.
+        self.interval_outputs
+            .push_slice(&self.temp_intervals[(self.temp_intervals.len() - self.num_roots)..]);
+        // Update the remaining members of the struct.
         self.bounds.push_iter(self.temp_bounds.drain(..));
         self.nodes.push_iter(self.temp_nodes.drain(..));
         self.interval_indices.push(0);
@@ -258,31 +297,86 @@ where
         )
     }
 
+    pub fn push(&mut self) -> PruningState {
+        self.push_impl(0)
+    }
+
+    fn pop_impl(&mut self) -> [Option<usize>; 5] {
+        [
+            self.nodes.pop_slice(),
+            self.ops.pop_slice(),
+            self.num_regs.pop(),
+            self.root_regs.pop_slice(),
+            self.interval_indices.pop(),
+        ]
+    }
+
     pub fn pop(&mut self) -> PruningState {
-        self.nodes.pop_slice();
-        self.ops.pop_slice();
-        self.num_regs.pop();
+        if self.pop_impl().iter().any(|opt| opt.is_none()) {
+            return PruningState::None;
+        }
         if let Some(nregs) = self.num_regs.last() {
             self.val_regs.resize(*nregs, T::default());
             self.interval_regs.resize(*nregs, Interval::default());
         }
-        self.root_regs.pop_slice();
-        self.interval_indices.pop();
-        PruningState::Valid(
-            self.current_depth(),
-            match self.interval_indices.last() {
-                Some(last) => *last,
-                None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
-            },
-        )
+        match self.interval_indices.last() {
+            Some(last) => PruningState::Valid(self.current_depth(), *last),
+            None => PruningState::None,
+        }
     }
 
     pub fn next(&mut self) -> PruningState {
-        match self.bounds.pop_slice() {
-            Some(_) => {}
-            None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+        let topush = loop {
+            match self.pop_impl() {
+                [Some(_), Some(_), Some(_), Some(_), Some(i)] => {
+                    if i < self.intervals_per_level {
+                        break i + 1;
+                    } else {
+                        continue;
+                    }
+                }
+                _ => return PruningState::None,
+            }
         };
-        todo!("Go to the next inteval at the same depth");
+        self.push_impl(topush)
+    }
+
+    /// Set the value of a scalar variable with the given label. You'd do this
+    /// for all the inputs before running the evaluator.
+    pub fn set_value(&mut self, label: char, value: T) {
+        self.vars.insert(label, value);
+    }
+
+    pub fn eval(&mut self) -> Result<&[T], Error> {
+        for (node, out) in self
+            .ops
+            .last_slice()
+            .ok_or(PruningError::UnexpectedEmptyState)?
+        {
+            self.val_regs[*out] = match node {
+                Node::Constant(val) => T::from_value(*val).unwrap(),
+                Node::Symbol(label) => match self.vars.get(label) {
+                    Some(&v) => v,
+                    None => return Err(Error::VariableNotFound(*label)),
+                },
+                Node::Unary(op, input) => T::unary_op(*op, self.val_regs[*input])?,
+                Node::Binary(op, lhs, rhs) => {
+                    T::binary_op(*op, self.val_regs[*lhs], self.val_regs[*rhs])?
+                }
+                Node::Ternary(op, a, b, c) => {
+                    T::ternary_op(*op, self.val_regs[*a], self.val_regs[*b], self.val_regs[*c])?
+                }
+            };
+        }
+        self.val_outputs.clear();
+        self.val_outputs.extend(
+            self.root_regs
+                .last_slice()
+                .ok_or(PruningError::UnexpectedEmptyState)?
+                .iter()
+                .map(|r| self.val_regs[*r]),
+        );
+        Ok(&self.val_outputs)
     }
 }
 
