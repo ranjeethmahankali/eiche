@@ -81,7 +81,7 @@ pub fn compile(
     }
     outregs[num_outregs..].reverse();
     ops[num_ops..].reverse();
-    return alive.len();
+    alive.len()
 }
 
 /// Get the first register that isn't alive, i.e. is not in use. If all
