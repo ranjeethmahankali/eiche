@@ -11,7 +11,6 @@ use crate::{
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 pub mod fold;
-pub mod pruning_eval;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Interval {
