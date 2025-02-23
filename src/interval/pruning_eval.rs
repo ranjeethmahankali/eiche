@@ -15,10 +15,12 @@ where
     vars: Vec<(char, T)>,
     num_roots: usize,
     root_regs: Vec<usize>,
-    outputs: Vec<T>,
+    val_outputs: Vec<T>,
+    interval_outputs: Vec<Interval>,
     bounds: Vec<BTreeMap<char, Interval>>, // Bounds stored like a stack.
     op_ranges: Vec<Range<usize>>,
     current_depth: usize,
+    divisions: usize,
 }
 
 impl<T> PruningEvaluator<T>
@@ -45,16 +47,19 @@ where
             },
         );
         debug_assert_eq!(root_regs.len(), num_roots);
+        let num_ops = ops.len();
         PruningEvaluator {
             ops,
             regs: vec![T::from_scalar(0.).unwrap(); num_regs],
             vars: Vec::new(),
             num_roots,
             root_regs,
-            outputs: todo!(),
-            bounds: todo!(),
-            op_ranges: todo!(),
-            current_depth: todo!(),
+            val_outputs: vec![T::from_scalar(0.).unwrap(); num_roots],
+            interval_outputs: vec![Interval::Scalar(inari::Interval::ENTIRE); num_roots],
+            bounds: vec![bounds],
+            op_ranges: vec![0..num_ops],
+            current_depth: 0,
+            divisions,
         }
     }
 }
