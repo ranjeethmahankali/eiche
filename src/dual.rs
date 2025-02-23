@@ -43,6 +43,12 @@ impl<const DIM: usize> Dual<DIM> {
     }
 }
 
+impl<const DIM: usize> Default for Dual<DIM> {
+    fn default() -> Self {
+        Dual::Scalar(0., [0.; DIM])
+    }
+}
+
 impl<const DIM: usize> ValueType for Dual<DIM> {
     fn from_scalar(val: f64) -> Result<Self, Error> {
         Ok(Dual::Scalar(val, [0.; DIM]))
@@ -186,7 +192,7 @@ mod test {
         deftree,
         dual::Dual,
         eval::ValueEvaluator,
-        test::{Sampler, assert_float_eq},
+        test::{assert_float_eq, Sampler},
         tree::{Tree, Value},
     };
 

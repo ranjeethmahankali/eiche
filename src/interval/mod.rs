@@ -52,6 +52,12 @@ impl Interval {
     }
 }
 
+impl Default for Interval {
+    fn default() -> Self {
+        Interval::Scalar(inari::Interval::ENTIRE)
+    }
+}
+
 impl ValueType for Interval {
     fn from_scalar(val: f64) -> Result<Self, Error> {
         Interval::from_scalar(val, val)
