@@ -20,8 +20,10 @@ where
     bounds: Vec<BTreeMap<char, Interval>>, // Bounds stored like a stack.
     op_ranges: Vec<Range<usize>>,
     current_depth: usize,
+    interval_index: usize,
     intervals_per_level: usize,
     divisions: usize,
+    compile_cache: CompileCache,
 }
 
 impl<T> PruningEvaluator<T>
@@ -61,12 +63,16 @@ where
             bounds: vec![bounds],
             op_ranges: vec![0..num_ops],
             current_depth: 0,
+            interval_index: 0usize,
             intervals_per_level: divisions.pow(num_bounds as u32),
             divisions,
+            compile_cache: cache,
         }
     }
 
     pub fn push(&mut self) -> Option<(usize, usize)> {
+        // Figure out the next interval.
+        let nops_before = self.ops.len();
         todo!("Go one level deeper");
     }
 
@@ -79,4 +85,4 @@ where
     }
 }
 
-pub type PruningValueEvaluator = PruningEvaluator<Value>;
+pub type ValuePruningEvaluator = PruningEvaluator<Value>;
