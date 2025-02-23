@@ -192,7 +192,7 @@ mod test {
         deftree,
         dual::Dual,
         eval::ValueEvaluator,
-        test::{assert_float_eq, Sampler},
+        test::{Sampler, assert_float_eq},
         tree::{Tree, Value},
     };
 

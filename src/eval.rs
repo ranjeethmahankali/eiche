@@ -1,5 +1,5 @@
 use crate::{
-    compile::{compile, CompileCache, CompileOutput},
+    compile::{CompileCache, CompileOutput, compile},
     error::Error,
     tree::{
         BinaryOp::{self, *},

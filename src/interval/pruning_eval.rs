@@ -1,6 +1,6 @@
 use super::Interval;
 use crate::{
-    compile::{compile, CompileCache, CompileOutput},
+    compile::{CompileCache, CompileOutput, compile},
     error::Error,
     eval::ValueType,
     interval::fold::fold_for_interval,
@@ -249,7 +249,7 @@ where
         } {
             Ok((bounds, rem_index)) => {
                 debug_assert_eq!(rem_index, 0); // Ensure we consumed the
-                                                // n-dimensional index fully, and that the index was not out of bounds.
+                // n-dimensional index fully, and that the index was not out of bounds.
                 bounds
             }
             Err(e) => return PruningState::Failure(e.into()),
