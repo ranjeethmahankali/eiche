@@ -105,7 +105,7 @@ impl ValueType for Interval {
     }
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
-        use {Interval::*, inari::Overlap::*};
+        use {inari::Overlap::*, Interval::*};
         match (lhs, rhs) {
             (Scalar(lhs), Scalar(rhs)) => match op {
                 Add => Ok(Interval::Scalar(lhs.add(rhs))),
@@ -262,10 +262,10 @@ mod test {
     use crate::{
         deftree,
         eval::ValueEvaluator,
-        test::{Sampler, assert_float_eq},
+        test::{assert_float_eq, Sampler},
         tree::Tree,
     };
-    use rand::{Rng, SeedableRng, rngs::StdRng};
+    use rand::{rngs::StdRng, Rng, SeedableRng};
 
     /**
     Helper function to check interval evaluations by evaluating the given
