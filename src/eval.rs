@@ -10,7 +10,7 @@ use crate::{
         Value,
     },
 };
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug};
 
 /// Size of a value type must be known at compile time.
 pub trait ValueType: Sized + Copy + Debug {
@@ -131,7 +131,7 @@ where
 {
     ops: Vec<(Node, usize)>,
     regs: Vec<T>,
-    vars: Vec<(char, T)>,
+    vars: BTreeMap<char, T>,
     root_regs: Vec<usize>,
     outputs: Vec<T>,
 }
@@ -155,10 +155,11 @@ where
             },
         );
         let num_roots = root_regs.len();
+        debug_assert_eq!(num_roots, tree.num_roots());
         Evaluator {
             ops,
             regs: vec![T::from_scalar(0.).unwrap(); num_regs],
-            vars: Vec::new(),
+            vars: BTreeMap::new(),
             root_regs,
             outputs: vec![T::from_scalar(0.).unwrap(); num_roots],
         }
@@ -174,13 +175,7 @@ where
     /// Set the value of a scalar variable with the given label. You'd do this
     /// for all the inputs before running the evaluator.
     pub fn set_value(&mut self, label: char, value: T) {
-        for (l, v) in self.vars.iter_mut() {
-            if *l == label {
-                *v = value;
-                return;
-            }
-        }
-        self.vars.push((label, value));
+        self.vars.insert(label, value);
     }
 
     /// Run the evaluator and return the result. The result may
@@ -191,8 +186,8 @@ where
         for (node, out) in &self.ops {
             self.regs[*out] = match node {
                 Constant(val) => T::from_value(*val).unwrap(),
-                Symbol(label) => match self.vars.iter().find(|(l, _v)| *l == *label) {
-                    Some((_l, v)) => *v,
+                Symbol(label) => match self.vars.get(label) {
+                    Some(&v) => v,
                     None => return Err(Error::VariableNotFound(*label)),
                 },
                 Unary(op, input) => T::unary_op(*op, self.regs[*input])?,
