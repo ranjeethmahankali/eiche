@@ -1,8 +1,8 @@
 use super::Interval;
 use crate::{
-    compile::{CompileCache, CompileOutput, compile},
+    compile::{compile, CompileCache, CompileOutput},
     eval::ValueType,
-    tree::{Node, Tree},
+    tree::{Node, Tree, Value},
 };
 use std::{collections::BTreeMap, ops::Range};
 
@@ -20,6 +20,7 @@ where
     bounds: Vec<BTreeMap<char, Interval>>, // Bounds stored like a stack.
     op_ranges: Vec<Range<usize>>,
     current_depth: usize,
+    intervals_per_level: usize,
     divisions: usize,
 }
 
@@ -48,6 +49,7 @@ where
         );
         debug_assert_eq!(root_regs.len(), num_roots);
         let num_ops = ops.len();
+        let num_bounds = bounds.len();
         PruningEvaluator {
             ops,
             regs: vec![T::from_scalar(0.).unwrap(); num_regs],
@@ -59,7 +61,22 @@ where
             bounds: vec![bounds],
             op_ranges: vec![0..num_ops],
             current_depth: 0,
+            intervals_per_level: divisions.pow(num_bounds as u32),
             divisions,
         }
     }
+
+    pub fn push(&mut self) -> Option<(usize, usize)> {
+        todo!("Go one level deeper");
+    }
+
+    pub fn pop(&mut self) -> Option<(usize, usize)> {
+        todo!("Go back up one level");
+    }
+
+    pub fn next(&mut self) -> Option<(usize, usize)> {
+        todo!("Go to the next inteval at the same depth");
+    }
 }
+
+pub type PruningValueEvaluator = PruningEvaluator<Value>;
