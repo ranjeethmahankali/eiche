@@ -99,7 +99,7 @@ where
     interval_regs: Vec<Interval>,
     vars: Vec<(char, T)>,
     num_roots: usize,
-    root_regs: Vec<usize>,
+    root_regs: Stack<usize>,
     val_outputs: Vec<T>,
     interval_outputs: Vec<Interval>,
     bounds: Vec<BTreeMap<char, Interval>>, // Bounds stored like a stack.
@@ -141,7 +141,7 @@ where
     ) -> Self {
         let num_roots = tree.num_roots();
         let mut ops = Stack::with_capacity(estimated_depth, tree.len() * estimated_depth);
-        let mut root_regs = Vec::with_capacity(num_roots * estimated_depth);
+        let mut root_regs = Stack::with_capacity(estimated_depth, num_roots * estimated_depth);
         let mut cache = CompileCache::default();
         let num_regs = compile(
             tree.nodes(),
@@ -149,10 +149,13 @@ where
             &mut cache,
             CompileOutput {
                 ops: ops.borrow_mut(),
-                out_regs: &mut root_regs,
+                out_regs: root_regs.borrow_mut(),
             },
         );
-        debug_assert_eq!(root_regs.len(), num_roots);
+        debug_assert_eq!(
+            root_regs.last_slice().map(|s| s.len()).unwrap_or(0),
+            num_roots
+        );
         let num_bounds = bounds.len();
         PruningEvaluator {
             nodes: tree.nodes().into(),
@@ -224,12 +227,18 @@ where
             &mut self.compile_cache,
             CompileOutput {
                 ops: self.ops.borrow_mut(),
-                out_regs: &mut self.root_regs,
+                out_regs: self.root_regs.borrow_mut(),
             },
         );
         self.val_regs.resize(num_regs, T::default());
         self.interval_regs.resize(num_regs, Interval::default());
-        todo!("Go one level deeper");
+        PruningState::Valid(
+            self.interval_indices.len(),
+            match self.interval_indices.last() {
+                Some(last) => *last,
+                None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+            },
+        )
     }
 
     pub fn pop(&mut self) -> PruningState {
