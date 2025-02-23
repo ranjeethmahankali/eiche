@@ -20,8 +20,11 @@ pub(crate) fn fold_for_interval(
     nodes: &[Node],
     interval: &[(char, Interval)],
     dst: &mut Vec<Node>,
+    // Temporary reusable storage,
+    values: &mut Vec<Interval>,
 ) -> Result<(), Error> {
-    let mut values: Vec<Interval> = Vec::with_capacity(nodes.len());
+    values.clear();
+    values.reserve(nodes.len());
     dst.reserve(nodes.len());
     for node in nodes {
         let (folded, value) = match node {
@@ -194,7 +197,8 @@ impl Tree {
     /// must appear at most once.
     pub fn folded_for_interval(&self, vars: &[(char, Interval)]) -> Result<Tree, Error> {
         let mut out = Vec::with_capacity(self.len());
-        fold_for_interval(self.nodes(), vars, &mut out)?;
+        let mut values = Vec::new();
+        fold_for_interval(self.nodes(), vars, &mut out, &mut values)?;
         Tree::from_nodes(out, self.dims())
     }
 }
