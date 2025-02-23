@@ -12,11 +12,13 @@ use crate::{
         Value,
     },
 };
-use std::collections::BTreeMap;
 
+/// Fold the given nodes by pruning for the given interval. The intervals are
+/// assumed to be sorted by the variable labels, and each variable label must
+/// appear at most once.
 pub(crate) fn fold_for_interval(
     nodes: &[Node],
-    vars: &BTreeMap<char, Interval>,
+    interval: &[(char, Interval)],
     dst: &mut Vec<Node>,
 ) -> Result<(), Error> {
     let mut values: Vec<Interval> = Vec::with_capacity(nodes.len());
@@ -24,9 +26,9 @@ pub(crate) fn fold_for_interval(
     for node in nodes {
         let (folded, value) = match node {
             Constant(value) => (None, Interval::from_value(*value)?),
-            Symbol(label) => match vars.get(label) {
-                Some(value) => (None, *value),
-                None => (None, Interval::Scalar(inari::Interval::ENTIRE)),
+            Symbol(label) => match interval.binary_search_by(|(var, _)| var.cmp(label)) {
+                Ok(index) => (None, interval[index].1),
+                Err(_) => (None, Interval::Scalar(inari::Interval::ENTIRE)),
             },
             Unary(op, input) => match (op, &values[*input], &nodes[*input]) {
                 // Singleton intervals that don't come from constants can be replaced with constants.
@@ -187,7 +189,10 @@ pub(crate) fn fold_for_interval(
 }
 
 impl Tree {
-    pub fn folded_for_interval(&self, vars: &BTreeMap<char, Interval>) -> Result<Tree, Error> {
+    /// Fold the tree by pruning for the given interval.The intervals are
+    /// assumed to be sorted by the variable labels, and each variable label
+    /// must appear at most once.
+    pub fn folded_for_interval(&self, vars: &[(char, Interval)]) -> Result<Tree, Error> {
         let mut out = Vec::with_capacity(self.len());
         fold_for_interval(self.nodes(), vars, &mut out)?;
         Tree::from_nodes(out, self.dims())
@@ -215,15 +220,15 @@ mod test {
     fn t_two_planes_union() {
         let tree = deftree!(min (- x 1) (- 6 x)).unwrap(); // Union of two planes.
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(0., 1.).unwrap(),)].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(0., 1.).unwrap(),)])
             .unwrap()
             .equivalent(&deftree!(- x 1).unwrap())); // Should get back one plane after pruning.
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(6., 7.).unwrap(),)].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(6., 7.).unwrap(),)])
             .unwrap()
             .equivalent(&deftree!(- 6 x).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(2., 5.).unwrap(),)].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(2., 5.).unwrap(),)])
             .unwrap()
             .equivalent(&tree))
     }
@@ -234,33 +239,24 @@ mod test {
         let c2 = circle(4., 0., 1.).unwrap();
         let tree = deftree!(min {Ok(c1.clone())} {Ok(c2.clone())}).unwrap();
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(0., 1.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(0., 1.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+            ])
             .unwrap()
             .equivalent(&c1.fold().unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(3., 4.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(3., 4.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+            ])
             .unwrap()
             .equivalent(&c2.fold().unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(1., 3.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(1., 3.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+            ])
             .unwrap()
             .equivalent(&tree.fold().unwrap()));
     }
@@ -271,36 +267,27 @@ mod test {
         let s2 = sphere(4., 0., 0., 1.).unwrap();
         let tree = deftree!(min {Ok(s1.clone())} {Ok(s2.clone())}).unwrap();
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(0., 1.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                    ('z', Interval::from_scalar(0., 1.).unwrap())
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(0., 1.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+                ('z', Interval::from_scalar(0., 1.).unwrap())
+            ])
             .unwrap()
             .equivalent(&s1.fold().unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(3., 4.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                    ('z', Interval::from_scalar(0., 1.).unwrap())
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(3., 4.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+                ('z', Interval::from_scalar(0., 1.).unwrap())
+            ])
             .unwrap()
             .equivalent(&s2.fold().unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(1., 3.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                    ('z', Interval::from_scalar(0., 1.).unwrap())
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(1., 3.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+                ('z', Interval::from_scalar(0., 1.).unwrap())
+            ])
             .unwrap()
             .equivalent(&tree.fold().unwrap()))
     }
@@ -309,33 +296,24 @@ mod test {
     fn t_two_planes_intersection() {
         let tree = deftree!(max (- x 1) (- y 1)).unwrap();
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(0., 1.).unwrap()),
-                    ('y', Interval::from_scalar(2., 3.).unwrap())
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(0., 1.).unwrap()),
+                ('y', Interval::from_scalar(2., 3.).unwrap())
+            ])
             .unwrap()
             .equivalent(&deftree!(- y 1).unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(2., 3.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap())
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(2., 3.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap())
+            ])
             .unwrap()
             .equivalent(&deftree!(- x 1).unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(2., 3.).unwrap()),
-                    ('y', Interval::from_scalar(2., 3.).unwrap())
-                ]
-                .into()
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(2., 3.).unwrap()),
+                ('y', Interval::from_scalar(2., 3.).unwrap())
+            ])
             .unwrap()
             .equivalent(&tree));
     }
@@ -346,33 +324,24 @@ mod test {
         let c2 = circle(1.5, 0., 1.).unwrap();
         let tree = deftree!(max {Ok(c1.clone())} {Ok(c2.clone())}).unwrap();
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(-2., -1.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into(),
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(-2., -1.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+            ],)
             .unwrap()
             .equivalent(&c2.fold().unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(2.5, 3.5).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into(),
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(2.5, 3.5).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+            ],)
             .unwrap()
             .equivalent(&c1.fold().unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(0., 1.5).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into(),
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(0., 1.5).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+            ],)
             .unwrap()
             .equivalent(&tree.fold().unwrap()));
     }
@@ -383,36 +352,27 @@ mod test {
         let c2 = sphere(1.5, 0., 0., 1.).unwrap();
         let tree = deftree!(max {Ok(c1.clone())} {Ok(c2.clone())}).unwrap();
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(-2., -1.).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                    ('z', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into(),
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(-2., -1.).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+                ('z', Interval::from_scalar(0., 1.).unwrap()),
+            ],)
             .unwrap()
             .equivalent(&c2.fold().unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(2.5, 3.5).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                    ('z', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into(),
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(2.5, 3.5).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+                ('z', Interval::from_scalar(0., 1.).unwrap()),
+            ],)
             .unwrap()
             .equivalent(&c1.fold().unwrap()));
         assert!(tree
-            .folded_for_interval(
-                &[
-                    ('x', Interval::from_scalar(0., 1.5).unwrap()),
-                    ('y', Interval::from_scalar(0., 1.).unwrap()),
-                    ('z', Interval::from_scalar(0., 1.).unwrap()),
-                ]
-                .into(),
-            )
+            .folded_for_interval(&[
+                ('x', Interval::from_scalar(0., 1.5).unwrap()),
+                ('y', Interval::from_scalar(0., 1.).unwrap()),
+                ('z', Interval::from_scalar(0., 1.).unwrap()),
+            ],)
             .unwrap()
             .equivalent(&tree.fold().unwrap()));
     }
@@ -421,15 +381,15 @@ mod test {
     fn t_choose_lt() {
         let tree = deftree!(if (< x 1) true false).unwrap();
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())])
             .unwrap()
             .equivalent(&deftree!(true).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())])
             .unwrap()
             .equivalent(&deftree!(false).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(1.0, 2.).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(1.0, 2.).unwrap())])
             .unwrap()
             .equivalent(&tree))
     }
@@ -438,15 +398,15 @@ mod test {
     fn t_choose_lte() {
         let tree = deftree!(if (<= x 1) true false).unwrap();
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())])
             .unwrap()
             .equivalent(&deftree!(true).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())])
             .unwrap()
             .equivalent(&deftree!(false).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(0., 1.).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(0., 1.).unwrap())])
             .unwrap()
             .equivalent(&deftree!(true).unwrap()));
     }
@@ -455,15 +415,15 @@ mod test {
     fn t_choose_gt() {
         let tree = deftree!(if (> x 1) true false).unwrap();
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())])
             .unwrap()
             .equivalent(&deftree!(false).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())])
             .unwrap()
             .equivalent(&deftree!(true).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(1.0, 2.).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(1.0, 2.).unwrap())])
             .unwrap()
             .equivalent(&tree))
     }
@@ -472,15 +432,15 @@ mod test {
     fn t_choose_gte() {
         let tree = deftree!(if (>= x 1) true false).unwrap();
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(0., 0.5).unwrap())])
             .unwrap()
             .equivalent(&deftree!(false).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(1.5, 2.).unwrap())])
             .unwrap()
             .equivalent(&deftree!(true).unwrap()));
         assert!(tree
-            .folded_for_interval(&[('x', Interval::from_scalar(1., 2.).unwrap())].into())
+            .folded_for_interval(&[('x', Interval::from_scalar(1., 2.).unwrap())])
             .unwrap()
             .equivalent(&deftree!(true).unwrap()));
     }

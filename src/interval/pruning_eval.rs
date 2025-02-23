@@ -34,15 +34,23 @@ where
         }
     }
 
+    pub fn from_iter(iter: impl Iterator<Item = T>) -> Self {
+        let mut out = Self::new();
+        out.start_slice();
+        out.push_iter(iter);
+        out
+    }
+
     pub fn start_slice(&mut self) {
         self.offsets.push(self.buf.len());
     }
 
-    pub fn pop_slice(&mut self) {
-        match self.offsets.pop() {
-            Some(last) => self.buf.truncate(last),
-            None => {}
-        }
+    pub fn pop_slice(&mut self) -> Option<usize> {
+        self.offsets.pop().map(|last| {
+            let num = self.buf.len() - last;
+            self.buf.truncate(last);
+            num
+        })
     }
 
     pub fn push_slice(&mut self, vals: &[T]) {
@@ -93,7 +101,9 @@ pub struct PruningEvaluator<T>
 where
     T: ValueType,
 {
+    bounds: Stack<(char, Interval)>, // Bounds stored like a stack.
     nodes: Stack<Node>,
+    num_regs: Vec<usize>,
     ops: Stack<(Node, usize)>,
     val_regs: Vec<T>,
     interval_regs: Vec<Interval>,
@@ -102,11 +112,11 @@ where
     root_regs: Stack<usize>,
     val_outputs: Vec<T>,
     interval_outputs: Vec<Interval>,
-    bounds: Vec<BTreeMap<char, Interval>>, // Bounds stored like a stack.
     interval_indices: Vec<usize>,
     intervals_per_level: usize,
     divisions: f64,
     // Temp storage,
+    temp_bounds: Vec<(char, Interval)>,
     temp_nodes: Vec<Node>,
     compile_cache: CompileCache,
 }
@@ -124,7 +134,6 @@ impl From<PruningError> for Error {
 }
 
 pub enum PruningState {
-    None,
     Valid(usize, usize),
     Failure(Error),
 }
@@ -158,7 +167,9 @@ where
         );
         let num_bounds = bounds.len();
         PruningEvaluator {
+            bounds: Stack::from_iter(bounds.into_iter()),
             nodes: tree.nodes().into(),
+            num_regs: vec![num_regs],
             ops,
             val_regs: vec![T::default(); num_regs],
             interval_regs: vec![Interval::default(); num_regs],
@@ -167,23 +178,28 @@ where
             root_regs,
             val_outputs: vec![T::from_scalar(0.).unwrap(); num_roots],
             interval_outputs: vec![Interval::Scalar(inari::Interval::ENTIRE); num_roots],
-            bounds: vec![bounds],
             interval_indices: vec![0],
             intervals_per_level: divisions.pow(num_bounds as u32),
             divisions: divisions as f64,
+            temp_bounds: Vec::new(),
             temp_nodes: Vec::with_capacity(tree.len()),
             compile_cache: cache,
         }
     }
 
+    pub fn current_depth(&self) -> usize {
+        self.interval_indices.len()
+    }
+
     pub fn push(&mut self) -> PruningState {
         // Split the current intervals into 'divisions' and pick the first child.
-        let bounds = match match self.bounds.last() {
+        self.temp_bounds.clear();
+        match match self.bounds.last_slice() {
             Some(last) => last
                 .iter()
-                .try_fold(BTreeMap::new(), |mut bounds, (&k, v)| {
-                    bounds.insert(
-                        k,
+                .try_fold(&mut self.temp_bounds, |bounds, (k, v)| {
+                    bounds.push((
+                        *k,
                         match v {
                             Interval::Scalar(ii) => inari::Interval::try_from((
                                 ii.inf(),
@@ -194,7 +210,7 @@ where
                             Interval::Bool(false, false) => Interval::Bool(false, false),
                             Interval::Bool(_, _) => Interval::Bool(false, true),
                         },
-                    );
+                    ));
                     Ok(bounds)
                 }),
             None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
@@ -209,13 +225,13 @@ where
                 Some(nodes) => nodes,
                 None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
             },
-            &bounds,
+            &self.temp_bounds,
             &mut self.temp_nodes,
         ) {
             return PruningState::Failure(e);
         }
+        self.bounds.push_iter(self.temp_bounds.drain(..));
         self.nodes.push_iter(self.temp_nodes.drain(..));
-        self.bounds.push(bounds);
         self.interval_indices.push(0);
         let nodes = match self.nodes.last_slice() {
             Some(nodes) => nodes,
@@ -230,10 +246,11 @@ where
                 out_regs: self.root_regs.borrow_mut(),
             },
         );
+        self.num_regs.push(num_regs);
         self.val_regs.resize(num_regs, T::default());
         self.interval_regs.resize(num_regs, Interval::default());
         PruningState::Valid(
-            self.interval_indices.len(),
+            self.current_depth(),
             match self.interval_indices.last() {
                 Some(last) => *last,
                 None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
@@ -242,10 +259,29 @@ where
     }
 
     pub fn pop(&mut self) -> PruningState {
-        todo!("Go back up one level");
+        self.nodes.pop_slice();
+        self.ops.pop_slice();
+        self.num_regs.pop();
+        if let Some(nregs) = self.num_regs.last() {
+            self.val_regs.resize(*nregs, T::default());
+            self.interval_regs.resize(*nregs, Interval::default());
+        }
+        self.root_regs.pop_slice();
+        self.interval_indices.pop();
+        PruningState::Valid(
+            self.current_depth(),
+            match self.interval_indices.last() {
+                Some(last) => *last,
+                None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+            },
+        )
     }
 
     pub fn next(&mut self) -> PruningState {
+        match self.bounds.pop_slice() {
+            Some(_) => {}
+            None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+        };
         todo!("Go to the next inteval at the same depth");
     }
 }
