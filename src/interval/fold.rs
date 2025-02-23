@@ -17,9 +17,11 @@ use std::collections::BTreeMap;
 pub(crate) fn folded_for_interval(
     nodes: &[Node],
     vars: &BTreeMap<char, Interval>,
-) -> Result<Vec<Node>, Error> {
+    dst: &mut Vec<Node>,
+) -> Result<(), Error> {
     let mut values: Vec<Interval> = Vec::with_capacity(nodes.len());
-    let mut out = Vec::with_capacity(nodes.len());
+    dst.clear();
+    dst.reserve(nodes.len());
     for node in nodes {
         let (folded, value) = match node {
             Constant(value) => (None, Interval::from_value(*value)?),
@@ -32,8 +34,8 @@ pub(crate) fn folded_for_interval(
                 (_, Interval::Scalar(ii), Unary(_, _) | Binary(_, _, _) | Ternary(_, _, _, _))
                     if ii.is_singleton() =>
                 {
-                    let ni = out.len();
-                    out.push(Constant(Value::Scalar(ii.inf())));
+                    let ni = dst.len();
+                    dst.push(Constant(Value::Scalar(ii.inf())));
                     (
                         Some(Unary(*op, ni)),
                         Interval::unary_op(*op, Interval::Scalar(*ii))?,
@@ -107,8 +109,8 @@ pub(crate) fn folded_for_interval(
                             }
                             // Fold constant on left.
                             (true, false, Unary(..) | Binary(..) | Ternary(..), _) => {
-                                let ni = out.len();
-                                out.push(Constant(Value::Scalar(ileft.inf())));
+                                let ni = dst.len();
+                                dst.push(Constant(Value::Scalar(ileft.inf())));
                                 (
                                     Some(Binary(*op, ni, *ri)),
                                     Interval::binary_op(
@@ -120,8 +122,8 @@ pub(crate) fn folded_for_interval(
                             }
                             // Fold constant on right.
                             (false, true, _, Unary(..) | Binary(..) | Ternary(..)) => {
-                                let ni = out.len();
-                                out.push(Constant(Value::Scalar(iright.inf())));
+                                let ni = dst.len();
+                                dst.push(Constant(Value::Scalar(iright.inf())));
                                 (
                                     Some(Binary(*op, *li, ni)),
                                     Interval::binary_op(
@@ -178,16 +180,18 @@ pub(crate) fn folded_for_interval(
                 (Choose, Interval::Scalar(_)) => return Err(Error::TypeMismatch),
             },
         };
-        out.push(folded.unwrap_or(*node));
+        dst.push(folded.unwrap_or(*node));
         values.push(value);
     }
-    fold(&mut out)?;
-    Ok(out)
+    fold(dst)?;
+    Ok(())
 }
 
 impl Tree {
     pub fn folded_for_interval(&self, vars: &BTreeMap<char, Interval>) -> Result<Tree, Error> {
-        Tree::from_nodes(folded_for_interval(self.nodes(), vars)?, self.dims())
+        let mut out = Vec::with_capacity(self.len());
+        folded_for_interval(self.nodes(), vars, &mut out)?;
+        Tree::from_nodes(out, self.dims())
     }
 }
 

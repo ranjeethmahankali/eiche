@@ -9,6 +9,7 @@ use crate::{
     },
 };
 use std::ops::{Add, Div, Mul, Neg, Sub};
+
 pub mod fold;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
