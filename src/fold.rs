@@ -152,13 +152,15 @@ mod test {
     #[test]
     fn t_add_zero() {
         let mut pruner = Pruner::new();
-        assert!(deftree!(+ (pow x (+ y 0)) 0)
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(pow x y).unwrap()));
+        assert!(
+            deftree!(+ (pow x (+ y 0)) 0)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(pow x y).unwrap())
+        );
         assert!(
             deftree!(pow (+ (+ (cos (+ x 0)) (/ 1 (+ (sin y) 0))) 0) (* 2 (+ (+ x 0) y)))
                 .unwrap()
@@ -173,13 +175,15 @@ mod test {
     #[test]
     fn t_sub_zero() {
         let mut pruner = Pruner::new();
-        assert!(deftree!(- (pow (- x 0) (+ y 0)) 0)
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(pow x y).unwrap()),);
+        assert!(
+            deftree!(- (pow (- x 0) (+ y 0)) 0)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(pow x y).unwrap()),
+        );
         assert!(
             deftree!(pow (+ (cos (+ (- x 0) 0)) (/ 1 (- (sin (- y 0)) 0))) (* 2 (+ x (- y 0))))
                 .unwrap()
@@ -194,33 +198,39 @@ mod test {
     #[test]
     fn t_mul_1() {
         let mut pruner = Pruner::new();
-        assert!(deftree!(+ (pow (* 1 x) (* y 1)) 0)
+        assert!(
+            deftree!(+ (pow (* 1 x) (* y 1)) 0)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(pow x y).unwrap()),
+        );
+        assert!(
+            deftree!(pow (+ (cos (* x (* 1 (+ 1 (* 0 x)))))
+                          (/ 1 (* (sin (- y 0)) 1))) (* (* (+ 2 0) (+ x y)) 1))
             .unwrap()
             .fold()
             .unwrap()
             .prune(&mut pruner)
             .unwrap()
-            .equivalent(&deftree!(pow x y).unwrap()),);
-        assert!(deftree!(pow (+ (cos (* x (* 1 (+ 1 (* 0 x)))))
-                          (/ 1 (* (sin (- y 0)) 1))) (* (* (+ 2 0) (+ x y)) 1))
-        .unwrap()
-        .fold()
-        .unwrap()
-        .prune(&mut pruner)
-        .unwrap()
-        .equivalent(&deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()),);
+            .equivalent(&deftree!(pow (+ (cos x) (/ 1 (sin y))) (* 2 (+ x y))).unwrap()),
+        );
     }
 
     #[test]
     fn t_pow_1() {
         let mut pruner = Pruner::new();
-        assert!(deftree!(pow (pow (pow x 1) (pow y 1)) (pow 1 1))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(pow x y).unwrap()));
+        assert!(
+            deftree!(pow (pow (pow x 1) (pow y 1)) (pow 1 1))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(pow x y).unwrap())
+        );
         assert!(
             deftree!(pow (+ (cos (pow x (pow x (* 0 x)))) (/ 1 (sin y))) (* 2 (+ x (pow y 1))))
                 .unwrap()
@@ -235,13 +245,15 @@ mod test {
     #[test]
     fn t_div_1() {
         let mut pruner = Pruner::new();
-        assert!(deftree!(pow (/ x 1) (/ y (pow x (* t 0))))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(pow x y).unwrap()),);
+        assert!(
+            deftree!(pow (/ x 1) (/ y (pow x (* t 0))))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(pow x y).unwrap()),
+        );
 
         assert!(
             deftree!(pow (+ (cos (/ x 1)) (/ 1 (sin (/ y (pow t (* 0 p)))))) (* 2 (+ x y)))
@@ -257,13 +269,15 @@ mod test {
     #[test]
     fn t_mul_0() {
         let mut pruner = Pruner::new();
-        assert!(deftree!(pow (+ x (* t 0)) (+ y (* t 0)))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(pow x y).unwrap()),);
+        assert!(
+            deftree!(pow (+ x (* t 0)) (+ y (* t 0)))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(pow x y).unwrap()),
+        );
         assert!(
             deftree!(pow (+ (cos (+ x (* 0 t))) (/ 1 (sin (- y (* t 0)))))
                      (* 2 (* (+ x y) (pow t (* 0 t)))))
@@ -279,13 +293,15 @@ mod test {
     #[test]
     fn t_pow_0() {
         let mut pruner = Pruner::new();
-        assert!(deftree!(* (pow x (* t 0)) (pow (* x (pow t 0)) y))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(pow x y).unwrap()),);
+        assert!(
+            deftree!(* (pow x (* t 0)) (pow (* x (pow t 0)) y))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(pow x y).unwrap()),
+        );
         assert!(
             deftree!(pow (+ (cos (* x (pow t 0))) (/ 1 (sin (* y (pow t (* x 0))))))
                      (* 2 (+ x (* y (pow x 0)))))
@@ -301,47 +317,59 @@ mod test {
     #[test]
     fn t_boolean() {
         let mut pruner = Pruner::new();
-        assert!(deftree!(if (> 2 0) x (- x))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(x).unwrap()),);
-        assert!(deftree!(if (not (> 2 0)) x (- x))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(-x).unwrap()),);
-        assert!(deftree!(if (and (> x 0) (> 2 0)) x (-x))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),);
-        assert!(deftree!(if (and (> x 0) (> 0 2)) x (-x))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(-x).unwrap()),);
-        assert!(deftree!(if (or (> x 0) (> 2 0)) x (-x))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(x).unwrap()),);
-        assert!(deftree!(if (or (> x 0) (> 0 2)) x (-x))
-            .unwrap()
-            .fold()
-            .unwrap()
-            .prune(&mut pruner)
-            .unwrap()
-            .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),);
+        assert!(
+            deftree!(if (> 2 0) x (- x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(x).unwrap()),
+        );
+        assert!(
+            deftree!(if (not (> 2 0)) x (- x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(-x).unwrap()),
+        );
+        assert!(
+            deftree!(if (and (> x 0) (> 2 0)) x (-x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),
+        );
+        assert!(
+            deftree!(if (and (> x 0) (> 0 2)) x (-x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(-x).unwrap()),
+        );
+        assert!(
+            deftree!(if (or (> x 0) (> 2 0)) x (-x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(x).unwrap()),
+        );
+        assert!(
+            deftree!(if (or (> x 0) (> 0 2)) x (-x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(if (> x 0) x (-x)).unwrap()),
+        );
     }
 }

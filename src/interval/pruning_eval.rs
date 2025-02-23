@@ -1,6 +1,6 @@
 use super::Interval;
 use crate::{
-    compile::{compile, CompileCache, CompileOutput},
+    compile::{CompileCache, CompileOutput, compile},
     eval::ValueType,
     tree::{Node, Tree},
 };
