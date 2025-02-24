@@ -1,6 +1,7 @@
 use super::Interval;
 use crate::{
     compile::{CompileCache, CompileOutput, compile},
+    dedup::Deduplicater,
     error::Error,
     eval::ValueType,
     interval::fold::fold_for_interval,
@@ -117,6 +118,7 @@ where
     intervals_per_level: usize,
     divisions: BTreeMap<char, usize>,
     pruner: Pruner,
+    deduper: Deduplicater,
     // Temp storage,
     temp_bounds: Vec<(char, Interval)>,
     temp_intervals: Vec<Interval>,
@@ -202,6 +204,8 @@ where
                 .map(|(label, (_bounds, divisions))| (*label, *divisions))
                 .collect(),
             pruner: Pruner::default(),
+            deduper: Deduplicater::default(),
+            // Temporary storage.
             temp_bounds: Vec::new(),
             temp_intervals: Vec::new(),
             temp_nodes: Vec::with_capacity(tree.len()),
@@ -211,6 +215,26 @@ where
 
     pub fn current_depth(&self) -> usize {
         self.interval_indices.len()
+    }
+
+    fn compact_temp_nodes(&mut self) -> Result<(), Error> {
+        // Prune unused nodes, and deduplicate.
+        let num_nodes = self.temp_nodes.len();
+        let root_indices = self.pruner.run_from_range(
+            &mut self.temp_nodes,
+            (num_nodes - self.num_roots)..num_nodes,
+        )?;
+        debug_assert_eq!(root_indices.len(), self.num_roots);
+        debug_assert_eq!(root_indices.start, self.temp_nodes.len() - self.num_roots);
+        self.deduper.run(&mut self.temp_nodes)?;
+        let num_nodes = self.temp_nodes.len();
+        let root_indices = self.pruner.run_from_range(
+            &mut self.temp_nodes,
+            (num_nodes - self.num_roots)..num_nodes,
+        )?;
+        debug_assert_eq!(root_indices.len(), self.num_roots);
+        debug_assert_eq!(root_indices.start, self.temp_nodes.len() - self.num_roots);
+        Ok(())
     }
 
     fn push_impl(&mut self, index: usize) -> PruningState {
@@ -268,17 +292,10 @@ where
         ) {
             return PruningState::Failure(e);
         }
-        // Prune unused nodes.
-        let num_nodes = self.temp_nodes.len();
-        let root_indices = match self.pruner.run_from_range(
-            &mut self.temp_nodes,
-            (num_nodes - self.num_roots)..num_nodes,
-        ) {
+        match self.compact_temp_nodes() {
             Ok(roots) => roots,
             Err(e) => return PruningState::Failure(e),
         };
-        debug_assert_eq!(root_indices.len(), self.num_roots);
-        debug_assert_eq!(root_indices.start, self.temp_nodes.len() - self.num_roots);
         // Copy the output intervals.
         self.interval_outputs
             .push_slice(&self.temp_intervals[(self.temp_intervals.len() - self.num_roots)..]);
