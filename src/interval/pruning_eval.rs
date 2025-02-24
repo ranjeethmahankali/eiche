@@ -381,3 +381,38 @@ where
 }
 
 pub type ValuePruningEvaluator = PruningEvaluator<Value>;
+
+#[cfg(test)]
+mod test {
+    use super::{PruningEvaluator, ValuePruningEvaluator};
+    use crate::{deftree, error::Error, eval::ValueType, interval::Interval, tree::Tree};
+
+    fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
+        deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
+    }
+
+    fn num_instructions<T>(eval: &PruningEvaluator<T>) -> usize
+    where
+        T: ValueType,
+    {
+        eval.ops.last_slice().unwrap().len()
+    }
+
+    #[test]
+    fn t_two_circles() {
+        let tree = deftree!(min {circle(0., 0., 1.)} {circle(4., 0., 1.)}).unwrap();
+        let mut eval = ValuePruningEvaluator::new(
+            &tree,
+            4,
+            [
+                ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3usize)),
+                ('y', (Interval::from_scalar(-1., 1.).unwrap(), 3usize)),
+            ]
+            .into(),
+        );
+        for _ in 0..1 {
+            eval.push();
+        }
+        assert!(false);
+    }
+}

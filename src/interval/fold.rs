@@ -25,6 +25,7 @@ pub(crate) fn fold_for_interval(
 ) -> Result<(), Error> {
     values.clear();
     values.reserve(nodes.len());
+    dst.clear();
     dst.reserve(nodes.len());
     for node in nodes {
         let (folded, value) = match node {
