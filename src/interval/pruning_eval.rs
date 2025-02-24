@@ -422,6 +422,15 @@ mod test {
         deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
     }
 
+    fn sphere(cx: f64, cy: f64, cz: f64, r: f64) -> Result<Tree, Error> {
+        deftree!(- (sqrt (+
+                          (pow (- x (const cx)) 2)
+                          (+
+                           (pow (- y (const cy)) 2)
+                           (pow (- z (const cz)) 2))))
+                 (const r))
+    }
+
     fn num_instructions<T>(eval: &PruningEvaluator<T>) -> usize
     where
         T: ValueType,
@@ -441,6 +450,28 @@ mod test {
             [
                 ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3usize)),
                 ('y', (Interval::from_scalar(-1., 1.).unwrap(), 3usize)),
+            ]
+            .into(),
+        );
+        let before = num_instructions(&eval);
+        eval.push();
+        let after = num_instructions(&eval);
+        assert!(after < before);
+    }
+
+    #[test]
+    fn t_two_spheres_union() {
+        let tree = deftree!(min {sphere(0., 0., 0., 1.)} {sphere(4., 0., 0., 1.)})
+            .unwrap()
+            .compacted()
+            .unwrap();
+        let mut eval = ValuePruningEvaluator::new(
+            &tree,
+            4,
+            [
+                ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3)),
+                ('y', (Interval::from_scalar(-1., 1.).unwrap(), 3)),
+                ('z', (Interval::from_scalar(-1., 1.).unwrap(), 3)),
             ]
             .into(),
         );
