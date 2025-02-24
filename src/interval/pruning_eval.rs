@@ -444,19 +444,36 @@ mod test {
             .unwrap()
             .compacted()
             .unwrap();
-        let mut eval = ValuePruningEvaluator::new(
-            &tree,
-            4,
-            [
-                ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3usize)),
-                ('y', (Interval::from_scalar(-1., 1.).unwrap(), 3usize)),
-            ]
-            .into(),
-        );
-        let before = num_instructions(&eval);
-        eval.push();
-        let after = num_instructions(&eval);
-        assert!(after < before);
+        {
+            let mut eval = ValuePruningEvaluator::new(
+                &tree,
+                4,
+                [
+                    ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3)),
+                    ('y', (Interval::from_scalar(-1., 1.).unwrap(), 3)),
+                ]
+                .into(),
+            );
+            let before = num_instructions(&eval);
+            eval.push();
+            let after = num_instructions(&eval);
+            assert!(after < before);
+        }
+        {
+            let mut eval = ValuePruningEvaluator::new(
+                &tree,
+                4,
+                [
+                    ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3)),
+                    ('y', (Interval::from_scalar(-1., 1.).unwrap(), 1)),
+                ]
+                .into(),
+            );
+            let before = num_instructions(&eval);
+            eval.push();
+            let after = num_instructions(&eval);
+            assert!(after < before);
+        }
     }
 
     #[test]
@@ -465,19 +482,37 @@ mod test {
             .unwrap()
             .compacted()
             .unwrap();
-        let mut eval = ValuePruningEvaluator::new(
-            &tree,
-            4,
-            [
-                ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3)),
-                ('y', (Interval::from_scalar(-1., 1.).unwrap(), 3)),
-                ('z', (Interval::from_scalar(-1., 1.).unwrap(), 3)),
-            ]
-            .into(),
-        );
-        let before = num_instructions(&eval);
-        eval.push();
-        let after = num_instructions(&eval);
-        assert!(after < before);
+        {
+            let mut eval = ValuePruningEvaluator::new(
+                &tree,
+                4,
+                [
+                    ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3)),
+                    ('y', (Interval::from_scalar(-1., 1.).unwrap(), 3)),
+                    ('z', (Interval::from_scalar(-1., 1.).unwrap(), 3)),
+                ]
+                .into(),
+            );
+            let before = num_instructions(&eval);
+            eval.push();
+            let after = num_instructions(&eval);
+            assert!(after < before);
+        }
+        {
+            let mut eval = ValuePruningEvaluator::new(
+                &tree,
+                4,
+                [
+                    ('x', (Interval::from_scalar(-1., 5.).unwrap(), 3)),
+                    ('y', (Interval::from_scalar(-1., 1.).unwrap(), 1)),
+                    ('z', (Interval::from_scalar(-1., 1.).unwrap(), 1)),
+                ]
+                .into(),
+            );
+            let before = num_instructions(&eval);
+            eval.push();
+            let after = num_instructions(&eval);
+            assert!(after < before);
+        }
     }
 }
