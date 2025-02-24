@@ -260,7 +260,7 @@ where
                                     let lo = ii.inf() + (span * icurr as f64);
                                     let hi = lo + span;
                                     inari::Interval::try_from((lo, hi))
-                                        .map_err(|e| PruningError::CannotConstructInterval(e))?
+                                        .map_err(PruningError::CannotConstructInterval)?
                                         .into()
                                 }
                                 Interval::Bool(true, true) => Interval::Bool(true, true),
