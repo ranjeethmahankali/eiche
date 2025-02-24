@@ -4,6 +4,7 @@ use crate::{
     error::Error,
     eval::ValueType,
     interval::fold::fold_for_interval,
+    prune::Pruner,
     tree::{Node, Tree, Value},
 };
 use std::collections::BTreeMap;
@@ -115,6 +116,7 @@ where
     interval_indices: Vec<usize>,
     intervals_per_level: usize,
     divisions: BTreeMap<char, usize>,
+    pruner: Pruner,
     // Temp storage,
     temp_bounds: Vec<(char, Interval)>,
     temp_intervals: Vec<Interval>,
@@ -199,6 +201,7 @@ where
                 .iter()
                 .map(|(label, (_bounds, divisions))| (*label, *divisions))
                 .collect(),
+            pruner: Pruner::default(),
             temp_bounds: Vec::new(),
             temp_intervals: Vec::new(),
             temp_nodes: Vec::with_capacity(tree.len()),
@@ -265,6 +268,17 @@ where
         ) {
             return PruningState::Failure(e);
         }
+        // Prune unused nodes.
+        let num_nodes = self.temp_nodes.len();
+        let root_indices = match self.pruner.run_from_range(
+            &mut self.temp_nodes,
+            (num_nodes - self.num_roots)..num_nodes,
+        ) {
+            Ok(roots) => roots,
+            Err(e) => return PruningState::Failure(e),
+        };
+        debug_assert_eq!(root_indices.len(), self.num_roots);
+        debug_assert_eq!(root_indices.start, self.temp_nodes.len() - self.num_roots);
         // Copy the output intervals.
         self.interval_outputs
             .push_slice(&self.temp_intervals[(self.temp_intervals.len() - self.num_roots)..]);
@@ -400,7 +414,10 @@ mod test {
 
     #[test]
     fn t_two_circles() {
-        let tree = deftree!(min {circle(0., 0., 1.)} {circle(4., 0., 1.)}).unwrap();
+        let tree = deftree!(min {circle(0., 0., 1.)} {circle(4., 0., 1.)})
+            .unwrap()
+            .compacted()
+            .unwrap();
         let mut eval = ValuePruningEvaluator::new(
             &tree,
             4,
@@ -410,9 +427,9 @@ mod test {
             ]
             .into(),
         );
-        for _ in 0..1 {
-            eval.push();
-        }
-        assert!(false);
+        let before = num_instructions(&eval);
+        eval.push();
+        let after = num_instructions(&eval);
+        assert!(after < before);
     }
 }
