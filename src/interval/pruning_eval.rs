@@ -245,39 +245,39 @@ where
             Some(last) => {
                 debug_assert_eq!(last.len(), self.divisions.len()); // This is required for proper indexing.
                 last.iter().zip(self.divisions.iter()).try_fold(
-                    (&mut self.temp_bounds, index),
-                    |(bounds, index),
-                     ((label, val), (divlabel, div))|
-                     -> Result<(&mut Vec<(char, Interval)>, usize), PruningError> {
+                    index,
+                    |index, ((label, val), (divlabel, div))| {
                         debug_assert_eq!(divlabel, label); // Ensure the labels aren't somehow out of order.
                         let inext = index / div;
                         let icurr = index % div;
-                        bounds.push((
+                        self.temp_bounds.push((
                             *label,
                             match val {
                                 Interval::Scalar(ii) => {
                                     let span = ii.wid() / (*div as f64);
                                     let lo = ii.inf() + (span * icurr as f64);
                                     let hi = lo + span;
-                                    inari::Interval::try_from((lo, hi))
-                                        .map_err(PruningError::CannotConstructInterval)?
-                                        .into()
+                                    match inari::Interval::try_from((lo, hi)) {
+                                        Ok(iout) => Interval::Scalar(iout),
+                                        Err(e) => {
+                                            return Err(PruningError::CannotConstructInterval(e));
+                                        }
+                                    }
                                 }
                                 Interval::Bool(true, true) => Interval::Bool(true, true),
                                 Interval::Bool(false, false) => Interval::Bool(false, false),
                                 Interval::Bool(_, _) => Interval::Bool(false, true),
                             },
                         ));
-                        Ok((bounds, inext))
+                        Ok(inext)
                     },
                 )
             }
             None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
         } {
-            Ok((bounds, rem_index)) => {
+            Ok(rem_index) => {
                 debug_assert_eq!(rem_index, 0); // Ensure we consumed the
                 // n-dimensional index fully, and that the index was not out of bounds.
-                bounds
             }
             Err(e) => return PruningState::Failure(e.into()),
         };
@@ -356,7 +356,7 @@ where
         }
     }
 
-    pub fn next(&mut self) -> PruningState {
+    pub fn advance(&mut self) -> PruningState {
         let topush = loop {
             match self.pop_impl() {
                 [Some(_), Some(_), Some(_), Some(_), Some(i)] => {
