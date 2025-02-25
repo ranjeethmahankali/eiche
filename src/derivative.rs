@@ -58,9 +58,9 @@ impl Tree {
         // an object that the caller can pass in. That would allow the caller to
         // reuse the resources and avoid repeated allocations.
         let mut pruner = Pruner::new();
-        let mut nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
+        pruner.run_from_slice(&mut nodes, &mut rootnodes)?;
         fold(&mut nodes)?;
-        let nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
+        pruner.run_from_slice(&mut nodes, &mut rootnodes)?;
         Tree::from_nodes(nodes, (root_end - root_start, params.len()))
     }
 

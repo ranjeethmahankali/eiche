@@ -100,16 +100,16 @@ impl TemplateCapture {
 
     fn make_compact_tree(
         &mut self,
-        nodes: Vec<Node>,
+        mut nodes: Vec<Node>,
         dims: (usize, usize),
         root_indices: Range<usize>,
     ) -> Result<Tree, Error> {
-        let (mut nodes, root_indices) = self.pruner.run_from_range(nodes, root_indices)?;
+        let root_indices = self.pruner.run_from_range(&mut nodes, root_indices)?;
         fold(&mut nodes)?;
         // We don't need to check for valid topological order because we just ran the pruner on these nodes, which sorts them.
         self.deduper.run(&mut nodes)?;
         let root_indices = (nodes.len() - root_indices.len())..nodes.len();
-        let (nodes, _) = self.pruner.run_from_range(nodes, root_indices)?;
+        self.pruner.run_from_range(&mut nodes, root_indices)?;
         Tree::from_nodes(nodes, dims)
     }
 
