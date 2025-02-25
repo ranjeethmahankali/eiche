@@ -416,7 +416,14 @@ pub type ValuePruningEvaluator = PruningEvaluator<Value>;
 #[cfg(test)]
 mod test {
     use super::{PruningEvaluator, ValuePruningEvaluator};
-    use crate::{deftree, error::Error, eval::ValueType, interval::Interval, tree::Tree};
+    use crate::{
+        deftree,
+        error::Error,
+        eval::ValueType,
+        interval::Interval,
+        tree::{Tree, min},
+    };
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
@@ -436,6 +443,37 @@ mod test {
         T: ValueType,
     {
         eval.ops.last_slice().unwrap().len()
+    }
+
+    fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
+        range.0 + rng.random::<f64>() * (range.1 - range.0)
+    }
+
+    fn random_circles(
+        xrange: (f64, f64),
+        yrange: (f64, f64),
+        rad_range: (f64, f64),
+        num_circles: usize,
+    ) -> Tree {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut tree = circle(
+            sample_range(xrange, &mut rng),
+            sample_range(yrange, &mut rng),
+            sample_range(rad_range, &mut rng),
+        );
+        for _ in 1..num_circles {
+            tree = min(
+                tree,
+                circle(
+                    sample_range(xrange, &mut rng),
+                    sample_range(yrange, &mut rng),
+                    sample_range(rad_range, &mut rng),
+                ),
+            );
+        }
+        let tree = tree.unwrap();
+        assert_eq!(tree.dims(), (1, 1));
+        tree
     }
 
     #[test]
@@ -514,5 +552,26 @@ mod test {
             let after = num_instructions(&eval);
             assert!(after < before);
         }
+    }
+
+    #[test]
+    fn t_random_circles_push() {
+        let circles = random_circles((0., 1.), (0., 1.), (0.02, 0.1), 100);
+        let mut eval = ValuePruningEvaluator::new(
+            &circles,
+            4,
+            [
+                ('x', (Interval::from_scalar(0., 1.).unwrap(), 2)),
+                ('y', (Interval::from_scalar(0., 1.).unwrap(), 2)),
+                ('z', (Interval::from_scalar(0., 1.).unwrap(), 2)),
+            ]
+            .into(),
+        );
+        (0..7).fold(num_instructions(&eval), |prev, _| {
+            eval.push();
+            let current = num_instructions(&eval);
+            assert!(current < prev);
+            current
+        });
     }
 }
