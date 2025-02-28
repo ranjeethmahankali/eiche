@@ -189,19 +189,21 @@ impl Tree {
         fold(&mut self.nodes)?;
         let mut pruner = Pruner::new();
         let roots = self.root_indices();
-        let (mut nodes, roots) = pruner.run_from_range(self.nodes, roots)?;
+        let (mut nodes, dims) = self.take();
+        let roots = pruner.run_from_range(&mut nodes, roots)?;
         let mut deduper = Deduplicater::new();
         // We don't need to check because we just ran the pruner on these nodes, which sorts them topologically.
         deduper.run(&mut nodes)?;
         let mut pruner = Pruner::new();
-        let (nodes, _) = pruner.run_from_range(nodes, roots)?;
-        Tree::from_nodes(nodes, self.dims)
+        pruner.run_from_range(&mut nodes, roots)?;
+        Tree::from_nodes(nodes, dims)
     }
     /// Prunes the tree and topologically sorts the nodes.
     pub fn prune(self, pruner: &mut Pruner) -> Result<Tree, Error> {
         let roots = self.root_indices();
-        let (nodes, _) = pruner.run_from_range(self.nodes, roots)?;
-        Tree::from_nodes(nodes, self.dims)
+        let (mut nodes, dims) = self.take();
+        pruner.run_from_range(&mut nodes, roots)?;
+        Tree::from_nodes(nodes, dims)
     }
 
     /// Create a tree representing a symbol with the given `label`.
