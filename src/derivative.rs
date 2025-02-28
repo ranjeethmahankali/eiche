@@ -45,13 +45,11 @@ impl Tree {
                 &mut derivmap,
             );
             nodes.append(&mut derivs);
-            for item in &derivmap[root_start..root_end] {
-                rootnodes.push(match item {
-                    Some(deriv) => *deriv,
-                    None => return Err(Error::CannotComputeSymbolicDerivative),
-                });
+            for deriv in derivmap.drain(root_start..root_end) {
+                rootnodes.push(deriv.ok_or(Error::CannotComputeSymbolicDerivative)?);
             }
         }
+        debug_assert_eq!(rootnodes.len(), self.num_roots() * params.len());
         // Below operations all perform allocations. I am assuming symbolic
         // derivatives won't be computed in a hot path so it may not be a big
         // deal. But in the future, I might consider putting these resources in
