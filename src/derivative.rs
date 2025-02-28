@@ -68,6 +68,9 @@ impl Tree {
     /// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
     /// params.len().
     pub fn numerical_deriv(&self, params: &str, eps: f64) -> Result<Tree, Error> {
+        // Numerically differentiate with each param, and concatenate the
+        // derivatives into one matrix with `fold`. Things can go wrong so we
+        // use `try_fold`.
         params
             .chars()
             .try_fold(
@@ -90,7 +93,7 @@ impl Tree {
                 },
             )?
             .ok_or(Error::CannotComputeNumericDerivative)?
-            .reshape(self.num_roots(), params.len())
+            .reshape(self.num_roots(), params.len()) // The correct shape for derivatives. No reordering required.
     }
 }
 
@@ -465,6 +468,13 @@ mod test {
         compare_trees(
             &deftree!(nderiv (- (sqrt (+ (pow x 2) (pow y 2))) 5.) xy 1e-4).unwrap(),
             &deftree!(reshape (/ (concat x y) (sqrt (+ (pow x 2) (pow y 2)))) 1 2).unwrap(),
+            &[('y', -10., 10.), ('x', -10., 10.)],
+            20,
+            1e-7,
+        );
+        compare_trees(
+            &deftree!(nderiv (concat (+ (* 3 (pow x 2)) y) (+ (* 3 (pow y 2)) x)) xy 1e-4).unwrap(),
+            &deftree!(reshape (concat (* 6 x) 1 1 (* 6 y)) 2 2).unwrap(),
             &[('y', -10., 10.), ('x', -10., 10.)],
             20,
             1e-7,
