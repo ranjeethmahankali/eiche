@@ -68,27 +68,29 @@ impl Tree {
     /// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
     /// params.len().
     pub fn numerical_deriv(&self, params: &str, eps: f64) -> Result<Tree, Error> {
-        let mut deriv = None;
-        for param in params.chars() {
-            let (left, right) = {
-                let var = Tree::symbol(param);
-                let eps = Tree::constant(Scalar(eps));
-                let newvar = sub(Ok(var.clone()), Ok(eps.clone()))?;
-                let left = self.clone().substitute(&var, &newvar);
-                let newvar = add(Ok(var.clone()), Ok(eps))?;
-                let right = self.clone().substitute(&var, &newvar);
-                (left, right)
-            };
-            let partial = div(sub(right, left), Ok(Tree::constant(Scalar(2. * eps))));
-            deriv = Some(match deriv {
-                Some(tree) => Tree::concat(tree, partial),
-                None => partial,
-            });
-        }
-        match deriv {
-            Some(output) => output?.reshape(self.num_roots(), params.len()),
-            None => Err(Error::CannotComputeNumericDerivative),
-        }
+        params
+            .chars()
+            .try_fold(
+                None,
+                |deriv: Option<Tree>, param: char| -> Result<Option<Tree>, Error> {
+                    let (left, right) = {
+                        let var = Tree::symbol(param);
+                        let eps = Tree::constant(Scalar(eps));
+                        let newvar = sub(Ok(var.clone()), Ok(eps.clone()))?;
+                        let left = self.clone().substitute(&var, &newvar);
+                        let newvar = add(Ok(var.clone()), Ok(eps))?;
+                        let right = self.clone().substitute(&var, &newvar);
+                        (left, right)
+                    };
+                    let partial = div(sub(right, left), Ok(Tree::constant(Scalar(2. * eps))));
+                    Ok(Some(match deriv {
+                        Some(tree) => Tree::concat(Ok(tree), partial)?,
+                        None => partial?,
+                    }))
+                },
+            )?
+            .ok_or(Error::CannotComputeNumericDerivative)?
+            .reshape(self.num_roots(), params.len())
     }
 }
 
