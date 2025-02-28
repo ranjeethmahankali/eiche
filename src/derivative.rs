@@ -45,22 +45,20 @@ impl Tree {
                 &mut derivmap,
             );
             nodes.append(&mut derivs);
-            for item in &derivmap[root_start..root_end] {
-                rootnodes.push(match item {
-                    Some(deriv) => *deriv,
-                    None => return Err(Error::CannotComputeSymbolicDerivative),
-                });
+            for deriv in derivmap.drain(root_start..root_end) {
+                rootnodes.push(deriv.ok_or(Error::CannotComputeSymbolicDerivative)?);
             }
         }
+        debug_assert_eq!(rootnodes.len(), self.num_roots() * params.len());
         // Below operations all perform allocations. I am assuming symbolic
         // derivatives won't be computed in a hot path so it may not be a big
         // deal. But in the future, I might consider putting these resources in
         // an object that the caller can pass in. That would allow the caller to
         // reuse the resources and avoid repeated allocations.
         let mut pruner = Pruner::new();
-        let mut nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
+        pruner.run_from_slice(&mut nodes, &mut rootnodes)?;
         fold(&mut nodes)?;
-        let nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
+        pruner.run_from_slice(&mut nodes, &mut rootnodes)?;
         Tree::from_nodes(nodes, (root_end - root_start, params.len()))
     }
 
@@ -70,27 +68,32 @@ impl Tree {
     /// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
     /// params.len().
     pub fn numerical_deriv(&self, params: &str, eps: f64) -> Result<Tree, Error> {
-        let mut deriv = None;
-        for param in params.chars() {
-            let (left, right) = {
-                let var = Tree::symbol(param);
-                let eps = Tree::constant(Scalar(eps));
-                let newvar = sub(Ok(var.clone()), Ok(eps.clone()))?;
-                let left = self.clone().substitute(&var, &newvar);
-                let newvar = add(Ok(var.clone()), Ok(eps))?;
-                let right = self.clone().substitute(&var, &newvar);
-                (left, right)
-            };
-            let partial = div(sub(right, left), Ok(Tree::constant(Scalar(2. * eps))));
-            deriv = Some(match deriv {
-                Some(tree) => Tree::concat(tree, partial),
-                None => partial,
-            });
-        }
-        match deriv {
-            Some(output) => output?.reshape(self.num_roots(), params.len()),
-            None => Err(Error::CannotComputeNumericDerivative),
-        }
+        // Numerically differentiate with each param, and concatenate the
+        // derivatives into one matrix with `fold`. Things can go wrong so we
+        // use `try_fold`.
+        params
+            .chars()
+            .try_fold(
+                None,
+                |deriv: Option<Tree>, param: char| -> Result<Option<Tree>, Error> {
+                    let (left, right) = {
+                        let var = Tree::symbol(param);
+                        let eps = Tree::constant(Scalar(eps));
+                        let newvar = sub(Ok(var.clone()), Ok(eps.clone()))?;
+                        let left = self.clone().substitute(&var, &newvar);
+                        let newvar = add(Ok(var.clone()), Ok(eps))?;
+                        let right = self.clone().substitute(&var, &newvar);
+                        (left, right)
+                    };
+                    let partial = div(sub(right, left), Ok(Tree::constant(Scalar(2. * eps))));
+                    Ok(Some(match deriv {
+                        Some(tree) => Tree::concat(Ok(tree), partial)?,
+                        None => partial?,
+                    }))
+                },
+            )?
+            .ok_or(Error::CannotComputeNumericDerivative)?
+            .reshape(self.num_roots(), params.len()) // The correct shape for derivatives. No reordering required.
     }
 }
 
@@ -465,6 +468,13 @@ mod test {
         compare_trees(
             &deftree!(nderiv (- (sqrt (+ (pow x 2) (pow y 2))) 5.) xy 1e-4).unwrap(),
             &deftree!(reshape (/ (concat x y) (sqrt (+ (pow x 2) (pow y 2)))) 1 2).unwrap(),
+            &[('y', -10., 10.), ('x', -10., 10.)],
+            20,
+            1e-7,
+        );
+        compare_trees(
+            &deftree!(nderiv (concat (+ (* 3 (pow x 2)) y) (+ (* 3 (pow y 2)) x)) xy 1e-4).unwrap(),
+            &deftree!(reshape (concat (* 6 x) 1 1 (* 6 y)) 2 2).unwrap(),
             &[('y', -10., 10.), ('x', -10., 10.)],
             20,
             1e-7,
