@@ -19,8 +19,8 @@ impl Tree {
         // the current logic for checking equivalence to take advantage of
         // results from the past. I am skipping this optimization for now.
         let oldroot = old.root_indices().start;
-        let mut lwalker = DepthWalker::new();
-        let mut rwalker = DepthWalker::new();
+        let mut lwalker = DepthWalker::default();
+        let mut rwalker = DepthWalker::default();
         let flags = {
             let mut flags = Vec::with_capacity(self.len());
             for ni in 0..self.len() {

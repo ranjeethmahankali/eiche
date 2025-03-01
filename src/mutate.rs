@@ -603,8 +603,8 @@ mod test {
             .unwrap()
             .prune(&mut pruner)
             .unwrap();
-        let mut lwalker = DepthWalker::new();
-        let mut rwalker = DepthWalker::new();
+        let mut lwalker = DepthWalker::default();
+        let mut rwalker = DepthWalker::default();
         let mut capture = TemplateCapture::new();
         assert_eq!(
             1,

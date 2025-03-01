@@ -28,7 +28,7 @@ impl std::fmt::Display for Tree {
             // First pass of collecting tokens with no branching.
             let mut tokens = {
                 let mut tokens: Vec<Token> = Vec::with_capacity(self.len()); // Likely need more memory.
-                let mut walker = DepthWalker::new();
+                let mut walker = DepthWalker::default();
                 let mut node_depths: Box<[usize]> = vec![0; self.len()].into_boxed_slice();
                 for (index, parent) in walker.walk_tree(self, false, NodeOrdering::Original) {
                     if let Some(pi) = parent {
