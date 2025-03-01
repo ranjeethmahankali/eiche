@@ -13,7 +13,7 @@ use crate::{
 use std::{collections::BTreeMap, fmt::Debug};
 
 /// Size of a value type must be known at compile time.
-pub trait ValueType: Sized + Copy + Debug {
+pub trait ValueType: Sized + Copy + Debug + Default {
     fn from_scalar(val: f64) -> Result<Self, Error>;
     fn from_boolean(val: bool) -> Result<Self, Error>;
     fn from_value(val: Value) -> Result<Self, Error>;
@@ -35,6 +35,12 @@ impl Value {
             Value::Scalar(_) => Err(Error::TypeMismatch),
             Value::Bool(val) => Ok(*val),
         }
+    }
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Value::Scalar(0.)
     }
 }
 
@@ -158,7 +164,7 @@ where
         debug_assert_eq!(num_roots, tree.num_roots());
         Evaluator {
             ops,
-            regs: vec![T::from_scalar(0.).unwrap(); num_regs],
+            regs: vec![T::default(); num_regs],
             vars: BTreeMap::new(),
             root_regs,
             outputs: vec![T::from_scalar(0.).unwrap(); num_roots],
