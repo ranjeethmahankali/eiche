@@ -119,10 +119,10 @@ macro_rules! assert_float_eq {
         );
     }};
     ($a:expr, $b:expr, $eps:expr) => {
-        assert_float_eq!($a, $b, $eps, "")
+        $crate::assert_float_eq!($a, $b, $eps, "")
     };
     ($a:expr, $b:expr) => {
-        assert_float_eq!($a, $b, f64::EPSILON)
+        $crate::assert_float_eq!($a, $b, f64::EPSILON)
     };
 }
 
