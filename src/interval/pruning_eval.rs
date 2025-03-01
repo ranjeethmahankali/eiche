@@ -424,11 +424,14 @@ mod test {
     use crate::{
         deftree,
         error::Error,
-        eval::ValueType,
+        eval::{ValueEvaluator, ValueType},
         interval::Interval,
-        tree::{Tree, min},
+        tree::{Tree, Value, min},
     };
     use rand::{Rng, SeedableRng, rngs::StdRng};
+    use std::time::Instant;
+
+    type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
     fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
@@ -578,5 +581,38 @@ mod test {
             assert!(current < prev);
             current
         });
+    }
+
+    #[test]
+    fn t_perft() {
+        const IMAGE_SIZE: u32 = 1024;
+        let tree = random_circles((0., 1.), (0., 1.), (0.02, 0.1), 100);
+        {
+            let before = Instant::now();
+            let mut image = ImageBuffer::new(IMAGE_SIZE, IMAGE_SIZE);
+            let mut eval = ValueEvaluator::new(&tree);
+            for y in 0..IMAGE_SIZE {
+                eval.set_value('y', Value::Scalar((y as f64 + 0.5) / (IMAGE_SIZE as f64)));
+                for x in 0..IMAGE_SIZE {
+                    eval.set_value('x', Value::Scalar((x as f64 + 0.5) / (IMAGE_SIZE as f64)));
+                    let outputs = eval.run().expect("Failed to run value evaluator");
+                    assert_eq!(outputs.len(), 1);
+                    *image.get_pixel_mut(x, y) = match outputs[0] {
+                        Value::Bool(_) => panic!("Expecting a scalar"),
+                        Value::Scalar(val) => image::Luma([if val < 0. {
+                            f64::min((-val / 0.1) * 255., 255.) as u8
+                        } else {
+                            f64::min(((0.1 - val) / 0.1) * 255., 255.) as u8
+                        }]),
+                    };
+                }
+            }
+            let duration = Instant::now() - before;
+            println!("Value evaluator took {} ms", duration.as_millis());
+            image
+                .save("value-evaluator.png")
+                .expect("Cannot save image from value evaluator");
+        }
+        assert!(false);
     }
 }
