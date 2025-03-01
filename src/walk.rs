@@ -19,6 +19,7 @@ struct StackElement {
 /// allocations. Those buffers are owned by this instance. So reusing
 /// the same walker many times is recommended to avoid unnecessary
 /// allocations.
+#[derive(Default)]
 pub struct DepthWalker {
     stack: Vec<StackElement>,
     visited: Vec<bool>, // Whether a node is already visited.
@@ -26,14 +27,6 @@ pub struct DepthWalker {
 }
 
 impl DepthWalker {
-    pub fn new() -> DepthWalker {
-        DepthWalker {
-            stack: Vec::new(),
-            visited: Vec::new(),
-            on_path: Vec::new(),
-        }
-    }
-
     fn init_from_roots<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
         // Prep the stack.
         self.stack.clear();
@@ -282,7 +275,7 @@ mod test {
 
     #[test]
     fn t_depth_traverse() {
-        let mut walker = DepthWalker::new();
+        let mut walker = DepthWalker::default();
         {
             let tree = deftree!(+ (pow x 2.) (pow y 2.)).unwrap();
             // Make sure two successive traversal yield the same nodes.
@@ -311,7 +304,7 @@ mod test {
     #[test]
     fn t_cyclic_graph() {
         use crate::tree::{BinaryOp::*, UnaryOp::*, Value::*};
-        let mut walker = DepthWalker::new();
+        let mut walker = DepthWalker::default();
         let foldfn = |acc, current| match (acc, current) {
             (Ok(_), Ok(_)) => Ok(()),
             (Ok(_), Err(e)) => Err(e),

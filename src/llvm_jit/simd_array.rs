@@ -648,13 +648,8 @@ fn build_binary_intrinsic<'ctx>(
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        deftree,
-        eval::ValueEvaluator,
-        test::{Sampler, assert_float_eq},
-    };
-
     use super::*;
+    use crate::{assert_float_eq, deftree, eval::ValueEvaluator, test::Sampler};
 
     fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
         let context = JitContext::default();
@@ -871,11 +866,11 @@ mod test {
 mod perft {
     use super::*;
     use crate::{
+        assert_float_eq,
         dedup::Deduplicater,
         deftree,
         eval::ValueEvaluator,
         prune::Pruner,
-        test::assert_float_eq,
         tree::{Tree, min},
     };
     use rand::{SeedableRng, rngs::StdRng};

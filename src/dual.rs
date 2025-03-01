@@ -186,15 +186,14 @@ pub type DualEvaluator<const DIM: usize> = Evaluator<Dual<DIM>>;
 
 #[cfg(test)]
 mod test {
-    use core::f64;
-
     use crate::{
-        deftree,
+        assert_float_eq, deftree,
         dual::Dual,
         eval::ValueEvaluator,
-        test::{Sampler, assert_float_eq},
+        test::Sampler,
         tree::{Tree, Value},
     };
+    use core::f64;
 
     use super::DualEvaluator;
 
