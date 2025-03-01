@@ -681,6 +681,7 @@ mod test {
                     let mut sample = [0.; 2];
                     eval.sample(&norm, &mut sample)
                         .expect("Cannot generate sample");
+                    println!("Sample at {}, {}", sample[0], sample[1]);
                     eval.set_value('x', Value::Scalar(sample[0]));
                     eval.set_value('y', Value::Scalar(sample[1]));
                     let outputs = eval.run().expect("Failed to run the pruning evaluator");
@@ -694,8 +695,8 @@ mod test {
                             f64::min(((0.1 - val) / 0.1) * 255., 255.) as u8
                         }]),
                     };
-                    state = eval.advance(Some(10));
                 }
+                state = eval.advance(Some(10));
             }
             let duration = Instant::now() - before;
             println!("Pruning evaluator took {} ms", duration.as_millis());
