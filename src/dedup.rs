@@ -34,8 +34,8 @@ impl Deduplicater {
         Deduplicater {
             indices: vec![],
             hashes: vec![],
-            walker1: DepthWalker::new(),
-            walker2: DepthWalker::new(),
+            walker1: DepthWalker::default(),
+            walker2: DepthWalker::default(),
             hash_to_index: HashMap::new(),
         }
     }
@@ -239,8 +239,8 @@ impl Tree {
         if self.dims() != other.dims() {
             return false;
         }
-        let mut lwalker = DepthWalker::new();
-        let mut rwalker = DepthWalker::new();
+        let mut lwalker = DepthWalker::default();
+        let mut rwalker = DepthWalker::default();
         equivalent_trees(self, other, &mut lwalker, &mut rwalker)
     }
 }
@@ -259,8 +259,8 @@ mod test {
     fn t_recursive_compare() {
         // Check if 'Add' node with mirrored inputs is compared
         // correctly.
-        let mut walker1 = DepthWalker::new();
-        let mut walker2 = DepthWalker::new();
+        let mut walker1 = DepthWalker::default();
+        let mut walker2 = DepthWalker::default();
         let mut nodes = vec![
             Symbol('y'),            // 0
             Symbol('x'),            // 1
@@ -356,8 +356,8 @@ mod test {
             .unwrap()
             .prune(&mut pruner)
             .unwrap();
-        let mut walker1 = DepthWalker::new();
-        let mut walker2 = DepthWalker::new();
+        let mut walker1 = DepthWalker::default();
+        let mut walker2 = DepthWalker::default();
         assert!(equivalent_trees(&a, &b, &mut walker1, &mut walker2));
         assert!(a.equivalent(&b));
     }
