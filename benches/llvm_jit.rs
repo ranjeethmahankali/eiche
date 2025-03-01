@@ -67,7 +67,7 @@ mod spheres {
         use super::*;
 
         fn with_compile(tree: &Tree, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
-            let mut eval = ValueEvaluator::new(&tree);
+            let mut eval = ValueEvaluator::new(tree);
             values.clear();
             values.extend(queries.iter().map(|coords| {
                 eval.set_value('x', coords[0].into());
