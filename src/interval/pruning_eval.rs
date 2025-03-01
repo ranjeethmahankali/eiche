@@ -705,9 +705,6 @@ mod test {
             let duration = Instant::now() - before;
             println!("Pruning evaluator took {} ms", duration.as_millis());
             image
-                .save("pruning-evaluator.png")
-                .expect("Cannot save image from pruning evaluator");
-            image
         };
         let expected_image = {
             let mut image = ImageBuffer::new(DIMS, DIMS);
@@ -731,9 +728,6 @@ mod test {
             }
             let duration = Instant::now() - before;
             println!("Value evaluator took {} ms", duration.as_millis());
-            image
-                .save("value-evaluator.png")
-                .expect("Cannot save image from value evaluator");
             image
         };
         assert_eq!(pruned_image.width(), expected_image.width());
