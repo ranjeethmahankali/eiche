@@ -21,3 +21,6 @@ inari = { version = "2.0.0" }
 
 [features]
 llvm-jit = ["dep:inkwell"]
+
+[dev-dependencies]
+image = "0.25.5"

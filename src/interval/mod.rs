@@ -11,6 +11,7 @@ use crate::{
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 pub mod fold;
+pub mod pruning_eval;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Interval {
@@ -48,6 +49,12 @@ impl Interval {
         Ok(Interval::Scalar(
             inari::interval!(lower, upper).map_err(|_| Error::InvalidInterval)?,
         ))
+    }
+}
+
+impl Default for Interval {
+    fn default() -> Self {
+        Interval::Scalar(inari::Interval::ENTIRE)
     }
 }
 
