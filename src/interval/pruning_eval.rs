@@ -657,23 +657,26 @@ mod test {
 
     #[test]
     fn t_perft() {
-        const IMAGE_SIZE: u32 = 1024;
-        let tree = random_circles((0., 1024.), (0., 1024.), (20., 100.), 100);
-        {
-            let mut image = ImageBuffer::new(IMAGE_SIZE, IMAGE_SIZE);
+        const DIMS: u32 = 256;
+        const DIMS_F64: f64 = DIMS as f64;
+        const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
+        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, 100);
+        let pruned_image = {
+            const PRUNE_DEPTH: usize = 8;
+            let mut image = ImageBuffer::new(DIMS, DIMS);
             let mut eval = ValuePruningEvaluator::new(
                 &tree,
                 11,
                 [
-                    ('x', (Interval::from_scalar(0., 1024.).unwrap(), 2)),
-                    ('y', (Interval::from_scalar(0., 1024.).unwrap(), 2)),
+                    ('x', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
+                    ('y', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
                 ]
                 .into(),
             );
             const NORM_SAMPLES: [[f64; 2]; 4] =
                 [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
             let before = Instant::now();
-            let mut state = eval.push_or_pop_to(10);
+            let mut state = eval.push_or_pop_to(PRUNE_DEPTH);
             loop {
                 match state {
                     PruningState::None => break,
@@ -691,36 +694,37 @@ mod test {
                     *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
                         Value::Bool(_) => panic!("Expecting a scalar"),
                         Value::Scalar(val) => image::Luma([if val < 0. {
-                            f64::min((-val / 100.) * 255., 255.) as u8
+                            f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
                         } else {
-                            f64::min(((100. - val) / 100.) * 255., 255.) as u8
+                            f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
                         }]),
                     };
                 }
-                state = eval.advance(Some(10));
+                state = eval.advance(Some(PRUNE_DEPTH));
             }
             let duration = Instant::now() - before;
             println!("Pruning evaluator took {} ms", duration.as_millis());
             image
                 .save("pruning-evaluator.png")
                 .expect("Cannot save image from pruning evaluator");
-        }
-        {
-            let mut image = ImageBuffer::new(IMAGE_SIZE, IMAGE_SIZE);
+            image
+        };
+        let expected_image = {
+            let mut image = ImageBuffer::new(DIMS, DIMS);
             let mut eval = ValueEvaluator::new(&tree);
             let before = Instant::now();
-            for y in 0..IMAGE_SIZE {
+            for y in 0..DIMS {
                 eval.set_value('y', Value::Scalar(y as f64 + 0.5));
-                for x in 0..IMAGE_SIZE {
+                for x in 0..DIMS {
                     eval.set_value('x', Value::Scalar(x as f64 + 0.5));
                     let outputs = eval.run().expect("Failed to run value evaluator");
                     assert_eq!(outputs.len(), 1);
                     *image.get_pixel_mut(x, y) = match outputs[0] {
                         Value::Bool(_) => panic!("Expecting a scalar"),
                         Value::Scalar(val) => image::Luma([if val < 0. {
-                            f64::min((-val / 100.) * 255., 255.) as u8
+                            f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
                         } else {
-                            f64::min(((100. - val) / 100.) * 255., 255.) as u8
+                            f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
                         }]),
                     };
                 }
@@ -730,7 +734,15 @@ mod test {
             image
                 .save("value-evaluator.png")
                 .expect("Cannot save image from value evaluator");
-        }
-        unreachable!()
+            image
+        };
+        assert_eq!(pruned_image.width(), expected_image.width());
+        assert_eq!(pruned_image.height(), expected_image.height());
+        assert!(
+            pruned_image
+                .iter()
+                .zip(expected_image.iter())
+                .all(|(left, right)| left == right)
+        );
     }
 }
