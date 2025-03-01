@@ -20,7 +20,6 @@ pub(crate) fn fold_for_interval(
     nodes: &[Node],
     interval: &[(char, Interval)],
     dst: &mut Vec<Node>,
-    // Temporary reusable storage,
     values: &mut Vec<Interval>,
 ) -> Result<(), Error> {
     values.clear();

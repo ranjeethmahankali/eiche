@@ -36,13 +36,6 @@ where
         }
     }
 
-    pub fn from_iter(iter: impl Iterator<Item = T>) -> Self {
-        let mut out = Self::new();
-        out.start_slice();
-        out.push_iter(iter);
-        out
-    }
-
     pub fn start_slice(&mut self) {
         self.offsets.push(self.buf.len());
     }
@@ -95,6 +88,18 @@ where
         let mut out = Self::with_capacity(1, value.len());
         out.start_slice();
         out.push_slice(value);
+        out
+    }
+}
+
+impl<T> FromIterator<T> for Stack<T>
+where
+    T: Clone,
+{
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut out = Self::new();
+        out.start_slice();
+        out.buf.extend(iter);
         out
     }
 }
