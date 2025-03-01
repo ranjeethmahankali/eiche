@@ -19,20 +19,11 @@ struct StackElement {
 /// allocations. Those buffers are owned by this instance. So reusing
 /// the same walker many times is recommended to avoid unnecessary
 /// allocations.
+#[derive(Default)]
 pub struct DepthWalker {
     stack: Vec<StackElement>,
     visited: Vec<bool>, // Whether a node is already visited.
     on_path: Vec<bool>, // Whether a node is present on the path between the current node and the root.
-}
-
-impl Default for DepthWalker {
-    fn default() -> Self {
-        DepthWalker {
-            stack: Vec::new(),
-            visited: Vec::new(),
-            on_path: Vec::new(),
-        }
-    }
 }
 
 impl DepthWalker {
