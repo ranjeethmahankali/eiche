@@ -863,7 +863,7 @@ mod test {
 }
 
 #[cfg(test)]
-mod perft {
+mod sphere_test {
     use super::*;
     use crate::{
         assert_float_eq,
@@ -874,30 +874,29 @@ mod perft {
         tree::{Tree, min},
     };
     use rand::{SeedableRng, rngs::StdRng};
-    use std::time::{Duration, Instant};
 
-    fn _sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
+    fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
         use rand::Rng;
         range.0 + rng.random::<f64>() * (range.1 - range.0)
     }
-    const _RADIUS_RANGE: (f64, f64) = (0.2, 2.);
-    const _X_RANGE: (f64, f64) = (0., 100.);
-    const _Y_RANGE: (f64, f64) = (0., 100.);
-    const _Z_RANGE: (f64, f64) = (0., 100.);
-    const _N_SPHERES: usize = 5000;
-    const _N_QUERIES: usize = 5000;
+    const RADIUS_RANGE: (f64, f64) = (0.2, 2.);
+    const X_RANGE: (f64, f64) = (0., 100.);
+    const Y_RANGE: (f64, f64) = (0., 100.);
+    const Z_RANGE: (f64, f64) = (0., 100.);
+    const N_SPHERES: usize = 500;
+    const N_QUERIES: usize = 500;
 
-    fn _sphere_union() -> Tree {
+    fn sphere_union() -> Tree {
         let mut rng = StdRng::seed_from_u64(42);
         let mut make_sphere = || -> Result<Tree, Error> {
             deftree!(- (sqrt (+ (+
-                                 (pow (- x (const _sample_range(_X_RANGE, &mut rng))) 2)
-                                 (pow (- y (const _sample_range(_Y_RANGE, &mut rng))) 2))
-                              (pow (- z (const _sample_range(_Z_RANGE, &mut rng))) 2)))
-                     (const _sample_range(_RADIUS_RANGE, &mut rng)))
+                                 (pow (- x (const sample_range(X_RANGE, &mut rng))) 2)
+                                 (pow (- y (const sample_range(Y_RANGE, &mut rng))) 2))
+                              (pow (- z (const sample_range(Z_RANGE, &mut rng))) 2)))
+                     (const sample_range(RADIUS_RANGE, &mut rng)))
         };
         let mut tree = make_sphere();
-        for _ in 1.._N_SPHERES {
+        for _ in 1..N_SPHERES {
             tree = min(tree, make_sphere());
         }
         let tree = tree.unwrap();
@@ -905,52 +904,22 @@ mod perft {
         tree
     }
 
-    fn _benchmark_eval(
-        values: &mut Vec<f64>,
-        queries: &[[f64; 3]],
-        eval: &mut ValueEvaluator,
-    ) -> Duration {
-        let before = Instant::now();
-        values.extend(queries.iter().map(|coords| {
-            eval.set_value('x', coords[0].into());
-            eval.set_value('y', coords[1].into());
-            eval.set_value('z', coords[2].into());
-            let results = eval.run().unwrap();
-            results[0].scalar().unwrap()
-        }));
-        Instant::now() - before
-    }
-
-    fn _benchmark_jit(
-        values: &mut Vec<f64>,
-        queries: &[[f64; 3]],
-        eval: &mut JitSimdFn<f64>,
-    ) -> Duration {
-        for q in queries {
-            eval.push(q).unwrap();
-        }
-        let before = Instant::now();
-        eval.run(values);
-        Instant::now() - before
-    }
-
-    // Run this function to bench mark the performance
-    fn _t_perft() {
+    #[test]
+    fn t_compare_jit_simd() {
         let mut rng = StdRng::seed_from_u64(234);
-        let queries: Vec<[f64; 3]> = (0.._N_QUERIES)
+        let queries: Vec<[f64; 3]> = (0..N_QUERIES)
             .map(|_| {
                 [
-                    _sample_range(_X_RANGE, &mut rng),
-                    _sample_range(_Y_RANGE, &mut rng),
-                    _sample_range(_Z_RANGE, &mut rng),
+                    sample_range(X_RANGE, &mut rng),
+                    sample_range(Y_RANGE, &mut rng),
+                    sample_range(Z_RANGE, &mut rng),
                 ]
             })
             .collect();
-        let before = Instant::now();
         let tree = {
             let mut dedup = Deduplicater::new();
             let mut pruner = Pruner::new();
-            _sphere_union()
+            sphere_union()
                 .fold()
                 .unwrap()
                 .deduplicate(&mut dedup)
@@ -958,31 +927,28 @@ mod perft {
                 .prune(&mut pruner)
                 .unwrap()
         };
-        println!(
-            "Tree creation time: {}ms",
-            (Instant::now() - before).as_millis()
-        );
-        let mut values1: Vec<f64> = Vec::with_capacity(_N_QUERIES);
-        let mut eval = ValueEvaluator::new(&tree);
-        let evaltime = _benchmark_eval(&mut values1, &queries, &mut eval);
-        println!("ValueEvaluator time: {}ms", evaltime.as_millis());
-        let mut values2: Vec<f64> = Vec::with_capacity(_N_QUERIES);
-        let context = JitContext::default();
-        let mut jiteval = {
-            let before = Instant::now();
-            let jiteval = tree.jit_compile_array(&context).unwrap();
-            println!(
-                "Compilation time: {}ms",
-                (Instant::now() - before).as_millis()
-            );
-            jiteval
-        };
-        let jittime = _benchmark_jit(&mut values2, &queries, &mut jiteval);
-        println!("Jit time: {}ms", jittime.as_millis());
-        let ratio = evaltime.as_millis() as f64 / jittime.as_millis() as f64;
-        println!("Ratio: {}", ratio);
-        assert_eq!(values1.len(), values2.len());
-        for (l, r) in values1.iter().zip(values2.iter()) {
+        let mut val_eval: Vec<f64> = Vec::with_capacity(N_QUERIES);
+        {
+            let mut eval = ValueEvaluator::new(&tree);
+            val_eval.extend(queries.iter().map(|coords| {
+                eval.set_value('x', coords[0].into());
+                eval.set_value('y', coords[1].into());
+                eval.set_value('z', coords[2].into());
+                let results = eval.run().unwrap();
+                results[0].scalar().unwrap()
+            }));
+        }
+        let mut val_jit: Vec<f64> = Vec::with_capacity(N_QUERIES);
+        {
+            let context = JitContext::default();
+            let mut eval = tree.jit_compile_array(&context).unwrap();
+            for q in queries {
+                eval.push(&q).unwrap();
+            }
+            eval.run(&mut val_jit);
+        }
+        assert_eq!(val_eval.len(), val_jit.len());
+        for (l, r) in val_eval.iter().zip(val_jit.iter()) {
             assert_float_eq!(l, r, 1e-15);
         }
     }
