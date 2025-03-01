@@ -162,4 +162,8 @@ mod spheres {
     }
 }
 
+#[cfg(not(feature = "llvm-jit"))]
 criterion_main!(spheres::value_eval::bench);
+
+#[cfg(feature = "llvm-jit")]
+criterion_main!(spheres::value_eval::bench, spheres::jit_single::bench);
