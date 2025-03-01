@@ -368,18 +368,20 @@ where
         }
     }
 
-    fn pop_impl(&mut self) -> [Option<usize>; 5] {
-        [
-            self.nodes.pop_slice(),
-            self.ops.pop_slice(),
-            self.num_regs.pop(),
-            self.root_regs.pop_slice(),
-            self.interval_indices.pop(),
-        ]
+    fn pop_impl(&mut self) -> Option<[usize; 7]> {
+        Some([
+            self.nodes.pop_slice()?,
+            self.ops.pop_slice()?,
+            self.num_regs.pop()?,
+            self.root_regs.pop_slice()?,
+            self.bounds.pop_slice()?,
+            self.interval_outputs.pop_slice()?,
+            self.interval_indices.pop()?,
+        ])
     }
 
     pub fn pop(&mut self) -> PruningState {
-        if self.pop_impl().iter().any(|opt| opt.is_none()) {
+        if let None = self.pop_impl() {
             return PruningState::None;
         }
         if let Some(nregs) = self.num_regs.last() {
@@ -395,34 +397,34 @@ where
     pub fn advance(&mut self, target_depth: Option<usize>) -> PruningState {
         let topush = loop {
             match self.pop_impl() {
-                [Some(_), Some(_), Some(_), Some(_), Some(i)] => {
-                    if i < self.intervals_per_level {
+                Some([.., i]) => {
+                    if i + 1 < self.intervals_per_level {
                         break i + 1;
                     } else {
                         continue;
                     }
                 }
-                _ => return PruningState::None,
+                None => return PruningState::None,
             }
         };
-        let (mut depth, mut index) = match self.push_impl(topush) {
+        let (depth, index) = match self.push_impl(topush) {
             PruningState::None => return PruningState::None,
             PruningState::Valid(depth, index) => (depth, index),
             PruningState::Failure(error) => return PruningState::Failure(error),
         };
         match target_depth {
-            Some(d) => {
-                while depth < d {
-                    (depth, index) = match self.push_impl(0) {
-                        PruningState::None => return PruningState::None,
-                        PruningState::Valid(dnext, i) => (dnext, i),
-                        PruningState::Failure(error) => return PruningState::Failure(error),
-                    };
+            Some(td) if depth < td => loop {
+                match self.push_impl(0) {
+                    PruningState::None => break PruningState::None,
+                    PruningState::Valid(dnext, i) if dnext == td => {
+                        break PruningState::Valid(dnext, i);
+                    }
+                    PruningState::Valid(_, _) => continue,
+                    PruningState::Failure(error) => break PruningState::Failure(error),
                 }
-            }
-            None => {} // Do nothing.
+            },
+            Some(_) | None => PruningState::Valid(depth, index),
         }
-        PruningState::Valid(depth, index)
     }
 
     /// Set the value of a scalar variable with the given label. You'd do this
@@ -656,19 +658,20 @@ mod test {
     #[test]
     fn t_perft() {
         const IMAGE_SIZE: u32 = 1024;
-        let tree = random_circles((0., 1.), (0., 1.), (0.02, 0.1), 100);
+        let tree = random_circles((0., 1024.), (0., 1024.), (20., 100.), 100);
         {
             let mut image = ImageBuffer::new(IMAGE_SIZE, IMAGE_SIZE);
             let mut eval = ValuePruningEvaluator::new(
                 &tree,
                 11,
                 [
-                    ('x', (Interval::from_scalar(0., 1.).unwrap(), 2)),
-                    ('y', (Interval::from_scalar(0., 1.).unwrap(), 2)),
+                    ('x', (Interval::from_scalar(0., 1024.).unwrap(), 2)),
+                    ('y', (Interval::from_scalar(0., 1024.).unwrap(), 2)),
                 ]
                 .into(),
             );
-            const NORM_SAMPLES: [[f64; 2]; 4] = [[0.5, 0.5], [1.5, 0.5], [0.5, 1.5], [1.5, 1.5]];
+            const NORM_SAMPLES: [[f64; 2]; 4] =
+                [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
             let before = Instant::now();
             let mut state = eval.push_or_pop_to(10);
             loop {
@@ -681,12 +684,10 @@ mod test {
                     let mut sample = [0.; 2];
                     eval.sample(&norm, &mut sample)
                         .expect("Cannot generate sample");
-                    println!("Sample at {}, {}", sample[0], sample[1]);
                     eval.set_value('x', Value::Scalar(sample[0]));
                     eval.set_value('y', Value::Scalar(sample[1]));
                     let outputs = eval.run().expect("Failed to run the pruning evaluator");
-                    let coords = sample.map(|c| (c * 1024.) as u32);
-                    println!("Evaluating at pixel ({}, {})", coords[0], coords[1]);
+                    let coords = sample.map(|c| c as u32);
                     *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
                         Value::Bool(_) => panic!("Expecting a scalar"),
                         Value::Scalar(val) => image::Luma([if val < 0. {
@@ -709,9 +710,9 @@ mod test {
             let mut eval = ValueEvaluator::new(&tree);
             let before = Instant::now();
             for y in 0..IMAGE_SIZE {
-                eval.set_value('y', Value::Scalar((y as f64 + 0.5) / (IMAGE_SIZE as f64)));
+                eval.set_value('y', Value::Scalar(y as f64 + 0.5));
                 for x in 0..IMAGE_SIZE {
-                    eval.set_value('x', Value::Scalar((x as f64 + 0.5) / (IMAGE_SIZE as f64)));
+                    eval.set_value('x', Value::Scalar(x as f64 + 0.5));
                     let outputs = eval.run().expect("Failed to run value evaluator");
                     assert_eq!(outputs.len(), 1);
                     *image.get_pixel_mut(x, y) = match outputs[0] {
