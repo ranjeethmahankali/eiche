@@ -681,22 +681,19 @@ mod test {
                     PruningState::Failure(error) => panic!("Error during pruning: {:?}", error),
                 }
                 for norm in NORM_SAMPLES {
-                    // println!("======\nnorm at ({}, {})", norm[0], norm[1]);
                     let mut sample = [0.; 2];
                     eval.sample(&norm, &mut sample)
                         .expect("Cannot generate sample");
-                    // println!("Sample at ({}, {})", sample[0], sample[1]);
                     eval.set_value('x', Value::Scalar(sample[0]));
                     eval.set_value('y', Value::Scalar(sample[1]));
                     let outputs = eval.run().expect("Failed to run the pruning evaluator");
                     let coords = sample.map(|c| c as u32);
-                    // println!("Evaluating at pixel ({}, {})", coords[0], coords[1]);
                     *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
                         Value::Bool(_) => panic!("Expecting a scalar"),
                         Value::Scalar(val) => image::Luma([if val < 0. {
                             f64::min((-val / 100.) * 255., 255.) as u8
                         } else {
-                            f64::min(((0.1 - val) / 100.) * 255., 255.) as u8
+                            f64::min(((100. - val) / 100.) * 255., 255.) as u8
                         }]),
                     };
                 }
