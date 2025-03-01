@@ -381,7 +381,7 @@ where
     }
 
     pub fn pop(&mut self) -> PruningState {
-        if let None = self.pop_impl() {
+        if self.pop_impl().is_none() {
             return PruningState::None;
         }
         if let Some(nregs) = self.num_regs.last() {
