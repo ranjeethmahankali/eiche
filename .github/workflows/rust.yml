@@ -60,6 +60,8 @@ jobs:
       env:
         CC: gcc
         CXX: gcc
+        GMP_LIB_DIR: ${{steps.msys2.outputs.msys2-location}}\mingw64\lib
+        GMP_INCLUDE_DIR: ${{steps.msys2.outputs.msys2-location}}\mingw64\include
       run: cargo build --verbose --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
