@@ -16,20 +16,20 @@ use inkwell::{
 type UnsafeFuncType = unsafe extern "C" fn(*const f64, *mut f64);
 
 /// This represents a JIT compiled tree. This is a wrapper around the JIT compiled native function.
-pub struct JitEvaluator<'ctx> {
+pub struct JitFn<'ctx> {
     func: JitFunction<'ctx, UnsafeFuncType>,
     num_inputs: usize,
     outputs: Vec<f64>,
 }
 
-impl<'ctx> JitEvaluator<'ctx> {
+impl<'ctx> JitFn<'ctx> {
     pub fn create(
         func: JitFunction<'ctx, UnsafeFuncType>,
         num_inputs: usize,
         num_outputs: usize,
-    ) -> JitEvaluator<'ctx> {
+    ) -> JitFn<'ctx> {
         // Construct evaluator
-        JitEvaluator {
+        JitFn {
             func,
             num_inputs,
             outputs: vec![f64::NAN; num_outputs],
@@ -39,10 +39,7 @@ impl<'ctx> JitEvaluator<'ctx> {
 
 impl Tree {
     /// JIT compile a tree and return a native evaluator.
-    pub fn jit_compile<'ctx>(
-        &'ctx self,
-        context: &'ctx JitContext,
-    ) -> Result<JitEvaluator<'ctx>, Error> {
+    pub fn jit_compile<'ctx>(&'ctx self, context: &'ctx JitContext) -> Result<JitFn<'ctx>, Error> {
         const FUNC_NAME: &str = "eiche_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
@@ -311,7 +308,7 @@ impl Tree {
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
         let func = unsafe { engine.get_function(FUNC_NAME)? };
-        Ok(JitEvaluator::create(func, symbols.len(), num_roots))
+        Ok(JitFn::create(func, symbols.len(), num_roots))
     }
 }
 
@@ -373,7 +370,7 @@ fn build_float_binary_intrinsic<'ctx>(
         .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
-impl JitEvaluator<'_> {
+impl JitFn<'_> {
     /// Run the JIT evaluator with the given input values. The number of input
     /// values is expected to be the same as the number of variables in the
     /// tree. The variables are substituted with the input values in the same
@@ -652,11 +649,7 @@ mod perft {
         Instant::now() - before
     }
 
-    fn _benchmark_jit(
-        values: &mut Vec<f64>,
-        queries: &[[f64; 3]],
-        eval: &mut JitEvaluator,
-    ) -> Duration {
+    fn _benchmark_jit(values: &mut Vec<f64>, queries: &[[f64; 3]], eval: &mut JitFn) -> Duration {
         let before = Instant::now();
         values.extend(queries.iter().map(|coords| {
             let results = eval.run(coords).unwrap();
