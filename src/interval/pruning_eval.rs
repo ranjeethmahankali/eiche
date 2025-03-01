@@ -150,6 +150,7 @@ impl From<inari::IntervalError> for PruningError {
     }
 }
 
+#[derive(Debug)]
 pub enum PruningState {
     None,
     Valid(usize, usize),
@@ -307,7 +308,7 @@ where
         // Update the remaining members of the struct.
         self.bounds.push_iter(self.temp_bounds.drain(..));
         self.nodes.push_iter(self.temp_nodes.drain(..));
-        self.interval_indices.push(0);
+        self.interval_indices.push(index);
         let nodes = match self.nodes.last_slice() {
             Some(nodes) => nodes,
             None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
@@ -337,6 +338,36 @@ where
         self.push_impl(0)
     }
 
+    pub fn push_or_pop_to(&mut self, depth: usize) -> PruningState {
+        match self.current_depth() {
+            d if d < depth => loop {
+                match self.push() {
+                    PruningState::None => break PruningState::None,
+                    PruningState::Valid(dnext, i) if dnext == depth => {
+                        break PruningState::Valid(dnext, i);
+                    }
+                    PruningState::Valid(_, _) => continue,
+                    PruningState::Failure(error) => break PruningState::Failure(error),
+                }
+            },
+            d if d > depth => loop {
+                match self.pop() {
+                    PruningState::None => break PruningState::None,
+                    PruningState::Valid(dnext, i) if dnext == depth => {
+                        break PruningState::Valid(dnext, i);
+                    }
+                    PruningState::Valid(_, _) => continue,
+                    PruningState::Failure(error) => break PruningState::Failure(error),
+                }
+            },
+            _ => match self.interval_indices.last() {
+                // Already at the desired depth. Do nothing.
+                Some(i) => PruningState::Valid(self.current_depth(), *i),
+                None => PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+            },
+        }
+    }
+
     fn pop_impl(&mut self) -> [Option<usize>; 5] {
         [
             self.nodes.pop_slice(),
@@ -361,7 +392,7 @@ where
         }
     }
 
-    pub fn advance(&mut self) -> PruningState {
+    pub fn advance(&mut self, target_depth: Option<usize>) -> PruningState {
         let topush = loop {
             match self.pop_impl() {
                 [Some(_), Some(_), Some(_), Some(_), Some(i)] => {
@@ -374,7 +405,24 @@ where
                 _ => return PruningState::None,
             }
         };
-        self.push_impl(topush)
+        let (mut depth, mut index) = match self.push_impl(topush) {
+            PruningState::None => return PruningState::None,
+            PruningState::Valid(depth, index) => (depth, index),
+            PruningState::Failure(error) => return PruningState::Failure(error),
+        };
+        match target_depth {
+            Some(d) => {
+                while depth < d {
+                    (depth, index) = match self.push_impl(0) {
+                        PruningState::None => return PruningState::None,
+                        PruningState::Valid(dnext, i) => (dnext, i),
+                        PruningState::Failure(error) => return PruningState::Failure(error),
+                    };
+                }
+            }
+            None => {} // Do nothing.
+        }
+        PruningState::Valid(depth, index)
     }
 
     /// Set the value of a scalar variable with the given label. You'd do this
@@ -383,7 +431,29 @@ where
         self.vars.insert(label, value);
     }
 
-    pub fn eval(&mut self) -> Result<&[T], Error> {
+    pub fn sample(&self, norm_val: &[f64], abs_val: &mut [f64]) -> Result<(), Error> {
+        let bounds = self
+            .bounds
+            .last_slice()
+            .ok_or(PruningError::UnexpectedEmptyState)?;
+        if norm_val.len() != abs_val.len() {
+            return Err(Error::InputSizeMismatch(norm_val.len(), abs_val.len()));
+        }
+        if norm_val.len() != bounds.len() {
+            return Err(Error::InputSizeMismatch(norm_val.len(), bounds.len()));
+        }
+        for (((_label, interval), norm), out) in
+            bounds.iter().zip(norm_val.iter()).zip(abs_val.iter_mut())
+        {
+            match interval {
+                Interval::Scalar(ii) => *out = ii.inf() + norm * ii.wid(),
+                Interval::Bool(_, _) => return Err(Error::TypeMismatch),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn run(&mut self) -> Result<&[T], Error> {
         for (node, out) in self
             .ops
             .last_slice()
@@ -420,7 +490,7 @@ pub type ValuePruningEvaluator = PruningEvaluator<Value>;
 
 #[cfg(test)]
 mod test {
-    use super::{PruningEvaluator, ValuePruningEvaluator};
+    use super::{PruningEvaluator, PruningState, ValuePruningEvaluator};
     use crate::{
         deftree,
         error::Error,
@@ -588,9 +658,55 @@ mod test {
         const IMAGE_SIZE: u32 = 1024;
         let tree = random_circles((0., 1.), (0., 1.), (0.02, 0.1), 100);
         {
+            let mut image = ImageBuffer::new(IMAGE_SIZE, IMAGE_SIZE);
+            let mut eval = ValuePruningEvaluator::new(
+                &tree,
+                11,
+                [
+                    ('x', (Interval::from_scalar(0., 1.).unwrap(), 2)),
+                    ('y', (Interval::from_scalar(0., 1.).unwrap(), 2)),
+                ]
+                .into(),
+            );
+            const NORM_SAMPLES: [[f64; 2]; 4] = [[0.5, 0.5], [1.5, 0.5], [0.5, 1.5], [1.5, 1.5]];
             let before = Instant::now();
+            let mut state = eval.push_or_pop_to(10);
+            loop {
+                match state {
+                    PruningState::None => break,
+                    PruningState::Valid(_, _) => {} // Keep going.
+                    PruningState::Failure(error) => panic!("Error during pruning: {:?}", error),
+                }
+                for norm in NORM_SAMPLES {
+                    let mut sample = [0.; 2];
+                    eval.sample(&norm, &mut sample)
+                        .expect("Cannot generate sample");
+                    eval.set_value('x', Value::Scalar(sample[0]));
+                    eval.set_value('y', Value::Scalar(sample[1]));
+                    let outputs = eval.run().expect("Failed to run the pruning evaluator");
+                    let coords = sample.map(|c| (c * 1024.) as u32);
+                    println!("Evaluating at pixel ({}, {})", coords[0], coords[1]);
+                    *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
+                        Value::Bool(_) => panic!("Expecting a scalar"),
+                        Value::Scalar(val) => image::Luma([if val < 0. {
+                            f64::min((-val / 0.1) * 255., 255.) as u8
+                        } else {
+                            f64::min(((0.1 - val) / 0.1) * 255., 255.) as u8
+                        }]),
+                    };
+                    state = eval.advance(Some(10));
+                }
+            }
+            let duration = Instant::now() - before;
+            println!("Pruning evaluator took {} ms", duration.as_millis());
+            image
+                .save("pruning-evaluator.png")
+                .expect("Cannot save image from pruning evaluator");
+        }
+        {
             let mut image = ImageBuffer::new(IMAGE_SIZE, IMAGE_SIZE);
             let mut eval = ValueEvaluator::new(&tree);
+            let before = Instant::now();
             for y in 0..IMAGE_SIZE {
                 eval.set_value('y', Value::Scalar((y as f64 + 0.5) / (IMAGE_SIZE as f64)));
                 for x in 0..IMAGE_SIZE {
@@ -613,6 +729,6 @@ mod test {
                 .save("value-evaluator.png")
                 .expect("Cannot save image from value evaluator");
         }
-        assert!(false);
+        unreachable!()
     }
 }
