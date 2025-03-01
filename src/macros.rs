@@ -34,65 +34,65 @@ macro_rules! deftree {
     };
     // Constants.
     (const $tt:expr) => {{
-        let out: Result<$crate::tree::Tree, $crate::error::Error>  = Ok($crate::tree::Tree::constant({$tt}.into()));
+        let out: Result<$crate::Tree, $crate::Error>  = Ok($crate::Tree::constant({$tt}.into()));
         out
     }};
     // Unary ops with functions names.
     ($unary_op:ident $a:tt) => {
-        $crate::tree::$unary_op($crate::deftree!($a))
+        $crate::$unary_op($crate::deftree!($a))
     };
     // Binary ops with function names.
     ($binary_op:ident $a:tt $b:tt) => {
-        $crate::tree::$binary_op($crate::deftree!($a), $crate::deftree!($b))
+        $crate::$binary_op($crate::deftree!($a), $crate::deftree!($b))
     };
     // Operators.
     (- $a:tt) => {
-        $crate::tree::negate($crate::deftree!($a))
+        $crate::negate($crate::deftree!($a))
     };
     (- $a:tt $b:tt) => {
-        $crate::tree::sub($crate::deftree!($a), $crate::deftree!($b))
+        $crate::sub($crate::deftree!($a), $crate::deftree!($b))
     };
     (+ $a:tt $b:tt) => {
-        $crate::tree::add($crate::deftree!($a), $crate::deftree!($b))
+        $crate::add($crate::deftree!($a), $crate::deftree!($b))
     };
     (/ $a:tt $b:tt) => {
-        $crate::tree::div($crate::deftree!($a), $crate::deftree!($b))
+        $crate::div($crate::deftree!($a), $crate::deftree!($b))
     };
     (* $a:tt $b:tt) => {
-        $crate::tree::mul($crate::deftree!($a), $crate::deftree!($b))
+        $crate::mul($crate::deftree!($a), $crate::deftree!($b))
     };
     (< $a:tt $b:tt) => {
-      $crate::tree::less($crate::deftree!($a), $crate::deftree!($b))
+      $crate::less($crate::deftree!($a), $crate::deftree!($b))
     };
     (<= $a:tt $b:tt) => {
-      $crate::tree::leq($crate::deftree!($a), $crate::deftree!($b))
+      $crate::leq($crate::deftree!($a), $crate::deftree!($b))
     };
     (== $a:tt $b:tt) => {
-      $crate::tree::equals($crate::deftree!($a), $crate::deftree!($b))
+      $crate::equals($crate::deftree!($a), $crate::deftree!($b))
     };
     (!= $a:tt $b:tt) => {
-      $crate::tree::neq($crate::deftree!($a), $crate::deftree!($b))
+      $crate::neq($crate::deftree!($a), $crate::deftree!($b))
     };
     (> $a:tt $b:tt) => {
-      $crate::tree::greater($crate::deftree!($a), $crate::deftree!($b))
+      $crate::greater($crate::deftree!($a), $crate::deftree!($b))
     };
     (>= $a:tt $b:tt) => {
-      $crate::tree::geq($crate::deftree!($a), $crate::deftree!($b))
+      $crate::geq($crate::deftree!($a), $crate::deftree!($b))
     };
     // Constants
     ($a:literal) => {{
-        let out: Result<$crate::tree::Tree, $crate::error::Error> = Ok($crate::tree::Tree::constant(($a).into()));
+        let out: Result<$crate::Tree, $crate::Error> = Ok($crate::Tree::constant(($a).into()));
         out
     }};
     // Conditional / piecewise
     (if $cond:tt $a:tt $b:tt) => {
-        $crate::tree::Tree::piecewise($crate::deftree!($cond), $crate::deftree!($a), $crate::deftree!($b))
+        $crate::Tree::piecewise($crate::deftree!($cond), $crate::deftree!($a), $crate::deftree!($b))
     };
     // Symbols
     ($a:ident) => {{
         const LABEL: &str = {stringify!($a)};
         const {assert!(LABEL.len() == 1, "Symbols can only have a single character as an identifier.")};
-        let out: Result<$crate::tree::Tree, $crate::error::Error> = Ok($crate::tree::Tree::symbol(LABEL.chars().next().unwrap()));
+        let out: Result<$crate::Tree, $crate::Error> = Ok($crate::Tree::symbol(LABEL.chars().next().unwrap()));
         out
     }};
 }
