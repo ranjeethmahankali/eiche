@@ -690,6 +690,7 @@ mod test {
                     eval.set_value('x', Value::Scalar(sample[0]));
                     eval.set_value('y', Value::Scalar(sample[1]));
                     let outputs = eval.run().expect("Failed to run the pruning evaluator");
+                    assert_eq!(outputs.len(), 1);
                     let coords = sample.map(|c| c as u32);
                     *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
                         Value::Bool(_) => panic!("Expecting a scalar"),
