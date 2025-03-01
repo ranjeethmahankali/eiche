@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use crate::{
     dedup::Deduplicater,
     error::Error,
@@ -8,6 +6,7 @@ use crate::{
     template::{TEMPLATES, Template},
     tree::{Node, Node::*, Tree},
 };
+use std::ops::Range;
 
 /// Iterator that produces all mutations of a tree.
 pub struct Mutations<'a> {

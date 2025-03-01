@@ -27,14 +27,17 @@ pub use llvm_jit::single::JitEvaluator;
 #[cfg(test)]
 mod test;
 
+pub use dedup::{Deduplicater, equivalent_trees};
 pub use derivative::{numerical_deriv, symbolic_deriv};
 pub use dual::{Dual, DualEvaluator};
 pub use error::Error;
 pub use eval::ValueEvaluator;
 pub use interval::{IntervalEvaluator, pruning_eval::ValuePruningEvaluator};
+pub use prune::Pruner;
 pub use reduce::reduce;
 pub use tree::{
     BinaryOp, Node, TernaryOp, Tree, UnaryOp, Value, abs, add, and, cos, div, equals, exp, floor,
     geq, greater, leq, less, log, max, min, mul, negate, neq, not, or, pow, rem, reshape, sin,
     sqrt, sub, tan,
 };
+pub use walk::{DepthIterator, DepthWalker};
