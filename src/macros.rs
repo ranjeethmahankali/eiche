@@ -97,6 +97,35 @@ macro_rules! deftree {
     }};
 }
 
+/// Assert that the floating point numbers are equal within the given epsilon.
+#[macro_export]
+macro_rules! assert_float_eq {
+    ($a:expr, $b:expr, $eps:expr, $debug:expr) => {{
+        // Make variables to avoid evaluating experssions multiple times.
+        let a = $a;
+        let b = $b;
+        let eps = $eps;
+        let error = f64::abs(a - b);
+        if error > eps {
+            eprintln!("{:?}", $debug);
+        }
+        assert!(
+            error <= eps,
+            "Assertion failed: |({}) - ({})| = {:e} <= {:e}",
+            a,
+            b,
+            error,
+            eps
+        );
+    }};
+    ($a:expr, $b:expr, $eps:expr) => {
+        assert_float_eq!($a, $b, $eps, "")
+    };
+    ($a:expr, $b:expr) => {
+        assert_float_eq!($a, $b, f64::EPSILON)
+    };
+}
+
 #[cfg(test)]
 mod test {
     use crate::tree::{BinaryOp::*, Node::*, UnaryOp::*, Value::*};

@@ -592,12 +592,11 @@ mod test {
 mod perft {
     use super::*;
     use crate::{
+        assert_float_eq,
         dedup::Deduplicater,
         deftree,
         eval::ValueEvaluator,
         prune::Pruner,
-        test::assert_float_eq,
-        // test::util::assert_float_eq,
         tree::{Tree, min},
     };
     use rand::{SeedableRng, rngs::StdRng};
