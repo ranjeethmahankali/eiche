@@ -657,12 +657,12 @@ mod test {
 
     #[test]
     fn t_perft() {
-        const DIMS: u32 = 256;
+        const PRUNE_DEPTH: usize = 7;
+        const DIMS: u32 = 1 << PRUNE_DEPTH;
         const DIMS_F64: f64 = DIMS as f64;
         const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
         let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, 100);
         let pruned_image = {
-            const PRUNE_DEPTH: usize = 8;
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let mut eval = ValuePruningEvaluator::new(
                 &tree,
