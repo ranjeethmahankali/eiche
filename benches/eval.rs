@@ -193,7 +193,7 @@ mod spheres {
 
         fn b_with_compilation(c: &mut Criterion) {
             let (tree, queries, mut values) = init_benchmark();
-            c.bench_function("spheres-jit-simd-with-compilation", |b| {
+            c.bench_function("spheres-jit-simd-f64-with-compilation", |b| {
                 b.iter(|| with_compilation(&tree, &mut values, &queries))
             });
         }
@@ -202,7 +202,7 @@ mod spheres {
             let (tree, queries, mut values) = init_benchmark();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
-            c.bench_function("spheres-jit-simd-no-compilation", |b| {
+            c.bench_function("spheres-jit-simd-f64-no-compilation", |b| {
                 b.iter(|| no_compilation(&mut eval, &mut values, &queries))
             });
         }
