@@ -22,7 +22,11 @@ mod walk;
 pub mod llvm_jit;
 
 #[cfg(feature = "llvm-jit")]
-pub use llvm_jit::{JitContext, simd_array::JitSimdFn, single::JitFn};
+pub use llvm_jit::{
+    JitContext,
+    simd_array::{JitSimdFn, SimdVec, Wfloat},
+    single::JitFn,
+};
 
 #[cfg(test)]
 mod test;

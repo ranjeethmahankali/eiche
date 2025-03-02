@@ -4,7 +4,7 @@ use eiche::{
     ValuePruningEvaluator, deftree, min,
 };
 use rand::{SeedableRng, rngs::StdRng};
-// use std::hint::black_box;
+use std::hint::black_box;
 
 fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
     use rand::Rng;
@@ -96,7 +96,7 @@ mod spheres {
             let (tree, queries, mut values) = init_benchmark();
             c.bench_function("spheres-value-evaluator-with-compilation", |b| {
                 b.iter(|| {
-                    with_compile(&tree, &mut values, &queries);
+                    with_compile(black_box(&tree), black_box(&mut values), &queries);
                     assert_eq!(values.len(), N_QUERIES);
                 })
             });
@@ -107,7 +107,7 @@ mod spheres {
             let mut eval = ValueEvaluator::new(&tree);
             c.bench_function("spheres-value-evaluation-no-compilation", |b| {
                 b.iter(|| {
-                    no_compile(&mut eval, &mut values, &queries);
+                    no_compile(black_box(&mut eval), black_box(&mut values), &queries);
                     assert_eq!(values.len(), N_QUERIES);
                 })
             });
@@ -143,7 +143,7 @@ mod spheres {
             let (tree, queries, mut values) = init_benchmark();
             c.bench_function("spheres-jit-single-eval-with-compile", |b| {
                 b.iter(|| {
-                    with_compilation(&tree, &mut values, &queries);
+                    with_compilation(&tree, black_box(&mut values), &queries);
                     assert_eq!(values.len(), N_QUERIES);
                 })
             });
@@ -155,7 +155,7 @@ mod spheres {
             let mut eval = tree.jit_compile(&context).unwrap();
             c.bench_function("spheres-jit-single-eval-no-compile", |b| {
                 b.iter(|| {
-                    no_compilation(&mut eval, &mut values, &queries);
+                    no_compilation(&mut eval, black_box(&mut values), &queries);
                     assert_eq!(values.len(), N_QUERIES);
                 })
             });
@@ -165,16 +165,20 @@ mod spheres {
     }
 
     #[cfg(feature = "llvm-jit")]
-    pub mod jit_simd_f64 {
+    pub mod jit_simd {
         use super::*;
-        use eiche::{JitContext, JitSimdFn};
+        use eiche::{JitContext, JitSimdFn, SimdVec, Wfloat};
 
-        fn no_compilation(eval: &mut JitSimdFn<'_, f64>, values: &mut Vec<f64>) {
+        fn no_compilation<T>(eval: &mut JitSimdFn<'_, T>, values: &mut Vec<T>)
+        where
+            Wfloat: SimdVec<T>,
+            T: Copy,
+        {
             values.clear();
             eval.run(values);
         }
 
-        fn b_no_compilation(c: &mut Criterion) {
+        fn b_no_compilation_f64(c: &mut Criterion) {
             let (tree, queries, mut values) = init_benchmark();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
@@ -182,11 +186,28 @@ mod spheres {
                 eval.push(&q).unwrap();
             }
             c.bench_function("spheres-jit-simd-f64-no-compilation", |b| {
-                b.iter(|| no_compilation(&mut eval, &mut values))
+                b.iter(|| no_compilation(&mut eval, black_box(&mut values)))
             });
         }
 
-        criterion_group!(bench, b_no_compilation);
+        fn b_no_compilation_f32(c: &mut Criterion) {
+            let (tree, queries, _) = init_benchmark();
+            let mut values = Vec::with_capacity(N_QUERIES);
+            let queries: Vec<_> = queries
+                .into_iter()
+                .map(|coords| coords.map(|c| c as f32))
+                .collect();
+            let context = JitContext::default();
+            let mut eval = tree.jit_compile_array(&context).unwrap();
+            for q in queries {
+                eval.push(&q).unwrap();
+            }
+            c.bench_function("spheres-jit-simd-f32-no-compilation", |b| {
+                b.iter(|| no_compilation(&mut eval, black_box(&mut values)))
+            });
+        }
+
+        criterion_group!(bench, b_no_compilation_f64, b_no_compilation_f32);
     }
 }
 
@@ -319,5 +340,5 @@ criterion_main!(
     spheres::value_eval::bench,
     circles::bench,
     spheres::jit_single::bench,
-    spheres::jit_simd_f64::bench,
+    spheres::jit_simd::bench,
 );
