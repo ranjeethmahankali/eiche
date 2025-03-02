@@ -216,10 +216,11 @@ mod circles {
 
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
-    const PRUNE_DEPTH: usize = 10;
+    const PRUNE_DEPTH: usize = 9;
     const DIMS: u32 = 1 << PRUNE_DEPTH;
     const DIMS_F64: f64 = DIMS as f64;
     const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
+    const N_CIRCLES: usize = 100;
 
     fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
@@ -314,7 +315,7 @@ mod circles {
     }
 
     fn b_with_compile(c: &mut Criterion) {
-        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, 100);
+        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
         c.bench_function("circles-value-eval-with-compilation", |b| {
             b.iter(|| with_compile(&tree, &mut image))
@@ -322,7 +323,7 @@ mod circles {
     }
 
     fn b_pruned_eval(c: &mut Criterion) {
-        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, 100);
+        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
         c.bench_function("circles-pruned-eval", |b| {
             b.iter(|| do_pruned_eval(&tree, &mut image))
@@ -331,7 +332,7 @@ mod circles {
 
     criterion_group! {
         name = bench;
-        config = Criterion::default().sample_size(5);
+        config = Criterion::default().sample_size(10);
         targets = b_with_compile, b_pruned_eval
     }
 }
