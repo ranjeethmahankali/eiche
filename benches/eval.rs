@@ -216,7 +216,7 @@ mod circles {
 
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
-    const PRUNE_DEPTH: usize = 7;
+    const PRUNE_DEPTH: usize = 8;
     const DIMS: u32 = 1 << PRUNE_DEPTH;
     const DIMS_F64: f64 = DIMS as f64;
     const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
@@ -275,7 +275,7 @@ mod circles {
     fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
         let mut eval = ValuePruningEvaluator::new(
             tree,
-            11,
+            PRUNE_DEPTH + 1,
             [
                 ('x', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
                 ('y', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
