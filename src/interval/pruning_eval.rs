@@ -501,7 +501,6 @@ mod test {
         tree::{Tree, Value, min},
     };
     use rand::{Rng, SeedableRng, rngs::StdRng};
-    use std::time::Instant;
 
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
@@ -656,7 +655,7 @@ mod test {
     }
 
     #[test]
-    fn t_perft() {
+    fn t_compare_pruned_eval() {
         const PRUNE_DEPTH: usize = 7;
         const DIMS: u32 = 1 << PRUNE_DEPTH;
         const DIMS_F64: f64 = DIMS as f64;
@@ -675,7 +674,6 @@ mod test {
             );
             const NORM_SAMPLES: [[f64; 2]; 4] =
                 [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
-            let before = Instant::now();
             let mut state = eval.push_or_pop_to(PRUNE_DEPTH);
             loop {
                 match state {
@@ -703,14 +701,11 @@ mod test {
                 }
                 state = eval.advance(Some(PRUNE_DEPTH));
             }
-            let duration = Instant::now() - before;
-            println!("Pruning evaluator took {} ms", duration.as_millis());
             image
         };
         let expected_image = {
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let mut eval = ValueEvaluator::new(&tree);
-            let before = Instant::now();
             for y in 0..DIMS {
                 eval.set_value('y', Value::Scalar(y as f64 + 0.5));
                 for x in 0..DIMS {
@@ -727,8 +722,6 @@ mod test {
                     };
                 }
             }
-            let duration = Instant::now() - before;
-            println!("Value evaluator took {} ms", duration.as_millis());
             image
         };
         assert_eq!(pruned_image.width(), expected_image.width());
