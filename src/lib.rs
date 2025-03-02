@@ -32,7 +32,10 @@ pub use derivative::{numerical_deriv, symbolic_deriv};
 pub use dual::{Dual, DualEvaluator};
 pub use error::Error;
 pub use eval::ValueEvaluator;
-pub use interval::{IntervalEvaluator, pruning_eval::ValuePruningEvaluator};
+pub use interval::{
+    Interval, IntervalEvaluator,
+    pruning_eval::{PruningError, PruningState, ValuePruningEvaluator},
+};
 pub use prune::Pruner;
 pub use reduce::reduce;
 pub use tree::{
