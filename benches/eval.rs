@@ -274,7 +274,7 @@ mod circles {
 
     fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
         let mut eval = ValuePruningEvaluator::new(
-            &tree,
+            tree,
             11,
             [
                 ('x', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
