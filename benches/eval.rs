@@ -169,45 +169,24 @@ mod spheres {
         use super::*;
         use eiche::{JitContext, JitSimdFn};
 
-        fn with_compilation(tree: &Tree, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
-            let context = JitContext::default();
-            let mut eval = tree.jit_compile_array(&context).unwrap();
+        fn no_compilation(eval: &mut JitSimdFn<'_, f64>, values: &mut Vec<f64>) {
             values.clear();
-            for q in queries {
-                eval.push(q).unwrap();
-            }
             eval.run(values);
-        }
-
-        fn no_compilation(
-            eval: &mut JitSimdFn<'_, f64>,
-            values: &mut Vec<f64>,
-            queries: &[[f64; 3]],
-        ) {
-            values.clear();
-            for q in queries {
-                eval.push(q).unwrap();
-            }
-            eval.run(values);
-        }
-
-        fn b_with_compilation(c: &mut Criterion) {
-            let (tree, queries, mut values) = init_benchmark();
-            c.bench_function("spheres-jit-simd-f64-with-compilation", |b| {
-                b.iter(|| with_compilation(&tree, &mut values, &queries))
-            });
         }
 
         fn b_no_compilation(c: &mut Criterion) {
             let (tree, queries, mut values) = init_benchmark();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
+            for q in queries {
+                eval.push(&q).unwrap();
+            }
             c.bench_function("spheres-jit-simd-f64-no-compilation", |b| {
-                b.iter(|| no_compilation(&mut eval, &mut values, &queries))
+                b.iter(|| no_compilation(&mut eval, &mut values))
             });
         }
 
-        criterion_group!(bench, b_no_compilation, b_with_compilation);
+        criterion_group!(bench, b_no_compilation);
     }
 }
 
