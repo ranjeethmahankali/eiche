@@ -165,7 +165,7 @@ mod spheres {
     }
 
     #[cfg(feature = "llvm-jit")]
-    pub mod jit_simd {
+    pub mod jit_simd_f64 {
         use super::*;
         use eiche::{JitContext, JitSimdFn};
 
@@ -202,7 +202,7 @@ mod spheres {
             let (tree, queries, mut values) = init_benchmark();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
-            c.bench_function("spheres-jit-simd-with-compilation", |b| {
+            c.bench_function("spheres-jit-simd-no-compilation", |b| {
                 b.iter(|| no_compilation(&mut eval, &mut values, &queries))
             });
         }
@@ -340,5 +340,5 @@ criterion_main!(
     spheres::value_eval::bench,
     circles::bench,
     spheres::jit_single::bench,
-    spheres::jit_simd::bench,
+    spheres::jit_simd_f64::bench,
 );
