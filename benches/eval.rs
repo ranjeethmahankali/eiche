@@ -216,7 +216,7 @@ mod circles {
 
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
-    const PRUNE_DEPTH: usize = 8;
+    const PRUNE_DEPTH: usize = 10;
     const DIMS: u32 = 1 << PRUNE_DEPTH;
     const DIMS_F64: f64 = DIMS as f64;
     const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
@@ -329,7 +329,11 @@ mod circles {
         });
     }
 
-    criterion_group!(bench, b_with_compile, b_pruned_eval);
+    criterion_group! {
+        name = bench;
+        config = Criterion::default().sample_size(5);
+        targets = b_with_compile, b_pruned_eval
+    }
 }
 
 #[cfg(not(feature = "llvm-jit"))]
