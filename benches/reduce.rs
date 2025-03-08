@@ -8,5 +8,14 @@ fn b_hessian(c: &mut Criterion) {
     });
 }
 
-criterion_group!(bench, b_hessian);
+fn b_norm_vec_len(c: &mut Criterion) {
+    let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
+                              (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
+    .unwrap();
+    c.bench_function("reduce_normalized_vector_length", |b| {
+        b.iter(|| reduce(std::hint::black_box(tree.clone()), 256).unwrap())
+    });
+}
+
+criterion_group!(bench, b_hessian, b_norm_vec_len);
 criterion_main!(bench);
