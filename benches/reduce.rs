@@ -17,5 +17,12 @@ fn b_norm_vec_len(c: &mut Criterion) {
     });
 }
 
-criterion_group!(bench, b_hessian, b_norm_vec_len);
+fn b_circle_gradient(c: &mut Criterion) {
+    let tree = deftree!(sderiv (- (sqrt (+ (pow x 2) (pow y 2))) 3) xy).unwrap();
+    c.bench_function("reduce_circle_gradient", |b| {
+        b.iter(|| reduce(std::hint::black_box(tree.clone()), 256).unwrap())
+    });
+}
+
+criterion_group!(bench, b_hessian, b_norm_vec_len, b_circle_gradient);
 criterion_main!(bench);
