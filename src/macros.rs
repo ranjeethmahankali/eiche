@@ -23,14 +23,14 @@ macro_rules! deftree {
     };
     // Derivatives.
     (sderiv $tree:tt $params:ident) => {
-        $crate::derivative::symbolic_deriv($crate::deftree!($tree), stringify!($params))
+        $crate::symbolic_deriv($crate::deftree!($tree), stringify!($params))
     };
     (nderiv $tree:tt $params:ident $eps:literal) => {
-        $crate::derivative::numerical_deriv($crate::deftree!($tree), stringify!($params), $eps)
+        $crate::numerical_deriv($crate::deftree!($tree), stringify!($params), $eps)
     };
     // Reshape
     (reshape $tree:tt $rows:literal $cols:literal) => {
-        $crate::tree::reshape($crate::deftree!($tree), $rows, $cols)
+        $crate::reshape($crate::deftree!($tree), $rows, $cols)
     };
     // Constants.
     (const $tt:expr) => {{
