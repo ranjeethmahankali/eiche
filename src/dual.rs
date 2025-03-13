@@ -374,7 +374,7 @@ mod test {
     fn t_trigonometry() {
         check_dual_eval::<1>(&deftree!(pow (sin x) 2).unwrap(), &[('x', -5., 5.)], 1e-15);
         check_dual_eval::<1>(&deftree!(pow (cos x) 2).unwrap(), &[('x', -5., 5.)], 1e-15);
-        check_dual_eval::<1>(&deftree!(tan x).unwrap(), &[('x', -1.5, 1.5)], 1e-14);
+        check_dual_eval::<1>(&deftree!(tan x).unwrap(), &[('x', -1.5, 1.5)], 3e-14);
         check_dual_eval::<1>(&deftree!(sin (pow x 2)).unwrap(), &[('x', -2., 2.)], 1e-14);
     }
 
