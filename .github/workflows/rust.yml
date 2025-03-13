@@ -76,10 +76,6 @@ jobs:
     - name: Update Rust
       run: rustup update stable
     - uses: actions/checkout@v4
-    - name: Install LLVM and Clang
-      uses: KyleMayes/install-llvm-action@v1
-      with:
-        version: "15.0"
     - name: Build
       run: cargo build --verbose --all-features --all-targets
     - name: Check formatting
