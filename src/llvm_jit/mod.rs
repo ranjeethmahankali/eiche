@@ -95,5 +95,5 @@ impl<'ctx> JitCompiler<'ctx> {
 
 pub mod single;
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 pub mod simd_array;

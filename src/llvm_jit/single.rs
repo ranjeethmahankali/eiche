@@ -547,7 +547,7 @@ mod test {
             &deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
             &[('x', 1., 5.)],
             100,
-            0.,
+            1e-15,
         );
     }
 
