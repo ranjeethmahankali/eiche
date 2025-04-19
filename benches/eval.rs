@@ -215,7 +215,7 @@ mod circles {
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
     const PRUNE_DEPTH: usize = 9;
-    const DIMS: u32 = 1 << PRUNE_DEPTH;
+    const DIMS: u32 = 1 << PRUNE_DEPTH; // 512 x 512 image.
     const DIMS_F64: f64 = DIMS as f64;
     const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
     const N_CIRCLES: usize = 100;
@@ -361,7 +361,7 @@ mod circles {
         fn b_with_compile(c: &mut Criterion) {
             let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
             let mut image = ImageBuffer::new(DIMS, DIMS);
-            c.bench_function("spheres-jit-single-eval-with-compile", |b| {
+            c.bench_function("circles-jit-single-eval-with-compile", |b| {
                 b.iter(|| {
                     with_compilation(&tree, black_box(&mut image));
                 })
@@ -373,7 +373,7 @@ mod circles {
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let context = JitContext::default();
             let mut eval = tree.jit_compile(&context).unwrap();
-            c.bench_function("spheres-jit-single-eval-no-compile", |b| {
+            c.bench_function("circles-jit-single-eval-no-compile", |b| {
                 b.iter(|| {
                     no_compilation(&mut eval, black_box(&mut image));
                 })
