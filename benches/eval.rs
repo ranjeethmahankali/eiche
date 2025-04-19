@@ -280,6 +280,25 @@ mod circles {
         }
     }
 
+    fn no_compile(eval: &mut ValueEvaluator, image: &mut ImageBuffer) {
+        for y in 0..DIMS {
+            eval.set_value('y', Value::Scalar(y as f64 + 0.5));
+            for x in 0..DIMS {
+                eval.set_value('x', Value::Scalar(x as f64 + 0.5));
+                let outputs = eval.run().expect("Failed to run value evaluator");
+                assert_eq!(outputs.len(), 1);
+                *image.get_pixel_mut(x, y) = match outputs[0] {
+                    Value::Bool(_) => panic!("Expecting a scalar"),
+                    Value::Scalar(val) => image::Luma([if val < 0. {
+                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
+                    } else {
+                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
+                    }]),
+                };
+            }
+        }
+    }
+
     /// Uses the pruning evaluator.
     fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
         let mut eval = ValuePruningEvaluator::new(
@@ -330,6 +349,15 @@ mod circles {
         });
     }
 
+    fn b_no_compile(c: &mut Criterion) {
+        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+        let mut image = ImageBuffer::new(DIMS, DIMS);
+        let mut eval = ValueEvaluator::new(&tree);
+        c.bench_function("circles-value-eval-no-compilation", |b| {
+            b.iter(|| no_compile(&mut eval, &mut image));
+        });
+    }
+
     fn b_pruned_eval(c: &mut Criterion) {
         let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
@@ -341,7 +369,7 @@ mod circles {
     criterion_group! {
         name = bench;
         config = Criterion::default().sample_size(10);
-        targets = b_with_compile, b_pruned_eval
+        targets = b_with_compile, b_no_compile, b_pruned_eval
     }
 }
 
