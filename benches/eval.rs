@@ -125,6 +125,7 @@ mod spheres {
         use super::*;
         use eiche::{JitContext, JitFn};
 
+        /// Includes the time to jit-compile the tree.
         fn with_compilation(tree: &Tree, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             values.clear();
             let context = JitContext::default();
@@ -135,6 +136,7 @@ mod spheres {
             }));
         }
 
+        /// Does not include the time to jit-compile the tree.
         fn no_compilation(eval: &mut JitFn<'_>, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             values.clear();
             values.extend(queries.iter().map(|coords| {
@@ -257,6 +259,7 @@ mod circles {
         tree
     }
 
+    /// Includes the time to compile, i.e. create the ValueEvaluator.
     fn with_compile(tree: &Tree, image: &mut ImageBuffer) {
         let mut eval = ValueEvaluator::new(tree);
         for y in 0..DIMS {
@@ -277,6 +280,7 @@ mod circles {
         }
     }
 
+    /// Uses the pruning evaluator.
     fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
         let mut eval = ValuePruningEvaluator::new(
             tree,
