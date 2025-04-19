@@ -9,19 +9,26 @@ use inkwell::{
     values::{BasicMetadataValueEnum, BasicValueEnum},
 };
 
+#[cfg(target_arch = "aarch64")]
+use std::arch::aarch64::*;
 #[cfg(target_arch = "x86")]
 use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
-use std::{marker::PhantomData, mem::size_of};
 
 use super::{JitCompiler, JitContext};
 use crate::{
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
+use std::{marker::PhantomData, mem::size_of};
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 type SimdType = __m256d;
+
+#[cfg(target_arch = "aarch64")]
+type SimdType = float64x1x4_t;
+
 const SIMD_F32_SIZE: usize = size_of::<SimdType>() / size_of::<f32>();
 const SIMD_F64_SIZE: usize = size_of::<SimdType>() / size_of::<f64>();
 
@@ -821,7 +828,7 @@ mod test {
             &deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
             &[('x', 1., 5.)],
             100,
-            0.,
+            1e-15,
         );
     }
 
