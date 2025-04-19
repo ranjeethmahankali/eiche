@@ -104,6 +104,23 @@ where
     }
 }
 
+/// Often applications that require pruning will traverse the parameter space in
+/// a depth-first tree like pattern. For this reason, it makes sense to store
+/// the pruned trees in a stack datastructure, that is updated synchronously
+/// with the depth first traversal. This enum represents the state of the
+/// `PruningEvaluator`. A valid state will contain two integers. First integer
+/// represents the depth of the pruning evaluator. The second index represents
+/// the index of the child of the DFS tree that is currently active at that
+/// depth.
+#[derive(Debug)]
+pub enum PruningState {
+    None,
+    Valid(usize, usize),
+    Failure(Error),
+}
+
+/// The pruning evaluator is designed for applications that traverse the
+/// parameter space as a depth-first tree pattern.
 pub struct PruningEvaluator<T>
 where
     T: ValueType,
@@ -148,13 +165,6 @@ impl From<inari::IntervalError> for PruningError {
     fn from(value: inari::IntervalError) -> Self {
         PruningError::CannotConstructInterval(value)
     }
-}
-
-#[derive(Debug)]
-pub enum PruningState {
-    None,
-    Valid(usize, usize),
-    Failure(Error),
 }
 
 impl<T> PruningEvaluator<T>
