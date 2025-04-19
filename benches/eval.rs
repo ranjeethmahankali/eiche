@@ -342,7 +342,12 @@ mod circles {
                 coord[1] = y as f64 + 0.5;
                 for x in 0..DIMS {
                     coord[0] = x as f64 + 0.5;
-                    *image.get_pixel_mut(x, y) = image::Luma([eval.run_unchecked(&coord)[0] as u8]);
+                    let val = eval.run_unchecked(&coord)[0];
+                    *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
+                    } else {
+                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
+                    }]);
                 }
             }
         }
@@ -353,7 +358,12 @@ mod circles {
                 coord[1] = y as f64 + 0.5;
                 for x in 0..DIMS {
                     coord[0] = x as f64 + 0.5;
-                    *image.get_pixel_mut(x, y) = image::Luma([eval.run_unchecked(&coord)[0] as u8]);
+                    let val = eval.run_unchecked(&coord)[0];
+                    *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
+                    } else {
+                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
+                    }]);
                 }
             }
         }
