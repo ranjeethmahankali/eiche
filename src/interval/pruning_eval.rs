@@ -148,11 +148,14 @@ where
     compile_cache: CompileCache,
 }
 
+/// Represents things that can go wrong when pruning.
 #[derive(Debug)]
 pub enum PruningError {
+    /// This is returned when the trees (with instructions), or the stack of
+    /// intervals is empty when they're expected to not be.
     UnexpectedEmptyState,
+    /// Construction of an inari::Interval failed during pruning.
     CannotConstructInterval(inari::IntervalError),
-    UnknownVariable(char),
 }
 
 impl From<PruningError> for Error {
@@ -255,7 +258,7 @@ where
 
     fn push_impl(&mut self, index: usize) -> PruningState {
         debug_assert!(index < self.intervals_per_level);
-        // Split the current intervals into 'divisions' and pick the first child.
+        // Split the current intervals into 'self.divisions' and pick the first child.
         self.temp_bounds.clear();
         match match self.bounds.last_slice() {
             Some(last) => {
@@ -498,6 +501,10 @@ where
     }
 }
 
+/// This evaluator can be used to depth first traverse a parameter space,
+/// performing pruning on the tree using interval arithmetic as you go, and then
+/// evaluating values at the leaf nodes of the tree more efficiently than
+/// evaluating the full unpruned tree.
 pub type ValuePruningEvaluator = PruningEvaluator<Value>;
 
 #[cfg(test)]
