@@ -210,10 +210,14 @@ where
         }
         let index = self.num_eval % Self::SIMD_VEC_SIZE;
         if index == 0 {
-            self.inputs
-                .extend(std::iter::repeat(<Wfloat as SimdVec<T>>::nan()).take(self.num_inputs));
-            self.outputs
-                .extend(std::iter::repeat(<Wfloat as SimdVec<T>>::nan()).take(self.num_outputs));
+            self.inputs.extend(std::iter::repeat_n(
+                <Wfloat as SimdVec<T>>::nan(),
+                self.num_inputs,
+            ));
+            self.outputs.extend(std::iter::repeat_n(
+                <Wfloat as SimdVec<T>>::nan(),
+                self.num_outputs,
+            ));
         }
         let inpsize = self.inputs.len();
         for (reg, val) in self.inputs[(inpsize - self.num_inputs)..]
