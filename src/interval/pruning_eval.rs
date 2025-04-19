@@ -10,6 +10,11 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+/// This works similarly to how the stack memory works when a program is
+/// running. This maintains a `Vec` of elements, and a series of offsets marking
+/// where each 'stack-frame' begins. You can use the `last_slice` as a normal
+/// slice. When you pop a slice, the vector will be truncated to the most recent
+/// offset.
 struct Stack<T>
 where
     T: Clone,
@@ -29,6 +34,7 @@ where
         }
     }
 
+    /// Initialize the stack with the given capacity.
     pub fn with_capacity(nslices: usize, ntotal: usize) -> Self {
         Self {
             buf: Vec::with_capacity(ntotal),
@@ -36,10 +42,12 @@ where
         }
     }
 
+    /// Start a new slice, akin to a new stack-frame.
     pub fn start_slice(&mut self) {
         self.offsets.push(self.buf.len());
     }
 
+    /// Pop the last slice.
     pub fn pop_slice(&mut self) -> Option<usize> {
         self.offsets.pop().map(|last| {
             let num = self.buf.len() - last;
@@ -48,20 +56,26 @@ where
         })
     }
 
+    /// Push a new stack-frame with the supplied data (as a slice).
     pub fn push_slice(&mut self, vals: &[T]) {
         self.start_slice();
         self.buf.extend_from_slice(vals)
     }
 
+    /// Push a new stack-frame with the supplied data (as an iterator).
     pub fn push_iter(&mut self, vals: impl Iterator<Item = T>) {
         self.start_slice();
         self.buf.extend(vals);
     }
 
+    /// Borrow the last slice.
     pub fn last_slice(&self) -> Option<&[T]> {
         self.offsets.last().map(|last| &self.buf[*last..])
     }
 
+    /// Create a new slice, and borrow it mutably. This is useful when you want
+    /// to simply push elements to the stack-frame, or modify it like any
+    /// vector.
     pub fn borrow_mut(&mut self) -> &mut Vec<T> {
         self.start_slice();
         &mut self.buf
