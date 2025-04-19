@@ -69,6 +69,8 @@ mod spheres {
     pub mod value_eval {
         use super::*;
 
+        /// Includes the compilation times. In this case that is the time spent
+        /// creating the ValueEvaluator.
         fn with_compile(tree: &Tree, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             let mut eval = ValueEvaluator::new(tree);
             values.clear();
@@ -81,6 +83,8 @@ mod spheres {
             }))
         }
 
+        /// Does not include the compilation time, i.e. the time spent creating
+        /// the ValueEvaluator.
         fn no_compile(eval: &mut ValueEvaluator, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             values.clear();
             values.extend(queries.iter().map(|coords| {
