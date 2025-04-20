@@ -246,8 +246,7 @@ mod circles {
                 ),
             );
         }
-        let tree = tree.unwrap();
-        tree
+        tree.unwrap()
     }
 
     /// Includes the time to compile, i.e. create the ValueEvaluator.
