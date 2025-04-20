@@ -10,6 +10,11 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+/// This works similarly to how the stack memory works when a program is
+/// running. This maintains a `Vec` of elements, and a series of offsets marking
+/// where each 'stack-frame' begins. You can use the `last_slice` as a normal
+/// slice. When you pop a slice, the vector will be truncated to the most recent
+/// offset.
 struct Stack<T>
 where
     T: Clone,
@@ -29,6 +34,7 @@ where
         }
     }
 
+    /// Initialize the stack with the given capacity.
     pub fn with_capacity(nslices: usize, ntotal: usize) -> Self {
         Self {
             buf: Vec::with_capacity(ntotal),
@@ -36,10 +42,12 @@ where
         }
     }
 
+    /// Start a new slice, akin to a new stack-frame.
     pub fn start_slice(&mut self) {
         self.offsets.push(self.buf.len());
     }
 
+    /// Pop the last slice.
     pub fn pop_slice(&mut self) -> Option<usize> {
         self.offsets.pop().map(|last| {
             let num = self.buf.len() - last;
@@ -48,20 +56,26 @@ where
         })
     }
 
+    /// Push a new stack-frame with the supplied data (as a slice).
     pub fn push_slice(&mut self, vals: &[T]) {
         self.start_slice();
         self.buf.extend_from_slice(vals)
     }
 
+    /// Push a new stack-frame with the supplied data (as an iterator).
     pub fn push_iter(&mut self, vals: impl Iterator<Item = T>) {
         self.start_slice();
         self.buf.extend(vals);
     }
 
+    /// Borrow the last slice.
     pub fn last_slice(&self) -> Option<&[T]> {
         self.offsets.last().map(|last| &self.buf[*last..])
     }
 
+    /// Create a new slice, and borrow it mutably. This is useful when you want
+    /// to simply push elements to the stack-frame, or modify it like any
+    /// vector.
     pub fn borrow_mut(&mut self) -> &mut Vec<T> {
         self.start_slice();
         &mut self.buf
@@ -104,6 +118,23 @@ where
     }
 }
 
+/// Often applications that require pruning will traverse the parameter space in
+/// a depth-first tree like pattern. For this reason, it makes sense to store
+/// the pruned trees in a stack datastructure, that is updated synchronously
+/// with the depth first traversal. This enum represents the state of the
+/// `PruningEvaluator`. A valid state will contain two integers. First integer
+/// represents the depth of the pruning evaluator. The second index represents
+/// the index of the child of the DFS tree that is currently active at that
+/// depth.
+#[derive(Debug)]
+pub enum PruningState {
+    None,
+    Valid(usize, usize),
+    Failure(Error),
+}
+
+/// The pruning evaluator is designed for applications that traverse the
+/// parameter space as a depth-first tree pattern.
 pub struct PruningEvaluator<T>
 where
     T: ValueType,
@@ -131,11 +162,14 @@ where
     compile_cache: CompileCache,
 }
 
+/// Represents things that can go wrong when pruning.
 #[derive(Debug)]
 pub enum PruningError {
+    /// This is returned when the trees (with instructions), or the stack of
+    /// intervals is empty when they're expected to not be.
     UnexpectedEmptyState,
+    /// Construction of an inari::Interval failed during pruning.
     CannotConstructInterval(inari::IntervalError),
-    UnknownVariable(char),
 }
 
 impl From<PruningError> for Error {
@@ -148,13 +182,6 @@ impl From<inari::IntervalError> for PruningError {
     fn from(value: inari::IntervalError) -> Self {
         PruningError::CannotConstructInterval(value)
     }
-}
-
-#[derive(Debug)]
-pub enum PruningState {
-    None,
-    Valid(usize, usize),
-    Failure(Error),
 }
 
 impl<T> PruningEvaluator<T>
@@ -245,7 +272,7 @@ where
 
     fn push_impl(&mut self, index: usize) -> PruningState {
         debug_assert!(index < self.intervals_per_level);
-        // Split the current intervals into 'divisions' and pick the first child.
+        // Split the current intervals into 'self.divisions' and pick the first child.
         self.temp_bounds.clear();
         match match self.bounds.last_slice() {
             Some(last) => {
@@ -488,6 +515,10 @@ where
     }
 }
 
+/// This evaluator can be used to depth first traverse a parameter space,
+/// performing pruning on the tree using interval arithmetic as you go, and then
+/// evaluating values at the leaf nodes of the tree more efficiently than
+/// evaluating the full unpruned tree.
 pub type ValuePruningEvaluator = PruningEvaluator<Value>;
 
 #[cfg(test)]

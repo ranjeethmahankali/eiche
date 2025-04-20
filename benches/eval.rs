@@ -69,6 +69,8 @@ mod spheres {
     pub mod value_eval {
         use super::*;
 
+        /// Includes the compilation times. In this case that is the time spent
+        /// creating the ValueEvaluator.
         fn with_compile(tree: &Tree, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             let mut eval = ValueEvaluator::new(tree);
             values.clear();
@@ -81,6 +83,8 @@ mod spheres {
             }))
         }
 
+        /// Does not include the compilation time, i.e. the time spent creating
+        /// the ValueEvaluator.
         fn no_compile(eval: &mut ValueEvaluator, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             values.clear();
             values.extend(queries.iter().map(|coords| {
@@ -121,22 +125,18 @@ mod spheres {
         use super::*;
         use eiche::{JitContext, JitFn};
 
+        /// Includes the time to jit-compile the tree.
         fn with_compilation(tree: &Tree, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             values.clear();
             let context = JitContext::default();
             let mut eval = tree.jit_compile(&context).unwrap();
-            values.extend(queries.iter().map(|coords| {
-                let results = eval.run(coords).unwrap();
-                results[0]
-            }));
+            values.extend(queries.iter().map(|coords| eval.run_unchecked(coords)[0]));
         }
 
+        /// Does not include the time to jit-compile the tree.
         fn no_compilation(eval: &mut JitFn<'_>, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             values.clear();
-            values.extend(queries.iter().map(|coords| {
-                let results = eval.run(coords).unwrap();
-                results[0]
-            }));
+            values.extend(queries.iter().map(|coords| eval.run_unchecked(coords)[0]));
         }
 
         fn b_with_compile(c: &mut Criterion) {
@@ -144,7 +144,6 @@ mod spheres {
             c.bench_function("spheres-jit-single-eval-with-compile", |b| {
                 b.iter(|| {
                     with_compilation(&tree, black_box(&mut values), &queries);
-                    assert_eq!(values.len(), N_QUERIES);
                 })
             });
         }
@@ -156,7 +155,6 @@ mod spheres {
             c.bench_function("spheres-jit-single-eval-no-compile", |b| {
                 b.iter(|| {
                     no_compilation(&mut eval, black_box(&mut values), &queries);
-                    assert_eq!(values.len(), N_QUERIES);
                 })
             });
         }
@@ -217,7 +215,7 @@ mod circles {
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
     const PRUNE_DEPTH: usize = 9;
-    const DIMS: u32 = 1 << PRUNE_DEPTH;
+    const DIMS: u32 = 1 << PRUNE_DEPTH; // 512 x 512 image.
     const DIMS_F64: f64 = DIMS as f64;
     const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
     const N_CIRCLES: usize = 100;
@@ -248,11 +246,10 @@ mod circles {
                 ),
             );
         }
-        let tree = tree.unwrap();
-        assert_eq!(tree.dims(), (1, 1));
-        tree
+        tree.unwrap()
     }
 
+    /// Includes the time to compile, i.e. create the ValueEvaluator.
     fn with_compile(tree: &Tree, image: &mut ImageBuffer) {
         let mut eval = ValueEvaluator::new(tree);
         for y in 0..DIMS {
@@ -260,7 +257,6 @@ mod circles {
             for x in 0..DIMS {
                 eval.set_value('x', Value::Scalar(x as f64 + 0.5));
                 let outputs = eval.run().expect("Failed to run value evaluator");
-                assert_eq!(outputs.len(), 1);
                 *image.get_pixel_mut(x, y) = match outputs[0] {
                     Value::Bool(_) => panic!("Expecting a scalar"),
                     Value::Scalar(val) => image::Luma([if val < 0. {
@@ -273,6 +269,25 @@ mod circles {
         }
     }
 
+    fn no_compile(eval: &mut ValueEvaluator, image: &mut ImageBuffer) {
+        for y in 0..DIMS {
+            eval.set_value('y', Value::Scalar(y as f64 + 0.5));
+            for x in 0..DIMS {
+                eval.set_value('x', Value::Scalar(x as f64 + 0.5));
+                let outputs = eval.run().expect("Failed to run value evaluator");
+                *image.get_pixel_mut(x, y) = match outputs[0] {
+                    Value::Bool(_) => panic!("Expecting a scalar"),
+                    Value::Scalar(val) => image::Luma([if val < 0. {
+                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
+                    } else {
+                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
+                    }]),
+                };
+            }
+        }
+    }
+
+    /// Uses the pruning evaluator.
     fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
         let mut eval = ValuePruningEvaluator::new(
             tree,
@@ -299,7 +314,6 @@ mod circles {
                 eval.set_value('x', Value::Scalar(sample[0]));
                 eval.set_value('y', Value::Scalar(sample[1]));
                 let outputs = eval.run().expect("Failed to run the pruning evaluator");
-                assert_eq!(outputs.len(), 1);
                 let coords = sample.map(|c| c as u32);
                 *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
                     Value::Bool(_) => panic!("Expecting a scalar"),
@@ -314,11 +328,84 @@ mod circles {
         }
     }
 
+    #[cfg(feature = "llvm-jit")]
+    pub mod jit_single {
+        use super::*;
+        use eiche::{JitContext, JitFn};
+
+        fn with_compilation(tree: &Tree, image: &mut ImageBuffer) {
+            let context = JitContext::default();
+            let mut eval = tree.jit_compile(&context).unwrap();
+            let mut coord = [0., 0.];
+            for y in 0..DIMS {
+                coord[1] = y as f64 + 0.5;
+                for x in 0..DIMS {
+                    coord[0] = x as f64 + 0.5;
+                    let val = eval.run_unchecked(&coord)[0];
+                    *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
+                    } else {
+                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
+                    }]);
+                }
+            }
+        }
+
+        fn no_compilation(eval: &mut JitFn<'_>, image: &mut ImageBuffer) {
+            let mut coord = [0., 0.];
+            for y in 0..DIMS {
+                coord[1] = y as f64 + 0.5;
+                for x in 0..DIMS {
+                    coord[0] = x as f64 + 0.5;
+                    let val = eval.run_unchecked(&coord)[0];
+                    *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
+                    } else {
+                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
+                    }]);
+                }
+            }
+        }
+
+        fn b_with_compile(c: &mut Criterion) {
+            let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+            let mut image = ImageBuffer::new(DIMS, DIMS);
+            c.bench_function("circles-jit-single-eval-with-compile", |b| {
+                b.iter(|| {
+                    with_compilation(&tree, black_box(&mut image));
+                })
+            });
+        }
+
+        fn b_no_compile(c: &mut Criterion) {
+            let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+            let mut image = ImageBuffer::new(DIMS, DIMS);
+            let context = JitContext::default();
+            let mut eval = tree.jit_compile(&context).unwrap();
+            c.bench_function("circles-jit-single-eval-no-compile", |b| {
+                b.iter(|| {
+                    no_compilation(&mut eval, black_box(&mut image));
+                })
+            });
+        }
+
+        criterion_group!(bench, b_no_compile, b_with_compile,);
+    }
+
     fn b_with_compile(c: &mut Criterion) {
         let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
         c.bench_function("circles-value-eval-with-compilation", |b| {
-            b.iter(|| with_compile(&tree, &mut image))
+            b.iter(|| with_compile(black_box(&tree), &mut image))
+        });
+    }
+
+    fn b_no_compile(c: &mut Criterion) {
+        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+        let mut image = ImageBuffer::new(DIMS, DIMS);
+        let mut eval = ValueEvaluator::new(&tree);
+        c.bench_function("circles-value-eval-no-compilation", |b| {
+            b.iter(|| no_compile(black_box(&mut eval), &mut image));
         });
     }
 
@@ -326,14 +413,14 @@ mod circles {
         let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
         c.bench_function("circles-pruned-eval", |b| {
-            b.iter(|| do_pruned_eval(&tree, &mut image))
+            b.iter(|| do_pruned_eval(black_box(&tree), &mut image))
         });
     }
 
     criterion_group! {
         name = bench;
         config = Criterion::default().sample_size(10);
-        targets = b_with_compile, b_pruned_eval
+        targets = b_with_compile, b_no_compile, b_pruned_eval
     }
 }
 
@@ -343,7 +430,8 @@ criterion_main!(spheres::value_eval::bench, circles::bench);
 #[cfg(feature = "llvm-jit")]
 criterion_main!(
     spheres::value_eval::bench,
-    circles::bench,
     spheres::jit_single::bench,
     spheres::jit_simd::bench,
+    circles::bench,
+    circles::jit_single::bench,
 );

@@ -380,8 +380,15 @@ impl JitFn<'_> {
         if inputs.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         }
+        Ok(self.run_unchecked(inputs))
+    }
+
+    /// Same as `run` except it doesn't check to make sure the `inputs` slice is
+    /// of the correct length. This can be used when the caller is sure the
+    /// inputs are correct, and this check can be omitted.
+    pub fn run_unchecked(&mut self, inputs: &[f64]) -> &[f64] {
         unsafe { self.func.call(inputs.as_ptr(), self.outputs.as_mut_ptr()) };
-        Ok(&self.outputs)
+        &self.outputs
     }
 }
 
