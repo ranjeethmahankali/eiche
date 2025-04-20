@@ -13,16 +13,34 @@ use inkwell::{
     types::{BasicTypeEnum, FloatType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
 };
-use std::ffi::c_void;
+use std::{
+    ffi::c_void,
+    ops::{Add, AddAssign, Div, DivAssign, MulAssign, Neg, Sub, SubAssign},
+};
 
 type UnsafeFuncType = unsafe extern "C" fn(*const c_void, *mut c_void);
 
-pub trait NumberType: Copy {
+pub trait NumberType:
+    Copy
+    + PartialOrd
+    + Neg
+    + Div
+    + DivAssign
+    + Add
+    + AddAssign
+    + Sub<Output = Self>
+    + SubAssign
+    + MulAssign
+{
     fn nan() -> Self;
 
     fn jit_type(context: &Context) -> FloatType<'_>;
 
     fn from_f64(val: f64) -> Self;
+
+    fn min(a: Self, b: Self) -> Self;
+
+    fn max(a: Self, b: Self) -> Self;
 }
 
 impl NumberType for f32 {
@@ -37,6 +55,14 @@ impl NumberType for f32 {
     fn from_f64(val: f64) -> Self {
         val as f32
     }
+
+    fn min(a: Self, b: Self) -> Self {
+        f32::min(a, b)
+    }
+
+    fn max(a: Self, b: Self) -> Self {
+        f32::max(a, b)
+    }
 }
 
 impl NumberType for f64 {
@@ -50,6 +76,14 @@ impl NumberType for f64 {
 
     fn from_f64(val: f64) -> Self {
         val
+    }
+
+    fn min(a: Self, b: Self) -> Self {
+        f64::min(a, b)
+    }
+
+    fn max(a: Self, b: Self) -> Self {
+        f64::max(a, b)
     }
 }
 
