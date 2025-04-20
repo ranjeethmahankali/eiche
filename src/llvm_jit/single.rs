@@ -17,7 +17,7 @@ use std::ffi::c_void;
 
 type UnsafeFuncType = unsafe extern "C" fn(*const c_void, *mut c_void);
 
-pub trait NumberType {
+pub trait NumberType: Copy {
     fn nan() -> Self;
 
     fn jit_type<'a>(context: &'a Context) -> FloatType<'a>;
@@ -46,7 +46,7 @@ impl NumberType for f64 {
 /// This represents a JIT compiled tree. This is a wrapper around the JIT compiled native function.
 pub struct JitFn<'ctx, T>
 where
-    T: Copy + NumberType,
+    T: NumberType,
 {
     func: JitFunction<'ctx, UnsafeFuncType>,
     num_inputs: usize,
@@ -55,7 +55,7 @@ where
 
 impl<'ctx, T> JitFn<'ctx, T>
 where
-    T: Copy + NumberType,
+    T: NumberType,
 {
     pub fn create(
         func: JitFunction<'ctx, UnsafeFuncType>,
@@ -78,7 +78,7 @@ impl Tree {
         context: &'ctx JitContext,
     ) -> Result<JitFn<'ctx, T>, Error>
     where
-        T: Copy + NumberType,
+        T: NumberType,
     {
         const FUNC_NAME: &str = "eiche_func";
         let num_roots = self.num_roots();
@@ -412,7 +412,7 @@ fn build_float_binary_intrinsic<'ctx>(
 
 impl<T> JitFn<'_, T>
 where
-    T: Copy + NumberType,
+    T: NumberType,
 {
     /// Run the JIT evaluator with the given input values. The number of input
     /// values is expected to be the same as the number of variables in the
