@@ -244,6 +244,21 @@ in the tree."
     }
 
     #[test]
+    fn t_muladd_tree() {
+        let tree = deftree!(* (- x 3.) (+ 2. y)).unwrap().compacted().unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_tiny_tree() {
+        let tree = deftree!(+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
     fn t_small_tree() {
         let tree = deftree!(+ (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
             .unwrap()
