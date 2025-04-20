@@ -112,10 +112,10 @@ impl Tree {
     /// ranges is returned. i.e. for each node the entry in this vector
     /// indicates the number of nodes it exclusively dominates.
     pub fn dominator_sort(self) -> (Tree, Vec<usize>) {
-        let (sorted, dims, domcounts): (Vec<_>, (usize, usize), Vec<_>) = {
+        let domtable = DomTable::from_tree(&self);
+        let tree = {
             let (indices, rev_indices, domcounts) = {
                 let (keys, domcounts): (Vec<_>, Vec<_>) = {
-                    let domtable = DomTable::from_tree(&self);
                     let domcounts = domtable.counts();
                     let mut deps = vec![usize::MAX, self.len()];
                     for (pi, node) in self.nodes().iter().enumerate() {
@@ -166,12 +166,9 @@ impl Tree {
                     }
                 })
                 .collect();
-            (sorted, dims, domcounts)
+            Tree::from_nodes(sorted, dims).expect("This should never fail")
         };
-        (
-            Tree::from_nodes(sorted, dims).expect("This should never fail"),
-            domcounts,
-        )
+        (tree, domtable.counts())
     }
 }
 
