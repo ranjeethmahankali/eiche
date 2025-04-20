@@ -1,6 +1,7 @@
 mod compile;
 mod dedup;
 mod derivative;
+mod dominator;
 mod dual;
 mod error;
 mod eval;
