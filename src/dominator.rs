@@ -59,6 +59,10 @@ impl DomTable {
             })
             .unwrap_or(child) // If no dominator found then return the node itself.
     }
+
+    pub fn counts(&self) -> Vec<usize> {
+        todo!("TODO: Get the number of nodes each node dominates")
+    }
 }
 
 impl Tree {
@@ -69,9 +73,9 @@ impl Tree {
     /// ranges is returned. i.e. for each node the entry in this vector
     /// indicates the number of nodes it exclusively dominates.
     pub fn dominator_sort(self) -> (Tree, Vec<usize>) {
-        let sorted: Vec<_> = {
-            let (indices, rev_indices) = {
-                let keys: Vec<_> = {
+        let (sorted, dims, domcounts): (Vec<_>, (usize, usize), Vec<_>) = {
+            let (indices, rev_indices, domcounts) = {
+                let (keys, domcounts): (Vec<_>, Vec<_>) = {
                     let domtable = {
                         let mut table = DomTable::new(self.len());
                         for (i, node) in self.nodes().iter().enumerate().rev() {
@@ -91,6 +95,7 @@ impl Tree {
                         }
                         table
                     };
+                    let domcounts = domtable.counts();
                     let mut deps = vec![usize::MAX, self.len()];
                     for (pi, node) in self.nodes().iter().enumerate() {
                         match node {
@@ -109,10 +114,12 @@ impl Tree {
                             }
                         }
                     }
-                    deps.iter()
+                    let keys = deps
+                        .iter()
                         .enumerate()
                         .map(|(ni, dep)| (domtable.immediate_dominator(ni), *dep))
-                        .collect()
+                        .collect();
+                    (keys, domcounts)
                 };
                 let mut indices: Vec<_> = (0..self.len()).collect();
                 indices.sort_by_key(|i| keys[*i]);
@@ -123,10 +130,10 @@ impl Tree {
                         r
                     },
                 );
-                (indices, rev_indices)
+                (indices, rev_indices, domcounts)
             };
             let (nodes, dims) = self.take();
-            indices
+            let sorted = indices
                 .iter()
                 .map(|ni| match nodes[*ni] {
                     Constant(value) => Constant(value),
@@ -137,8 +144,12 @@ impl Tree {
                         Ternary(op, rev_indices[a], rev_indices[b], rev_indices[c])
                     }
                 })
-                .collect()
+                .collect();
+            (sorted, dims, domcounts)
         };
-        todo!("Incomplete");
+        (
+            Tree::from_nodes(sorted, dims).expect("This should never fail"),
+            domcounts,
+        )
     }
 }
