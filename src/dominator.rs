@@ -137,7 +137,7 @@ impl Tree {
         let domtable = DomTable::from_tree(&self);
         let (indices, rev_indices) = {
             let keys: Vec<_> = {
-                let mut deps = vec![usize::MAX, self.len()];
+                let mut deps = vec![usize::MAX; self.len()];
                 for (pi, node) in self.nodes().iter().enumerate() {
                     match node {
                         Constant(_) | Symbol(_) => {} // Do nothing.
@@ -198,7 +198,35 @@ mod test {
     use crate::{Tree, deftree};
 
     fn validate_sorting(tree: Tree) {
-        let (tree, counts) = tree.dominator_sort();
+        let (tree, subcounts) = tree.dominator_sort();
+        let domcounts = {
+            let mut domcounts = vec![0usize; tree.len()];
+            for (i, count) in subcounts.iter().enumerate() {
+                assert!(
+                    *count <= i,
+                    "
+The number of dominated nodes cannot be more than the index of the node.Because
+that would imply this node is dominating more nodes than have preceded this node
+in the tree."
+                );
+                for ci in (i - count)..i {
+                    domcounts[ci] += 1;
+                }
+            }
+            domcounts
+        };
+        let table = DomTable::from_tree(&tree);
+        for (child, domcount) in domcounts.iter().enumerate() {
+            let offset = child * table.n_chunks;
+            // Compare the computed dominator counts with those expected from the table.
+            assert_eq!(
+                *domcount,
+                table.bits[offset..(offset + table.n_chunks)]
+                    .iter()
+                    .map(|chunk| chunk.count_ones() as usize)
+                    .sum::<usize>()
+            )
+        }
     }
 
     #[test]
@@ -211,6 +239,17 @@ mod test {
         assert_eq!(table.immediate_dominator(3), 3);
         // Check the counts.
         assert_eq!(&table.counts(), &[0usize, 1, 2, 3]);
+        // Check sorting.
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_small_tree() {
+        let tree = deftree!(+ (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
+            .unwrap()
+            .compacted()
+            .unwrap();
+        validate_sorting(tree);
     }
 
     #[test]
@@ -257,8 +296,9 @@ mod test {
         .unwrap()
         .compacted()
             .unwrap();
-        let table = DomTable::from_tree(&tree);
-        println!("{:?}", table.counts());
-        assert!(false);
+        // let table = DomTable::from_tree(&tree);
+        // println!("{:?}", table.counts());
+        validate_sorting(tree);
+        // assert!(false);
     }
 }
