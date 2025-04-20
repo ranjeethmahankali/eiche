@@ -13,7 +13,6 @@ fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
 
 mod spheres {
     use super::*;
-    use eiche::llvm_jit::single::NumberType;
 
     const RADIUS_RANGE: (f64, f64) = (0.2, 2.);
     const X_RANGE: (f64, f64) = (0., 100.);
@@ -21,6 +20,33 @@ mod spheres {
     const Z_RANGE: (f64, f64) = (0., 100.);
     const N_SPHERES: usize = 512;
     const N_QUERIES: usize = 512;
+
+    fn init_benchmark() -> (Tree, Vec<[f64; 3]>, Vec<f64>) {
+        let mut rng = StdRng::seed_from_u64(234);
+        (
+            {
+                let mut dedup = Deduplicater::new();
+                let mut pruner = Pruner::new();
+                random_sphere_union()
+                    .fold()
+                    .unwrap()
+                    .deduplicate(&mut dedup)
+                    .unwrap()
+                    .prune(&mut pruner)
+                    .unwrap()
+            },
+            (0..N_QUERIES)
+                .map(|_| {
+                    [
+                        sample_range(X_RANGE, &mut rng),
+                        sample_range(Y_RANGE, &mut rng),
+                        sample_range(Z_RANGE, &mut rng),
+                    ]
+                })
+                .collect(),
+            Vec::with_capacity(N_QUERIES),
+        )
+    }
 
     fn random_sphere_union() -> Tree {
         let mut rng = StdRng::seed_from_u64(42);
@@ -38,36 +64,6 @@ mod spheres {
         let tree = tree.unwrap();
         assert_eq!(tree.dims(), (1, 1));
         tree
-    }
-
-    fn init_benchmark<T>() -> (Tree, Vec<[T; 3]>, Vec<T>)
-    where
-        T: NumberType,
-    {
-        let mut rng = StdRng::seed_from_u64(234);
-        (
-            {
-                let mut dedup = Deduplicater::new();
-                let mut pruner = Pruner::new();
-                random_sphere_union()
-                    .fold()
-                    .unwrap()
-                    .deduplicate(&mut dedup)
-                    .unwrap()
-                    .prune(&mut pruner)
-                    .unwrap()
-            },
-            (0..N_QUERIES)
-                .map(|_| {
-                    [
-                        T::from_f64(sample_range(X_RANGE, &mut rng)),
-                        T::from_f64(sample_range(Y_RANGE, &mut rng)),
-                        T::from_f64(sample_range(Z_RANGE, &mut rng)),
-                    ]
-                })
-                .collect(),
-            Vec::with_capacity(N_QUERIES),
-        )
     }
 
     pub mod value_eval {
@@ -127,7 +123,37 @@ mod spheres {
     #[cfg(feature = "llvm-jit")]
     pub mod jit_single {
         use super::*;
-        use eiche::{JitContext, JitFn};
+        use eiche::{JitContext, JitFn, llvm_jit::single::NumberType};
+
+        pub fn init_benchmark<T>() -> (Tree, Vec<[T; 3]>, Vec<T>)
+        where
+            T: NumberType,
+        {
+            let mut rng = StdRng::seed_from_u64(234);
+            (
+                {
+                    let mut dedup = Deduplicater::new();
+                    let mut pruner = Pruner::new();
+                    random_sphere_union()
+                        .fold()
+                        .unwrap()
+                        .deduplicate(&mut dedup)
+                        .unwrap()
+                        .prune(&mut pruner)
+                        .unwrap()
+                },
+                (0..N_QUERIES)
+                    .map(|_| {
+                        [
+                            T::from_f64(sample_range(X_RANGE, &mut rng)),
+                            T::from_f64(sample_range(Y_RANGE, &mut rng)),
+                            T::from_f64(sample_range(Z_RANGE, &mut rng)),
+                        ]
+                    })
+                    .collect(),
+                Vec::with_capacity(N_QUERIES),
+            )
+        }
 
         /// Includes the time to jit-compile the tree.
         fn with_compilation<T>(tree: &Tree, values: &mut Vec<T>, queries: &[[T; 3]])
@@ -209,7 +235,7 @@ mod spheres {
         }
 
         fn b_no_compilation_f64(c: &mut Criterion) {
-            let (tree, queries, mut values) = init_benchmark::<f64>();
+            let (tree, queries, mut values) = jit_single::init_benchmark::<f64>();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
             for q in queries {
@@ -221,7 +247,7 @@ mod spheres {
         }
 
         fn b_no_compilation_f32(c: &mut Criterion) {
-            let (tree, queries, mut values) = init_benchmark::<f32>();
+            let (tree, queries, mut values) = jit_single::init_benchmark::<f32>();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
             for q in queries {
