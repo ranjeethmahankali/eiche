@@ -100,7 +100,25 @@ impl DomTable {
     }
 
     pub fn counts(&self) -> Vec<usize> {
-        todo!("TODO: Get the number of nodes each node dominates")
+        let n_nodes = self.bits.len() / self.n_chunks;
+        let mut counts = vec![0usize; n_nodes];
+        for chunks in self.bits.chunks_exact(self.n_chunks) {
+            let mut offset = 0usize;
+            for chunk in chunks {
+                let mut chunk = *chunk;
+                let mut shift = 0usize;
+                while chunk != 0 {
+                    let tz = chunk.trailing_zeros();
+                    chunk >>= tz;
+                    shift += tz as usize;
+                    counts[offset + shift] += 1;
+                    chunk >>= 1;
+                    shift += 1;
+                }
+                offset += 64;
+            }
+        }
+        counts
     }
 }
 
@@ -114,9 +132,8 @@ impl Tree {
     pub fn dominator_sort(self) -> (Tree, Vec<usize>) {
         let domtable = DomTable::from_tree(&self);
         let tree = {
-            let (indices, rev_indices, domcounts) = {
-                let (keys, domcounts): (Vec<_>, Vec<_>) = {
-                    let domcounts = domtable.counts();
+            let (indices, rev_indices) = {
+                let keys: Vec<_> = {
                     let mut deps = vec![usize::MAX, self.len()];
                     for (pi, node) in self.nodes().iter().enumerate() {
                         match node {
@@ -135,12 +152,10 @@ impl Tree {
                             }
                         }
                     }
-                    let keys = deps
-                        .iter()
+                    deps.iter()
                         .enumerate()
                         .map(|(ni, dep)| (domtable.immediate_dominator(ni), *dep))
-                        .collect();
-                    (keys, domcounts)
+                        .collect()
                 };
                 let mut indices: Vec<_> = (0..self.len()).collect();
                 indices.sort_by_key(|i| keys[*i]);
@@ -151,7 +166,7 @@ impl Tree {
                         r
                     },
                 );
-                (indices, rev_indices, domcounts)
+                (indices, rev_indices)
             };
             let (nodes, dims) = self.take();
             let sorted = indices
@@ -185,6 +200,8 @@ mod test {
         assert_eq!(table.immediate_dominator(1), 2);
         assert_eq!(table.immediate_dominator(2), 3);
         assert_eq!(table.immediate_dominator(3), 3);
+        // Check the counts.
+        assert_eq!(&table.counts(), &[0usize, 1, 2, 3]);
     }
 
     #[test]
@@ -230,8 +247,9 @@ mod test {
                    (/ (- (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a)))))
         .unwrap()
         .compacted()
-        .unwrap();
-        println!("{}", tree.len());
+            .unwrap();
+        let table = DomTable::from_tree(&tree);
+        println!("{:?}", table.counts());
         assert!(false);
     }
 }
