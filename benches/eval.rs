@@ -134,7 +134,7 @@ mod spheres {
         }
 
         /// Does not include the time to jit-compile the tree.
-        fn no_compilation(eval: &mut JitFn<'_>, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
+        fn no_compilation(eval: &mut JitFn<'_, f64>, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
             values.clear();
             values.extend(queries.iter().map(|coords| eval.run_unchecked(coords)[0]));
         }
@@ -351,7 +351,7 @@ mod circles {
             }
         }
 
-        fn no_compilation(eval: &mut JitFn<'_>, image: &mut ImageBuffer) {
+        fn no_compilation(eval: &mut JitFn<'_, f64>, image: &mut ImageBuffer) {
             let mut coord = [0., 0.];
             for y in 0..DIMS {
                 coord[1] = y as f64 + 0.5;
