@@ -221,12 +221,7 @@ mod spheres {
         }
 
         fn b_no_compilation_f32(c: &mut Criterion) {
-            let (tree, queries, _) = init_benchmark::<f32>();
-            let mut values = Vec::with_capacity(N_QUERIES);
-            let queries: Vec<_> = queries
-                .into_iter()
-                .map(|coords| coords.map(|c| c as f32))
-                .collect();
+            let (tree, queries, mut values) = init_benchmark::<f32>();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
             for q in queries {
