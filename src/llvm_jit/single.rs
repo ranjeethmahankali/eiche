@@ -21,6 +21,8 @@ pub trait NumberType: Copy {
     fn nan() -> Self;
 
     fn jit_type(context: &Context) -> FloatType<'_>;
+
+    fn from_f64(val: f64) -> Self;
 }
 
 impl NumberType for f32 {
@@ -31,6 +33,10 @@ impl NumberType for f32 {
     fn jit_type(context: &Context) -> FloatType<'_> {
         context.f32_type()
     }
+
+    fn from_f64(val: f64) -> Self {
+        val as f32
+    }
 }
 
 impl NumberType for f64 {
@@ -40,6 +46,10 @@ impl NumberType for f64 {
 
     fn jit_type(context: &Context) -> FloatType<'_> {
         context.f64_type()
+    }
+
+    fn from_f64(val: f64) -> Self {
+        val
     }
 }
 
