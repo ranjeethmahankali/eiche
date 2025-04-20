@@ -20,7 +20,7 @@ type UnsafeFuncType = unsafe extern "C" fn(*const c_void, *mut c_void);
 pub trait NumberType: Copy {
     fn nan() -> Self;
 
-    fn jit_type<'a>(context: &'a Context) -> FloatType<'a>;
+    fn jit_type(context: &Context) -> FloatType<'_>;
 }
 
 impl NumberType for f32 {
@@ -28,7 +28,7 @@ impl NumberType for f32 {
         f32::NAN
     }
 
-    fn jit_type<'a>(context: &'a Context) -> FloatType<'a> {
+    fn jit_type(context: &Context) -> FloatType<'_> {
         context.f32_type()
     }
 }
@@ -38,7 +38,7 @@ impl NumberType for f64 {
         f64::NAN
     }
 
-    fn jit_type<'a>(context: &'a Context) -> FloatType<'a> {
+    fn jit_type(context: &Context) -> FloatType<'_> {
         context.f64_type()
     }
 }
