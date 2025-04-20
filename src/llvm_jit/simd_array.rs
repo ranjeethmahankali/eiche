@@ -662,15 +662,22 @@ mod test {
     use super::*;
     use crate::{assert_float_eq, deftree, eval::ValueEvaluator, test::Sampler};
 
-    fn check_jit_eval(tree: &Tree, vardata: &[(char, f64, f64)], samples_per_var: usize, eps: f64) {
+    fn check_jit_eval(
+        tree: &Tree,
+        vardata: &[(char, f64, f64)],
+        samples_per_var: usize,
+        eps64: f64,
+        eps32: f32,
+    ) {
         let context = JitContext::default();
-        let mut jiteval = tree.jit_compile_array(&context).unwrap();
+        let mut eval64 = tree.jit_compile_array(&context).unwrap();
+        let mut eval32 = tree.jit_compile_array(&context).unwrap();
         let mut eval = ValueEvaluator::new(tree);
         let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         let mut expected = Vec::with_capacity(
             tree.num_roots() * usize::pow(samples_per_var, vardata.len() as u32),
         );
-        let mut actual = Vec::with_capacity(expected.capacity());
+        let mut sample32 = Vec::new(); // Temporary storage.
         while let Some(sample) = sampler.next() {
             for (label, value) in vardata.iter().map(|(label, ..)| *label).zip(sample.iter()) {
                 eval.set_value(label, (*value).into());
@@ -681,12 +688,31 @@ mod test {
                     .iter()
                     .map(|value| value.scalar().unwrap()),
             );
-            jiteval.push(sample).unwrap();
+            eval64.push(sample).unwrap();
+            {
+                // f32
+                sample32.clear();
+                sample32.extend(sample.iter().map(|s| *s as f32));
+                eval32.push(&sample32).unwrap();
+            }
         }
-        jiteval.run(&mut actual);
-        assert_eq!(actual.len(), expected.len());
-        for (l, r) in actual.iter().zip(expected.iter()) {
-            assert_float_eq!(l, r, eps);
+        {
+            // Run and check f64.
+            let mut actual = Vec::with_capacity(expected.capacity());
+            eval64.run(&mut actual);
+            assert_eq!(actual.len(), expected.len());
+            for (l, r) in actual.iter().zip(expected.iter()) {
+                assert_float_eq!(l, r, eps64);
+            }
+        }
+        {
+            // Run and check f32.
+            let mut actual = Vec::with_capacity(expected.capacity());
+            eval32.run(&mut actual);
+            assert_eq!(actual.len(), expected.len());
+            for (l, r) in actual.iter().zip(expected.iter()) {
+                assert_float_eq!(*l as f64, r, eps32 as f64);
+            }
         }
     }
 
@@ -697,6 +723,7 @@ mod test {
             &[('x', -10., 10.), ('y', -10., 10.)],
             20,
             0.,
+            1e-5,
         );
     }
 
@@ -707,6 +734,7 @@ mod test {
             &[('x', -10., 10.), ('y', -10., 10.)],
             100,
             0.,
+            1e-4,
         );
     }
 
@@ -717,17 +745,30 @@ mod test {
             &[('x', -10., 10.), ('y', -10., 10.)],
             20,
             0.,
+            1e-4,
         );
     }
 
     #[test]
     fn t_pow() {
-        check_jit_eval(&deftree!(pow x 2).unwrap(), &[('x', -10., -10.)], 100, 0.);
+        check_jit_eval(
+            &deftree!(pow x 2).unwrap(),
+            &[('x', -10., -10.)],
+            100,
+            0.,
+            1e-6,
+        );
     }
 
     #[test]
     fn t_sqrt() {
-        check_jit_eval(&deftree!(sqrt x).unwrap(), &[('x', 0.01, 10.)], 100, 0.);
+        check_jit_eval(
+            &deftree!(sqrt x).unwrap(),
+            &[('x', 0.01, 10.)],
+            100,
+            0.,
+            1e-6,
+        );
     }
 
     #[test]
@@ -737,6 +778,7 @@ mod test {
             &[('x', -5., 5.), ('y', -5., 5.)],
             20,
             0.,
+            1e-6,
         );
     }
 
@@ -747,6 +789,7 @@ mod test {
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             5,
             0.,
+            1e-5,
         );
     }
 
@@ -757,7 +800,8 @@ mod test {
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             0.,
-        )
+            1e-6,
+        );
     }
 
     #[test]
@@ -767,6 +811,7 @@ mod test {
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             0.,
+            1e-5,
         );
     }
 
@@ -777,6 +822,7 @@ mod test {
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             0.,
+            1e-5,
         );
     }
 
@@ -787,6 +833,7 @@ mod test {
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             1e-14,
+            1e-5,
         );
     }
 
@@ -797,6 +844,7 @@ mod test {
             &[('x', 0.1, 5.), ('y', 0.1, 5.)],
             10,
             0.,
+            1e-6,
         );
     }
 
@@ -813,6 +861,7 @@ mod test {
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
             0.,
+            1e-5,
         );
     }
 
@@ -823,6 +872,7 @@ mod test {
             &[('x', -5., 5.)],
             100,
             0.,
+            1e-6,
         );
     }
 
@@ -833,6 +883,7 @@ mod test {
             &[('x', 1., 5.)],
             100,
             1e-15,
+            1e-5,
         );
     }
 
@@ -843,12 +894,14 @@ mod test {
             &[('x', -10., 10.)],
             100,
             0.,
+            1e-6,
         );
         check_jit_eval(
             &deftree!(if (< x 0) (- x) x).unwrap(),
             &[('x', -10., 10.)],
             100,
             0.,
+            1e-6,
         );
     }
 
@@ -859,6 +912,7 @@ mod test {
             &[('x', -3., 3.)],
             100,
             0.,
+            1e-6,
         );
     }
 
@@ -869,6 +923,7 @@ mod test {
             &[('x', -5., 5.), ('y', -5., 5.)],
             100,
             1e-14,
+            1e-4,
         );
     }
 }
