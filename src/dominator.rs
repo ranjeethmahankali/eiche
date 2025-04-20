@@ -1,3 +1,5 @@
+use crate::{Node::*, Tree};
+
 /// Used to manage a dominator mapping between nodes of a tree.
 ///
 /// Because this is used to manage the dominator mapping of any node with any
@@ -5,7 +7,6 @@
 /// number of nodes, i.e. `size`.
 struct DomTable {
     bits: Vec<u64>,
-    n_nodes: usize,  // Number of nodes, i.e. rows and cols.
     n_chunks: usize, // Number of bytes per row.
 }
 
@@ -30,11 +31,7 @@ impl DomTable {
             }
             out
         };
-        DomTable {
-            bits,
-            n_nodes,
-            n_chunks,
-        }
+        DomTable { bits, n_chunks }
     }
 
     pub fn dominate(&mut self, parent: usize, child: usize) {
@@ -48,7 +45,6 @@ impl DomTable {
         for (p, c) in parent_bits.iter().zip(child_bits.iter_mut()) {
             *c &= *p;
         }
-        Self::set(child_bits, child);
     }
 
     pub fn immediate_dominator(&self, child: usize) -> usize {
@@ -57,11 +53,92 @@ impl DomTable {
         self.bits[offset..(offset + self.n_chunks)]
             .iter()
             .enumerate()
-            .rev()
             .find_map(|(i, flags)| match flags.trailing_zeros() {
                 64 => None,
                 n => Some(i * Self::CHUNK_SIZE + n as usize),
             })
-            .expect("The node has no immediate dominator. This should never happen.")
+            .unwrap_or(child) // If no dominator found then return the node itself.
+    }
+}
+
+impl Tree {
+    /// Performs dominator sort on this tree. After this, each node will be
+    /// precended by a contiguous range of it's dependencies are dominatoed by
+    /// that node. This criteria also holds recursively for the nodes within
+    /// that contiguous range. A vector containing the sizes of these dominated
+    /// ranges is returned. i.e. for each node the entry in this vector
+    /// indicates the number of nodes it exclusively dominates.
+    pub fn dominator_sort(self) -> (Tree, Vec<usize>) {
+        let sorted: Vec<_> = {
+            let (indices, rev_indices) = {
+                let keys: Vec<_> = {
+                    let domtable = {
+                        let mut table = DomTable::new(self.len());
+                        for (i, node) in self.nodes().iter().enumerate().rev() {
+                            match node {
+                                Constant(_) | Symbol(_) => {} // Do nothing.
+                                Unary(_, input) => table.dominate(i, *input),
+                                Binary(_, lhs, rhs) => {
+                                    table.dominate(i, *lhs);
+                                    table.dominate(i, *rhs);
+                                }
+                                Ternary(_, a, b, c) => {
+                                    table.dominate(i, *a);
+                                    table.dominate(i, *b);
+                                    table.dominate(i, *c);
+                                }
+                            }
+                        }
+                        table
+                    };
+                    let mut deps = vec![usize::MAX, self.len()];
+                    for (pi, node) in self.nodes().iter().enumerate() {
+                        match node {
+                            Constant(_) | Symbol(_) => {} // Do nothing.
+                            Unary(_, input) => {
+                                deps[*input] = usize::min(deps[*input], pi);
+                            }
+                            Binary(_, lhs, rhs) => {
+                                deps[*lhs] = usize::min(deps[*lhs], pi);
+                                deps[*rhs] = usize::min(deps[*rhs], pi);
+                            }
+                            Ternary(_, a, b, c) => {
+                                deps[*a] = usize::min(deps[*a], pi);
+                                deps[*b] = usize::min(deps[*b], pi);
+                                deps[*c] = usize::min(deps[*c], pi);
+                            }
+                        }
+                    }
+                    deps.iter()
+                        .enumerate()
+                        .map(|(ni, dep)| (domtable.immediate_dominator(ni), *dep))
+                        .collect()
+                };
+                let mut indices: Vec<_> = (0..self.len()).collect();
+                indices.sort_by_key(|i| keys[*i]);
+                let rev_indices = indices.iter().enumerate().fold(
+                    vec![usize::MAX; self.len()],
+                    |mut r, (newi, oldi)| {
+                        r[*oldi] = newi;
+                        r
+                    },
+                );
+                (indices, rev_indices)
+            };
+            let (nodes, dims) = self.take();
+            indices
+                .iter()
+                .map(|ni| match nodes[*ni] {
+                    Constant(value) => Constant(value),
+                    Symbol(label) => Symbol(label),
+                    Unary(op, input) => Unary(op, rev_indices[input]),
+                    Binary(op, lhs, rhs) => Binary(op, rev_indices[lhs], rev_indices[rhs]),
+                    Ternary(op, a, b, c) => {
+                        Ternary(op, rev_indices[a], rev_indices[b], rev_indices[c])
+                    }
+                })
+                .collect()
+        };
+        todo!("Incomplete");
     }
 }
