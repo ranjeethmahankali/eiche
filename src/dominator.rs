@@ -177,7 +177,7 @@ impl Tree {
 
 #[cfg(test)]
 mod test {
-    use crate::deftree;
+    use crate::{Deduplicater, deftree};
 
     use super::DomTable;
 
@@ -189,5 +189,56 @@ mod test {
         assert_eq!(table.immediate_dominator(1), 2);
         assert_eq!(table.immediate_dominator(2), 3);
         assert_eq!(table.immediate_dominator(3), 3);
+    }
+
+    #[test]
+    fn t_large_tree() {
+        let tree = {
+            let mut dedup = Deduplicater::new();
+            deftree!(min
+                 (- (log (+
+                          (min
+                           (+ (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
+                           (max
+                            (- (sqrt (+ (pow (- x 3.5) 2.) (pow (- y 3.5) 2.))) 2.234)
+                            (max
+                             (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
+                             (- (sqrt (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.))) 5.243))))
+                          (exp (pow (min
+                                     (- (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
+                                     (max
+                                      (- (sqrt (+ (pow (- x 3.5) 2.) (pow (- y 3.5) 2.))) 2.234)
+                                      (max
+                                       (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
+                                       (- (sqrt (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.))) 5.243))))
+                                2.456))))
+                  (min
+                   (/ (+ (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a))
+                   (/ (- (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a))))
+                 (+ (log (+
+                          (max
+                           (- (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
+                           (min
+                            (- (sqrt (+ (pow (- x 3.5) 2.) (pow (- y 3.5) 2.))) 2.234)
+                            (min
+                             (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
+                             (- (sqrt (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.))) 5.243))))
+                          (exp (pow (max
+                                     (- (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
+                                     (min
+                                      (- (sqrt (+ (pow (- x 3.5) 2.) (pow (- y 3.5) 2.))) 2.234)
+                                      (min
+                                       (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
+                                       (- (sqrt (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.))) 5.243))))
+                                2.456))))
+                  (max
+                   (/ (+ (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a))
+                   (/ (- (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a)))))
+            .unwrap()
+            .deduplicate(&mut dedup)
+            .unwrap()
+        };
+        println!("{}", tree.len());
+        assert!(false);
     }
 }
