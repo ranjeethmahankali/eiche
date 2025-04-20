@@ -99,8 +99,12 @@ impl DomTable {
             .unwrap_or(child) // If no dominator found then return the node itself.
     }
 
+    pub fn num_nodes(&self) -> usize {
+        self.bits.len() / self.n_chunks
+    }
+
     pub fn counts(&self) -> Vec<usize> {
-        let n_nodes = self.bits.len() / self.n_chunks;
+        let n_nodes = self.num_nodes();
         let mut counts = vec![0usize; n_nodes];
         for chunks in self.bits.chunks_exact(self.n_chunks) {
             let mut offset = 0usize;
@@ -131,43 +135,43 @@ impl Tree {
     /// indicates the number of nodes it exclusively dominates.
     pub fn dominator_sort(self) -> (Tree, Vec<usize>) {
         let domtable = DomTable::from_tree(&self);
-        let tree = {
-            let (indices, rev_indices) = {
-                let keys: Vec<_> = {
-                    let mut deps = vec![usize::MAX, self.len()];
-                    for (pi, node) in self.nodes().iter().enumerate() {
-                        match node {
-                            Constant(_) | Symbol(_) => {} // Do nothing.
-                            Unary(_, input) => {
-                                deps[*input] = usize::min(deps[*input], pi);
-                            }
-                            Binary(_, lhs, rhs) => {
-                                deps[*lhs] = usize::min(deps[*lhs], pi);
-                                deps[*rhs] = usize::min(deps[*rhs], pi);
-                            }
-                            Ternary(_, a, b, c) => {
-                                deps[*a] = usize::min(deps[*a], pi);
-                                deps[*b] = usize::min(deps[*b], pi);
-                                deps[*c] = usize::min(deps[*c], pi);
-                            }
+        let (indices, rev_indices) = {
+            let keys: Vec<_> = {
+                let mut deps = vec![usize::MAX, self.len()];
+                for (pi, node) in self.nodes().iter().enumerate() {
+                    match node {
+                        Constant(_) | Symbol(_) => {} // Do nothing.
+                        Unary(_, input) => {
+                            deps[*input] = usize::min(deps[*input], pi);
+                        }
+                        Binary(_, lhs, rhs) => {
+                            deps[*lhs] = usize::min(deps[*lhs], pi);
+                            deps[*rhs] = usize::min(deps[*rhs], pi);
+                        }
+                        Ternary(_, a, b, c) => {
+                            deps[*a] = usize::min(deps[*a], pi);
+                            deps[*b] = usize::min(deps[*b], pi);
+                            deps[*c] = usize::min(deps[*c], pi);
                         }
                     }
-                    deps.iter()
-                        .enumerate()
-                        .map(|(ni, dep)| (domtable.immediate_dominator(ni), *dep))
-                        .collect()
-                };
-                let mut indices: Vec<_> = (0..self.len()).collect();
-                indices.sort_by_key(|i| keys[*i]);
-                let rev_indices = indices.iter().enumerate().fold(
-                    vec![usize::MAX; self.len()],
-                    |mut r, (newi, oldi)| {
-                        r[*oldi] = newi;
-                        r
-                    },
-                );
-                (indices, rev_indices)
+                }
+                deps.iter()
+                    .enumerate()
+                    .map(|(ni, dep)| (domtable.immediate_dominator(ni), *dep))
+                    .collect()
             };
+            let mut indices: Vec<_> = (0..self.len()).collect();
+            indices.sort_by_key(|i| keys[*i]);
+            let rev_indices = indices.iter().enumerate().fold(
+                vec![usize::MAX; self.len()],
+                |mut r, (newi, oldi)| {
+                    r[*oldi] = newi;
+                    r
+                },
+            );
+            (indices, rev_indices)
+        };
+        let tree = {
             let (nodes, dims) = self.take();
             let sorted = indices
                 .iter()
@@ -183,14 +187,19 @@ impl Tree {
                 .collect();
             Tree::from_nodes(sorted, dims).expect("This should never fail")
         };
-        (tree, domtable.counts())
+        let oldcounts = domtable.counts();
+        (tree, indices.iter().map(|i| oldcounts[*i]).collect())
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::DomTable;
-    use crate::deftree;
+    use crate::{Tree, deftree};
+
+    fn validate_sorting(tree: Tree) {
+        let (tree, counts) = tree.dominator_sort();
+    }
 
     #[test]
     fn t_one_chain() {
