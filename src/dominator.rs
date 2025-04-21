@@ -266,8 +266,10 @@ The number of dominated nodes cannot be more than the index of the node.Because
 that would imply this node is dominating more nodes than have preceded this node
 in the tree."
                 );
+                println!("========= Handling {i}...");
                 for ci in (i - count)..i {
                     domcounts[ci] += 1;
+                    println!("Incremented {ci} to {}", domcounts[ci]);
                 }
             }
             domcounts
@@ -277,7 +279,12 @@ in the tree."
             let offset = child * table.n_chunks;
             // Compare the computed dominator counts with those expected from the table.
             println!("Child: {child}");
-            println!("Counts: {domcounts:?}");
+            println!("Counts: {subcounts:?}");
+            println!("Bits:");
+            for chunk in &table.bits[offset..(offset + table.n_chunks)] {
+                print!("{:b} | ", chunk);
+            }
+            println!("");
             assert_eq!(
                 *domcount,
                 table.bits[offset..(offset + table.n_chunks)]
@@ -323,6 +330,17 @@ in the tree."
             .unwrap()
             .compacted()
             .unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_medium_tree() {
+        let tree = deftree!(max
+                            (+ (pow x 2.) (pow y 2.))
+                            (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.)))
+        .unwrap()
+        .compacted()
+        .unwrap();
         validate_sorting(tree);
     }
 
