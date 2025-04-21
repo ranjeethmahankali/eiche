@@ -158,7 +158,7 @@ impl Tree {
         let mut visited = vec![false; self.len()];
         let mut onpath = vec![false; self.len()];
         let mut roots: Vec<Node> = Vec::with_capacity(self.num_roots());
-        let mut index_map: Vec<usize> = vec![usize::MAX; self.len()];
+        let mut index_map: Vec<usize> = (0..self.len()).collect();
         let mut sorted: Vec<Node> = Vec::new();
         // Do DFS walk.
         while let Some(StackElement {
@@ -236,7 +236,15 @@ impl Tree {
             }
         }
         let tree = Tree::from_nodes(sorted, self.dims())?;
-        Ok((tree, domtable.counts()))
+        let counts = {
+            let oldcounts = domtable.counts();
+            let mut newcounts = vec![0usize; oldcounts.len()];
+            for (i, count) in index_map.iter().zip(oldcounts.iter()) {
+                newcounts[*i] = *count;
+            }
+            newcounts
+        };
+        Ok((tree, counts))
     }
 }
 
@@ -269,6 +277,7 @@ in the tree."
             let offset = child * table.n_chunks;
             // Compare the computed dominator counts with those expected from the table.
             println!("Child: {child}");
+            println!("Counts: {subcounts:?}");
             assert_eq!(
                 *domcount,
                 table.bits[offset..(offset + table.n_chunks)]
