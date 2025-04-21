@@ -176,11 +176,8 @@ impl Pruner {
             };
             if use_height {
                 let num = self.stack.len();
-                self.stack[(num - num_children)..].sort_by(
-                    |StackElement { index: a, .. }, StackElement { index: b, .. }| {
-                        self.heights[*a].cmp(&self.heights[*b])
-                    },
-                );
+                self.stack[(num - num_children)..]
+                    .sort_by_key(|StackElement { index: a, .. }| self.heights[*a]);
             }
         }
         // Push the roots.
