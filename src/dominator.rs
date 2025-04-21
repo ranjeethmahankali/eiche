@@ -277,7 +277,7 @@ in the tree."
             let offset = child * table.n_chunks;
             // Compare the computed dominator counts with those expected from the table.
             println!("Child: {child}");
-            println!("Counts: {subcounts:?}");
+            println!("Counts: {domcounts:?}");
             assert_eq!(
                 *domcount,
                 table.bits[offset..(offset + table.n_chunks)]
