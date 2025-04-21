@@ -1,4 +1,8 @@
-use crate::{Node::*, Tree};
+use crate::{
+    Error,
+    Node::{self, *},
+    Tree,
+};
 
 /// Used to manage a dominator mapping between nodes of a tree.
 ///
@@ -126,6 +130,12 @@ impl DomTable {
     }
 }
 
+struct StackElement {
+    index: usize,
+    visited_children: bool, // Whether we're visiting this node after visiting all it's children.
+    is_root: bool,
+}
+
 impl Tree {
     /// Performs dominator sort on this tree. After this, each node will be
     /// precended by a contiguous range of it's dependencies are dominatoed by
@@ -133,62 +143,100 @@ impl Tree {
     /// that contiguous range. A vector containing the sizes of these dominated
     /// ranges is returned. i.e. for each node the entry in this vector
     /// indicates the number of nodes it exclusively dominates.
-    pub fn dominator_sort(self) -> (Tree, Vec<usize>) {
+    pub fn dominator_sort(self) -> Result<(Tree, Vec<usize>), Error> {
+        // Initialize data.
         let domtable = DomTable::from_tree(&self);
-        let (indices, rev_indices) = {
-            let keys: Vec<_> = {
-                let mut deps = vec![usize::MAX; self.len()];
-                for (pi, node) in self.nodes().iter().enumerate() {
-                    match node {
-                        Constant(_) | Symbol(_) => {} // Do nothing.
-                        Unary(_, input) => {
-                            deps[*input] = usize::min(deps[*input], pi);
-                        }
-                        Binary(_, lhs, rhs) => {
-                            deps[*lhs] = usize::min(deps[*lhs], pi);
-                            deps[*rhs] = usize::min(deps[*rhs], pi);
-                        }
-                        Ternary(_, a, b, c) => {
-                            deps[*a] = usize::min(deps[*a], pi);
-                            deps[*b] = usize::min(deps[*b], pi);
-                            deps[*c] = usize::min(deps[*c], pi);
-                        }
-                    }
+        let idoms: Vec<_> = (0..self.len())
+            .map(|ni| domtable.immediate_dominator(ni))
+            .collect();
+        let mut stack: Vec<StackElement> = Vec::with_capacity(self.len());
+        stack.extend(self.root_indices().map(|r| StackElement {
+            index: r,
+            visited_children: false,
+            is_root: true,
+        }));
+        let mut visited = vec![false; self.len()];
+        let mut onpath = vec![false; self.len()];
+        let mut roots: Vec<Node> = Vec::with_capacity(self.num_roots());
+        let mut index_map: Vec<usize> = vec![usize::MAX; self.len()];
+        let mut sorted: Vec<Node> = Vec::new();
+        // Do DFS walk.
+        while let Some(StackElement {
+            index,
+            visited_children,
+            is_root,
+        }) = stack.pop()
+        {
+            if visited[index] {
+                continue;
+            }
+            if visited_children {
+                // We're backtracking after processing the children of this node. So we remove it from the path.
+                // Since we visited all children of this node, we're ready to push it into the sorted list, and mark it as
+                // processed.
+                onpath[index] = false;
+                let node = self.node(index).clone();
+                if is_root {
+                    roots.push(node);
+                } else {
+                    index_map[index] = sorted.len();
+                    sorted.push(node);
                 }
-                deps.iter()
-                    .enumerate()
-                    .map(|(ni, dep)| (domtable.immediate_dominator(ni), *dep))
-                    .collect()
+                visited[index] = true;
+                continue;
+            } else if onpath[index] {
+                // Haven't visited this node's children, but it's already on the path. This means we found a cycle.
+                return Err(Error::CyclicGraph);
+            }
+            // We reached this node for the first time. We push this node to the stack again for backtracking after it's
+            // children are visited. And we push its children on to the stack.
+            onpath[index] = true;
+            stack.push(StackElement {
+                index,
+                visited_children: true,
+                is_root,
+            });
+            let before = stack.len();
+            match self.node(index) {
+                Constant(_) | Symbol(_) => {}
+                Unary(_, input) => stack.push(StackElement {
+                    index: *input,
+                    visited_children: false,
+                    is_root: false,
+                }),
+                Binary(_op, lhs, rhs) => stack.extend([*rhs, *lhs].iter().map(|ci| StackElement {
+                    index: *ci,
+                    visited_children: false,
+                    is_root: false,
+                })),
+                Ternary(_, a, b, c) => stack.extend([*c, *b, *a].iter().map(|ci| StackElement {
+                    index: *ci,
+                    visited_children: false,
+                    is_root: false,
+                })),
             };
-            let mut indices: Vec<_> = (0..self.len()).collect();
-            indices.sort_by_key(|i| keys[*i]);
-            let rev_indices = indices.iter().enumerate().fold(
-                vec![usize::MAX; self.len()],
-                |mut r, (newi, oldi)| {
-                    r[*oldi] = newi;
-                    r
-                },
-            );
-            (indices, rev_indices)
-        };
-        let tree = {
-            let (nodes, dims) = self.take();
-            let sorted = indices
-                .iter()
-                .map(|ni| match nodes[*ni] {
-                    Constant(value) => Constant(value),
-                    Symbol(label) => Symbol(label),
-                    Unary(op, input) => Unary(op, rev_indices[input]),
-                    Binary(op, lhs, rhs) => Binary(op, rev_indices[lhs], rev_indices[rhs]),
-                    Ternary(op, a, b, c) => {
-                        Ternary(op, rev_indices[a], rev_indices[b], rev_indices[c])
-                    }
-                })
-                .collect();
-            Tree::from_nodes(sorted, dims).expect("This should never fail")
-        };
-        let oldcounts = domtable.counts();
-        (tree, indices.iter().map(|i| oldcounts[*i]).collect())
+            // Sort the children by their immediate dominator.
+            stack[before..].sort_by_key(|StackElement { index: ci, .. }| idoms[*ci] != index);
+        }
+        sorted.append(&mut roots); // Push the roots at the end.
+        // Update the inputs to new indices.
+        for node in &mut sorted {
+            match node {
+                Constant(_) | Symbol(_) => {} // Nothing.
+                Unary(_, input) => *input = index_map[*input],
+                Binary(_, lhs, rhs) => {
+                    *lhs = index_map[*lhs];
+                    *rhs = index_map[*rhs];
+                }
+                Ternary(_, a, b, c) => {
+                    *a = index_map[*a];
+                    *b = index_map[*b];
+                    *c = index_map[*c];
+                }
+            }
+        }
+        let tree = Tree::from_nodes(sorted, self.dims())?;
+        Ok((tree, domtable.counts()))
     }
 }
 
@@ -198,7 +246,8 @@ mod test {
     use crate::{Tree, deftree};
 
     fn validate_sorting(tree: Tree) {
-        let (tree, subcounts) = tree.dominator_sort();
+        let (tree, subcounts) = tree.dominator_sort().unwrap();
+        println!("Tree: \n{tree}\n");
         let domcounts = {
             let mut domcounts = vec![0usize; tree.len()];
             for (i, count) in subcounts.iter().enumerate() {
@@ -219,6 +268,7 @@ in the tree."
         for (child, domcount) in domcounts.iter().enumerate() {
             let offset = child * table.n_chunks;
             // Compare the computed dominator counts with those expected from the table.
+            println!("Child: {child}");
             assert_eq!(
                 *domcount,
                 table.bits[offset..(offset + table.n_chunks)]
