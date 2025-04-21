@@ -145,39 +145,33 @@ impl Pruner {
                 visited_children: true,
                 is_root,
             });
-            let num_children = match nodes[index] {
-                Constant(_) | Symbol(_) => 0, // No children.
-                Unary(_op, input) => {
-                    self.stack.push(StackElement {
-                        index: input,
-                        visited_children: false,
-                        is_root: false,
-                    });
-                    1
-                }
+            let before = self.stack.len();
+            match nodes[index] {
+                Constant(_) | Symbol(_) => {} // No children.
+                Unary(_op, input) => self.stack.push(StackElement {
+                    index: input,
+                    visited_children: false,
+                    is_root: false,
+                }),
                 Binary(_op, lhs, rhs) => {
-                    let children = [rhs, lhs];
-                    self.stack.extend(children.iter().map(|ci| StackElement {
+                    self.stack.extend([rhs, lhs].iter().map(|ci| StackElement {
                         index: *ci,
                         visited_children: false,
                         is_root: false,
-                    }));
-                    children.len()
+                    }))
                 }
                 Ternary(_op, a, b, c) => {
-                    let children = [c, b, a];
-                    self.stack.extend(children.iter().map(|ci| StackElement {
+                    self.stack.extend([c, b, a].iter().map(|ci| StackElement {
                         index: *ci,
                         visited_children: false,
                         is_root: false,
-                    }));
-                    children.len()
+                    }))
                 }
             };
             if use_height {
-                let num = self.stack.len();
-                self.stack[(num - num_children)..]
-                    .sort_by_key(|StackElement { index: a, .. }| self.heights[*a]);
+                // Sort the children by height.
+                self.stack[before..]
+                    .sort_by_key(|StackElement { index: ci, .. }| self.heights[*ci]);
             }
         }
         // Push the roots.
