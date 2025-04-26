@@ -336,12 +336,10 @@ in the tree."
 
     #[test]
     fn t_depth_two_diamond_nodes() {
-        let tree = deftree!(max
-                            (+ (+ x 2.) (+ y 2.))
-                            (+ (+ (sqrt x) 2.) (+ (sqrt y) 2.)))
-        .unwrap()
-        .compacted()
-        .unwrap();
+        let tree = deftree!(max (+ (+ x 2.) (+ y 2.)) (+ x y))
+            .unwrap()
+            .compacted()
+            .unwrap();
         validate_sorting(tree);
     }
 
