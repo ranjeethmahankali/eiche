@@ -130,6 +130,47 @@ impl DomTable {
     }
 }
 
+struct DomTree {
+    children_buf: Vec<usize>,
+    offsets: Vec<usize>,
+}
+
+impl DomTree {
+    pub fn from_table(table: &DomTable) -> Self {
+        let num_nodes = table.num_nodes();
+        let pairs = {
+            let mut pairs: Vec<_> = (0..num_nodes)
+                .map(|ni| (table.immediate_dominator(ni), ni))
+                .collect();
+            pairs.sort();
+            pairs
+        };
+        let mut offsets = Vec::with_capacity(num_nodes);
+        let mut children_buf = Vec::new();
+        let mut iter = pairs.iter().peekable();
+        for i in 0..num_nodes {
+            offsets.push(children_buf.len());
+            while let Some(&(_, ni)) = iter.next_if(|(idom, _)| *idom == i) {
+                children_buf.push(ni);
+            }
+        }
+        DomTree {
+            children_buf,
+            offsets,
+        }
+    }
+
+    pub fn children(&self, node: usize) -> &[usize] {
+        let start = self.offsets[node];
+        let stop = self
+            .offsets
+            .get(node + 1)
+            .cloned()
+            .unwrap_or(self.children_buf.len());
+        &self.children_buf[start..stop]
+    }
+}
+
 struct StackElement {
     index: usize,
     visited_children: bool, // Whether we're visiting this node after visiting all it's children.
