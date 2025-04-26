@@ -275,11 +275,12 @@ in the tree."
             domcounts
         };
         let table = DomTable::from_tree(&tree);
+        println!("Sub Counts: {subcounts:?}");
+        println!("Dom Counts: {domcounts:?}");
         for (child, domcount) in domcounts.iter().enumerate() {
             let offset = child * table.n_chunks;
             // Compare the computed dominator counts with those expected from the table.
             println!("Child: {child}");
-            println!("Counts: {subcounts:?}");
             println!("Bits:");
             for chunk in &table.bits[offset..(offset + table.n_chunks)] {
                 print!("{:b} | ", chunk);
@@ -330,6 +331,17 @@ in the tree."
             .unwrap()
             .compacted()
             .unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_depth_two_diamond_nodes() {
+        let tree = deftree!(max
+                            (+ (+ x 2.) (+ y 2.))
+                            (+ (+ (sqrt x) 2.) (+ (sqrt y) 2.)))
+        .unwrap()
+        .compacted()
+        .unwrap();
         validate_sorting(tree);
     }
 
