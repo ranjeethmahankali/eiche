@@ -47,7 +47,7 @@ jobs:
           diffutils
           m4
           make
-          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-clang
     - uses: actions/checkout@v4
     - name: Setup Rust
       run: |
@@ -57,8 +57,7 @@ jobs:
         rustup component add clippy
     - name: Build
       env:
-        CC: gcc
-        CXX: gcc
+        CC: clang
       run: cargo build --verbose --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
