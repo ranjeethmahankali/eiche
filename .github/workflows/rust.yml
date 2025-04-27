@@ -64,6 +64,7 @@ jobs:
         echo $PATH
         which gcc
         cargo build --verbose --all-targets
+        echo config.log
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run tests
