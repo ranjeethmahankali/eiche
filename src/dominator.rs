@@ -187,9 +187,9 @@ impl Tree {
     /// that contiguous range. A vector containing the sizes of these dominated
     /// ranges is returned. i.e. for each node the entry in this vector
     /// indicates the number of nodes it exclusively dominates.
-    pub fn dominator_sort(self) -> Result<(Tree, Vec<usize>), Error> {
+    pub fn dominator_sorted(&self) -> Result<(Tree, Vec<usize>), Error> {
         // Initialize data.
-        let domtable = DomTable::from_tree(&self);
+        let domtable = DomTable::from_tree(self);
         let domtree = DomTree::from_table(&domtable);
         let mut stack: Vec<StackElement> = Vec::with_capacity(self.len());
         stack.extend(self.root_indices().map(|r| StackElement {
@@ -299,7 +299,7 @@ mod test {
     }
 
     fn validate_sorting(tree: Tree) {
-        let (tree, subcounts) = tree.dominator_sort().unwrap();
+        let (tree, subcounts) = tree.dominator_sorted().unwrap();
         {
             // Verify the number of dominating nodes for each node are the same
             // in the table as that in the sorted results.
