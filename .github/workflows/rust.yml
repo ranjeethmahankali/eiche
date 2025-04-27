@@ -60,7 +60,6 @@ jobs:
         rustup component add clippy
     - name: Build
       env:
-        RUSTFLAGS: -C link-args=-fuse-ld=lld
         CC: gcc
         CXX: g++
       run: cargo build --verbose --all-targets
