@@ -218,7 +218,7 @@ impl Tree {
                 // Since we visited all children of this node, we're ready to push it into the sorted list, and mark it as
                 // processed.
                 onpath[index] = false;
-                let node = self.node(index).clone();
+                let node = *self.node(index);
                 if is_root {
                     roots.push(node);
                 } else {
@@ -313,8 +313,8 @@ The number of dominated nodes cannot be more than the index of the node.Because
 that would imply this node is dominating more nodes than have preceded this node
 in the tree."
                     );
-                    for ci in (i - count)..i {
-                        domcounts[ci] += 1;
+                    for count in domcounts.iter_mut().take(i).skip(i - count) {
+                        *count += 1
                     }
                 }
                 domcounts
