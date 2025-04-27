@@ -58,8 +58,7 @@ jobs:
     - name: Build
       env:
         CC: clang
-      run: |
-        cargo build --verbose --all-targets
+      run: cargo build --verbose --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run tests
