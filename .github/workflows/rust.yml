@@ -48,6 +48,9 @@ jobs:
           m4
           make
           base-devel
+          mingw-w64-i686-gcc
+          mingw-w64-i686-toolchain
+          mingw-w64-x86_64-gcc
           mingw-w64-x86_64-toolchain
     - uses: actions/checkout@v4
     - name: Setup Rust
