@@ -140,7 +140,10 @@ impl DomTree {
         let num_nodes = table.num_nodes();
         let pairs = {
             let mut pairs: Vec<_> = (0..num_nodes)
-                .map(|ni| (table.immediate_dominator(ni), ni))
+                .filter_map(|ni| match table.immediate_dominator(ni) {
+                    idom if idom == ni => None,
+                    idom => Some((idom, ni)),
+                })
                 .collect();
             pairs.sort();
             pairs
