@@ -190,9 +190,7 @@ impl Tree {
     pub fn dominator_sort(self) -> Result<(Tree, Vec<usize>), Error> {
         // Initialize data.
         let domtable = DomTable::from_tree(&self);
-        let idoms: Vec<_> = (0..self.len())
-            .map(|ni| domtable.immediate_dominator(ni))
-            .collect();
+        let domtree = DomTree::from_table(&domtable);
         let mut stack: Vec<StackElement> = Vec::with_capacity(self.len());
         stack.extend(self.root_indices().map(|r| StackElement {
             index: r,
@@ -204,6 +202,7 @@ impl Tree {
         let mut roots: Vec<Node> = Vec::with_capacity(self.num_roots());
         let mut index_map: Vec<usize> = (0..self.len()).collect();
         let mut sorted: Vec<Node> = Vec::new();
+        let mut children: Vec<usize> = Vec::new();
         // Do DFS walk.
         while let Some(StackElement {
             index,
@@ -240,27 +239,21 @@ impl Tree {
                 visited_children: true,
                 is_root,
             });
-            let before = stack.len();
+            // Process children and push them on to the stack..
             match self.node(index) {
-                Constant(_) | Symbol(_) => {}
-                Unary(_, input) => stack.push(StackElement {
-                    index: *input,
-                    visited_children: false,
-                    is_root: false,
-                }),
-                Binary(_op, lhs, rhs) => stack.extend([*rhs, *lhs].iter().map(|ci| StackElement {
-                    index: *ci,
-                    visited_children: false,
-                    is_root: false,
-                })),
-                Ternary(_, a, b, c) => stack.extend([*c, *b, *a].iter().map(|ci| StackElement {
-                    index: *ci,
-                    visited_children: false,
-                    is_root: false,
-                })),
+                Constant(_) | Symbol(_) => {} // no children.
+                Unary(_, input) => children.push(*input),
+                Binary(_op, lhs, rhs) => children.extend_from_slice(&[*rhs, *lhs]),
+                Ternary(_, a, b, c) => children.extend_from_slice(&[*c, *b, *a]),
             };
-            // Sort the children by their immediate dominator.
-            stack[before..].sort_by_key(|StackElement { index: ci, .. }| idoms[*ci] != index);
+            children.extend_from_slice(domtree.children(index));
+            children.sort_by(|a, b| b.cmp(a)); // Sort in descending order.
+            children.dedup();
+            stack.extend(children.drain(..).map(|ci| StackElement {
+                index: ci,
+                visited_children: false,
+                is_root: false,
+            }));
         }
         sorted.append(&mut roots); // Push the roots at the end.
         // Update the inputs to new indices.
