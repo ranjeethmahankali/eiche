@@ -48,7 +48,7 @@ jobs:
           m4
           make
           base-devel
-          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-clang
           mingw-w64-x86_64-toolchain
     - uses: actions/checkout@v4
     - name: Setup Rust
@@ -59,8 +59,7 @@ jobs:
         rustup component add clippy
     - name: Build
       env:
-        CC: gcc
-        CXX: g++
+        CC: clang
       run: |
         cargo build --verbose --all-targets
     - name: Find and display config.log
