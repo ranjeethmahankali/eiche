@@ -61,10 +61,13 @@ jobs:
         CC: gcc
         CXX: g++
       run: |
-        echo $PATH
-        which gcc
         cargo build --verbose --all-targets
-        echo config.log
+    - name: Find and display config.log
+      run: |
+        $configLog = Get-ChildItem -Path "D:\a\eiche\eiche\target\debug\build" -Recurse -Filter "config.log" | Select-Object -First 1 -ExpandProperty FullName
+        Write-Host "Found config.log at: $configLog"
+        Get-Content -Path $configLog
+      shell: pwsh
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run tests
