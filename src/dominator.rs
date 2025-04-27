@@ -313,7 +313,7 @@ The number of dominated nodes cannot be more than the index of the node.Because
 that would imply this node is dominating more nodes than have preceded this node
 in the tree."
                     );
-                    for count in domcounts.iter_mut().take(i).skip(i - count) {
+                    for count in domcounts.iter_mut().skip(i - count).take(*count) {
                         *count += 1
                     }
                 }
