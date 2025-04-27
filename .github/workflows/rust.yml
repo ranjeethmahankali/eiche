@@ -47,10 +47,8 @@ jobs:
           diffutils
           m4
           make
-          mingw-w64-x86_64-gcc
-          mingw-w64-x86_64-make
-          mingw-w64-x86_64-gmp
-          mingw-w64-x86_64-mpfr
+          base-devel
+          mingw-w64-x86_64-toolchain
     - uses: actions/checkout@v4
     - name: Setup Rust
       run: |
@@ -58,13 +56,14 @@ jobs:
         rustup default stable-x86_64-pc-windows-gnu
         rustup component add rustfmt
         rustup component add clippy
-        echo $PATH
-        which gcc
     - name: Build
       env:
         CC: gcc
         CXX: g++
-      run: cargo build --verbose --all-targets
+      run: |
+        echo $PATH
+        which gcc
+        cargo build --verbose --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run tests
