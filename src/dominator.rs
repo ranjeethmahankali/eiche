@@ -290,46 +290,55 @@ mod test {
     use super::DomTable;
     use crate::{Tree, deftree};
 
+    fn check(table: &DomTable, parent: usize, child: usize) -> bool {
+        let offset = child * table.n_chunks;
+        let flags = &table.bits[offset..(offset + table.n_chunks)];
+        let quot = parent / DomTable::CHUNK_SIZE;
+        let rem = parent % DomTable::CHUNK_SIZE;
+        flags[quot] & (1 << rem) != 0
+    }
+
     fn validate_sorting(tree: Tree) {
         let (tree, subcounts) = tree.dominator_sort().unwrap();
-        println!("Tree: \n{tree}\n");
-        let domcounts = {
-            let mut domcounts = vec![0usize; tree.len()];
-            for (i, count) in subcounts.iter().enumerate() {
-                assert!(
-                    *count <= i,
-                    "
+        {
+            // Verify the number of dominating nodes for each node are the same
+            // in the table as that in the sorted results.
+            let domcounts = {
+                let mut domcounts = vec![0usize; tree.len()];
+                for (i, count) in subcounts.iter().enumerate() {
+                    assert!(
+                        *count <= i,
+                        "
 The number of dominated nodes cannot be more than the index of the node.Because
 that would imply this node is dominating more nodes than have preceded this node
 in the tree."
-                );
-                println!("========= Handling {i}...");
-                for ci in (i - count)..i {
-                    domcounts[ci] += 1;
-                    println!("Incremented {ci} to {}", domcounts[ci]);
+                    );
+                    for ci in (i - count)..i {
+                        domcounts[ci] += 1;
+                    }
                 }
+                domcounts
+            };
+            let table = DomTable::from_tree(&tree);
+            for (child, domcount) in domcounts.iter().enumerate() {
+                let offset = child * table.n_chunks;
+                // Compare the computed dominator counts with those expected from the table.
+                assert_eq!(
+                    *domcount,
+                    table.bits[offset..(offset + table.n_chunks)]
+                        .iter()
+                        .map(|chunk| chunk.count_ones() as usize)
+                        .sum::<usize>()
+                )
             }
-            domcounts
-        };
+        }
+        // Ensure all the nodes indicated as dominated by the sorted results,
+        // are also flagged as such in the table.
         let table = DomTable::from_tree(&tree);
-        println!("Sub Counts: {subcounts:?}");
-        println!("Dom Counts: {domcounts:?}");
-        for (child, domcount) in domcounts.iter().enumerate() {
-            let offset = child * table.n_chunks;
-            // Compare the computed dominator counts with those expected from the table.
-            println!("Child: {child}");
-            println!("Bits:");
-            for chunk in &table.bits[offset..(offset + table.n_chunks)] {
-                print!("{:b} | ", chunk);
+        for (pi, count) in subcounts.iter().enumerate() {
+            for ci in (pi - count)..pi {
+                assert!(check(&table, pi, ci));
             }
-            println!("");
-            assert_eq!(
-                *domcount,
-                table.bits[offset..(offset + table.n_chunks)]
-                    .iter()
-                    .map(|chunk| chunk.count_ones() as usize)
-                    .sum::<usize>()
-            )
         }
     }
 
