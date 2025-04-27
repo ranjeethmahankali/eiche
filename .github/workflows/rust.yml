@@ -63,6 +63,7 @@ jobs:
       run: |
         cargo build --verbose --all-targets
     - name: Find and display config.log
+      if: always()  # This ensures the step runs even if previous steps fail
       run: |
         $configLog = Get-ChildItem -Path "D:\a\eiche\eiche\target\debug\build" -Recurse -Filter "config.log" | Select-Object -First 1 -ExpandProperty FullName
         Write-Host "Found config.log at: $configLog"
