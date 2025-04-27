@@ -34,7 +34,7 @@ jobs:
       run: cargo test --verbose --all-targets --all-features
 
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2019
     defaults:
       run:
         shell: msys2 {0}
@@ -48,8 +48,6 @@ jobs:
           m4
           make
           base-devel
-          mingw-w64-i686-gcc
-          mingw-w64-i686-toolchain
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-toolchain
     - uses: actions/checkout@v4
