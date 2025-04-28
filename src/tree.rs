@@ -1,4 +1,4 @@
-use crate::{dedup::Deduplicater, error::Error, fold::fold_nodes, prune::Pruner};
+use crate::{dedup::Deduplicater, error::Error, fold::fold, prune::Pruner};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -165,16 +165,14 @@ pub struct Tree {
     dims: (usize, usize),
 }
 
-pub type MaybeTree = Result<Tree, Error>;
-
 const fn matsize(dims: (usize, usize)) -> usize {
     dims.0 * dims.1
 }
 
 impl Tree {
-    pub fn from_nodes(nodes: Vec<Node>, dims: (usize, usize)) -> MaybeTree {
+    pub fn from_nodes(nodes: Vec<Node>, dims: (usize, usize)) -> Result<Tree, Error> {
         let t = Tree { nodes, dims };
-        return t.validated();
+        t.validated()
     }
 
     /// Create a tree representing a constant value.
@@ -187,23 +185,25 @@ impl Tree {
 
     /// Fold the constants, deduplicate subtrees, prune unused subtrees and
     /// return a topologically sorted compacted equivalent to this tree.
-    pub fn compacted(mut self) -> MaybeTree {
-        fold_nodes(&mut self.nodes)?;
+    pub fn compacted(mut self) -> Result<Tree, Error> {
+        fold(&mut self.nodes)?;
         let mut pruner = Pruner::new();
         let roots = self.root_indices();
-        let (mut nodes, roots) = pruner.run_from_range(self.nodes, roots)?;
+        let (mut nodes, dims) = self.take();
+        let roots = pruner.run_from_range(&mut nodes, roots)?;
         let mut deduper = Deduplicater::new();
         // We don't need to check because we just ran the pruner on these nodes, which sorts them topologically.
         deduper.run(&mut nodes)?;
         let mut pruner = Pruner::new();
-        let (nodes, _) = pruner.run_from_range(nodes, roots)?;
-        return Tree::from_nodes(nodes, self.dims);
+        pruner.run_from_range(&mut nodes, roots)?;
+        Tree::from_nodes(nodes, dims)
     }
     /// Prunes the tree and topologically sorts the nodes.
-    pub fn prune(self, pruner: &mut Pruner) -> MaybeTree {
+    pub fn prune(self, pruner: &mut Pruner) -> Result<Tree, Error> {
         let roots = self.root_indices();
-        let (nodes, _) = pruner.run_from_range(self.nodes, roots)?;
-        return Tree::from_nodes(nodes, self.dims);
+        let (mut nodes, dims) = self.take();
+        pruner.run_from_range(&mut nodes, roots)?;
+        Tree::from_nodes(nodes, dims)
     }
 
     /// Create a tree representing a symbol with the given `label`.
@@ -218,7 +218,7 @@ impl Tree {
     /// matrices, they are flattened and then concatenated into a flat
     /// vector. If the caller doesn't want a vector, they can use the `reshape`
     /// function to reshape the tree after concatenation.
-    pub fn concat(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
+    pub fn concat(lhs: Result<Tree, Error>, rhs: Result<Tree, Error>) -> Result<Tree, Error> {
         let mut lhs = lhs?;
         let mut rhs = rhs?;
         let (llen, lsize) = (lhs.len(), lhs.num_roots());
@@ -240,18 +240,27 @@ impl Tree {
         // concatenations makes sure all the root nodes are at the end.
         lhs.nodes[(llen - lsize)..(llen + rlen - rsize)].rotate_left(lsize);
         lhs.dims = (lsize + rsize, 1);
-        return Ok(lhs);
+        Ok(lhs)
     }
 
     /// Get a piece wise expression from the given condition, value when true
     /// and value when false.
-    pub fn piecewise(cond: MaybeTree, iftrue: MaybeTree, iffalse: MaybeTree) -> MaybeTree {
-        return cond?.ternary_op(iftrue?, iffalse?, Choose);
+    pub fn piecewise(
+        cond: Result<Tree, Error>,
+        iftrue: Result<Tree, Error>,
+        iffalse: Result<Tree, Error>,
+    ) -> Result<Tree, Error> {
+        cond?.ternary_op(iftrue?, iffalse?, Choose)
     }
 
     /// The number of nodes in this tree.
     pub fn len(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Check if the tree is empty.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
     }
 
     /// Get the number of roots in this tree.
@@ -266,7 +275,7 @@ impl Tree {
 
     /// Change the shape of this tree. If the new shape doesn't correspond to
     /// the same number of elements, an error is returned.
-    pub fn reshape(self, rows: usize, cols: usize) -> MaybeTree {
+    pub fn reshape(self, rows: usize, cols: usize) -> Result<Tree, Error> {
         if matsize((rows, cols)) == self.num_roots() {
             Ok(Tree {
                 nodes: self.nodes,
@@ -318,6 +327,21 @@ impl Tree {
 
     /// Get a unique list of all symbols in this tree. The symbols will appear
     /// in the same order as they first appear in the tree.
+    /// ```
+    /// use eiche::deftree;
+    /// assert_eq!(
+    ///     deftree!(* (+ x y) a).unwrap().symbols(),
+    ///     vec!['x', 'y', 'a']
+    /// );
+    /// assert_eq!(
+    ///     deftree!(* (+ a x) y).unwrap().symbols(),
+    ///     vec!['a', 'x', 'y']
+    /// );
+    /// assert_eq!(
+    ///     deftree!(* (+ a y) x).unwrap().symbols(),
+    ///     vec!['a', 'y', 'x']
+    /// );
+    /// ```
     pub fn symbols(&self) -> Vec<char> {
         let symbols: Vec<_> = self
             .nodes
@@ -334,12 +358,12 @@ impl Tree {
         indices.sort_by(|a, b| symbols[*a].cmp(&symbols[*b]));
         indices.dedup_by(|a, b| symbols[*a] == symbols[*b]);
         indices.sort();
-        return indices.iter().map(|i| symbols[*i]).collect();
+        indices.iter().map(|i| symbols[*i]).collect()
     }
 
     /// Check the tree for errors and return a Result that contains the tree if
     /// no errors were found, or the first error encountered with the tree.
-    fn validated(self) -> MaybeTree {
+    fn validated(self) -> Result<Tree, Error> {
         /* We make sure the inputs of every node appear before that node
          * itself. This is important when evaluating the tree, but also ensures
          * there are no cycles in the tree.
@@ -374,24 +398,24 @@ impl Tree {
             return Err(Error::DependentRootNodes);
         }
         // Maybe add more checks later.
-        return Ok(self);
+        Ok(self)
     }
 
-    fn unary_op(mut self, op: UnaryOp) -> MaybeTree {
+    fn unary_op(mut self, op: UnaryOp) -> Result<Tree, Error> {
         for root in self.root_indices() {
             self.nodes.push(Unary(op, root));
         }
-        return Ok(self);
+        Ok(self)
     }
 
-    fn binary_op(mut self, other: Tree, op: BinaryOp) -> MaybeTree {
+    fn binary_op(mut self, other: Tree, op: BinaryOp) -> Result<Tree, Error> {
         let nroots = self.num_roots();
         let other_nroots = other.num_roots();
         if nroots != 1 && other_nroots != 1 && nroots != other_nroots {
             return Err(Error::DimensionMismatch(self.dims, other.dims));
         }
         self.nodes
-            .reserve(self.nodes.len() + other.nodes.len() + usize::max(nroots, other_nroots));
+            .reserve(other.nodes.len() + usize::max(nroots, other_nroots));
         let offset = self.push_nodes(&other);
         if nroots == 1 {
             let root = offset - 1;
@@ -408,10 +432,10 @@ impl Tree {
                 self.nodes.push(Binary(op, l, r + offset));
             }
         }
-        return Ok(self);
+        Ok(self)
     }
 
-    fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> MaybeTree {
+    fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> Result<Tree, Error> {
         let anroots = a.num_roots();
         let bnroots = b.num_roots();
         if anroots != bnroots {
@@ -421,8 +445,7 @@ impl Tree {
         if nroots != 1 && nroots != anroots {
             return Err(Error::DimensionMismatch(self.dims, a.dims));
         }
-        self.nodes
-            .reserve(self.nodes.len() + a.nodes.len() + b.nodes.len() + 1);
+        self.nodes.reserve(a.nodes.len() + b.nodes.len() + 1);
         let a_offset = self.push_nodes(&a);
         let b_offset = self.push_nodes(&b);
         if nroots == 1 {
@@ -440,25 +463,25 @@ impl Tree {
                     .push(Ternary(op, r, ar + a_offset, br + b_offset));
             }
         }
-        return Ok(self);
+        Ok(self)
     }
 
     fn push_nodes(&mut self, other: &Tree) -> usize {
         let offset: usize = self.nodes.len();
         self.nodes.extend(other.nodes.iter().map(|node| match node {
             Constant(value) => Constant(*value),
-            Symbol(label) => Symbol(label.clone()),
+            Symbol(label) => Symbol(*label),
             Unary(op, input) => Unary(*op, *input + offset),
             Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
             Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
         }));
-        return offset;
+        offset
     }
 }
 
 macro_rules! unary_func {
     ($name:ident, $op:ident) => {
-        pub fn $name(tree: MaybeTree) -> MaybeTree {
+        pub fn $name(tree: Result<Tree, Error>) -> Result<Tree, Error> {
             tree?.unary_op($op)
         }
     };
@@ -477,7 +500,7 @@ unary_func!(not, Not);
 
 macro_rules! binary_func {
     ($name:ident, $op:ident) => {
-        pub fn $name(lhs: MaybeTree, rhs: MaybeTree) -> MaybeTree {
+        pub fn $name(lhs: Result<Tree, Error>, rhs: Result<Tree, Error>) -> Result<Tree, Error> {
             lhs?.binary_op(rhs?, $op)
         }
     };
@@ -500,7 +523,7 @@ binary_func!(geq, GreaterOrEqual);
 binary_func!(and, And);
 binary_func!(or, Or);
 
-pub fn reshape(tree: MaybeTree, rows: usize, cols: usize) -> MaybeTree {
+pub fn reshape(tree: Result<Tree, Error>, rows: usize, cols: usize) -> Result<Tree, Error> {
     tree?.reshape(rows, cols)
 }
 
@@ -536,7 +559,7 @@ impl From<bool> for Tree {
 
 impl From<char> for Tree {
     fn from(c: char) -> Self {
-        return Self::symbol(c);
+        Self::symbol(c)
     }
 }
 
@@ -747,7 +770,17 @@ mod test {
 
     #[test]
     fn t_symbols() {
-        let tree = deftree!(* (+ x y) a).unwrap();
-        assert_eq!(tree.symbols(), vec!['x', 'y', 'a']);
+        assert_eq!(
+            deftree!(* (+ x y) a).unwrap().symbols(),
+            vec!['x', 'y', 'a']
+        );
+        assert_eq!(
+            deftree!(* (+ a x) y).unwrap().symbols(),
+            vec!['a', 'x', 'y']
+        );
+        assert_eq!(
+            deftree!(* (+ a y) x).unwrap().symbols(),
+            vec!['a', 'y', 'x']
+        );
     }
 }

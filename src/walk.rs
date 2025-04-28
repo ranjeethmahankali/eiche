@@ -19,6 +19,7 @@ struct StackElement {
 /// allocations. Those buffers are owned by this instance. So reusing
 /// the same walker many times is recommended to avoid unnecessary
 /// allocations.
+#[derive(Default)]
 pub struct DepthWalker {
     stack: Vec<StackElement>,
     visited: Vec<bool>, // Whether a node is already visited.
@@ -26,14 +27,6 @@ pub struct DepthWalker {
 }
 
 impl DepthWalker {
-    pub fn new() -> DepthWalker {
-        DepthWalker {
-            stack: Vec::new(),
-            visited: Vec::new(),
-            on_path: Vec::new(),
-        }
-    }
-
     fn init_from_roots<I: Iterator<Item = usize>>(&mut self, num_nodes: usize, roots: I) {
         // Prep the stack.
         self.stack.clear();
@@ -70,7 +63,7 @@ impl DepthWalker {
             unique,
             ordering,
             walker: self,
-            nodes: &nodes,
+            nodes,
             last_pushed: 0,
         }
     }
@@ -123,10 +116,10 @@ pub struct DepthIterator<'a, const CHECK_FOR_CYCLES: bool> {
     nodes: &'a [Node],
 }
 
-impl<'a, const CHECK_FOR_CYCLES: bool> DepthIterator<'a, CHECK_FOR_CYCLES> {
+impl<const CHECK_FOR_CYCLES: bool> DepthIterator<'_, CHECK_FOR_CYCLES> {
     fn sort_children(&self, parent: &Node, children: &mut [usize]) {
-        use std::cmp::Ordering;
         use NodeOrdering::*;
+        use std::cmp::Ordering;
         if children.len() < 2 {
             // Nothing to sort.
             return;
@@ -217,7 +210,7 @@ impl<'a, const CHECK_FOR_CYCLES: bool> DepthIterator<'a, CHECK_FOR_CYCLES> {
     }
 }
 
-impl<'a> Iterator for DepthIterator<'a, false> {
+impl Iterator for DepthIterator<'_, false> {
     type Item = (usize, Option<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -235,11 +228,11 @@ impl<'a> Iterator for DepthIterator<'a, false> {
         };
         self.push_children(index);
         self.walker.visited[index] = true;
-        return Some((index, parent));
+        Some((index, parent))
     }
 }
 
-impl<'a> Iterator for DepthIterator<'a, true> {
+impl Iterator for DepthIterator<'_, true> {
     type Item = Result<(usize, Option<usize>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -247,21 +240,17 @@ impl<'a> Iterator for DepthIterator<'a, true> {
             index,
             parent,
             visited_children,
-        } = {
-            let mut elem = self.walker.stack.pop()?;
-            loop {
-                if !elem.visited_children && self.walker.on_path[elem.index] {
-                    return Some(Err(Error::CyclicGraph));
-                }
-                if elem.visited_children {
-                    self.walker.on_path[elem.index] = false;
-                }
-                if !(self.unique && self.walker.visited[elem.index]) && !elem.visited_children {
-                    break;
-                }
-                elem = self.walker.stack.pop()?;
+        } = loop {
+            let elem = self.walker.stack.pop()?;
+            if !elem.visited_children && self.walker.on_path[elem.index] {
+                return Some(Err(Error::CyclicGraph));
             }
-            elem
+            if elem.visited_children {
+                self.walker.on_path[elem.index] = false;
+                continue;
+            } else if !(self.unique && self.walker.visited[elem.index]) {
+                break elem;
+            }
         };
         debug_assert!(!visited_children, "Invalid depth first traversal.");
         if self.walker.on_path[index] {
@@ -275,7 +264,7 @@ impl<'a> Iterator for DepthIterator<'a, true> {
         });
         self.push_children(index);
         self.walker.visited[index] = true;
-        return Some(Ok((index, parent)));
+        Some(Ok((index, parent)))
     }
 }
 
@@ -286,17 +275,15 @@ mod test {
 
     #[test]
     fn t_depth_traverse() {
-        let mut walker = DepthWalker::new();
+        let mut walker = DepthWalker::default();
         {
             let tree = deftree!(+ (pow x 2.) (pow y 2.)).unwrap();
             // Make sure two successive traversal yield the same nodes.
             let a: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
                 .collect();
             let b: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
         }
@@ -305,12 +292,10 @@ mod test {
             let tree = deftree!(+ (pow x 3.) (pow y 3.)).unwrap();
             let a: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
                 .collect();
             let tree2 = tree.clone();
             let b: Vec<_> = walker
                 .walk_tree(&tree2, true, NodeOrdering::Original)
-                .map(|(index, parent)| (index, parent))
                 .collect();
             assert_eq!(a, b);
         }
@@ -319,7 +304,7 @@ mod test {
     #[test]
     fn t_cyclic_graph() {
         use crate::tree::{BinaryOp::*, UnaryOp::*, Value::*};
-        let mut walker = DepthWalker::new();
+        let mut walker = DepthWalker::default();
         let foldfn = |acc, current| match (acc, current) {
             (Ok(_), Ok(_)) => Ok(()),
             (Ok(_), Err(e)) => Err(e),

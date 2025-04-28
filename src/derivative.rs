@@ -1,18 +1,15 @@
 use crate::{
     error::Error,
-    fold::fold_nodes,
+    fold::fold,
     prune::Pruner,
-    tree::{
-        add, div, sub, BinaryOp::*, MaybeTree, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*,
-        Value::*,
-    },
+    tree::{BinaryOp::*, Node, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*, add, div, sub},
 };
 
 /// Compute the symbolic derivative of `tree` with respect to
 /// `params`. Irrespective of the dimensions of the input `tree`, it is
 /// flattened into a vector of length, say, 'n'. The symbolic derivative is a
 /// Jacobian matrix of dimensions n x params.len().
-pub fn symbolic_deriv(tree: MaybeTree, params: &str) -> MaybeTree {
+pub fn symbolic_deriv(tree: Result<Tree, Error>, params: &str) -> Result<Tree, Error> {
     tree?.symbolic_deriv(params)
 }
 
@@ -21,7 +18,7 @@ pub fn symbolic_deriv(tree: MaybeTree, params: &str) -> MaybeTree {
 /// dimensions of the input `tree`, it is flattened into a vector of length,
 /// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
 /// params.len().
-pub fn numerical_deriv(tree: MaybeTree, params: &str, eps: f64) -> MaybeTree {
+pub fn numerical_deriv(tree: Result<Tree, Error>, params: &str, eps: f64) -> Result<Tree, Error> {
     tree?.numerical_deriv(params, eps)
 }
 
@@ -30,7 +27,7 @@ impl Tree {
     /// `params`. Irrespective of the dimensions of the input `tree`, it is
     /// flattened into a vector of length, say, 'n'. The symbolic derivative is a
     /// Jacobian matrix of dimensions n x params.len().
-    pub fn symbolic_deriv(&self, params: &str) -> MaybeTree {
+    pub fn symbolic_deriv(&self, params: &str) -> Result<Tree, Error> {
         let (root_start, root_end) = {
             let root_indices = self.root_indices();
             (root_indices.start, root_indices.end)
@@ -47,24 +44,22 @@ impl Tree {
                 &mut derivs,
                 &mut derivmap,
             );
-            nodes.extend(derivs.drain(..));
-            for ri in root_start..root_end {
-                rootnodes.push(match derivmap[ri] {
-                    Some(deriv) => deriv,
-                    None => return Err(Error::CannotComputeSymbolicDerivative),
-                });
+            nodes.append(&mut derivs);
+            for deriv in derivmap.drain(root_start..root_end) {
+                rootnodes.push(deriv.ok_or(Error::CannotComputeSymbolicDerivative)?);
             }
         }
+        debug_assert_eq!(rootnodes.len(), self.num_roots() * params.len());
         // Below operations all perform allocations. I am assuming symbolic
         // derivatives won't be computed in a hot path so it may not be a big
         // deal. But in the future, I might consider putting these resources in
         // an object that the caller can pass in. That would allow the caller to
         // reuse the resources and avoid repeated allocations.
         let mut pruner = Pruner::new();
-        let mut nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
-        fold_nodes(&mut nodes)?;
-        let nodes = pruner.run_from_slice(nodes, &mut rootnodes)?;
-        return Tree::from_nodes(nodes, (root_end - root_start, params.len()));
+        pruner.run_from_slice(&mut nodes, &mut rootnodes)?;
+        fold(&mut nodes)?;
+        pruner.run_from_slice(&mut nodes, &mut rootnodes)?;
+        Tree::from_nodes(nodes, (root_end - root_start, params.len()))
     }
 
     /// Get a tree representing the numerical derivative of the input `tree` with
@@ -72,28 +67,33 @@ impl Tree {
     /// dimensions of the input `tree`, it is flattened into a vector of length,
     /// say, 'n'. The symbolic derivative is a Jacobian matrix of dimensions n x
     /// params.len().
-    pub fn numerical_deriv(&self, params: &str, eps: f64) -> MaybeTree {
-        let mut deriv = None;
-        for param in params.chars() {
-            let (left, right) = {
-                let var = Tree::symbol(param);
-                let eps = Tree::constant(Scalar(eps));
-                let newvar = sub(Ok(var.clone()), Ok(eps.clone()))?;
-                let left = self.clone().substitute(&var, &newvar);
-                let newvar = add(Ok(var.clone()), Ok(eps))?;
-                let right = self.clone().substitute(&var, &newvar);
-                (left, right)
-            };
-            let partial = div(sub(right, left), Ok(Tree::constant(Scalar(2. * eps))));
-            deriv = Some(match deriv {
-                Some(tree) => Tree::concat(tree, partial),
-                None => partial,
-            });
-        }
-        match deriv {
-            Some(output) => output?.reshape(self.num_roots(), params.len()),
-            None => Err(Error::CannotComputeNumericDerivative),
-        }
+    pub fn numerical_deriv(&self, params: &str, eps: f64) -> Result<Tree, Error> {
+        // Numerically differentiate with each param, and concatenate the
+        // derivatives into one matrix with `fold`. Things can go wrong so we
+        // use `try_fold`.
+        params
+            .chars()
+            .try_fold(
+                None,
+                |deriv: Option<Tree>, param: char| -> Result<Option<Tree>, Error> {
+                    let (left, right) = {
+                        let var = Tree::symbol(param);
+                        let eps = Tree::constant(Scalar(eps));
+                        let newvar = sub(Ok(var.clone()), Ok(eps.clone()))?;
+                        let left = self.clone().substitute(&var, &newvar);
+                        let newvar = add(Ok(var.clone()), Ok(eps))?;
+                        let right = self.clone().substitute(&var, &newvar);
+                        (left, right)
+                    };
+                    let partial = div(sub(right, left), Ok(Tree::constant(Scalar(2. * eps))));
+                    Ok(Some(match deriv {
+                        Some(tree) => Tree::concat(Ok(tree), partial)?,
+                        None => partial?,
+                    }))
+                },
+            )?
+            .ok_or(Error::CannotComputeNumericDerivative)?
+            .reshape(self.num_roots(), params.len()) // The correct shape for derivatives. No reordering required.
     }
 }
 
@@ -213,7 +213,7 @@ fn compute_symbolic_deriv(
                         Binary(Subtract, lderiv, gderiv_floorfg)
                     }
                     Less | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual | And | Or => {
-                        continue
+                        continue;
                     }
                 }
             }
@@ -239,7 +239,7 @@ fn compute_symbolic_deriv(
 fn push_node(node: Node, dst: &mut Vec<Node>) -> usize {
     let idx = dst.len();
     dst.push(node);
-    return idx;
+    idx
 }
 
 #[cfg(test)]
@@ -328,7 +328,7 @@ mod test {
             &deftree!(pow (/ 1 (cos x)) 2).unwrap(),
             &[('x', -1.5, 1.5)],
             100,
-            1e-3,
+            1e-14,
         );
         compare_trees(
             &deftree!(sderiv (sin (pow x 2)) x).unwrap(),
@@ -468,6 +468,13 @@ mod test {
         compare_trees(
             &deftree!(nderiv (- (sqrt (+ (pow x 2) (pow y 2))) 5.) xy 1e-4).unwrap(),
             &deftree!(reshape (/ (concat x y) (sqrt (+ (pow x 2) (pow y 2)))) 1 2).unwrap(),
+            &[('y', -10., 10.), ('x', -10., 10.)],
+            20,
+            1e-7,
+        );
+        compare_trees(
+            &deftree!(nderiv (concat (+ (* 3 (pow x 2)) y) (+ (* 3 (pow y 2)) x)) xy 1e-4).unwrap(),
+            &deftree!(reshape (concat (* 6 x) 1 1 (* 6 y)) 2 2).unwrap(),
             &[('y', -10., 10.), ('x', -10., 10.)],
             20,
             1e-7,

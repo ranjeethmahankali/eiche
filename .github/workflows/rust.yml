@@ -1,4 +1,4 @@
-name: Build and Run Tests
+name: CI
 
 on:
   push:
@@ -6,28 +6,80 @@ on:
   pull_request:
     branches: [ "main" ]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-test-linux:
+  linux:
     runs-on: ubuntu-latest
     steps:
+    - name: Update Rust
+      run: rustup update stable
     - uses: actions/checkout@v4
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v1
       with:
-        version: "14.0"
+        version: "15.0"
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --verbose --all-features --all-targets
+    - name: Check formatting
+      run: cargo fmt -- --check
+    - name: Run Clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose --all-targets --all-features
 
-  build-and-test-windows:
+  windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
+    - uses: msys2/setup-msys2@v2
+      with:
+        path-type: inherit
+        update: true
+        install: >-
+          diffutils
+          m4
+          make
+          mingw-w64-x86_64-clang
+    - uses: actions/checkout@v4
+    - name: Setup Rust
+      run: |
+        rustup install stable-x86_64-pc-windows-gnu
+        rustup default stable-x86_64-pc-windows-gnu
+        rustup component add rustfmt
+        rustup component add clippy
+    - name: Build
+      env:
+        CC: clang
+      run: cargo build --verbose --all-targets
+    - name: Check formatting
+      run: cargo fmt -- --check
+    - name: Run tests
+      run: cargo test --verbose --all-targets
+
+  macos:
+    runs-on: macos-latest
+    steps:
+    - name: Set up Homebrew
+      id: set-up-homebrew
+      uses: Homebrew/actions/setup-homebrew@master
+    - name: Install Homebrew Dependencies
+      run: brew install gcc cmake llvm@15 gmp
+    - name: Update Rust
+      run: rustup update stable
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build --verbose --no-default-features
+      run: cargo build --verbose --all-features --all-targets
+    - name: Check formatting
+      run: cargo fmt -- --check
+    - name: Run Clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
     - name: Run tests
-      run: cargo test --verbose --no-default-features
+      run: cargo test --verbose --all-targets --all-features

@@ -1,7 +1,7 @@
 use crate::{
     dedup::equivalent,
     error::Error,
-    tree::{MaybeTree, Node::*, Tree},
+    tree::{Node::*, Tree},
     walk::DepthWalker,
 };
 
@@ -9,7 +9,7 @@ impl Tree {
     /// Substitute all subtrees (sub expressions) in this tree that are
     /// equivalent to `old` with `new`. Both `old` and `new` are expected to
     /// represent scalars, i.e. have dimensions (1, 1).
-    pub fn substitute(self, old: &Tree, new: &Tree) -> MaybeTree {
+    pub fn substitute(self, old: &Tree, new: &Tree) -> Result<Tree, Error> {
         if old.dims() != (1, 1) || new.dims() != (1, 1) {
             return Err(Error::InvalidDimensions);
         }
@@ -19,8 +19,8 @@ impl Tree {
         // the current logic for checking equivalence to take advantage of
         // results from the past. I am skipping this optimization for now.
         let oldroot = old.root_indices().start;
-        let mut lwalker = DepthWalker::new();
-        let mut rwalker = DepthWalker::new();
+        let mut lwalker = DepthWalker::default();
+        let mut rwalker = DepthWalker::default();
         let flags = {
             let mut flags = Vec::with_capacity(self.len());
             for ni in 0..self.len() {
@@ -43,11 +43,7 @@ impl Tree {
         let newroot = new.root_indices().start;
         let offset = newroot + 1;
         let map_input = move |i: usize| {
-            if flags[i] {
-                newroot
-            } else {
-                i + offset
-            }
+            if flags[i] { newroot } else { i + offset }
         };
         let (mut nodes, dims) = self.take();
         for node in &mut nodes {
@@ -61,7 +57,7 @@ impl Tree {
         // Instead of prepending the new tree nodes, we append them and rotate the the whole slice.
         nodes.extend(new.nodes().iter());
         nodes.rotate_right(new.len());
-        return Tree::from_nodes(nodes, dims);
+        Tree::from_nodes(nodes, dims)
     }
 }
 

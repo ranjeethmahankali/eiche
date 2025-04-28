@@ -1,13 +1,14 @@
 use crate::error::Error;
 use inkwell::{
-    builder::Builder,
+    OptimizationLevel, OptimizationLevel,
+    builder::{Builder, BuilderError},
     context::Context,
+    execution_engine::FunctionLookupError,
     module::Module,
     passes::PassManager,
     targets::{
         CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple,
     },
-    OptimizationLevel,
 };
 use std::path::Path;
 
@@ -28,6 +29,18 @@ impl Default for JitContext {
         JitContext {
             inner: Context::create(),
         }
+    }
+}
+
+impl From<BuilderError> for Error {
+    fn from(value: BuilderError) -> Self {
+        Error::JitCompilationError(value.to_string())
+    }
+}
+
+impl From<FunctionLookupError> for Error {
+    fn from(value: FunctionLookupError) -> Self {
+        Error::JitCompilationError(value.to_string())
     }
 }
 
@@ -109,5 +122,5 @@ impl<'ctx> JitCompiler<'ctx> {
 
 pub mod single;
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 pub mod simd_array;

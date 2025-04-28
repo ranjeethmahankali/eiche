@@ -1,14 +1,22 @@
 use crate::{
     error::Error,
     eval::{Evaluator, ValueType},
-    tree::{BinaryOp, BinaryOp::*, TernaryOp, UnaryOp, UnaryOp::*, Value},
+    tree::{
+        BinaryOp::{self, *},
+        TernaryOp::{self, *},
+        UnaryOp::{self, *},
+        Value,
+    },
 };
 use std::ops::{Add, Div, Mul, Neg, Sub};
+
+pub mod fold;
+pub mod pruning_eval;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Interval {
     Scalar(inari::Interval),
-    Boolean(bool, bool),
+    Bool(bool, bool),
 }
 
 impl Interval {
@@ -21,16 +29,16 @@ impl Interval {
 
     pub fn boolean(&self) -> Result<(bool, bool), Error> {
         match self {
-            Interval::Boolean(lower, upper) => Ok((*lower, *upper)),
+            Interval::Bool(lower, upper) => Ok((*lower, *upper)),
             _ => Err(Error::TypeMismatch),
         }
     }
 
     pub fn from_boolean(lower: bool, upper: bool) -> Result<Interval, Error> {
         Ok(if lower != upper && lower {
-            Interval::Boolean(upper, lower)
+            Interval::Bool(upper, lower)
         } else {
-            Interval::Boolean(lower, upper)
+            Interval::Bool(lower, upper)
         })
     }
 
@@ -44,18 +52,24 @@ impl Interval {
     }
 }
 
+impl Default for Interval {
+    fn default() -> Self {
+        Interval::Scalar(inari::Interval::ENTIRE)
+    }
+}
+
 impl ValueType for Interval {
     fn from_scalar(val: f64) -> Result<Self, Error> {
         Interval::from_scalar(val, val)
     }
 
     fn from_boolean(val: bool) -> Result<Self, Error> {
-        Ok(Interval::Boolean(val, val))
+        Ok(Interval::Bool(val, val))
     }
 
     fn from_value(val: Value) -> Result<Self, Error> {
         match val {
-            Value::Bool(val) => Ok(Interval::Boolean(val, val)),
+            Value::Bool(val) => Ok(Interval::Bool(val, val)),
             Value::Scalar(val) => Interval::from_scalar(val, val),
         }
     }
@@ -74,7 +88,7 @@ impl ValueType for Interval {
                 Floor => it.floor(),
                 Not => return Err(Error::TypeMismatch),
             }),
-            Interval::Boolean(lower, upper) => match op {
+            Interval::Bool(lower, upper) => match op {
                 Not => {
                     let (lower, upper) = match (lower, upper) {
                         (true, true) => (false, false),
@@ -84,14 +98,14 @@ impl ValueType for Interval {
                     Interval::from_boolean(lower, upper)?
                 }
                 Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
-                    return Err(Error::TypeMismatch)
+                    return Err(Error::TypeMismatch);
                 }
             },
         })
     }
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
-        use {inari::Overlap::*, Interval::*};
+        use {Interval::*, inari::Overlap::*};
         match (lhs, rhs) {
             (Scalar(lhs), Scalar(rhs)) => match op {
                 Add => Ok(Interval::Scalar(lhs.add(rhs))),
@@ -181,12 +195,12 @@ impl ValueType for Interval {
                     };
                     Interval::from_boolean(lo, hi)
                 }
-                And | Or => return Err(Error::TypeMismatch),
+                And | Or => Err(Error::TypeMismatch),
             },
-            (Boolean(llo, lhi), Boolean(rlo, rhi)) => match op {
+            (Bool(llo, lhi), Bool(rlo, rhi)) => match op {
                 Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
                 | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => {
-                    return Err(Error::TypeMismatch)
+                    Err(Error::TypeMismatch)
                 }
                 And => {
                     let (lo, hi) = match (llo, lhi, rlo, rhi) {
@@ -205,13 +219,12 @@ impl ValueType for Interval {
                     Interval::from_boolean(lo, hi)
                 }
             },
-            _ => return Err(Error::TypeMismatch),
+            _ => Err(Error::TypeMismatch),
         }
     }
 
     fn ternary_op(op: TernaryOp, a: Self, b: Self, c: Self) -> Result<Self, Error> {
         use Interval::*;
-        use TernaryOp::*;
         match op {
             Choose => match a.boolean()? {
                 (true, true) => Ok(b),
@@ -220,10 +233,8 @@ impl ValueType for Interval {
                         f64::min(b.inf(), c.inf()),
                         f64::max(b.sup(), c.sup()),
                     ),
-                    (Scalar(_), Boolean(_, _)) | (Boolean(_, _), Scalar(_)) => {
-                        return Err(Error::TypeMismatch)
-                    }
-                    (Boolean(blo, bhi), Boolean(clo, chi)) => {
+                    (Scalar(_), Bool(_, _)) | (Bool(_, _), Scalar(_)) => Err(Error::TypeMismatch),
+                    (Bool(blo, bhi), Bool(clo, chi)) => {
                         if blo == bhi && blo == clo && blo == chi {
                             Interval::from_boolean(false, true)
                         } else {
@@ -248,8 +259,8 @@ pub type IntervalEvaluator = Evaluator<Interval>;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, eval::ValueEvaluator, test::assert_float_eq, test::Sampler, tree::Tree};
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use crate::{ValueEvaluator, assert_float_eq, deftree, test::Sampler, tree::Tree};
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     /**
     Helper function to check interval evaluations by evaluating the given
@@ -331,7 +342,7 @@ mod test {
                     let inf = lower + local_idx * step;
                     intervals.push(inari::interval!(inf, inf + step).unwrap());
                     multiplier *= intervals_per_var;
-                    return (idx, intervals, multiplier);
+                    (idx, intervals, multiplier)
                 },
             );
             assert!(index < computed.len());
@@ -377,8 +388,8 @@ mod test {
         let mut rng = StdRng::seed_from_u64(42);
         const MAX_VAL: f64 = 32.;
         for _ in 0..100 {
-            let lo = MAX_VAL * rng.gen::<f64>();
-            let hi = MAX_VAL * rng.gen::<f64>();
+            let lo = MAX_VAL * rng.random::<f64>();
+            let hi = MAX_VAL * rng.random::<f64>();
             let (outlo, outhi) = {
                 let mut outlo = lo * lo;
                 let mut outhi = hi * hi;

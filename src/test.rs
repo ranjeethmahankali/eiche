@@ -1,37 +1,9 @@
 use crate::{
+    assert_float_eq,
     eval::ValueEvaluator,
     tree::{Tree, Value},
 };
-use rand::{rngs::StdRng, Rng, SeedableRng};
-
-/// Assert that the floating point numbers are equal within the given epsilon.
-macro_rules! assert_float_eq {
-    ($a:expr, $b:expr, $eps:expr, $debug:expr) => {{
-        // Make variables to avoid evaluating experssions multiple times.
-        let a = $a;
-        let b = $b;
-        let eps = $eps;
-        let error = f64::abs(a - b);
-        if error > eps {
-            eprintln!("{:?}", $debug);
-        }
-        assert!(
-            error <= eps,
-            "Assertion failed: |({}) - ({})| = {:e} <= {:e}",
-            a,
-            b,
-            error,
-            eps
-        );
-    }};
-    ($a:expr, $b:expr, $eps:expr) => {
-        assert_float_eq!($a, $b, $eps, "")
-    };
-    ($a:expr, $b:expr) => {
-        assert_float_eq!($a, $b, f64::EPSILON)
-    };
-}
-pub(crate) use assert_float_eq;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 /// Helper for sampling multiple variables at once.
 pub(crate) struct Sampler {
@@ -54,7 +26,7 @@ impl Sampler {
         for &(_label, lower, upper) in vardata {
             let span = upper - lower;
             for _ in 0..samples_per_var {
-                var_samples.push(lower + rng.gen::<f64>() * span);
+                var_samples.push(lower + rng.random::<f64>() * span);
             }
         }
         Sampler {
@@ -84,7 +56,7 @@ impl Sampler {
         if self.counter.iter().all(|c| *c == 0) {
             self.done = true;
         }
-        return Some(&self.sample);
+        Some(&self.sample)
     }
 }
 
@@ -104,7 +76,7 @@ pub fn check_value_eval<F>(
     samples_per_var: usize,
     eps: f64,
 ) where
-    F: FnMut(&[f64], &mut [f64]) -> (),
+    F: FnMut(&[f64], &mut [f64]),
 {
     let mut eval = ValueEvaluator::new(&tree);
     let mut sampler = Sampler::new(vardata, samples_per_var, 42);
@@ -117,10 +89,10 @@ pub fn check_value_eval<F>(
         let results = eval.run().unwrap();
         assert_eq!(results.len(), expected.len());
         expected.fill(f64::NAN);
-        expectedfn(&sample, &mut expected);
+        expectedfn(sample, &mut expected);
         for (lhs, rhs) in expected.iter().zip(results.iter()) {
             match rhs {
-                Value::Bool(_) => assert!(false, "Found a boolean when expecting a scalar"),
+                Value::Bool(_) => panic!("Found a boolean when expecting a scalar"),
                 Value::Scalar(rhs) => assert_float_eq!(lhs, rhs, eps),
             }
         }
@@ -151,8 +123,8 @@ pub fn compare_trees(
         tree1.dims(),
         tree2.dims()
     );
-    let mut eval1 = ValueEvaluator::new(&tree1);
-    let mut eval2 = ValueEvaluator::new(&tree2);
+    let mut eval1 = ValueEvaluator::new(tree1);
+    let mut eval2 = ValueEvaluator::new(tree2);
     let mut sampler = Sampler::new(vardata, samples_per_var, 42);
     let symbols: Vec<_> = vardata.iter().map(|(label, ..)| *label).collect();
     while let Some(sample) = sampler.next() {
@@ -171,7 +143,7 @@ pub fn compare_trees(
             match (l, r) {
                 (Value::Scalar(a), Value::Scalar(b)) => assert_float_eq!(a, b, eps, sample),
                 (Value::Bool(a), Value::Bool(b)) => assert_eq!(a, b),
-                _ => assert!(false, "Mismatched types"),
+                _ => panic!("Mismatched types"),
             }
         }
     }

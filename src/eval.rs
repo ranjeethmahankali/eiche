@@ -1,5 +1,5 @@
 use crate::{
-    compile::{compile, Instructions},
+    compile::{CompileCache, CompileOutput, compile},
     error::Error,
     tree::{
         BinaryOp::{self, *},
@@ -10,9 +10,10 @@ use crate::{
         Value,
     },
 };
+use std::{collections::BTreeMap, fmt::Debug};
 
 /// Size of a value type must be known at compile time.
-pub trait ValueType: Sized + Copy {
+pub trait ValueType: Sized + Copy + Debug + Default {
     fn from_scalar(val: f64) -> Result<Self, Error>;
     fn from_boolean(val: bool) -> Result<Self, Error>;
     fn from_value(val: Value) -> Result<Self, Error>;
@@ -34,6 +35,12 @@ impl Value {
             Value::Scalar(_) => Err(Error::TypeMismatch),
             Value::Bool(val) => Ok(*val),
         }
+    }
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Value::Scalar(0.)
     }
 }
 
@@ -130,7 +137,7 @@ where
 {
     ops: Vec<(Node, usize)>,
     regs: Vec<T>,
-    vars: Vec<(char, T)>,
+    vars: BTreeMap<char, T>,
     root_regs: Vec<usize>,
     outputs: Vec<T>,
 }
@@ -141,38 +148,40 @@ where
 {
     /// Create a new evaluator for `tree`.
     pub fn new(tree: &Tree) -> Evaluator<T> {
-        let Instructions {
-            ops,
-            num_regs,
-            out_regs: root_regs,
-        } = compile(tree);
+        let mut ops = Vec::with_capacity(tree.len());
+        let mut root_regs = Vec::with_capacity(tree.num_roots());
+        let mut cache = CompileCache::default();
+        let num_regs = compile(
+            tree.nodes(),
+            tree.root_indices(),
+            &mut cache,
+            CompileOutput {
+                ops: &mut ops,
+                out_regs: &mut root_regs,
+            },
+        );
         let num_roots = root_regs.len();
-        return Evaluator {
+        debug_assert_eq!(num_roots, tree.num_roots());
+        Evaluator {
             ops,
-            regs: vec![T::from_scalar(0.).unwrap(); num_regs],
-            vars: Vec::new(),
+            regs: vec![T::default(); num_regs],
+            vars: BTreeMap::new(),
             root_regs,
             outputs: vec![T::from_scalar(0.).unwrap(); num_roots],
-        };
+        }
     }
 
     /// Get the number of registers used by this evaluator. This is not the same
     /// as the number of nodes in the tree, because registers are allocated as
     /// needed, and reused where possible.
     pub fn num_regs(&self) -> usize {
-        return self.regs.len();
+        self.regs.len()
     }
 
     /// Set the value of a scalar variable with the given label. You'd do this
     /// for all the inputs before running the evaluator.
     pub fn set_value(&mut self, label: char, value: T) {
-        for (l, v) in self.vars.iter_mut() {
-            if *l == label {
-                *v = value;
-                return;
-            }
-        }
-        self.vars.push((label, value));
+        self.vars.insert(label, value);
     }
 
     /// Run the evaluator and return the result. The result may
@@ -183,8 +192,8 @@ where
         for (node, out) in &self.ops {
             self.regs[*out] = match node {
                 Constant(val) => T::from_value(*val).unwrap(),
-                Symbol(label) => match self.vars.iter().find(|(l, _v)| *l == *label) {
-                    Some((_l, v)) => *v,
+                Symbol(label) => match self.vars.get(label) {
+                    Some(&v) => v,
                     None => return Err(Error::VariableNotFound(*label)),
                 },
                 Unary(op, input) => T::unary_op(*op, self.regs[*input])?,
@@ -197,7 +206,7 @@ where
         self.outputs.clear();
         self.outputs
             .extend(self.root_regs.iter().map(|r| self.regs[*r]));
-        return Ok(&self.outputs);
+        Ok(&self.outputs)
     }
 }
 
@@ -206,8 +215,7 @@ pub type ValueEvaluator = Evaluator<Value>;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::deftree;
-    use crate::test::{assert_float_eq, check_value_eval};
+    use crate::{assert_float_eq, deftree, test::check_value_eval};
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
 
@@ -218,7 +226,7 @@ mod test {
         let mut eval = ValueEvaluator::new(&x);
         match eval.run() {
             Ok(val) => assert_eq!(val, &[Value::Scalar(std::f64::consts::PI)]),
-            _ => assert!(false),
+            _ => panic!(),
         }
     }
 
@@ -239,7 +247,7 @@ mod test {
             eval.set_value('y', y.into());
             match eval.run() {
                 Ok(val) => assert_eq!(val, &[expected]),
-                _ => assert!(false),
+                _ => panic!(),
             }
         }
     }
@@ -251,7 +259,7 @@ mod test {
         let mut eval = ValueEvaluator::new(&sum);
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
-            let x: f64 = PI_2 * rng.gen::<f64>();
+            let x: f64 = PI_2 * rng.random::<f64>();
             eval.set_value('x', x.into());
             let val = eval.run().unwrap();
             assert_eq!(val.len(), 1);
@@ -428,5 +436,16 @@ mod test {
             100,
             1e-14,
         );
+    }
+
+    #[test]
+    fn t_bug_repro() {
+        let tree = deftree!(concat 1 (const -1.))
+            .unwrap()
+            .reshape(1, 2)
+            .unwrap();
+        let mut eval = ValueEvaluator::new(&tree);
+        let output = eval.run().unwrap();
+        assert_eq!(&[Value::Scalar(1.), Value::Scalar(-1.)], output);
     }
 }

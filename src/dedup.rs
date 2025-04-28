@@ -2,7 +2,6 @@ use crate::{
     error::Error,
     hash::hash_nodes,
     tree::{
-        MaybeTree,
         Node::{self, *},
         Tree,
     },
@@ -23,14 +22,20 @@ pub struct Deduplicater {
     hash_to_index: HashMap<u64, usize>,
 }
 
+impl Default for Deduplicater {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Deduplicater {
     /// Create a new deduplicater.
     pub fn new() -> Self {
         Deduplicater {
             indices: vec![],
             hashes: vec![],
-            walker1: DepthWalker::new(),
-            walker2: DepthWalker::new(),
+            walker1: DepthWalker::default(),
+            walker2: DepthWalker::default(),
             hash_to_index: HashMap::new(),
         }
     }
@@ -49,7 +54,7 @@ impl Deduplicater {
         // Compute unique indices after deduplication.
         self.indices.clear();
         self.indices.extend(0..nodes.len());
-        hash_nodes(&nodes, &mut self.hashes);
+        hash_nodes(nodes, &mut self.hashes);
         self.hash_to_index.clear();
         for i in 0..self.hashes.len() {
             let h = self.hashes[i];
@@ -58,8 +63,8 @@ impl Deduplicater {
                 && equivalent(
                     *entry,
                     i,
-                    &nodes,
-                    &nodes,
+                    nodes,
+                    nodes,
                     &mut self.walker1,
                     &mut self.walker2,
                 )?
@@ -91,7 +96,7 @@ impl Deduplicater {
                 }
             }
         }
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -116,7 +121,7 @@ pub fn equivalent_trees(
 ) -> bool {
     let lwalk = lwalker.walk_tree(ltree, false, NodeOrdering::Deterministic);
     let rwalk = rwalker.walk_tree(rtree, false, NodeOrdering::Deterministic);
-    return depth_walk_equivalent_trees(lwalk, rwalk, ltree, rtree);
+    depth_walk_equivalent_trees(lwalk, rwalk, ltree, rtree)
 }
 
 /// Check if the subtrees starting at 'left' and 'right' are equivalent.
@@ -138,7 +143,7 @@ pub fn equivalent(
         false,
         NodeOrdering::Deterministic,
     );
-    return depth_walk_equivalent_nodes(liter, riter, lnodes, rnodes);
+    depth_walk_equivalent_nodes(liter, riter, lnodes, rnodes)
 }
 
 /// Walk the depth iterators and compare the nodes for equivalence. The
@@ -224,19 +229,19 @@ fn depth_walk_equivalent_trees<'a>(
 
 impl Tree {
     /// Deduplicate the common subtrees in this tree.
-    pub fn deduplicate(self, dedup: &mut Deduplicater) -> MaybeTree {
+    pub fn deduplicate(self, dedup: &mut Deduplicater) -> Result<Tree, Error> {
         let (mut nodes, dims) = self.take();
         dedup.run(&mut nodes)?; // We don't need to check because the nodes came from a tree.
-        return Tree::from_nodes(nodes, dims);
+        Tree::from_nodes(nodes, dims)
     }
 
     pub fn equivalent(&self, other: &Tree) -> bool {
         if self.dims() != other.dims() {
             return false;
         }
-        let mut lwalker = DepthWalker::new();
-        let mut rwalker = DepthWalker::new();
-        return equivalent_trees(&self, &other, &mut lwalker, &mut rwalker);
+        let mut lwalker = DepthWalker::default();
+        let mut rwalker = DepthWalker::default();
+        equivalent_trees(self, other, &mut lwalker, &mut rwalker)
     }
 }
 
@@ -247,15 +252,15 @@ mod test {
         deftree,
         prune::Pruner,
         test::compare_trees,
-        tree::{is_topological_order, BinaryOp::*},
+        tree::{BinaryOp::*, is_topological_order},
     };
 
     #[test]
     fn t_recursive_compare() {
         // Check if 'Add' node with mirrored inputs is compared
         // correctly.
-        let mut walker1 = DepthWalker::new();
-        let mut walker2 = DepthWalker::new();
+        let mut walker1 = DepthWalker::default();
+        let mut walker2 = DepthWalker::default();
         let mut nodes = vec![
             Symbol('y'),            // 0
             Symbol('x'),            // 1
@@ -351,8 +356,8 @@ mod test {
             .unwrap()
             .prune(&mut pruner)
             .unwrap();
-        let mut walker1 = DepthWalker::new();
-        let mut walker2 = DepthWalker::new();
+        let mut walker1 = DepthWalker::default();
+        let mut walker2 = DepthWalker::default();
         assert!(equivalent_trees(&a, &b, &mut walker1, &mut walker2));
         assert!(a.equivalent(&b));
     }
@@ -425,8 +430,10 @@ mod test {
 
     #[test]
     fn t_ternary() {
-        assert!(deftree!(if (< x 0) (log (* x 3)) (exp (+ x 3)))
-            .unwrap()
-            .equivalent(&deftree!(if (< x 0) (log (* 3 x)) (exp (+ 3 x))).unwrap()));
+        assert!(
+            deftree!(if (< x 0) (log (* x 3)) (exp (+ x 3)))
+                .unwrap()
+                .equivalent(&deftree!(if (< x 0) (log (* 3 x)) (exp (+ 3 x))).unwrap())
+        );
     }
 }

@@ -1,7 +1,7 @@
 [package]
 name = "eiche"
-version = "0.1.1"
-edition = "2021"
+version = "0.3.2"
+edition = "2024"
 authors = ["Ranjeeth Mahankali <ranjeethmahankali@gmail.com>"]
 description = "A library with tools for working with symbolic expressions."
 readme = "README.md"
@@ -13,12 +13,30 @@ categories = ["mathematics"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand = "0.8"
-lazy_static = "1.4"
-inkwell = { version = "0.4", features = ["llvm14-0"], optional = true }
-inari = { version = "2.0", optional = true }
+rand = "0.9.0"
+# Inkwell requires the following system dependencies:
+# llvm-15, llvm-15-dev, libclang-common-15-dev, update the version number as required.
+inkwell = { version = "0.6.0", features = ["llvm15-0"], optional = true }
+inari = { version = "2.0.0" }
 
 [features]
-default = ["llvm-jit", "inari-intervals"]
 llvm-jit = ["dep:inkwell"]
-inari-intervals = ["dep:inari"]
+
+[dev-dependencies]
+image = "0.25"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "evaluation"
+path = "benches/eval.rs"
+harness = false
+
+[[bench]]
+name = "reduce"
+path = "benches/reduce.rs"
+harness = false
+
+[profile.release-with-debug]
+inherits = "release"
+strip = false # Automatically strip symbols
+debug = true
