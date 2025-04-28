@@ -398,7 +398,7 @@ impl Tree {
         compiler.write_llvm_ir(&std::path::Path::new(
             "/mnt/d/dev/linux/fidgetmark/hex_llvm.ir",
         )); // temporary code.
-        Ok(JitEvaluator::create(func, symbols.len(), num_roots))
+        Ok(JitFn::create(func, symbols.len(), num_roots))
     }
 }
 

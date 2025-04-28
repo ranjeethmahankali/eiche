@@ -1,6 +1,6 @@
 use crate::error::Error;
 use inkwell::{
-    OptimizationLevel, OptimizationLevel,
+    OptimizationLevel,
     builder::{Builder, BuilderError},
     context::Context,
     execution_engine::FunctionLookupError,
