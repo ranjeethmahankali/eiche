@@ -137,7 +137,7 @@ impl Tree {
                             &format!("arg_{}", *label),
                         )?
                     };
-                    builder.build_load(float_type, ptr, &format!("reg_{}", *label))?
+                    builder.build_load(float_type, ptr, &format!("val_{}", *label))?
                 }
                 _ => todo!("Not implemented"),
             };
