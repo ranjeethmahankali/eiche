@@ -286,7 +286,7 @@ impl Tree {
         Wfloat: SimdVec<T>,
         T: Copy,
     {
-        const FUNC_NAME: &str = "eiche_func";
+        const FUNC_NAME: &str = "eiche_simd_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
         let context = &context.inner;
