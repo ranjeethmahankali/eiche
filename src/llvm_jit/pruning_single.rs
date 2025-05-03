@@ -1,6 +1,6 @@
-use super::{JitContext, NumberType};
-use crate::{Error, Tree, llvm_jit::JitCompiler};
-use inkwell::AddressSpace;
+use super::{JitCompiler, JitContext, NumberType};
+use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
+use inkwell::{AddressSpace, values::BasicValueEnum};
 use std::ffi::c_void;
 
 type UnsafePruningFuncType = unsafe extern "C" fn(
@@ -110,6 +110,38 @@ impl Tree {
             .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         builder.position_at_end(context.append_basic_block(function, "entry"));
+        let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(tree.len());
+        for (ni, node) in tree.nodes().iter().enumerate() {
+            let reg = match node {
+                Constant(val) => match val {
+                    Bool(val) => BasicValueEnum::IntValue(
+                        bool_type.const_int(if *val { 1 } else { 0 }, false),
+                    ),
+                    Scalar(val) => BasicValueEnum::FloatValue(float_type.const_float(*val)),
+                },
+                Symbol(label) => {
+                    let inputs = function
+                        .get_first_param()
+                        .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
+                        .into_pointer_value();
+                    let ptr = unsafe {
+                        builder.build_gep(
+                            float_type,
+                            inputs,
+                            &[context.i64_type().const_int(
+                                symbols.iter().position(|c| c == label).ok_or(
+                                    Error::JitCompilationError("Cannot find symbol".to_string()),
+                                )? as u64,
+                                false,
+                            )],
+                            &format!("arg_{}", *label),
+                        )?
+                    };
+                    builder.build_load(float_type, ptr, &format!("reg_{}", *label))?
+                }
+                _ => todo!("Not implemented"),
+            };
+        }
         todo!("Not Implemented");
     }
 }
