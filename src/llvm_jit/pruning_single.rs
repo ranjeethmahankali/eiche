@@ -17,10 +17,12 @@ struct JumpTable {
 }
 
 impl JumpTable {
-    fn from_counts(counts: &[usize], count_threshold: usize) -> Self {
+    fn from_counts(counts: &[usize], num_roots: usize, count_threshold: usize) -> Self {
+        let num_nodes = counts.len();
         let pairs = {
             let mut pairs: Vec<_> = counts
                 .iter()
+                .take(num_nodes - num_roots) // Ignore the roots.
                 .enumerate()
                 .filter_map(|(i, c)| {
                     if *c >= count_threshold {
@@ -33,17 +35,17 @@ impl JumpTable {
             pairs.sort();
             pairs
         };
-        let mut targets = Vec::with_capacity(counts.len());
-        let mut offsets = Vec::with_capacity(counts.len());
+        let mut targets = Vec::with_capacity(num_nodes);
+        let mut offsets = Vec::with_capacity(num_nodes);
         let mut iter = pairs.iter().peekable();
-        for ni in 0..counts.len() {
+        for ni in 0..num_nodes {
             offsets.push(targets.len());
             while let Some((_, target)) = iter.next_if(|(i, _)| *i == ni) {
                 targets.push(*target);
             }
         }
         let prunable = {
-            let mut prunable = vec![false; offsets.len()];
+            let mut prunable = vec![false; num_nodes];
             for t in targets.iter() {
                 prunable[*t] = true;
             }
@@ -66,6 +68,10 @@ impl JumpTable {
         &self.targets[start..stop]
     }
 
+    fn num_nodes(&self) -> usize {
+        self.offsets.len()
+    }
+
     fn is_prunable(&self, node: usize) -> bool {
         self.prunable[node]
     }
@@ -81,7 +87,8 @@ impl Tree {
         T: NumberType,
     {
         let (tree, counts) = self.control_dependence_sorted()?;
-        let jtable = JumpTable::from_counts(&counts, prune_threshold);
+        let num_roots = tree.num_roots();
+        let jtable = JumpTable::from_counts(&counts, num_roots, prune_threshold);
         let signal_offsets: Vec<_> = (0..tree.len())
             .map(|i| jtable.is_prunable(i))
             .scan(0usize, |scan, current| {
@@ -97,7 +104,6 @@ impl Tree {
             "The number of prunable nodes should be equal to the number of signals computed via scan."
         );
         const FUNC_NAME: &str = "eiche_pruning_func";
-        let num_roots = tree.num_roots();
         let symbols = tree.symbols();
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
