@@ -1,4 +1,4 @@
-use super::{JitCompiler, JitContext};
+use super::{JitCompiler, JitContext, NumberType};
 use crate::{
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
@@ -6,86 +6,15 @@ use crate::{
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
     builder::Builder,
-    context::Context,
     execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
     types::{BasicTypeEnum, FloatType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
 };
-use std::{
-    ffi::c_void,
-    ops::{Add, AddAssign, Div, DivAssign, MulAssign, Neg, Sub, SubAssign},
-};
+use std::ffi::c_void;
 
 type UnsafeFuncType = unsafe extern "C" fn(*const c_void, *mut c_void);
-
-pub trait NumberType:
-    Copy
-    + PartialOrd
-    + Neg
-    + Div
-    + DivAssign
-    + Add
-    + AddAssign
-    + Sub<Output = Self>
-    + SubAssign
-    + MulAssign
-{
-    fn nan() -> Self;
-
-    fn jit_type(context: &Context) -> FloatType<'_>;
-
-    fn from_f64(val: f64) -> Self;
-
-    fn min(a: Self, b: Self) -> Self;
-
-    fn max(a: Self, b: Self) -> Self;
-}
-
-impl NumberType for f32 {
-    fn nan() -> Self {
-        f32::NAN
-    }
-
-    fn jit_type(context: &Context) -> FloatType<'_> {
-        context.f32_type()
-    }
-
-    fn from_f64(val: f64) -> Self {
-        val as f32
-    }
-
-    fn min(a: Self, b: Self) -> Self {
-        f32::min(a, b)
-    }
-
-    fn max(a: Self, b: Self) -> Self {
-        f32::max(a, b)
-    }
-}
-
-impl NumberType for f64 {
-    fn nan() -> Self {
-        f64::NAN
-    }
-
-    fn jit_type(context: &Context) -> FloatType<'_> {
-        context.f64_type()
-    }
-
-    fn from_f64(val: f64) -> Self {
-        val
-    }
-
-    fn min(a: Self, b: Self) -> Self {
-        f64::min(a, b)
-    }
-
-    fn max(a: Self, b: Self) -> Self {
-        f64::max(a, b)
-    }
-}
 
 /// This represents a JIT compiled tree. This is a wrapper around the JIT compiled native function.
 pub struct JitFn<'ctx, T>

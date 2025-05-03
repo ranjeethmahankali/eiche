@@ -7,8 +7,12 @@ use inkwell::{
     module::Module,
     passes::PassManager,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
+    types::FloatType,
 };
-use std::path::Path;
+use std::{
+    ops::{Add, AddAssign, Div, DivAssign, MulAssign, Neg, Sub, SubAssign},
+    path::Path,
+};
 
 /// Context for comiling a tree to LLVM. This is just a thin wrapper around
 /// inkwell Context.
@@ -90,6 +94,73 @@ impl<'ctx> JitCompiler<'ctx> {
         self.machine
             .write_to_file(&self.module, FileType::Assembly, path)
             .unwrap();
+    }
+}
+
+pub trait NumberType:
+    Copy
+    + PartialOrd
+    + Neg
+    + Div
+    + DivAssign
+    + Add
+    + AddAssign
+    + Sub<Output = Self>
+    + SubAssign
+    + MulAssign
+{
+    fn nan() -> Self;
+
+    fn jit_type(context: &Context) -> FloatType<'_>;
+
+    fn from_f64(val: f64) -> Self;
+
+    fn min(a: Self, b: Self) -> Self;
+
+    fn max(a: Self, b: Self) -> Self;
+}
+
+impl NumberType for f32 {
+    fn nan() -> Self {
+        f32::NAN
+    }
+
+    fn jit_type(context: &Context) -> FloatType<'_> {
+        context.f32_type()
+    }
+
+    fn from_f64(val: f64) -> Self {
+        val as f32
+    }
+
+    fn min(a: Self, b: Self) -> Self {
+        f32::min(a, b)
+    }
+
+    fn max(a: Self, b: Self) -> Self {
+        f32::max(a, b)
+    }
+}
+
+impl NumberType for f64 {
+    fn nan() -> Self {
+        f64::NAN
+    }
+
+    fn jit_type(context: &Context) -> FloatType<'_> {
+        context.f64_type()
+    }
+
+    fn from_f64(val: f64) -> Self {
+        val
+    }
+
+    fn min(a: Self, b: Self) -> Self {
+        f64::min(a, b)
+    }
+
+    fn max(a: Self, b: Self) -> Self {
+        f64::max(a, b)
     }
 }
 
