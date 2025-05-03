@@ -123,7 +123,7 @@ mod spheres {
     #[cfg(feature = "llvm-jit")]
     pub mod jit_single {
         use super::*;
-        use eiche::{JitContext, JitFn, llvm_jit::single::NumberType};
+        use eiche::{JitContext, JitFn, llvm_jit::NumberType};
 
         pub fn init_benchmark<T>() -> (Tree, Vec<[T; 3]>, Vec<T>)
         where

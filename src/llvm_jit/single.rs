@@ -1,91 +1,20 @@
-use super::{JitCompiler, JitContext};
-use crate::{
-    error::Error,
-    tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
-};
+use super::{JitCompiler, JitContext, NumberType};
+use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
     builder::Builder,
-    context::Context,
     execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
     types::{BasicTypeEnum, FloatType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
 };
-use std::{
-    ffi::c_void,
-    ops::{Add, AddAssign, Div, DivAssign, MulAssign, Neg, Sub, SubAssign},
-};
+use std::ffi::c_void;
 
-type UnsafeFuncType = unsafe extern "C" fn(*const c_void, *mut c_void);
-
-pub trait NumberType:
-    Copy
-    + PartialOrd
-    + Neg
-    + Div
-    + DivAssign
-    + Add
-    + AddAssign
-    + Sub<Output = Self>
-    + SubAssign
-    + MulAssign
-{
-    fn nan() -> Self;
-
-    fn jit_type(context: &Context) -> FloatType<'_>;
-
-    fn from_f64(val: f64) -> Self;
-
-    fn min(a: Self, b: Self) -> Self;
-
-    fn max(a: Self, b: Self) -> Self;
-}
-
-impl NumberType for f32 {
-    fn nan() -> Self {
-        f32::NAN
-    }
-
-    fn jit_type(context: &Context) -> FloatType<'_> {
-        context.f32_type()
-    }
-
-    fn from_f64(val: f64) -> Self {
-        val as f32
-    }
-
-    fn min(a: Self, b: Self) -> Self {
-        f32::min(a, b)
-    }
-
-    fn max(a: Self, b: Self) -> Self {
-        f32::max(a, b)
-    }
-}
-
-impl NumberType for f64 {
-    fn nan() -> Self {
-        f64::NAN
-    }
-
-    fn jit_type(context: &Context) -> FloatType<'_> {
-        context.f64_type()
-    }
-
-    fn from_f64(val: f64) -> Self {
-        val
-    }
-
-    fn min(a: Self, b: Self) -> Self {
-        f64::min(a, b)
-    }
-
-    fn max(a: Self, b: Self) -> Self {
-        f64::max(a, b)
-    }
-}
+type UnsafeFuncType = unsafe extern "C" fn(
+    *const c_void, // Inputs
+    *mut c_void,   // Outputs
+);
 
 /// This represents a JIT compiled tree. This is a wrapper around the JIT compiled native function.
 pub struct JitFn<'ctx, T>
@@ -137,8 +66,7 @@ impl Tree {
             .void_type()
             .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
-        let basic_block = context.append_basic_block(function, "entry");
-        builder.position_at_end(basic_block);
+        builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
@@ -166,12 +94,12 @@ impl Tree {
                             &format!("arg_{}", *label),
                         )?
                     };
-                    builder.build_load(float_type, ptr, &format!("reg_{}", *label))?
+                    builder.build_load(float_type, ptr, &format!("val_{}", *label))?
                 }
                 Unary(op, input) => match op {
                     Negate => BasicValueEnum::FloatValue(builder.build_float_neg(
                         regs[*input].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Sqrt => build_float_unary_intrinsic(
                         builder,
@@ -225,7 +153,7 @@ impl Tree {
                         BasicValueEnum::FloatValue(builder.build_float_div(
                             sin.into_float_value(),
                             cos.into_float_value(),
-                            &format!("reg_{}", ni),
+                            &format!("val_{}", ni),
                         )?)
                     }
                     Log => build_float_unary_intrinsic(
@@ -253,29 +181,29 @@ impl Tree {
                         float_type,
                     )?,
                     Not => BasicValueEnum::IntValue(
-                        builder.build_not(regs[*input].into_int_value(), &format!("reg_{}", ni))?,
+                        builder.build_not(regs[*input].into_int_value(), &format!("val_{}", ni))?,
                     ),
                 },
                 Binary(op, lhs, rhs) => match op {
                     Add => BasicValueEnum::FloatValue(builder.build_float_add(
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Subtract => BasicValueEnum::FloatValue(builder.build_float_sub(
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Multiply => BasicValueEnum::FloatValue(builder.build_float_mul(
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Divide => BasicValueEnum::FloatValue(builder.build_float_div(
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Pow => build_float_binary_intrinsic(
                         builder,
@@ -307,53 +235,53 @@ impl Tree {
                     Remainder => BasicValueEnum::FloatValue(builder.build_float_rem(
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Less => BasicValueEnum::IntValue(builder.build_float_compare(
                         FloatPredicate::ULT,
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     LessOrEqual => BasicValueEnum::IntValue(builder.build_float_compare(
                         FloatPredicate::ULE,
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Equal => BasicValueEnum::IntValue(builder.build_float_compare(
                         FloatPredicate::UEQ,
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     NotEqual => BasicValueEnum::IntValue(builder.build_float_compare(
                         FloatPredicate::UNE,
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Greater => BasicValueEnum::IntValue(builder.build_float_compare(
                         FloatPredicate::UGT,
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     GreaterOrEqual => BasicValueEnum::IntValue(builder.build_float_compare(
                         FloatPredicate::UGE,
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     And => BasicValueEnum::IntValue(builder.build_and(
                         regs[*lhs].into_int_value(),
                         regs[*rhs].into_int_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                     Or => BasicValueEnum::IntValue(builder.build_or(
                         regs[*lhs].into_int_value(),
                         regs[*rhs].into_int_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?),
                 },
                 Ternary(op, a, b, c) => match op {
@@ -361,7 +289,7 @@ impl Tree {
                         regs[*a].into_int_value(),
                         regs[*b].into_float_value(),
                         regs[*c].into_float_value(),
-                        &format!("reg_{}", ni),
+                        &format!("val_{}", ni),
                     )?,
                 },
             };
