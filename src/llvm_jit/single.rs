@@ -14,7 +14,10 @@ use inkwell::{
 };
 use std::ffi::c_void;
 
-type UnsafeFuncType = unsafe extern "C" fn(*const c_void, *mut c_void);
+type UnsafeFuncType = unsafe extern "C" fn(
+    *const c_void, // Inputs
+    *mut c_void,   // Outputs
+);
 
 /// This represents a JIT compiled tree. This is a wrapper around the JIT compiled native function.
 pub struct JitFn<'ctx, T>
@@ -66,8 +69,7 @@ impl Tree {
             .void_type()
             .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
-        let basic_block = context.append_basic_block(function, "entry");
-        builder.position_at_end(basic_block);
+        builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
