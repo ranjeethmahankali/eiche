@@ -192,8 +192,16 @@ impl Tree {
             .void_type()
             .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
-        builder.position_at_end(context.append_basic_block(function, "entry"));
+        // Create the blocks needed.
         let layout = BlockLayout::from_table(&jtable)?;
+        let blocks: Box<[_]> = (0..layout.num_blocks())
+            .map(|bi| context.append_basic_block(function, &format!("block_{bi}")))
+            .collect();
+        let block_addresses: Box<[_]> = blocks
+            .iter()
+            .map(|block| unsafe { block.get_address() })
+            .collect();
+        builder.position_at_end(blocks[0]);
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(tree.len());
         for (ni, node) in tree.nodes().iter().enumerate() {
             // TODO: Check and add branch instruction if required.
