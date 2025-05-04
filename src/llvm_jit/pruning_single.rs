@@ -77,6 +77,78 @@ impl JumpTable {
     }
 }
 
+enum BranchType {
+    None,
+    Unconditional,
+    Indirect(Box<[usize]>),
+}
+
+fn block_layout(table: &JumpTable) -> Result<(usize, Box<[BranchType]>), Error> {
+    #[derive(Clone)]
+    enum BranchData<'a> {
+        None,
+        Unconditional,
+        Indirect(&'a [usize]),
+    }
+    let branches: Box<[BranchData<'_>]> = (0..table.num_nodes())
+        .scan(false, |need_branch, ni| {
+            let targets = table.get_targets(ni);
+            Some(
+                match (
+                    targets.is_empty(),
+                    std::mem::replace(need_branch, table.is_prunable(ni)),
+                ) {
+                    (false, _) => BranchData::Indirect(targets),
+                    (_, true) => BranchData::Unconditional,
+                    _ => BranchData::None,
+                },
+            )
+        })
+        .collect();
+    // Find the indices of each block.
+    let block_indices: Box<[usize]> = branches
+        .iter()
+        .scan(0usize, |index, branch| {
+            let prev = *index;
+            *index += match branch {
+                BranchData::None => 0,
+                BranchData::Unconditional | BranchData::Indirect(_) => 1,
+            };
+            Some(prev)
+        })
+        .collect();
+    // Verify the block layout is correct. This should never fail.
+    debug_assert!(
+        branches.iter().all(|branch| match branch {
+            BranchData::None | BranchData::Unconditional => true,
+            BranchData::Indirect(targets) => targets.iter().all(|ti| match branches[*ti] {
+                BranchData::None => false,
+                BranchData::Unconditional | BranchData::Indirect(_) => true,
+            }),
+        }),
+        "Invalid block layout. This should never happen."
+    );
+    let num_blocks = block_indices
+        .last()
+        .cloned()
+        .ok_or(Error::JitCompilationError(
+            "Unable to compute the number of blocks".into(),
+        ))?;
+    Ok((
+        num_blocks,
+        branches
+            .iter()
+            .map(|branch| match branch {
+                BranchData::None => BranchType::None,
+                BranchData::Unconditional => BranchType::Unconditional,
+                BranchData::Indirect(targets) => {
+                    BranchType::Indirect(targets.iter().map(|ti| block_indices[*ti]).collect())
+                }
+            })
+            .collect(),
+    ))
+}
+
 impl Tree {
     pub fn jit_compile_with_pruning<'ctx, T>(
         &'ctx self,
