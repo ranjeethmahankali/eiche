@@ -295,11 +295,10 @@ impl Tree {
         let float_type = <Wfloat as SimdVec<T>>::float_type(context);
         let i64_type = context.i64_type();
         let fvec_type = float_type.vec_type(<Wfloat as SimdVec<T>>::SIMD_VEC_SIZE as u32);
-        let fptr_type = context.ptr_type(AddressSpace::default());
-        let fn_type = context.void_type().fn_type(
-            &[fptr_type.into(), fptr_type.into(), i64_type.into()],
-            false,
-        );
+        let ptr_type = context.ptr_type(AddressSpace::default());
+        let fn_type = context
+            .void_type()
+            .fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         let start_block = context.append_basic_block(function, "entry");
         let loop_block = context.append_basic_block(function, "loop");

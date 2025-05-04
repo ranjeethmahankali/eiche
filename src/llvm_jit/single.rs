@@ -60,11 +60,11 @@ impl Tree {
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
         let float_type = T::jit_type(context);
-        let float_ptr_type = context.ptr_type(AddressSpace::default());
+        let ptr_type = context.ptr_type(AddressSpace::default());
         let bool_type = context.bool_type();
         let fn_type = context
             .void_type()
-            .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
+            .fn_type(&[ptr_type.into(), ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
