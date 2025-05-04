@@ -117,7 +117,6 @@ fn block_layout(table: &JumpTable) -> Result<(usize, Box<[BranchType]>), Error> 
             Some(prev)
         })
         .collect();
-    // Verify the block layout is correct. This should never fail.
     debug_assert!(
         branches.iter().all(|branch| match branch {
             BranchData::None | BranchData::Unconditional => true,
@@ -221,5 +220,29 @@ impl Tree {
             };
         }
         todo!("Not Implemented");
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{JumpTable, block_layout};
+    use crate::deftree;
+
+    #[test]
+    fn t_block_layout() {
+        let (tree, counts) = deftree!(max
+                            (+ (pow x 2.) (pow y 2.))
+                            (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.)))
+        .unwrap()
+        .compacted()
+        .unwrap()
+        .control_dependence_sorted()
+        .unwrap();
+        let num_roots = tree.num_roots();
+        let jtable = JumpTable::from_counts(&counts, num_roots, 1);
+        let (num_blocks, branches) = block_layout(&jtable).unwrap();
+        println!("Tree:\n{}\n", tree);
+        println!("Number of blocks: {num_blocks}");
+        assert!(false);
     }
 }
