@@ -187,8 +187,10 @@ impl Tree {
             .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         builder.position_at_end(context.append_basic_block(function, "entry"));
+        let (num_blocks, branches) = block_layout(&jtable)?;
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(tree.len());
         for (ni, node) in tree.nodes().iter().enumerate() {
+            // TODO: Check and add branch instruction if required.
             let reg = match node {
                 Constant(val) => match val {
                     Bool(val) => BasicValueEnum::IntValue(
