@@ -77,6 +77,7 @@ impl JumpTable {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum BranchType {
     None,
     Unconditional,
@@ -84,7 +85,7 @@ enum BranchType {
 }
 
 fn block_layout(table: &JumpTable) -> Result<(usize, Box<[BranchType]>), Error> {
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     enum BranchData<'a> {
         None,
         Unconditional,
@@ -109,25 +110,24 @@ fn block_layout(table: &JumpTable) -> Result<(usize, Box<[BranchType]>), Error> 
     let block_indices: Box<[usize]> = branches
         .iter()
         .scan(0usize, |index, branch| {
-            let prev = *index;
             *index += match branch {
                 BranchData::None => 0,
                 BranchData::Unconditional | BranchData::Indirect(_) => 1,
             };
-            Some(prev)
+            Some(*index)
         })
         .collect();
     debug_assert!(
         branches.iter().all(|branch| match branch {
             BranchData::None | BranchData::Unconditional => true,
-            BranchData::Indirect(targets) => targets.iter().all(|ti| match branches[*ti] {
+            BranchData::Indirect(targets) => targets.iter().all(|ti| match branches[*ti + 1] {
                 BranchData::None => false,
                 BranchData::Unconditional | BranchData::Indirect(_) => true,
             }),
         }),
-        "Invalid block layout. This should never happen."
+        "A new block must begin right after each target of an indirect branch. Invalid block layout. This should never happen."
     );
-    let num_blocks = block_indices
+    let num_blocks = 1 + block_indices
         .last()
         .cloned()
         .ok_or(Error::JitCompilationError(
@@ -141,7 +141,7 @@ fn block_layout(table: &JumpTable) -> Result<(usize, Box<[BranchType]>), Error> 
                 BranchData::None => BranchType::None,
                 BranchData::Unconditional => BranchType::Unconditional,
                 BranchData::Indirect(targets) => {
-                    BranchType::Indirect(targets.iter().map(|ti| block_indices[*ti]).collect())
+                    BranchType::Indirect(targets.iter().map(|ti| block_indices[*ti + 1]).collect())
                 }
             })
             .collect(),
@@ -226,23 +226,33 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::{JumpTable, block_layout};
-    use crate::deftree;
+    use crate::{deftree, llvm_jit::pruning_single::BranchType};
 
     #[test]
-    fn t_block_layout() {
-        let (tree, counts) = deftree!(max
-                            (+ (pow x 2.) (pow y 2.))
-                            (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.)))
-        .unwrap()
-        .compacted()
-        .unwrap()
-        .control_dependence_sorted()
-        .unwrap();
+    fn t_block_layout_small_tree() {
+        let (tree, counts) = deftree!(max (+ (+ x 2.) (+ y 2.)) (+ x y))
+            .unwrap()
+            .compacted()
+            .unwrap()
+            .control_dependence_sorted()
+            .unwrap();
+        assert_eq!(&counts, &[0usize, 0, 0, 0, 0, 3, 0, 7]);
         let num_roots = tree.num_roots();
         let jtable = JumpTable::from_counts(&counts, num_roots, 1);
         let (num_blocks, branches) = block_layout(&jtable).unwrap();
-        println!("Tree:\n{}\n", tree);
-        println!("Number of blocks: {num_blocks}");
-        assert!(false);
+        assert_eq!(
+            branches.as_ref(),
+            &[
+                BranchType::None,
+                BranchType::None,
+                BranchType::Indirect([2].into()),
+                BranchType::None,
+                BranchType::None,
+                BranchType::None,
+                BranchType::Unconditional,
+                BranchType::None
+            ]
+        );
+        assert_eq!(num_blocks, 3);
     }
 }
