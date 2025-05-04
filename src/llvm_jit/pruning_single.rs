@@ -84,58 +84,56 @@ enum BranchType {
     Indirect(Box<[usize]>),
 }
 
-fn block_layout(table: &JumpTable) -> Result<(usize, Box<[BranchType]>), Error> {
-    #[derive(Clone, Debug)]
-    enum BranchData<'a> {
-        None,
-        Unconditional,
-        Indirect(&'a [usize]),
-    }
-    let branches: Box<[BranchData<'_>]> = (0..table.num_nodes())
-        .scan(false, |need_branch, ni| {
-            let targets = table.get_targets(ni);
-            Some(
-                match (
-                    targets.is_empty(),
-                    std::mem::replace(need_branch, table.is_prunable(ni)),
-                ) {
-                    (false, _) => BranchData::Indirect(targets),
-                    (_, true) => BranchData::Unconditional,
-                    _ => BranchData::None,
-                },
-            )
-        })
-        .collect();
-    // Find the indices of each block.
-    let block_indices: Box<[usize]> = branches
-        .iter()
-        .scan(0usize, |index, branch| {
-            *index += match branch {
-                BranchData::None => 0,
-                BranchData::Unconditional | BranchData::Indirect(_) => 1,
-            };
-            Some(*index)
-        })
-        .collect();
-    debug_assert!(
-        branches.iter().all(|branch| match branch {
-            BranchData::None | BranchData::Unconditional => true,
-            BranchData::Indirect(targets) => targets.iter().all(|ti| match branches[*ti + 1] {
-                BranchData::None => false,
-                BranchData::Unconditional | BranchData::Indirect(_) => true,
+struct BlockLayout {
+    block_indices: Box<[usize]>,
+    branches: Box<[BranchType]>,
+}
+
+impl BlockLayout {
+    fn from_table(table: &JumpTable) -> Result<Self, Error> {
+        #[derive(Clone, Debug)]
+        enum BranchData<'a> {
+            None,
+            Unconditional,
+            Indirect(&'a [usize]),
+        }
+        let branches: Box<[BranchData<'_>]> = (0..table.num_nodes())
+            .scan(false, |need_branch, ni| {
+                let targets = table.get_targets(ni);
+                Some(
+                    match (
+                        targets.is_empty(),
+                        std::mem::replace(need_branch, table.is_prunable(ni)),
+                    ) {
+                        (false, _) => BranchData::Indirect(targets),
+                        (_, true) => BranchData::Unconditional,
+                        _ => BranchData::None,
+                    },
+                )
+            })
+            .collect();
+        // Find the indices of each block.
+        let block_indices: Box<[usize]> = branches
+            .iter()
+            .scan(0usize, |index, branch| {
+                *index += match branch {
+                    BranchData::None => 0,
+                    BranchData::Unconditional | BranchData::Indirect(_) => 1,
+                };
+                Some(*index)
+            })
+            .collect();
+        debug_assert!(
+            branches.iter().all(|branch| match branch {
+                BranchData::None | BranchData::Unconditional => true,
+                BranchData::Indirect(targets) => targets.iter().all(|ti| match branches[*ti + 1] {
+                    BranchData::None => false,
+                    BranchData::Unconditional | BranchData::Indirect(_) => true,
+                }),
             }),
-        }),
-        "A new block must begin right after each target of an indirect branch. Invalid block layout. This should never happen."
-    );
-    let num_blocks = 1 + block_indices
-        .last()
-        .cloned()
-        .ok_or(Error::JitCompilationError(
-            "Unable to compute the number of blocks".into(),
-        ))?;
-    Ok((
-        num_blocks,
-        branches
+            "A new block must begin right after each target of an indirect branch. Invalid block layout. This should never happen."
+        );
+        let branches = branches
             .iter()
             .map(|branch| match branch {
                 BranchData::None => BranchType::None,
@@ -144,8 +142,16 @@ fn block_layout(table: &JumpTable) -> Result<(usize, Box<[BranchType]>), Error> 
                     BranchType::Indirect(targets.iter().map(|ti| block_indices[*ti + 1]).collect())
                 }
             })
-            .collect(),
-    ))
+            .collect();
+        Ok(Self {
+            block_indices,
+            branches,
+        })
+    }
+
+    fn num_blocks(&self) -> usize {
+        1 + self.block_indices.last().cloned().unwrap_or(0usize)
+    }
 }
 
 impl Tree {
@@ -187,7 +193,7 @@ impl Tree {
             .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         builder.position_at_end(context.append_basic_block(function, "entry"));
-        let (num_blocks, branches) = block_layout(&jtable)?;
+        let layout = BlockLayout::from_table(&jtable)?;
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(tree.len());
         for (ni, node) in tree.nodes().iter().enumerate() {
             // TODO: Check and add branch instruction if required.
@@ -227,7 +233,7 @@ impl Tree {
 
 #[cfg(test)]
 mod test {
-    use super::{JumpTable, block_layout};
+    use super::{BlockLayout, JumpTable};
     use crate::{deftree, llvm_jit::pruning_single::BranchType};
 
     #[test]
@@ -241,9 +247,9 @@ mod test {
         assert_eq!(&counts, &[0usize, 0, 0, 0, 0, 3, 0, 7]);
         let num_roots = tree.num_roots();
         let jtable = JumpTable::from_counts(&counts, num_roots, 1);
-        let (num_blocks, branches) = block_layout(&jtable).unwrap();
+        let layout = BlockLayout::from_table(&jtable).unwrap();
         assert_eq!(
-            branches.as_ref(),
+            layout.branches.as_ref(),
             &[
                 BranchType::None,
                 BranchType::None,
@@ -255,6 +261,41 @@ mod test {
                 BranchType::None
             ]
         );
-        assert_eq!(num_blocks, 3);
+        assert_eq!(layout.num_blocks(), 3);
+    }
+
+    #[test]
+    fn t_block_layout_medium_tree() {
+        let (tree, counts) = deftree!(max
+                            (+ (pow x 2.) (pow y 2.))
+                            (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.)))
+        .unwrap()
+        .compacted()
+        .unwrap()
+        .control_dependence_sorted()
+        .unwrap();
+        assert_eq!(&counts, &[0usize, 0, 0, 0, 0, 1, 0, 1, 5, 0, 0, 2, 12]);
+        let num_roots = tree.num_roots();
+        let jtable = JumpTable::from_counts(&counts, num_roots, 1);
+        let layout = BlockLayout::from_table(&jtable).unwrap();
+        assert_eq!(layout.num_blocks(), 7);
+        assert_eq!(
+            layout.branches.as_ref(),
+            &[
+                BranchType::None,
+                BranchType::None,
+                BranchType::None,
+                BranchType::Indirect([5].into()),
+                BranchType::Indirect([3].into()),
+                BranchType::None,
+                BranchType::Indirect([4].into()),
+                BranchType::None,
+                BranchType::Unconditional,
+                BranchType::Indirect([6].into()),
+                BranchType::None,
+                BranchType::None,
+                BranchType::Unconditional
+            ]
+        );
     }
 }
