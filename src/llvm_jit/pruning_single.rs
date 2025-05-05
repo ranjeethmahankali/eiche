@@ -1,13 +1,16 @@
 use super::{JitCompiler, JitContext, NumberType};
 use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
-use inkwell::{AddressSpace, values::BasicValueEnum};
+use inkwell::{
+    AddressSpace,
+    values::{ArrayValue, AsValueRef, BasicValueEnum, PointerValue},
+};
 use std::ffi::c_void;
 
 type UnsafePruningFuncType = unsafe extern "C" fn(
-    *const c_void,    // Inputs
-    *mut c_void,      // Outputs
-    *const *const i8, // Jump targets
-    *const i8,        // Traffic signals.
+    *const c_void, // Inputs
+    *mut c_void,   // Outputs
+    *const i64,    // Jump targets
+    *const i8,     // Traffic signals.
 );
 
 struct JumpTable {
@@ -87,6 +90,7 @@ enum BranchType {
 struct BlockLayout {
     block_indices: Box<[usize]>,
     branches: Box<[BranchType]>,
+    jump_target_indices: Box<[usize]>,
 }
 
 impl BlockLayout {
@@ -133,6 +137,17 @@ impl BlockLayout {
             }),
             "A new block must begin right after each target of an indirect branch. Invalid block layout. This should never happen."
         );
+        let jump_target_indices = branches
+            .iter()
+            .scan(0usize, |index, branch| {
+                let prev = *index;
+                *index += match branch {
+                    BranchData::None | BranchData::Unconditional => 0,
+                    BranchData::Indirect(_) => 1,
+                };
+                Some(prev)
+            })
+            .collect();
         let branches = branches
             .iter()
             .map(|branch| match branch {
@@ -146,6 +161,7 @@ impl BlockLayout {
         Ok(Self {
             block_indices,
             branches,
+            jump_target_indices,
         })
     }
 
@@ -186,25 +202,89 @@ impl Tree {
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
         let float_type = T::jit_type(context);
-        let float_ptr_type = context.ptr_type(AddressSpace::default());
+        let ptr_type = context.ptr_type(AddressSpace::default());
         let bool_type = context.bool_type();
         let fn_type = context
             .void_type()
-            .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
+            .fn_type(&[ptr_type.into(), ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         // Create the blocks needed.
         let layout = BlockLayout::from_table(&jtable)?;
         let blocks: Box<[_]> = (0..layout.num_blocks())
             .map(|bi| context.append_basic_block(function, &format!("block_{bi}")))
             .collect();
-        let block_addresses: Box<[_]> = blocks
-            .iter()
-            .map(|block| unsafe { block.get_address() })
-            .collect();
-        builder.position_at_end(blocks[0]);
+        let mut current_block = 0;
+        builder.position_at_end(blocks[current_block]);
+        let block_addresses = {
+            // Create a runtime array with all the blocka addresses.
+            let block_addresses: Box<[_]> = blocks
+                .iter()
+                .filter_map(|block| unsafe { block.get_address() })
+                .map(|ba| unsafe { ArrayValue::new(ba.as_value_ref()) })
+                .collect();
+            if block_addresses.len() != blocks.len() {
+                return Err(Error::JitCompilationError(
+                    "Unable to acquire addresses of all blocks".into(),
+                ));
+            }
+            ptr_type
+                .array_type(blocks.len() as u32)
+                .const_array(&block_addresses)
+        };
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(tree.len());
         for (ni, node) in tree.nodes().iter().enumerate() {
-            // TODO: Check and add branch instruction if required.
+            match &layout.branches[ni] {
+                BranchType::None => {}
+                BranchType::Unconditional => {
+                    let next = current_block + 1;
+                    builder.build_unconditional_branch(blocks[next])?;
+                    builder.position_at_end(blocks[next]);
+                    current_block = next;
+                }
+                BranchType::Indirect(targets) => {
+                    let next = current_block + 1;
+                    let targets_input = function
+                        .get_nth_param(2)
+                        .ok_or(Error::JitCompilationError(
+                            "Cannot read input arguments".into(),
+                        ))?
+                        .into_pointer_value();
+                    // Index of the jump target for this instruction in the array passed in as the input arg.
+                    let ti = layout.jump_target_indices[ni] as u64;
+                    let target_index = context.i64_type().const_int(ti, false);
+                    let address = unsafe {
+                        let block_index = builder
+                            .build_load(
+                                context.i64_type(),
+                                builder.build_gep(
+                                    context.i64_type(),
+                                    targets_input,
+                                    &[target_index],
+                                    &format!("jump_target_address_{}", target_index),
+                                )?,
+                                &format!("block_index_{}", ti),
+                            )?
+                            .into_int_value();
+                        builder
+                            .build_load(
+                                ptr_type,
+                                builder.build_gep(
+                                    ptr_type,
+                                    PointerValue::new(block_addresses.as_value_ref()),
+                                    &[block_index],
+                                    &format!("block_addres_ptr_{}", ti),
+                                )?,
+                                &format!("block_addres_{}", ti),
+                            )?
+                            .into_pointer_value()
+                    };
+                    let destinations: Box<[_]> = targets.iter().map(|i| blocks[*i]).collect();
+                    builder.build_indirect_branch(address, &destinations)?;
+                    // Move on to the next block.
+                    builder.position_at_end(blocks[next]);
+                    current_block = next;
+                }
+            }
             let reg = match node {
                 Constant(val) => match val {
                     Bool(val) => BasicValueEnum::IntValue(
