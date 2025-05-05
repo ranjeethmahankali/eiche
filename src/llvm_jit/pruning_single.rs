@@ -1,4 +1,4 @@
-use super::{JitCompiler, JitContext, NumberType};
+use super::{JitCompiler, JitContext, NumberType, build_constant, build_read_symbol};
 use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
 use inkwell::{
     AddressSpace,
@@ -286,31 +286,9 @@ impl Tree {
                 }
             }
             let reg = match node {
-                Constant(val) => match val {
-                    Bool(val) => BasicValueEnum::IntValue(
-                        bool_type.const_int(if *val { 1 } else { 0 }, false),
-                    ),
-                    Scalar(val) => BasicValueEnum::FloatValue(float_type.const_float(*val)),
-                },
+                Constant(val) => build_constant(val, float_type, bool_type),
                 Symbol(label) => {
-                    let inputs = function
-                        .get_first_param()
-                        .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
-                        .into_pointer_value();
-                    let ptr = unsafe {
-                        builder.build_gep(
-                            float_type,
-                            inputs,
-                            &[context.i64_type().const_int(
-                                symbols.iter().position(|c| c == label).ok_or(
-                                    Error::JitCompilationError("Cannot find symbol".to_string()),
-                                )? as u64,
-                                false,
-                            )],
-                            &format!("arg_{}", *label),
-                        )?
-                    };
-                    builder.build_load(float_type, ptr, &format!("val_{}", *label))?
+                    build_read_symbol(&symbols, context, builder, float_type, function, label)?
                 }
                 _ => todo!("Not implemented"),
             };
