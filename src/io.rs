@@ -6,8 +6,8 @@ use crate::{
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Scalar(val) => write!(f, "{}", val),
-            Bool(val) => write!(f, "{}", val),
+            Scalar(val) => write!(f, "{val}"),
+            Bool(val) => write!(f, "{val}"),
         }
     }
 }
@@ -89,11 +89,11 @@ impl std::fmt::Display for Tree {
 impl std::fmt::Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Constant(value) => write!(f, "Constant({})", value),
-            Symbol(label) => write!(f, "Symbol({})", label),
-            Unary(op, input) => write!(f, "{:?}({})", op, input),
-            Binary(op, lhs, rhs) => write!(f, "{:?}({}, {})", op, lhs, rhs),
-            Ternary(op, a, b, c) => write!(f, "{:?}({}, {}, {})", op, a, b, c),
+            Constant(value) => write!(f, "Constant({value})"),
+            Symbol(label) => write!(f, "Symbol({label})"),
+            Unary(op, input) => write!(f, "{op:?}({input})"),
+            Binary(op, lhs, rhs) => write!(f, "{op:?}({lhs}, {rhs})"),
+            Ternary(op, a, b, c) => write!(f, "{op:?}({a}, {b}, {c})"),
         }
     }
 }
@@ -114,7 +114,7 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            format!("{}", tree).trim(),
+            format!("{tree}").trim(),
             "
 [61] Max(40, 60)
  ├── [40] Min(19, 39)
@@ -186,7 +186,7 @@ mod test {
             .prune(&mut pruner)
             .unwrap();
         assert_eq!(
-            format!("{}", tree).trim(),
+            format!("{tree}").trim(),
             "
 [31] Max(23, 30)
  ├── [23] Min(16, 22)
@@ -261,7 +261,7 @@ mod test {
                           (* (pow x 2.) (pow y 2.)))
         .unwrap();
         assert_eq!(
-            format!("{}", v2).trim(),
+            format!("{v2}").trim(),
             "
 [12] Add(2, 5)
  ├── [2] Pow(0, 1)

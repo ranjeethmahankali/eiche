@@ -358,7 +358,7 @@ mod circles {
             match state {
                 PruningState::None => break,
                 PruningState::Valid(_, _) => {} // Keep going.
-                PruningState::Failure(error) => panic!("Error during pruning: {:?}", error),
+                PruningState::Failure(error) => panic!("Error during pruning: {error:?}"),
             }
             for norm in NORM_SAMPLES {
                 let mut sample = [0.; 2];
