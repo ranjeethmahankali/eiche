@@ -347,21 +347,18 @@ impl Tree {
                     builder.build_load(
                         fvec_type,
                         unsafe {
-                            builder.build_gep(
-                                fvec_type,
-                                inputs,
-                                &[offset],
-                                &format!("arg_{label}"),
-                            )
+                            builder.build_gep(fvec_type, inputs, &[offset], &format!("arg_{label}"))
                         }?,
                         &format!("arg_{label}"),
                     )?
                 }
                 Unary(op, input) => match op {
-                    Negate => BasicValueEnum::VectorValue(builder.build_float_neg(
-                        regs[*input].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
+                    Negate => {
+                        BasicValueEnum::VectorValue(builder.build_float_neg(
+                            regs[*input].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?)
+                    }
                     Sqrt => build_unary_intrinsic(
                         builder,
                         &compiler.module,

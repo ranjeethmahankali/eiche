@@ -97,10 +97,12 @@ impl Tree {
                     builder.build_load(float_type, ptr, &format!("val_{}", *label))?
                 }
                 Unary(op, input) => match op {
-                    Negate => BasicValueEnum::FloatValue(builder.build_float_neg(
-                        regs[*input].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
+                    Negate => {
+                        BasicValueEnum::FloatValue(builder.build_float_neg(
+                            regs[*input].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?)
+                    }
                     Sqrt => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
