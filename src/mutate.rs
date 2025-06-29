@@ -396,7 +396,7 @@ mod test {
             .unwrap()
             .prune(&mut pruner)
             .unwrap();
-        println!("{}", tree);
+        println!("{tree}");
         let mut capture = TemplateCapture::new();
         capture.node_index = None;
         capture.bindings.clear();

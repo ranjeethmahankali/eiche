@@ -285,7 +285,7 @@ pub mod test {
         // Find template by name.
         let template = BASE_TEMPLATES.iter().find(|t| t.name == name).unwrap();
         // Check if valid trees can be made from the templates.
-        print!("{}   ... ", name);
+        print!("{name}   ... ");
         compare_trees(&template.ping, &template.pong, vardata, 20, eps);
         println!("✔ Passed.");
         assert!(
@@ -432,8 +432,7 @@ pub mod test {
                 .join("\n");
             assert!(
                 unchecked.is_empty(),
-                "\nThe following templates have not been tested:\n{}\n",
-                unchecked
+                "\nThe following templates have not been tested:\n{unchecked}\n"
             );
         }
     }
