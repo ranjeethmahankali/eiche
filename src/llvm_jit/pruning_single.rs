@@ -213,7 +213,7 @@ impl Tree {
         let bool_type = context.bool_type();
         let fn_type = context
             .void_type()
-            .fn_type(&[ptr_type.into(), ptr_type.into()], false);
+            .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
         let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
         // Create the blocks needed.
         let layout = BlockLayout::from_table(&jtable)?;
@@ -223,11 +223,10 @@ impl Tree {
         let mut current_block = 0;
         builder.position_at_end(blocks[current_block]);
         let block_addresses = {
-            // Create a runtime array with all the blocka addresses.
+            // Create a runtime array with all the block addresses.
             let block_addresses: Box<[_]> = blocks
                 .iter()
                 .filter_map(|block| unsafe { block.get_address() })
-                .map(|ba| unsafe { ArrayValue::new(ba.as_value_ref()) })
                 .collect();
             if block_addresses.len() != blocks.len() {
                 return Err(Error::JitCompilationError(
