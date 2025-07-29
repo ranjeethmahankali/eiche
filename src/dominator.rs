@@ -321,7 +321,7 @@ in the tree."
                 }
                 domcounts
             };
-            let table = DomTable::from_tree(&sorted_tree);
+            let table = DomTable::from_tree(sorted_tree);
             for (child, domcount) in domcounts.iter().enumerate() {
                 let offset = child * table.n_chunks;
                 // Compare the computed dominator counts with those expected from the table.
@@ -336,7 +336,7 @@ in the tree."
         }
         // Ensure all the nodes indicated as dominated by the sorted results,
         // are also flagged as such in the table.
-        let table = DomTable::from_tree(&sorted_tree);
+        let table = DomTable::from_tree(sorted_tree);
         for (pi, count) in subcounts.iter().enumerate() {
             for ci in (pi - count)..pi {
                 assert!(check(&table, pi, ci));
