@@ -452,4 +452,88 @@ in the tree."
         validate_sorting(tree);
         // assert!(false);
     }
+
+    // Edge case tests
+    #[test]
+    fn t_single_node() {
+        let tree = deftree!(x).unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_single_constant() {
+        let tree = deftree!(42.).unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_all_leaves() {
+        let tree = deftree!(+ x y).unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_shared_subtree() {
+        let tree = deftree!(+ (* x y) (* x y)).unwrap().compacted().unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_nested_sharing() {
+        let tree = deftree!(+ (sin (cos x)) (cos (cos x)))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_ternary_nodes() {
+        let tree = deftree!(if (> x 0) x (- x)).unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_complex_ternary() {
+        let tree = deftree!(if (> x y) (+ x y) (- x y)).unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_deep_chain() {
+        let tree = deftree!(sin (cos (tan (log (exp (sqrt (abs x))))))).unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_wide_tree() {
+        let tree = deftree!(+ (+ (+ (+ x y) z) a) (+ (+ b c) d)).unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_multiple_shared_nodes() {
+        let tree = deftree!(+ (* (+ x y) (- x y)) (* (+ x y) (+ a b)))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_deeply_nested_sharing() {
+        let tree = deftree!(+ (pow (+ x y) 2) (sqrt (+ x y)))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        validate_sorting(tree);
+    }
+
+    #[test]
+    fn t_bit_boundary_64() {
+        // Create a tree with approximately 64 nodes to test bit chunk boundaries
+        // Using single character symbols as required by the macro
+        let tree = deftree!(+ (+ (+ (+ (+ (+ (+ (+ x y) z) a) b) c) d) e) f).unwrap();
+        validate_sorting(tree);
+    }
 }
