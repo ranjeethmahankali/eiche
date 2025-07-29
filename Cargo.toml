@@ -36,6 +36,11 @@ name = "reduce"
 path = "benches/reduce.rs"
 harness = false
 
+[[bench]]
+name = "dominator"
+path = "benches/dominator.rs"
+harness = false
+
 [profile.release-with-debug]
 inherits = "release"
 strip = false # Automatically strip symbols
