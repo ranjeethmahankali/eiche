@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use eiche::{deftree, Tree};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use eiche::{Tree, deftree};
 
 fn create_small_tree() -> Tree {
     deftree!(+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))
@@ -64,14 +64,12 @@ fn create_large_tree() -> Tree {
 
 fn create_deep_chain() -> Tree {
     // Create a very deep chain: sin(cos(tan(log(exp(sqrt(abs(floor(...))))))))
-    deftree!(sin (cos (tan (log (exp (sqrt (abs (floor (+ x y)))))))))
-        .unwrap()
+    deftree!(sin (cos (tan (log (exp (sqrt (abs (floor (+ x y))))))))).unwrap()
 }
 
 fn create_wide_tree() -> Tree {
     // Create a tree with many parallel branches
-    deftree!(+ (+ (+ (+ (+ (+ (+ x y) z) a) b) c) d) (+ (+ (+ e f) g) h))
-        .unwrap()
+    deftree!(+ (+ (+ (+ (+ (+ (+ x y) z) a) b) c) d) (+ (+ (+ e f) g) h)).unwrap()
 }
 
 fn create_shared_subtree() -> Tree {
@@ -165,29 +163,6 @@ fn bench_dominator_very_large(c: &mut Criterion) {
     });
 }
 
-fn bench_memory_usage(c: &mut Criterion) {
-    let mut group = c.benchmark_group("memory_usage");
-    
-    // Benchmark different tree sizes to show memory scaling
-    let trees = vec![
-        ("small", create_small_tree()),
-        ("medium", create_medium_tree()),
-        ("large", create_large_tree()),
-        ("very_large", create_very_large_tree()),
-    ];
-    
-    for (name, tree) in trees {
-        group.bench_function(format!("nodes_{}_len_{}", name, tree.len()), |b| {
-            b.iter(|| {
-                let result = black_box(&tree).control_dependence_sorted();
-                black_box(result).unwrap()
-            })
-        });
-    }
-    
-    group.finish();
-}
-
 criterion_group!(
     benches,
     bench_dominator_small,
@@ -196,7 +171,6 @@ criterion_group!(
     bench_dominator_deep_chain,
     bench_dominator_wide_tree,
     bench_dominator_shared_subtree,
-    bench_dominator_very_large,
-    bench_memory_usage
+    bench_dominator_very_large
 );
 criterion_main!(benches);
