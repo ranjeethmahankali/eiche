@@ -4,174 +4,107 @@ use crate::{
     Tree,
 };
 
-/// Used to manage a dominator mapping between nodes of a tree.
-///
-/// Because this is used to manage the dominator mapping of any node with any
-/// other node, the width and the height of the table are always eual to the
-/// number of nodes, i.e. `size`.
-struct DomTable {
-    bits: Box<[u64]>,
-    n_chunks: usize, // Number of bytes per row.
+fn compute_immediate_dominators(tree: &Tree) -> Vec<Option<usize>> {
+    let mut idom = vec![None; tree.len()];
+    let mut visited = vec![false; tree.len()];
+
+    // Process nodes in reverse topological order
+    for (i, node) in tree.nodes().iter().enumerate().rev() {
+        match node {
+            Constant(_) | Symbol(_) => {} // Leaves have no dominator
+            Unary(_, input) => {
+                update_dominator(&mut idom, &mut visited, i, *input);
+            }
+            Binary(_, lhs, rhs) => {
+                update_dominator(&mut idom, &mut visited, i, *lhs);
+                update_dominator(&mut idom, &mut visited, i, *rhs);
+            }
+            Ternary(_, a, b, c) => {
+                update_dominator(&mut idom, &mut visited, i, *a);
+                update_dominator(&mut idom, &mut visited, i, *b);
+                update_dominator(&mut idom, &mut visited, i, *c);
+            }
+        }
+    }
+    idom
 }
 
-impl DomTable {
-    const CHUNK_SIZE: usize = 64;
-
-    fn set(bits: &mut [u64], i: usize) {
-        let quot = i / Self::CHUNK_SIZE;
-        let rem = i % Self::CHUNK_SIZE;
-        bits[quot] |= 1 << rem;
-    }
-
-    fn unset(bits: &mut [u64], i: usize) {
-        let quot = i / Self::CHUNK_SIZE;
-        let rem = i % Self::CHUNK_SIZE;
-        bits[quot] &= !(1 << rem);
-    }
-
-    pub fn from_tree(tree: &Tree) -> Self {
-        // Empty tree.
-        let mut table = {
-            let quot = tree.len() / Self::CHUNK_SIZE;
-            let rem = tree.len() % Self::CHUNK_SIZE;
-            let n_chunks = quot + (if rem == 0 { 0 } else { 1 });
-            DomTable {
-                bits: vec![0u64; n_chunks * tree.len()].into_boxed_slice(),
-                n_chunks,
-            }
-        };
-        // Everynode dominates itself at the start.
-        for (ni, chunk) in table.bits.chunks_exact_mut(table.n_chunks).enumerate() {
-            Self::set(chunk, ni);
-        }
-        let mut visited = vec![false; tree.len()].into_boxed_slice();
-        // Parents try to dominate children.
-        for (i, node) in tree.nodes().iter().enumerate().rev() {
-            match node {
-                Constant(_) | Symbol(_) => {} // Do nothing.
-                Unary(_, input) => table.dominate(i, *input, &mut visited),
-                Binary(_, lhs, rhs) => {
-                    table.dominate(i, *lhs, &mut visited);
-                    table.dominate(i, *rhs, &mut visited);
-                }
-                Ternary(_, a, b, c) => {
-                    table.dominate(i, *a, &mut visited);
-                    table.dominate(i, *b, &mut visited);
-                    table.dominate(i, *c, &mut visited);
-                }
-            }
-        }
-        // Nodes dominating themselves is only useful while making the
-        // table. After that, this is implicit and makes it harder to find an
-        // immediate dominator that is not the node itself. So we remove it.
-        for (ni, chunk) in table.bits.chunks_exact_mut(table.n_chunks).enumerate() {
-            Self::unset(chunk, ni);
-        }
-        table
-    }
-
-    fn dominate(&mut self, parent: usize, child: usize, visited: &mut [bool]) {
-        let (poff, coff) = (parent * self.n_chunks, child * self.n_chunks);
-        let [parent_bits, child_bits] = unsafe {
-            self.bits.get_disjoint_unchecked_mut([
-                poff..(poff + self.n_chunks),
-                coff..(coff + self.n_chunks),
-            ])
-        };
-        if std::mem::replace(&mut visited[child], true) {
-            for (p, c) in parent_bits.iter().zip(child_bits.iter_mut()) {
-                *c &= *p;
-            }
-            Self::set(child_bits, child); // Always dominates itself.
-        } else {
-            for (p, c) in parent_bits.iter().zip(child_bits.iter_mut()) {
-                *c |= *p;
-            }
-        }
-    }
-
-    pub fn immediate_dominator(&self, child: usize) -> usize {
-        let offset = child * self.n_chunks;
-        // Iterate through flags in reverse and find the index of the first set flag.
-        self.bits[offset..(offset + self.n_chunks)]
-            .iter()
-            .enumerate()
-            .find_map(|(i, flags)| match flags.trailing_zeros() {
-                64 => None,
-                n => Some(i * Self::CHUNK_SIZE + n as usize),
-            })
-            .unwrap_or(child) // If no dominator found then return the node itself.
-    }
-
-    pub fn num_nodes(&self) -> usize {
-        self.bits.len() / self.n_chunks
-    }
-
-    pub fn counts(&self) -> Vec<usize> {
-        let n_nodes = self.num_nodes();
-        let mut counts = vec![0usize; n_nodes];
-        for chunks in self.bits.chunks_exact(self.n_chunks) {
-            let mut offset = 0usize;
-            for chunk in chunks {
-                let mut chunk = *chunk;
-                let mut shift = 0usize;
-                while chunk != 0 {
-                    let tz = chunk.trailing_zeros();
-                    chunk >>= tz;
-                    shift += tz as usize;
-                    counts[offset + shift] += 1;
-                    chunk >>= 1;
-                    shift += 1;
-                }
-                offset += 64;
-            }
-        }
-        counts
+fn update_dominator(idom: &mut [Option<usize>], visited: &mut [bool], parent: usize, child: usize) {
+    if std::mem::replace(&mut visited[child], true) {
+        // Child already visited - find LCA of current idom and parent
+        idom[child] = lowest_common_ancestor(idom, idom[child], Some(parent));
+    } else {
+        // First visit - parent becomes immediate dominator
+        idom[child] = Some(parent);
     }
 }
 
-struct DomTree {
-    children_buf: Vec<usize>,
-    offsets: Vec<usize>,
+fn lowest_common_ancestor(
+    idom: &[Option<usize>],
+    mut a: Option<usize>,
+    mut b: Option<usize>,
+) -> Option<usize> {
+    while a != b {
+        match (a, b) {
+            (Some(av), Some(bv)) => {
+                if av > bv {
+                    a = idom[av];
+                } else {
+                    b = idom[bv];
+                }
+            }
+            _ => return None,
+        }
+    }
+    a
 }
 
-impl DomTree {
-    pub fn from_table(table: &DomTable) -> Self {
-        let num_nodes = table.num_nodes();
-        let pairs = {
-            let mut pairs: Vec<_> = (0..num_nodes)
-                .filter_map(|ni| match table.immediate_dominator(ni) {
-                    idom if idom == ni => None,
-                    idom => Some((idom, ni)),
-                })
-                .collect();
-            pairs.sort();
-            pairs
-        };
-        let mut offsets = Vec::with_capacity(num_nodes);
-        let mut children_buf = Vec::new();
-        let mut iter = pairs.iter().peekable();
-        for i in 0..num_nodes {
-            offsets.push(children_buf.len());
-            while let Some(&(_, ni)) = iter.next_if(|(idom, _)| *idom == i) {
-                children_buf.push(ni);
-            }
-        }
-        DomTree {
-            children_buf,
-            offsets,
+fn compute_domination_counts(idom: &[Option<usize>]) -> Vec<usize> {
+    let mut counts = vec![0usize; idom.len()];
+
+    // Count how many nodes each node dominates (transitive closure)
+    for child in 0..idom.len() {
+        let mut current = idom[child];
+        while let Some(dominator) = current {
+            counts[dominator] += 1;
+            current = idom[dominator];
         }
     }
 
-    pub fn children(&self, node: usize) -> &[usize] {
-        let start = self.offsets[node];
-        let stop = self
-            .offsets
-            .get(node + 1)
-            .cloned()
-            .unwrap_or(self.children_buf.len());
-        &self.children_buf[start..stop]
+    counts
+}
+
+fn build_dominator_children(idom: &[Option<usize>]) -> (Vec<usize>, Vec<usize>) {
+    // Build dominator tree structure for DFS traversal
+    let mut pairs: Vec<_> = idom
+        .iter()
+        .enumerate()
+        .filter_map(|(child, &dom)| dom.map(|d| (d, child)))
+        .collect();
+    pairs.sort();
+
+    let mut offsets = Vec::with_capacity(idom.len());
+    let mut children_buf = Vec::new();
+    let mut iter = pairs.iter().peekable();
+
+    for i in 0..idom.len() {
+        offsets.push(children_buf.len());
+        while let Some(&(_, child)) = iter.next_if(|(dom, _)| *dom == i) {
+            children_buf.push(child);
+        }
     }
+
+    (children_buf, offsets)
+}
+
+fn get_dominator_children<'a>(
+    children_buf: &'a [usize],
+    offsets: &'a [usize],
+    node: usize,
+) -> &'a [usize] {
+    let start = offsets[node];
+    let stop = offsets.get(node + 1).cloned().unwrap_or(children_buf.len());
+    &children_buf[start..stop]
 }
 
 struct StackElement {
@@ -191,9 +124,10 @@ impl Tree {
     /// I think this concept is referred to as "Control Dependence Graph" in the
     /// compiler theory literature.
     pub fn control_dependence_sorted(&self) -> Result<(Tree, Vec<usize>), Error> {
-        // Initialize data.
-        let domtable = DomTable::from_tree(self);
-        let domtree = DomTree::from_table(&domtable);
+        // Initialize data using efficient dominator computation
+        let idom = compute_immediate_dominators(self);
+        let (children_buf, offsets) = build_dominator_children(&idom);
+
         let mut stack: Vec<StackElement> = Vec::with_capacity(self.len());
         stack.extend(self.root_indices().map(|r| StackElement {
             index: r,
@@ -206,6 +140,7 @@ impl Tree {
         let mut index_map: Vec<usize> = (0..self.len()).collect();
         let mut sorted: Vec<Node> = Vec::new();
         let mut children: Vec<usize> = Vec::new();
+
         // Do DFS walk.
         while let Some(StackElement {
             index,
@@ -249,7 +184,7 @@ impl Tree {
                 Binary(_op, lhs, rhs) => children.extend_from_slice(&[*rhs, *lhs]),
                 Ternary(_, a, b, c) => children.extend_from_slice(&[*c, *b, *a]),
             };
-            children.extend_from_slice(domtree.children(index));
+            children.extend_from_slice(get_dominator_children(&children_buf, &offsets, index));
             children.sort_by(|a, b| b.cmp(a)); // Sort in descending order.
             children.dedup();
             stack.extend(children.drain(..).map(|ci| StackElement {
@@ -277,7 +212,7 @@ impl Tree {
         }
         let tree = Tree::from_nodes(sorted, self.dims())?;
         let counts = {
-            let oldcounts = domtable.counts();
+            let oldcounts = compute_domination_counts(&idom);
             let mut newcounts = vec![0usize; oldcounts.len()];
             for (i, count) in index_map.iter().zip(oldcounts.iter()) {
                 newcounts[*i] = *count;
@@ -290,57 +225,121 @@ impl Tree {
 
 #[cfg(test)]
 mod test {
-    use super::DomTable;
+    use super::*;
     use crate::{Tree, deftree};
 
-    fn check(table: &DomTable, parent: usize, child: usize) -> bool {
-        let offset = child * table.n_chunks;
-        let flags = &table.bits[offset..(offset + table.n_chunks)];
-        let quot = parent / DomTable::CHUNK_SIZE;
-        let rem = parent % DomTable::CHUNK_SIZE;
-        flags[quot] & (1 << rem) != 0
+    fn dominates(idom: &[Option<usize>], dominator: usize, node: usize) -> bool {
+        let mut current = node;
+        while let Some(idom_current) = idom[current] {
+            if idom_current == dominator {
+                return true;
+            }
+            current = idom_current;
+        }
+        false
+    }
+
+    fn dominates_all_paths_from_roots(tree: &Tree, dominator: usize, child: usize) -> bool {
+        // Try to reach child from roots without going through dominator
+        // If we can reach it, domination fails
+        for root in tree.root_indices() {
+            if can_reach_without_dominator(tree, root, child, dominator) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn can_reach_without_dominator(tree: &Tree, start: usize, target: usize, dominator: usize) -> bool {
+        let mut stack = vec![start];
+        let mut visited = vec![false; tree.len()];
+        
+        while let Some(current) = stack.pop() {
+            if current == target {
+                return true; // Found path to target without hitting dominator
+            }
+            if current == dominator {
+                continue; // Hit dominator, skip this path
+            }
+            if std::mem::replace(&mut visited[current], true) {
+                continue; // Already visited
+            }
+            
+            // Add children to stack (traverse toward leaves)
+            match tree.node(current) {
+                Constant(_) | Symbol(_) => {} // Dead end
+                Unary(_, input) => stack.push(*input),
+                Binary(_, lhs, rhs) => {
+                    stack.push(*lhs);
+                    stack.push(*rhs);
+                }
+                Ternary(_, a, b, c) => {
+                    stack.push(*a);
+                    stack.push(*b);
+                    stack.push(*c);
+                }
+            }
+        }
+        false // Never reached target
     }
 
     fn validate_sorting(tree: Tree) {
-        let (tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+
+        // Test 1: Verify domination count consistency
         {
-            // Verify the number of dominating nodes for each node are the same
-            // in the table as that in the sorted results.
-            let domcounts = {
-                let mut domcounts = vec![0usize; tree.len()];
-                for (i, count) in subcounts.iter().enumerate() {
+            let original_idom = compute_immediate_dominators(&tree);
+            let original_counts = compute_domination_counts(&original_idom);
+            let sorted_idom = compute_immediate_dominators(&sorted_tree);
+
+            // Check that each node's domination count is preserved through sorting
+            for (i, &count) in subcounts.iter().enumerate() {
+                assert!(
+                    count <= i,
+                    "Dominated count {} cannot exceed node index {} in sorted order",
+                    count,
+                    i
+                );
+
+                // Verify the range [i-count..i] contains nodes dominated by i
+                let dominated_range = (i.saturating_sub(count))..i;
+                for dominated in dominated_range {
                     assert!(
-                        *count <= i,
-                        "
-The number of dominated nodes cannot be more than the index of the node.Because
-that would imply this node is dominating more nodes than have preceded this node
-in the tree."
+                        dominates(&sorted_idom, i, dominated),
+                        "Node {} should dominate {} based on subcounts",
+                        i,
+                        dominated
                     );
-                    for count in domcounts.iter_mut().skip(i - count).take(*count) {
-                        *count += 1
-                    }
                 }
-                domcounts
-            };
-            let table = DomTable::from_tree(&tree);
-            for (child, domcount) in domcounts.iter().enumerate() {
-                let offset = child * table.n_chunks;
-                // Compare the computed dominator counts with those expected from the table.
-                assert_eq!(
-                    *domcount,
-                    table.bits[offset..(offset + table.n_chunks)]
-                        .iter()
-                        .map(|chunk| chunk.count_ones() as usize)
-                        .sum::<usize>()
-                )
             }
+
+            // Total domination relationships should be preserved
+            let total_original: usize = original_counts.iter().sum();
+            let total_sorted: usize = subcounts.iter().sum();
+            assert_eq!(
+                total_original, total_sorted,
+                "Total domination count mismatch"
+            );
         }
-        // Ensure all the nodes indicated as dominated by the sorted results,
-        // are also flagged as such in the table.
-        let table = DomTable::from_tree(&tree);
-        for (pi, count) in subcounts.iter().enumerate() {
-            for ci in (pi - count)..pi {
-                assert!(check(&table, pi, ci));
+
+        // Test 2: Verify immediate dominator relationships are valid
+        {
+            let idom = compute_immediate_dominators(&sorted_tree);
+            for (child, &dominator) in idom.iter().enumerate() {
+                if let Some(dom) = dominator {
+                    assert!(
+                        dom < child,
+                        "Dominator {} must appear before dominated node {} in sorted order",
+                        dom,
+                        child
+                    );
+                    assert!(
+                        dominates_all_paths_from_roots(&sorted_tree, dom, child),
+                        "Dominator {} must block all paths from roots to {}",
+                        dom,
+                        child
+                    );
+                }
             }
         }
     }
@@ -348,13 +347,22 @@ in the tree."
     #[test]
     fn t_one_chain() {
         let tree = deftree!(sin (abs (log x))).unwrap();
-        let table = DomTable::from_tree(&tree);
-        assert_eq!(table.immediate_dominator(0), 1);
-        assert_eq!(table.immediate_dominator(1), 2);
-        assert_eq!(table.immediate_dominator(2), 3);
-        assert_eq!(table.immediate_dominator(3), 3);
+        let idom = compute_immediate_dominators(&tree);
+        println!("Original tree idom: {:?}", idom);
+        assert_eq!(idom[0], Some(1));
+        assert_eq!(idom[1], Some(2));
+        assert_eq!(idom[2], Some(3));
+        assert_eq!(idom[3], None);
         // Check the counts.
-        assert_eq!(&table.counts(), &[0usize, 1, 2, 3]);
+        let counts = compute_domination_counts(&idom);
+        assert_eq!(&counts, &[0usize, 1, 2, 3]);
+        
+        // Debug the sorted tree
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        let sorted_idom = compute_immediate_dominators(&sorted_tree);
+        println!("Sorted tree idom: {:?}", sorted_idom);
+        println!("Subcounts: {:?}", subcounts);
+        
         // Check sorting.
         validate_sorting(tree);
     }
@@ -447,10 +455,7 @@ in the tree."
         .unwrap()
         .compacted()
             .unwrap();
-        // let table = DomTable::from_tree(&tree);
-        // println!("{:?}", table.counts());
         validate_sorting(tree);
-        // assert!(false);
     }
 
     // Edge case tests
