@@ -333,7 +333,7 @@ impl Tree {
                         builder.build_int_mul(
                             index,
                             i64_type.const_int(symbols.len() as u64, false),
-                            &format!("input_offset_mul_{}", label),
+                            &format!("input_offset_mul_{label}"),
                         )?,
                         i64_type.const_int(
                             symbols.iter().position(|c| c == label).ok_or(
@@ -341,26 +341,23 @@ impl Tree {
                             )? as u64,
                             false,
                         ),
-                        &format!("input_offset_add_{}", label),
+                        &format!("input_offset_add_{label}"),
                     )?;
                     builder.build_load(
                         fvec_type,
                         unsafe {
-                            builder.build_gep(
-                                fvec_type,
-                                inputs,
-                                &[offset],
-                                &format!("arg_{}", label),
-                            )
+                            builder.build_gep(fvec_type, inputs, &[offset], &format!("arg_{label}"))
                         }?,
-                        &format!("arg_{}", label),
+                        &format!("arg_{label}"),
                     )?
                 }
                 Unary(op, input) => match op {
-                    Negate => BasicValueEnum::VectorValue(builder.build_float_neg(
-                        regs[*input].into_vector_value(),
-                        &format!("reg_{}", ni),
-                    )?),
+                    Negate => {
+                        BasicValueEnum::VectorValue(builder.build_float_neg(
+                            regs[*input].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?)
+                    }
                     Sqrt => build_unary_intrinsic(
                         builder,
                         &compiler.module,
@@ -413,7 +410,7 @@ impl Tree {
                         BasicValueEnum::VectorValue(builder.build_float_div(
                             sin.into_vector_value(),
                             cos.into_vector_value(),
-                            &format!("reg_{}", ni),
+                            &format!("reg_{ni}"),
                         )?)
                     }
                     Log => build_unary_intrinsic(
@@ -442,29 +439,29 @@ impl Tree {
                     )?,
                     Not => BasicValueEnum::VectorValue(
                         builder
-                            .build_not(regs[*input].into_vector_value(), &format!("reg_{}", ni))?,
+                            .build_not(regs[*input].into_vector_value(), &format!("reg_{ni}"))?,
                     ),
                 },
                 Binary(op, lhs, rhs) => match op {
                     Add => BasicValueEnum::VectorValue(builder.build_float_add(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     Subtract => BasicValueEnum::VectorValue(builder.build_float_sub(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     Multiply => BasicValueEnum::VectorValue(builder.build_float_mul(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     Divide => BasicValueEnum::VectorValue(builder.build_float_div(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     Pow => build_binary_intrinsic(
                         builder,
@@ -496,53 +493,53 @@ impl Tree {
                     Remainder => BasicValueEnum::VectorValue(builder.build_float_rem(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     Less => BasicValueEnum::VectorValue(builder.build_float_compare(
                         FloatPredicate::ULT,
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     LessOrEqual => BasicValueEnum::VectorValue(builder.build_float_compare(
                         FloatPredicate::ULE,
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     Equal => BasicValueEnum::VectorValue(builder.build_float_compare(
                         FloatPredicate::UEQ,
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     NotEqual => BasicValueEnum::VectorValue(builder.build_float_compare(
                         FloatPredicate::UNE,
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     Greater => BasicValueEnum::VectorValue(builder.build_float_compare(
                         FloatPredicate::UGT,
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     GreaterOrEqual => BasicValueEnum::VectorValue(builder.build_float_compare(
                         FloatPredicate::UGE,
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     And => BasicValueEnum::VectorValue(builder.build_and(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                     Or => BasicValueEnum::VectorValue(builder.build_or(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?),
                 },
                 Ternary(op, a, b, c) => match op {
@@ -550,7 +547,7 @@ impl Tree {
                         regs[*a].into_vector_value(),
                         regs[*b].into_vector_value(),
                         regs[*c].into_vector_value(),
-                        &format!("reg_{}", ni),
+                        &format!("reg_{ni}"),
                     )?,
                 },
             };
@@ -574,7 +571,7 @@ impl Tree {
                 "offset_add",
             )?;
             let dst = unsafe {
-                builder.build_gep(fvec_type, outputs, &[offset], &format!("output_{}", i))?
+                builder.build_gep(fvec_type, outputs, &[offset], &format!("output_{i}"))?
             };
             builder.build_store(dst, *reg)?;
         }

@@ -50,12 +50,12 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                         Constant(_) | Symbol(_) | Unary(..) | Binary(..) => ix,
                     }
                 }),
-                Sqrt => format!("\\sqrt{{{}}}", ix),
-                Abs => format!("\\left|{{{}}}\\right|", ix),
-                Sin => format!("\\sin\\left({{{}}}\\right)", ix),
-                Cos => format!("\\cos\\left({{{}}}\\right)", ix),
-                Tan => format!("\\tan\\left({{{}}}\\right)", ix),
-                Log => format!("\\ln\\left({{{}}}\\right)", ix),
+                Sqrt => format!("\\sqrt{{{ix}}}"),
+                Abs => format!("\\left|{{{ix}}}\\right|"),
+                Sin => format!("\\sin\\left({{{ix}}}\\right)"),
+                Cos => format!("\\cos\\left({{{ix}}}\\right)"),
+                Tan => format!("\\tan\\left({{{ix}}}\\right)"),
+                Log => format!("\\ln\\left({{{ix}}}\\right)"),
                 Exp => format!("e^{{{}}}", {
                     match inode {
                         Constant(_)
@@ -67,7 +67,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                         Binary(..) => with_parens(ix),
                     }
                 }),
-                Floor => format!("\\lfloor{{{}}}\\rfloor", ix),
+                Floor => format!("\\lfloor{{{ix}}}\\rfloor"),
                 // Boolean
                 Not => format!("\\text{{not }}{{{}}}", with_parens(ix)),
             }
@@ -84,23 +84,23 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
             );
             match op {
                 // Scalar.
-                Add => format!("{{{}}} + {{{}}}", lx, rx),
-                Subtract => format!("{{{}}} - {{{}}}", lx, rx),
-                Multiply => format!("{{{}}}.{{{}}}", lx, rx),
-                Divide => format!("\\dfrac{{{}}}{{{}}}", lx, rx),
-                Pow => format!("{{{}}}^{{{}}}", lx, rx),
-                Min => format!("\\min\\left({{{}}}, {{{}}}\\right)", lx, rx),
-                Max => format!("\\max\\left({{{}}}, {{{}}}\\right)", lx, rx),
-                Remainder => format!("{{{}}} \\bmod {{{}}}", lx, rx),
+                Add => format!("{{{lx}}} + {{{rx}}}"),
+                Subtract => format!("{{{lx}}} - {{{rx}}}"),
+                Multiply => format!("{{{lx}}}.{{{rx}}}"),
+                Divide => format!("\\dfrac{{{lx}}}{{{rx}}}"),
+                Pow => format!("{{{lx}}}^{{{rx}}}"),
+                Min => format!("\\min\\left({{{lx}}}, {{{rx}}}\\right)"),
+                Max => format!("\\max\\left({{{lx}}}, {{{rx}}}\\right)"),
+                Remainder => format!("{{{lx}}} \\bmod {{{rx}}}"),
                 // Boolean.
-                Less => format!("{{{}}} < {{{}}}", lx, rx),
-                LessOrEqual => format!("{{{}}} \\leq {{{}}}", lx, rx),
-                Equal => format!("{{{}}} = {{{}}}", lx, rx),
-                NotEqual => format!("{{{}}} \\neq {{{}}}", lx, rx),
-                Greater => format!("{{{}}} > {{{}}}", lx, rx),
-                GreaterOrEqual => format!("{{{}}} \\geq {{{}}}", lx, rx),
-                And => format!("{{{}}} \\text{{ and }} {{{}}}", lx, rx),
-                Or => format!("{{{}}} \\text{{ or }} {{{}}}", lx, rx),
+                Less => format!("{{{lx}}} < {{{rx}}}"),
+                LessOrEqual => format!("{{{lx}}} \\leq {{{rx}}}"),
+                Equal => format!("{{{lx}}} = {{{rx}}}"),
+                NotEqual => format!("{{{lx}}} \\neq {{{rx}}}"),
+                Greater => format!("{{{lx}}} > {{{rx}}}"),
+                GreaterOrEqual => format!("{{{lx}}} \\geq {{{rx}}}"),
+                And => format!("{{{lx}}} \\text{{ and }} {{{rx}}}"),
+                Or => format!("{{{lx}}} \\text{{ or }} {{{rx}}}"),
             }
         }
         Ternary(op, a, b, c) => {
@@ -197,7 +197,7 @@ fn parens_add_sub(node: &Node, latex: String) -> String {
 }
 
 fn with_parens(latex: String) -> String {
-    format!("\\left({}\\right)", latex)
+    format!("\\left({latex}\\right)")
 }
 
 #[cfg(test)]
