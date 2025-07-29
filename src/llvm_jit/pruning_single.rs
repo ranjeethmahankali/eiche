@@ -22,7 +22,8 @@ struct JumpTable {
 impl JumpTable {
     fn from_counts(counts: &[usize], num_roots: usize, count_threshold: usize) -> Self {
         let num_nodes = counts.len();
-        let pairs = {
+        let jmp_pairs = {
+            // Pairs of integers representing the bounds of nodes that can be skipped by a jump.
             let mut pairs: Vec<_> = counts
                 .iter()
                 .take(num_nodes - num_roots) // Ignore the roots.
@@ -38,15 +39,21 @@ impl JumpTable {
             pairs.sort();
             pairs
         };
+        // Now we compute the possible jump targets from each node. Because
+        // there can be many targets from each node, and we'd like to avoid
+        // nested vectors, we store them in a flat vector with offsets for each
+        // node.
         let mut targets = Vec::with_capacity(num_nodes);
         let mut offsets = Vec::with_capacity(num_nodes);
-        let mut iter = pairs.iter().peekable();
+        let mut iter = jmp_pairs.iter().peekable();
         for ni in 0..num_nodes {
             offsets.push(targets.len());
             while let Some((_, target)) = iter.next_if(|(i, _)| *i == ni) {
                 targets.push(*target);
             }
         }
+        // If something is a jump target, that means it's dependencies can be jumped over,
+        // which in turn means that node is prunable.
         let prunable = {
             let mut prunable = vec![false; num_nodes];
             for t in targets.iter() {
