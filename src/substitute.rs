@@ -67,12 +67,12 @@ mod test {
 
     #[test]
     fn t_substitution_0() {
-        let original = deftree!(/ (+ (pow x 2) (log x)) (exp (* 2 x))).unwrap();
-        let old = &deftree!(x).unwrap();
-        let new = &deftree!(+ 1 x).unwrap();
+        let original = deftree!(/ (+ (pow 'x 2) (log 'x)) (exp (* 2 'x))).unwrap();
+        let old = &deftree!('x).unwrap();
+        let new = &deftree!(+ 1 'x).unwrap();
         let replaced = original.clone().substitute(old, new).unwrap();
         assert!(replaced.equivalent(
-            &deftree!(/ (+ (pow (+ 1 x) 2) (log (+ 1 x))) (exp (* 2 (+ 1 x)))).unwrap()
+            &deftree!(/ (+ (pow (+ 1 'x) 2) (log (+ 1 'x))) (exp (* 2 (+ 1 'x)))).unwrap()
         ));
         let reverted = replaced.substitute(new, old).unwrap();
         assert!(original.equivalent(&reverted));

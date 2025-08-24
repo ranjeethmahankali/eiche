@@ -536,15 +536,15 @@ mod test {
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
     fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
-        deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
+        deftree!(- (sqrt (+ (pow (- 'x (const cx)) 2) (pow (- 'y (const cy)) 2))) (const r))
     }
 
     fn sphere(cx: f64, cy: f64, cz: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+
-                          (pow (- x (const cx)) 2)
+                          (pow (- 'x (const cx)) 2)
                           (+
-                           (pow (- y (const cy)) 2)
-                           (pow (- z (const cz)) 2))))
+                           (pow (- 'y (const cy)) 2)
+                           (pow (- 'z (const cz)) 2))))
                  (const r))
     }
 

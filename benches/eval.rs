@@ -52,9 +52,9 @@ mod spheres {
         let mut rng = StdRng::seed_from_u64(42);
         let mut make_sphere = || -> Result<Tree, Error> {
             deftree!(- (sqrt (+ (+
-                                 (pow (- x (const sample_range(X_RANGE, &mut rng))) 2)
-                                 (pow (- y (const sample_range(Y_RANGE, &mut rng))) 2))
-                              (pow (- z (const sample_range(Z_RANGE, &mut rng))) 2)))
+                                 (pow (- 'x (const sample_range(X_RANGE, &mut rng))) 2)
+                                 (pow (- 'y (const sample_range(Y_RANGE, &mut rng))) 2))
+                              (pow (- 'z (const sample_range(Z_RANGE, &mut rng))) 2)))
                      (const sample_range(RADIUS_RANGE, &mut rng)))
         };
         let mut tree = make_sphere();
@@ -274,7 +274,7 @@ mod circles {
     const N_CIRCLES: usize = 100;
 
     fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
-        deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
+        deftree!(- (sqrt (+ (pow (- 'x (const cx)) 2) (pow (- 'y (const cy)) 2))) (const r))
     }
 
     fn random_circles(

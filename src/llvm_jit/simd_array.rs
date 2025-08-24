@@ -716,7 +716,7 @@ mod test {
     #[test]
     fn t_mul() {
         check_jit_eval(
-            &deftree!(* x y).unwrap(),
+            &deftree!(* 'x 'y).unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
             20,
             0.,
@@ -727,7 +727,7 @@ mod test {
     #[test]
     fn t_prod_sum() {
         check_jit_eval(
-            &deftree!(concat (+ x y) (* x y)).unwrap(),
+            &deftree!(concat (+ 'x 'y) (* 'x 'y)).unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
             100,
             0.,
@@ -738,7 +738,7 @@ mod test {
     #[test]
     fn t_sub_div() {
         check_jit_eval(
-            &deftree!(concat (- x y) (/ x y)).unwrap(),
+            &deftree!(concat (- 'x 'y) (/ 'x 'y)).unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
             20,
             0.,
@@ -749,7 +749,7 @@ mod test {
     #[test]
     fn t_pow() {
         check_jit_eval(
-            &deftree!(pow x 2).unwrap(),
+            &deftree!(pow 'x 2).unwrap(),
             &[('x', -10., -10.)],
             100,
             0.,
@@ -760,7 +760,7 @@ mod test {
     #[test]
     fn t_sqrt() {
         check_jit_eval(
-            &deftree!(sqrt x).unwrap(),
+            &deftree!(sqrt 'x).unwrap(),
             &[('x', 0.01, 10.)],
             100,
             0.,
@@ -771,7 +771,7 @@ mod test {
     #[test]
     fn t_circle() {
         check_jit_eval(
-            &deftree!(- (sqrt (+ (pow x 2) (pow y 2))) 3).unwrap(),
+            &deftree!(- (sqrt (+ (pow 'x 2) (pow 'y 2))) 3).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.)],
             20,
             0.,
@@ -782,7 +782,7 @@ mod test {
     #[test]
     fn t_sum_3() {
         check_jit_eval(
-            &deftree!(+ (+ x 3) (+ y z)).unwrap(),
+            &deftree!(+ (+ 'x 3) (+ 'y 'z)).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             5,
             0.,
@@ -793,7 +793,7 @@ mod test {
     #[test]
     fn t_sphere() {
         check_jit_eval(
-            &deftree!(- (sqrt (+ (pow x 2) (+ (pow y 2) (pow z 2)))) 3).unwrap(),
+            &deftree!(- (sqrt (+ (pow 'x 2) (+ (pow 'y 2) (pow 'z 2)))) 3).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             0.,
@@ -804,7 +804,7 @@ mod test {
     #[test]
     fn t_negate() {
         check_jit_eval(
-            &deftree!(* (- x) (+ y z)).unwrap(),
+            &deftree!(* (- 'x) (+ 'y 'z)).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             0.,
@@ -815,7 +815,7 @@ mod test {
     #[test]
     fn t_abs() {
         check_jit_eval(
-            &deftree!(* (abs x) (+ (abs y) (abs z))).unwrap(),
+            &deftree!(* (abs 'x) (+ (abs 'y) (abs 'z))).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             0.,
@@ -826,7 +826,7 @@ mod test {
     #[test]
     fn t_trigonometry() {
         check_jit_eval(
-            &deftree!(/ (+ (sin x) (cos y)) (+ 0.27 (pow (tan z) 2))).unwrap(),
+            &deftree!(/ (+ (sin 'x) (cos 'y)) (+ 0.27 (pow (tan 'z) 2))).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
             1e-14,
@@ -837,7 +837,7 @@ mod test {
     #[test]
     fn t_log_exp() {
         check_jit_eval(
-            &deftree!(/ (+ 1 (log x)) (+ 1 (exp y))).unwrap(),
+            &deftree!(/ (+ 1 (log 'x)) (+ 1 (exp 'y))).unwrap(),
             &[('x', 0.1, 5.), ('y', 0.1, 5.)],
             10,
             0.,
@@ -850,9 +850,9 @@ mod test {
         check_jit_eval(
             &deftree!(
                 (max (min
-                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+                      (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
             )
             .unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
@@ -865,7 +865,7 @@ mod test {
     #[test]
     fn t_floor() {
         check_jit_eval(
-            &deftree!(floor (+ (pow x 2) (sin x))).unwrap(),
+            &deftree!(floor (+ (pow 'x 2) (sin 'x))).unwrap(),
             &[('x', -5., 5.)],
             100,
             0.,
@@ -876,7 +876,7 @@ mod test {
     #[test]
     fn t_remainder() {
         check_jit_eval(
-            &deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
+            &deftree!(rem (pow 'x 2) (+ 2 (sin 'x))).unwrap(),
             &[('x', 1., 5.)],
             100,
             1e-15,
@@ -887,14 +887,14 @@ mod test {
     #[test]
     fn t_choose() {
         check_jit_eval(
-            &deftree!(if (> x 0) x (-x)).unwrap(),
+            &deftree!(if (> 'x 0) 'x (- 'x)).unwrap(),
             &[('x', -10., 10.)],
             100,
             0.,
             1e-6,
         );
         check_jit_eval(
-            &deftree!(if (< x 0) (- x) x).unwrap(),
+            &deftree!(if (< 'x 0) (- 'x) 'x).unwrap(),
             &[('x', -10., 10.)],
             100,
             0.,
@@ -905,7 +905,7 @@ mod test {
     #[test]
     fn t_or_and() {
         check_jit_eval(
-            &deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
+            &deftree!(if (and (> 'x 0) (< 'x 1)) (* 2 'x) 1).unwrap(),
             &[('x', -3., 3.)],
             100,
             0.,
@@ -916,7 +916,8 @@ mod test {
     #[test]
     fn t_not() {
         check_jit_eval(
-            &deftree!(if (not (> x 0)) (- (pow x 3) (pow y 3)) (+ (pow x 2) (pow y 2))).unwrap(),
+            &deftree!(if (not (> 'x 0)) (- (pow 'x 3) (pow 'y 3)) (+ (pow 'x 2) (pow 'y 2)))
+                .unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.)],
             100,
             1e-14,
@@ -953,9 +954,9 @@ mod sphere_test {
         let mut rng = StdRng::seed_from_u64(42);
         let mut make_sphere = || -> Result<Tree, Error> {
             deftree!(- (sqrt (+ (+
-                                 (pow (- x (const sample_range(X_RANGE, &mut rng))) 2)
-                                 (pow (- y (const sample_range(Y_RANGE, &mut rng))) 2))
-                              (pow (- z (const sample_range(Z_RANGE, &mut rng))) 2)))
+                                 (pow (- 'x (const sample_range(X_RANGE, &mut rng))) 2)
+                                 (pow (- 'y (const sample_range(Y_RANGE, &mut rng))) 2))
+                              (pow (- 'z (const sample_range(Z_RANGE, &mut rng))) 2)))
                      (const sample_range(RADIUS_RANGE, &mut rng)))
         };
         let mut tree = make_sphere();

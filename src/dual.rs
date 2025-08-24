@@ -260,36 +260,36 @@ mod test {
     fn t_add_sub() {
         let eps = f64::EPSILON;
         // add
-        check_dual_eval::<1>(&deftree!(+ x 1).unwrap(), &[('x', -1., 1.)], eps);
+        check_dual_eval::<1>(&deftree!(+ 'x 1).unwrap(), &[('x', -1., 1.)], eps);
         check_dual_eval::<1>(
-            &deftree!(+ x y).unwrap(),
+            &deftree!(+ 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<2>(
-            &deftree!(+ x y).unwrap(),
+            &deftree!(+ 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<3>(
-            &deftree!(+ x y).unwrap(),
+            &deftree!(+ 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         // sub
-        check_dual_eval::<1>(&deftree!(- x 1).unwrap(), &[('x', -1., 1.)], eps);
+        check_dual_eval::<1>(&deftree!(- 'x 1).unwrap(), &[('x', -1., 1.)], eps);
         check_dual_eval::<1>(
-            &deftree!(- x y).unwrap(),
+            &deftree!(- 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<2>(
-            &deftree!(- x y).unwrap(),
+            &deftree!(- 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<3>(
-            &deftree!(- x y).unwrap(),
+            &deftree!(- 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
@@ -299,32 +299,32 @@ mod test {
     fn t_mul_div() {
         let eps = f64::EPSILON;
         check_dual_eval::<1>(
-            &deftree!(* x y).unwrap(),
+            &deftree!(* 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<2>(
-            &deftree!(* x y).unwrap(),
+            &deftree!(* 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<3>(
-            &deftree!(* x y).unwrap(),
+            &deftree!(* 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<1>(
-            &deftree!(/ x y).unwrap(),
+            &deftree!(/ 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<2>(
-            &deftree!(/ x y).unwrap(),
+            &deftree!(/ 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
         check_dual_eval::<3>(
-            &deftree!(/ x y).unwrap(),
+            &deftree!(/ 'x 'y).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             eps,
         );
@@ -332,16 +332,16 @@ mod test {
 
     #[test]
     fn t_polynomial() {
-        check_dual_eval::<1>(&deftree!(pow x 2).unwrap(), &[('x', -10., 10.)], 1e-14);
-        check_dual_eval::<2>(&deftree!(pow x 2).unwrap(), &[('x', -10., 10.)], 1e-14);
-        check_dual_eval::<1>(&deftree!(pow x 3).unwrap(), &[('x', -10., 10.)], 1e-13);
+        check_dual_eval::<1>(&deftree!(pow 'x 2).unwrap(), &[('x', -10., 10.)], 1e-14);
+        check_dual_eval::<2>(&deftree!(pow 'x 2).unwrap(), &[('x', -10., 10.)], 1e-14);
+        check_dual_eval::<1>(&deftree!(pow 'x 3).unwrap(), &[('x', -10., 10.)], 1e-13);
         check_dual_eval::<1>(
-            &deftree!(+ (* 1.5 (pow x 2)) (+ (* 2.3 x) 3.46)).unwrap(),
+            &deftree!(+ (* 1.5 (pow 'x 2)) (+ (* 2.3 'x) 3.46)).unwrap(),
             &[('x', -10., 10.)],
             1e-14,
         );
         check_dual_eval::<1>(
-            &deftree!(+ (* 1.2 (pow x 3)) (+ (* 2.3 (pow x 2)) (+ (* 3.4 x) 4.5))).unwrap(),
+            &deftree!(+ (* 1.2 (pow 'x 3)) (+ (* 2.3 (pow 'x 2)) (+ (* 3.4 'x) 4.5))).unwrap(),
             &[('x', -10., 10.)],
             1e-13,
         );
@@ -350,12 +350,12 @@ mod test {
     #[test]
     fn t_gradient_2d() {
         check_dual_eval::<2>(
-            &deftree!(- (+ (pow x 2) (pow y 2)) 5).unwrap(),
+            &deftree!(- (+ (pow 'x 2) (pow 'y 2)) 5).unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
             1e-14,
         );
         check_dual_eval::<2>(
-            &deftree!(+ (* 2 x) (log y)).unwrap(),
+            &deftree!(+ (* 2 'x) (log 'y)).unwrap(),
             &[('x', -10., 10.), ('y', 0.1, 10.)],
             1e-14,
         );
@@ -364,7 +364,7 @@ mod test {
     #[test]
     fn t_mat_2x2() {
         check_dual_eval::<2>(
-            &deftree!(concat (+ (pow x 2) (pow y 2)) (+ (* 2 x) (log y))).unwrap(),
+            &deftree!(concat (+ (pow 'x 2) (pow 'y 2)) (+ (* 2 'x) (log 'y))).unwrap(),
             &[('x', -10., 10.), ('y', 0.1, 10.)],
             1e-14,
         );
@@ -372,27 +372,31 @@ mod test {
 
     #[test]
     fn t_trigonometry() {
-        check_dual_eval::<1>(&deftree!(pow (sin x) 2).unwrap(), &[('x', -5., 5.)], 1e-15);
-        check_dual_eval::<1>(&deftree!(pow (cos x) 2).unwrap(), &[('x', -5., 5.)], 1e-15);
-        check_dual_eval::<1>(&deftree!(tan x).unwrap(), &[('x', -1.5, 1.5)], 3e-14);
-        check_dual_eval::<1>(&deftree!(sin (pow x 2)).unwrap(), &[('x', -2., 2.)], 1e-14);
+        check_dual_eval::<1>(&deftree!(pow (sin 'x) 2).unwrap(), &[('x', -5., 5.)], 1e-15);
+        check_dual_eval::<1>(&deftree!(pow (cos 'x) 2).unwrap(), &[('x', -5., 5.)], 1e-15);
+        check_dual_eval::<1>(&deftree!(tan 'x).unwrap(), &[('x', -1.5, 1.5)], 3e-14);
+        check_dual_eval::<1>(&deftree!(sin (pow 'x 2)).unwrap(), &[('x', -2., 2.)], 1e-14);
     }
 
     #[test]
     fn t_sqrt() {
-        check_dual_eval::<1>(&deftree!(sqrt x).unwrap(), &[('x', 0.01, 10.)], 1e-15);
-        check_dual_eval::<1>(&deftree!(* x (sqrt x)).unwrap(), &[('x', 0.01, 10.)], 1e-15);
+        check_dual_eval::<1>(&deftree!(sqrt 'x).unwrap(), &[('x', 0.01, 10.)], 1e-15);
+        check_dual_eval::<1>(
+            &deftree!(* 'x (sqrt 'x)).unwrap(),
+            &[('x', 0.01, 10.)],
+            1e-15,
+        );
     }
 
     #[test]
     fn t_abs() {
-        check_dual_eval::<1>(&deftree!(abs x).unwrap(), &[('x', -10., 10.)], 0.);
+        check_dual_eval::<1>(&deftree!(abs 'x).unwrap(), &[('x', -10., 10.)], 0.);
     }
 
     #[test]
     fn t_log() {
         check_dual_eval::<1>(
-            &deftree!(log (pow x 2)).unwrap(),
+            &deftree!(log (pow 'x 2)).unwrap(),
             &[('x', 0.01, 10.)],
             1e-14,
         );
@@ -400,19 +404,19 @@ mod test {
 
     #[test]
     fn t_exp() {
-        check_dual_eval::<1>(&deftree!(exp x).unwrap(), &[('x', -10., 10.)], 0.);
-        check_dual_eval::<1>(&deftree!(exp (pow x 2)).unwrap(), &[('x', -4., 4.)], 1e-8);
+        check_dual_eval::<1>(&deftree!(exp 'x).unwrap(), &[('x', -10., 10.)], 0.);
+        check_dual_eval::<1>(&deftree!(exp (pow 'x 2)).unwrap(), &[('x', -4., 4.)], 1e-8);
     }
 
     #[test]
     fn t_min_max() {
         check_dual_eval::<1>(
-            &deftree!(min x (pow x 2)).unwrap(),
+            &deftree!(min 'x (pow 'x 2)).unwrap(),
             &[('x', -3., 3.)],
             1e-14,
         );
         check_dual_eval::<1>(
-            &deftree!(max x (pow x 2)).unwrap(),
+            &deftree!(max 'x (pow 'x 2)).unwrap(),
             &[('x', -3., 3.)],
             1e-14,
         );
@@ -421,7 +425,7 @@ mod test {
     #[test]
     fn t_ternary() {
         check_dual_eval::<1>(
-            &deftree!(sderiv (min x (pow x 2)) x).unwrap(),
+            &deftree!(sderiv (min 'x (pow 'x 2)) 'x).unwrap(),
             &[('x', -3., 5.)],
             1e-15,
         );
@@ -430,7 +434,7 @@ mod test {
     #[test]
     fn t_floor() {
         check_dual_eval::<1>(
-            &deftree!(floor (+ x y)).unwrap(),
+            &deftree!(floor (+ 'x 'y)).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             0.,
         );
@@ -439,7 +443,7 @@ mod test {
     #[test]
     fn t_remainder() {
         check_dual_eval::<1>(
-            &deftree!(rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)).unwrap(),
+            &deftree!(rem (+ (+ (* (pow 'x 2) 5) (* 'x 2)) 3) (* (pow 'x 2) 3)).unwrap(),
             &[('x', -1., 1.)],
             1e-12,
         )
@@ -448,17 +452,20 @@ mod test {
     #[test]
     fn t_mat_3x3() {
         check_dual_eval::<1>(
-            &deftree!(- (sqrt (+ (+ (pow (- x 1) 2) (pow (- y 2) 2)) (pow (- z 3) 2))) 5.).unwrap(),
+            &deftree!(- (sqrt (+ (+ (pow (- 'x 1) 2) (pow (- 'y 2) 2)) (pow (- 'z 3) 2))) 5.)
+                .unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
             1e-14,
         );
         check_dual_eval::<2>(
-            &deftree!(- (sqrt (+ (+ (pow (- x 1) 2) (pow (- y 2) 2)) (pow (- z 3) 2))) 5.).unwrap(),
+            &deftree!(- (sqrt (+ (+ (pow (- 'x 1) 2) (pow (- 'y 2) 2)) (pow (- 'z 3) 2))) 5.)
+                .unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
             1e-14,
         );
         check_dual_eval::<3>(
-            &deftree!(- (sqrt (+ (+ (pow (- x 1) 2) (pow (- y 2) 2)) (pow (- z 3) 2))) 5.).unwrap(),
+            &deftree!(- (sqrt (+ (+ (pow (- 'x 1) 2) (pow (- 'y 2) 2)) (pow (- 'z 3) 2))) 5.)
+                .unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.), ('z', -10., 10.)],
             1e-14,
         );
