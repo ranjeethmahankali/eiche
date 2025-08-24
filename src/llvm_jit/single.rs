@@ -53,9 +53,9 @@ impl Tree {
     where
         T: NumberType,
     {
-        const FUNC_NAME: &str = "eiche_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
+        let func_name = context.new_func_name::<T, false>();
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
@@ -65,7 +65,7 @@ impl Tree {
         let fn_type = context
             .void_type()
             .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
-        let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
+        let function = compiler.module.add_function(&func_name, fn_type, None);
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
         for (ni, node) in self.nodes().iter().enumerate() {
@@ -321,7 +321,7 @@ impl Tree {
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
-        let func = unsafe { engine.get_function(FUNC_NAME)? };
+        let func = unsafe { engine.get_function(&func_name)? };
         Ok(JitFn::create(func, symbols.len(), num_roots))
     }
 }

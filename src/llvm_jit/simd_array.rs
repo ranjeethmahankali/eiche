@@ -16,7 +16,7 @@ use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use super::{JitCompiler, JitContext};
+use super::{JitCompiler, JitContext, NumberType};
 use crate::{
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
@@ -284,11 +284,11 @@ impl Tree {
     ) -> Result<JitSimdFn<'ctx, T>, Error>
     where
         Wfloat: SimdVec<T>,
-        T: Copy,
+        T: Copy + NumberType,
     {
-        const FUNC_NAME: &str = "eiche_simd_func";
         let num_roots = self.num_roots();
         let symbols = self.symbols();
+        let func_name = context.new_func_name::<T, true>();
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
@@ -300,7 +300,7 @@ impl Tree {
             &[fptr_type.into(), fptr_type.into(), i64_type.into()],
             false,
         );
-        let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
+        let function = compiler.module.add_function(&func_name, fn_type, None);
         let start_block = context.append_basic_block(function, "entry");
         let loop_block = context.append_basic_block(function, "loop");
         let end_block = context.append_basic_block(function, "end");
@@ -589,7 +589,7 @@ impl Tree {
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
-        let func = unsafe { engine.get_function(FUNC_NAME)? };
+        let func = unsafe { engine.get_function(&func_name)? };
         Ok(JitSimdFn::<T>::create(func, symbols.len(), num_roots))
     }
 }
