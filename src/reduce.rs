@@ -176,10 +176,13 @@ pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
     }
     let mut steps = Vec::<Tree>::new();
     let mut i = best_candidate;
-    while explored[i].prev != i {
+    loop {
         let cand = &explored[i];
         steps.push(cand.tree.clone());
         i = cand.prev;
+        if explored[i].prev == i {
+            break;
+        }
     }
     steps.reverse();
     Ok(steps)
