@@ -12,16 +12,20 @@ macro_rules! concat_trees {
 #[macro_export]
 macro_rules! deftree {
     () => {}; // empty;
+    (let (($name:ident $val:tt)) $body:tt) => {{
+        let $name = $crate::deftree!($val);
+        $crate::deftree!($body)
+    }};
+    (let (($name:ident $val:tt) $($rest:tt)+) $body:tt) => {{
+        let $name = $crate::deftree!($val);
+        $crate::deftree!(let ($($rest)+) $body)
+    }};
     (($($a:tt)*)) => { // Unwrap redundant parens.
         $crate::deftree!($($a)*)
     };
     ($a:block) => { // Block expressions.
         $a
     };    // Concat
-    (let (($name:ident $val:tt)) $body:tt) => {
-        let $name = $crate::deftree!($val);
-        $crate::deftree!($body)
-    };
     (concat $($trees:tt) +) => {
         $crate::concat_trees!($($trees) +)
     };
@@ -90,6 +94,10 @@ macro_rules! deftree {
         let out: Result<$crate::Tree, $crate::Error> = Ok($crate::Tree::constant(($a).into()));
         out
     }};
+        // Rust variables.
+    ($var:ident) => {
+        $var
+    };
     // Conditional / piecewise
     (if $cond:tt $a:tt $b:tt) => {
         $crate::Tree::piecewise($crate::deftree!($cond), $crate::deftree!($a), $crate::deftree!($b))
@@ -354,7 +362,52 @@ mod test {
 
     #[test]
     fn t_deftree_bool() {
-        let tree = deftree!(concat true false).unwrap();
+        let tree = concat_trees!(true false).unwrap();
         assert_eq!(tree.nodes(), &[Constant(Bool(true)), Constant(Bool(false))]);
+    }
+
+    #[test]
+    fn t_let_single_binding() {
+        let tree = deftree!(let ((numer (+ 1 'x)))
+                            (/ numer 2))
+        .unwrap();
+        assert_eq!(tree.dims(), (1, 1));
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Constant(Scalar(1.0)),
+                Symbol('x'),
+                Binary(Add, 0, 1),
+                Constant(Scalar(2.0)),
+                Binary(Divide, 2, 3)
+            ]
+        );
+    }
+
+    #[test]
+    fn t_let_multiple_bindings() {
+        let tree = deftree!(let ((numer (log (+ 1 (pow 'x 2))))
+                                 (denom (+ 1 (pow 'x 2))))
+                            (/ numer denom))
+        .unwrap();
+        println!("{:?}", &tree);
+        assert_eq!(tree.dims(), (1, 1));
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Constant(Scalar(1.0)),
+                Symbol('x'),
+                Constant(Scalar(2.0)),
+                Binary(Pow, 1, 2),
+                Binary(Add, 0, 3),
+                Unary(Log, 4),
+                Constant(Scalar(1.0)),
+                Symbol('x'),
+                Constant(Scalar(2.0)),
+                Binary(Pow, 7, 8),
+                Binary(Add, 6, 9),
+                Binary(Divide, 5, 10)
+            ]
+        );
     }
 }
