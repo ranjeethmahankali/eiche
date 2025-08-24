@@ -17,6 +17,7 @@ type UnsafeFuncType = unsafe extern "C" fn(
 );
 
 /// This represents a JIT compiled tree. This is a wrapper around the JIT compiled native function.
+#[derive(Clone)]
 pub struct JitFn<'ctx, T>
 where
     T: NumberType,
