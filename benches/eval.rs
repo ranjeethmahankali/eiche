@@ -134,13 +134,19 @@ mod spheres {
                 {
                     let mut dedup = Deduplicater::new();
                     let mut pruner = Pruner::new();
-                    random_sphere_union()
+                    let tree = random_sphere_union()
                         .fold()
                         .unwrap()
                         .deduplicate(&mut dedup)
                         .unwrap()
                         .prune(&mut pruner)
-                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        tree.symbols().len(),
+                        3,
+                        "Several unchecked function calls in other benchmarks require the the tree to haev exactly three inputs."
+                    );
+                    tree
                 },
                 (0..N_QUERIES)
                     .map(|_| {
@@ -158,12 +164,19 @@ mod spheres {
         /// Includes the time to jit-compile the tree.
         fn with_compilation<T>(tree: &Tree, values: &mut Vec<T>, queries: &[[T; 3]])
         where
-            T: NumberType,
+            T: NumberType + Copy,
         {
             values.clear();
             let context = JitContext::default();
             let mut eval = tree.jit_compile(&context).unwrap();
-            values.extend(queries.iter().map(|coords| eval.run_unchecked(coords)[0]));
+            // SAFETY: There is an assert to make sure the tree has 3 input
+            // symbols. That is what the safe version would check for, so we
+            // don't need to check here.
+            values.extend(
+                queries
+                    .iter()
+                    .map(|coords| unsafe { eval.run_unchecked(coords)[0] }),
+            );
         }
 
         /// Does not include the time to jit-compile the tree.
@@ -172,7 +185,14 @@ mod spheres {
             T: NumberType,
         {
             values.clear();
-            values.extend(queries.iter().map(|coords| eval.run_unchecked(coords)[0]));
+            // SAFETY: There is an assert to make sure the tree has 3 input
+            // symbols. That is what the safe version would check for, so we
+            // don't need to check here.
+            values.extend(
+                queries
+                    .iter()
+                    .map(|coords| unsafe { eval.run_unchecked(coords)[0] }),
+            );
         }
 
         fn b_with_compile(c: &mut Criterion) {
@@ -223,12 +243,12 @@ mod spheres {
     #[cfg(feature = "llvm-jit")]
     pub mod jit_simd {
         use super::*;
-        use eiche::{JitContext, JitSimdFn, SimdVec, Wfloat};
+        use eiche::{JitContext, JitSimdFn, SimdVec, Wfloat, llvm_jit::NumberType};
 
         fn no_compilation<T>(eval: &mut JitSimdFn<'_, T>, values: &mut Vec<T>)
         where
             Wfloat: SimdVec<T>,
-            T: Copy,
+            T: Copy + NumberType,
         {
             values.clear();
             eval.run(values);
@@ -394,7 +414,10 @@ mod circles {
                 coord[1] = y as f64 + 0.5;
                 for x in 0..DIMS {
                     coord[0] = x as f64 + 0.5;
-                    let val = eval.run_unchecked(&coord)[0];
+                    // SAFETY: Upstream functions assert to make sure the tree
+                    // has exactly 3 inputs. This is what the safe version
+                    // checks for, so we don't need to check agian.
+                    let val = unsafe { eval.run_unchecked(&coord)[0] };
                     *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
                         f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
                     } else {
@@ -410,7 +433,10 @@ mod circles {
                 coord[1] = y as f64 + 0.5;
                 for x in 0..DIMS {
                     coord[0] = x as f64 + 0.5;
-                    let val = eval.run_unchecked(&coord)[0];
+                    // SAFETY: Upstream functions assert to make sure the tree
+                    // has exactly 3 inputs. This is what the safe version
+                    // checks for, so we don't need to check agian.
+                    let val = unsafe { eval.run_unchecked(&coord)[0] };
                     *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
                         f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
                     } else {
@@ -422,6 +448,11 @@ mod circles {
 
         fn b_with_compile(c: &mut Criterion) {
             let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+            assert_eq!(
+                tree.symbols().len(),
+                3,
+                "Later calls require exactly three inputs."
+            );
             let mut image = ImageBuffer::new(DIMS, DIMS);
             c.bench_function("circles-jit-single-eval-with-compile", |b| {
                 b.iter(|| {

@@ -398,17 +398,18 @@ where
         if inputs.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         }
-        Ok(self.run_unchecked(inputs))
+        // SAFETY: We just checked above.
+        Ok(unsafe { self.run_unchecked(inputs) })
     }
 
     /// Same as `run` except it doesn't check to make sure the `inputs` slice is
     /// of the correct length. This can be used when the caller is sure the
     /// inputs are correct, and this check can be omitted.
-    pub fn run_unchecked(&mut self, inputs: &[T]) -> &[T] {
+    pub unsafe fn run_unchecked(&mut self, inputs: &[T]) -> &[T] {
         unsafe {
             self.func
-                .call(inputs.as_ptr().cast(), self.outputs.as_mut_ptr().cast())
-        };
+                .call(inputs.as_ptr().cast(), self.outputs.as_mut_ptr().cast());
+        }
         &self.outputs
     }
 }

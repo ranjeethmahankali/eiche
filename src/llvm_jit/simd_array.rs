@@ -164,7 +164,7 @@ type UnsafeFuncType = unsafe extern "C" fn(*const SimdType, *mut SimdType, u64);
 pub struct JitSimdFn<'ctx, T>
 where
     Wfloat: SimdVec<T>,
-    T: Copy,
+    T: Copy + NumberType,
 {
     func: JitFunction<'ctx, UnsafeFuncType>,
     num_inputs: usize,
@@ -178,7 +178,7 @@ where
 impl<'ctx, T> JitSimdFn<'ctx, T>
 where
     Wfloat: SimdVec<T>,
-    T: Copy,
+    T: Copy + NumberType,
 {
     const SIMD_VEC_SIZE: usize = <Wfloat as SimdVec<T>>::SIMD_VEC_SIZE;
 
