@@ -270,7 +270,7 @@ mod spheres {
                 buf.pack(&q).unwrap();
             }
             c.bench_function("spheres-jit-simd-f64-no-compilation", |b| {
-                b.iter(|| no_compilation(&mut eval, black_box(&mut buf)))
+                b.iter(|| no_compilation(black_box(&mut eval), black_box(&mut buf)))
             });
         }
 
@@ -283,7 +283,7 @@ mod spheres {
                 buf.pack(&q).unwrap();
             }
             c.bench_function("spheres-jit-simd-f32-no-compilation", |b| {
-                b.iter(|| no_compilation(&mut eval, black_box(&mut buf)))
+                b.iter(|| no_compilation(black_box(&mut eval), black_box(&mut buf)))
             });
         }
 
