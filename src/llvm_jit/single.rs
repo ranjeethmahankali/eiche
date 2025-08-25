@@ -9,7 +9,7 @@ use inkwell::{
     types::{BasicTypeEnum, FloatType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
 };
-use std::ffi::c_void;
+use std::{ffi::c_void, marker::PhantomData};
 
 type UnsafeFuncType = unsafe extern "C" fn(
     *const c_void, // Inputs
@@ -24,7 +24,8 @@ where
 {
     func: JitFunction<'ctx, UnsafeFuncType>,
     num_inputs: usize,
-    outputs: Vec<T>,
+    num_outputs: usize,
+    _phantom: PhantomData<T>,
 }
 
 impl<'ctx, T> JitFn<'ctx, T>
@@ -36,11 +37,11 @@ where
         num_inputs: usize,
         num_outputs: usize,
     ) -> JitFn<'ctx, T> {
-        // Construct evaluator
         JitFn {
             func,
             num_inputs,
-            outputs: vec![T::nan(); num_outputs],
+            num_outputs,
+            _phantom: PhantomData,
         }
     }
 }
@@ -327,6 +328,36 @@ impl Tree {
     }
 }
 
+impl<T> JitFn<'_, T>
+where
+    T: NumberType,
+{
+    /// Run the JIT evaluator with the given input values. The number of input
+    /// values is expected to be the same as the number of variables in the
+    /// tree. The variables are substituted with the input values in the same
+    /// order as returned by calling `tree.symbols()` which was compiled to
+    /// produce this evaluator.
+    pub fn run(&mut self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
+        if inputs.len() != self.num_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        } else if outputs.len() != self.num_outputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        }
+        // SAFETY: We just checked above.
+        Ok(unsafe { self.run_unchecked(inputs, outputs) })
+    }
+
+    /// Same as `run` except it doesn't check to make sure the `inputs` slice is
+    /// of the correct length. This can be used when the caller is sure the
+    /// inputs are correct, and this check can be omitted.
+    pub unsafe fn run_unchecked(&mut self, inputs: &[T], outputs: &mut [T]) {
+        unsafe {
+            self.func
+                .call(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast());
+        }
+    }
+}
+
 fn build_float_unary_intrinsic<'ctx>(
     builder: &'ctx Builder,
     module: &'ctx Module,
@@ -385,35 +416,6 @@ fn build_float_binary_intrinsic<'ctx>(
         .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
-impl<T> JitFn<'_, T>
-where
-    T: NumberType,
-{
-    /// Run the JIT evaluator with the given input values. The number of input
-    /// values is expected to be the same as the number of variables in the
-    /// tree. The variables are substituted with the input values in the same
-    /// order as returned by calling `tree.symbols()` which was compiled to
-    /// produce this evaluator.
-    pub fn run(&mut self, inputs: &[T]) -> Result<&[T], Error> {
-        if inputs.len() != self.num_inputs {
-            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
-        }
-        // SAFETY: We just checked above.
-        Ok(unsafe { self.run_unchecked(inputs) })
-    }
-
-    /// Same as `run` except it doesn't check to make sure the `inputs` slice is
-    /// of the correct length. This can be used when the caller is sure the
-    /// inputs are correct, and this check can be omitted.
-    pub unsafe fn run_unchecked(&mut self, inputs: &[T]) -> &[T] {
-        unsafe {
-            self.func
-                .call(inputs.as_ptr().cast(), self.outputs.as_mut_ptr().cast());
-        }
-        &self.outputs
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -433,8 +435,7 @@ mod test {
             check_value_eval(
                 tree.clone(),
                 |inputs: &[f64], outputs: &mut [f64]| {
-                    let results = jiteval.run(inputs).unwrap();
-                    outputs.copy_from_slice(results);
+                    jiteval.run(inputs, outputs).unwrap();
                 },
                 vardata,
                 samples_per_var,
@@ -445,15 +446,16 @@ mod test {
             // f32
             let mut jiteval = tree.jit_compile(&context).unwrap();
             let mut inpf32 = Vec::new();
+            let mut outf32 = vec![0.; tree.num_roots()];
             let mut outf64 = Vec::new();
             check_value_eval(
                 tree.clone(),
                 |inputs: &[f64], outputs: &mut [f64]| {
                     inpf32.clear();
                     inpf32.extend(inputs.iter().map(|i| *i as f32));
-                    let results = jiteval.run(&inpf32).unwrap();
+                    jiteval.run(&inpf32, &mut outf32).unwrap();
                     outf64.clear();
-                    outf64.extend(results.iter().map(|r| *r as f64));
+                    outf64.extend(outf32.iter().map(|v| *v as f64));
                     outputs.copy_from_slice(&outf64);
                 },
                 vardata,
@@ -760,8 +762,9 @@ mod sphere_test {
             let context = JitContext::default();
             let mut eval = tree.jit_compile(&context).unwrap();
             val_jit.extend(queries.iter().map(|coords| {
-                let results = eval.run(coords).unwrap();
-                results[0]
+                let mut output = [0.];
+                eval.run(coords, &mut output).unwrap();
+                output[0]
             }));
         }
         assert_eq!(val_eval.len(), val_jit.len());

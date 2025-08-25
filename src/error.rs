@@ -38,6 +38,7 @@ pub enum Error {
 
     // Jit
     InputSizeMismatch(usize, usize),
+    OutputSizeMismatch(usize, usize),
     CannotCreateJitModule,
     CannotCompileIntrinsic(&'static str),
     JitCompilationError(String),

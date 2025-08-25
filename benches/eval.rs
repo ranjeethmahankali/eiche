@@ -172,11 +172,13 @@ mod spheres {
             // SAFETY: There is an assert to make sure the tree has 3 input
             // symbols. That is what the safe version would check for, so we
             // don't need to check here.
-            values.extend(
-                queries
-                    .iter()
-                    .map(|coords| unsafe { eval.run_unchecked(coords)[0] }),
-            );
+            values.extend(queries.iter().map(|coords| {
+                let mut output = [T::nan()];
+                unsafe {
+                    eval.run_unchecked(coords, &mut output);
+                }
+                output[0]
+            }));
         }
 
         /// Does not include the time to jit-compile the tree.
@@ -188,11 +190,13 @@ mod spheres {
             // SAFETY: There is an assert to make sure the tree has 3 input
             // symbols. That is what the safe version would check for, so we
             // don't need to check here.
-            values.extend(
-                queries
-                    .iter()
-                    .map(|coords| unsafe { eval.run_unchecked(coords)[0] }),
-            );
+            values.extend(queries.iter().map(|coords| {
+                let mut output = [T::nan()];
+                unsafe {
+                    eval.run_unchecked(coords, &mut output);
+                }
+                output[0]
+            }));
         }
 
         fn b_with_compile(c: &mut Criterion) {
@@ -419,10 +423,12 @@ mod circles {
                 coord[1] = y as f64 + 0.5;
                 for x in 0..DIMS {
                     coord[0] = x as f64 + 0.5;
+                    let mut output = [0.];
                     // SAFETY: Upstream functions assert to make sure the tree
                     // has exactly 3 inputs. This is what the safe version
                     // checks for, so we don't need to check agian.
-                    let val = unsafe { eval.run_unchecked(&coord)[0] };
+                    unsafe { eval.run_unchecked(&coord, &mut output) };
+                    let val = output[0];
                     *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
                         f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
                     } else {
@@ -438,10 +444,12 @@ mod circles {
                 coord[1] = y as f64 + 0.5;
                 for x in 0..DIMS {
                     coord[0] = x as f64 + 0.5;
+                    let mut output = [0.];
                     // SAFETY: Upstream functions assert to make sure the tree
                     // has exactly 3 inputs. This is what the safe version
                     // checks for, so we don't need to check agian.
-                    let val = unsafe { eval.run_unchecked(&coord)[0] };
+                    unsafe { eval.run_unchecked(&coord, &mut output) };
+                    let val = output[0];
                     *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
                         f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
                     } else {
