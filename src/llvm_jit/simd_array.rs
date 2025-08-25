@@ -215,6 +215,14 @@ where
         }
     }
 
+    pub fn reset_for_tree(&mut self, tree: &Tree) {
+        self.num_samples = 0;
+        self.num_inputs = tree.symbols().len();
+        self.num_outputs = tree.num_roots();
+        self.inputs.clear();
+        self.outputs.clear();
+    }
+
     fn num_simd_iters(&self) -> usize {
         (self.num_samples / Self::SIMD_VEC_SIZE)
             + if self.num_samples % Self::SIMD_VEC_SIZE > 0 {
