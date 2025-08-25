@@ -168,7 +168,7 @@ mod spheres {
         {
             values.clear();
             let context = JitContext::default();
-            let mut eval = tree.jit_compile(&context).unwrap();
+            let eval = tree.jit_compile(&context).unwrap();
             // SAFETY: There is an assert to make sure the tree has 3 input
             // symbols. That is what the safe version would check for, so we
             // don't need to check here.
@@ -417,7 +417,7 @@ mod circles {
 
         fn with_compilation(tree: &Tree, image: &mut ImageBuffer) {
             let context = JitContext::default();
-            let mut eval = tree.jit_compile(&context).unwrap();
+            let eval = tree.jit_compile(&context).unwrap();
             let mut coord = [0., 0.];
             for y in 0..DIMS {
                 coord[1] = y as f64 + 0.5;

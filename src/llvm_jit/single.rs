@@ -337,7 +337,7 @@ where
     /// tree. The variables are substituted with the input values in the same
     /// order as returned by calling `tree.symbols()` which was compiled to
     /// produce this evaluator.
-    pub fn run(&mut self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
+    pub fn run(&self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
         if inputs.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         } else if outputs.len() != self.num_outputs {
@@ -350,7 +350,7 @@ where
     /// Same as `run` except it doesn't check to make sure the `inputs` slice is
     /// of the correct length. This can be used when the caller is sure the
     /// inputs are correct, and this check can be omitted.
-    pub unsafe fn run_unchecked(&mut self, inputs: &[T], outputs: &mut [T]) {
+    pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T]) {
         unsafe {
             self.func
                 .call(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast());
@@ -431,7 +431,7 @@ mod test {
         let context = JitContext::default();
         {
             // f64.
-            let mut jiteval = tree.jit_compile(&context).unwrap();
+            let jiteval = tree.jit_compile(&context).unwrap();
             check_value_eval(
                 tree.clone(),
                 |inputs: &[f64], outputs: &mut [f64]| {
@@ -444,7 +444,7 @@ mod test {
         }
         {
             // f32
-            let mut jiteval = tree.jit_compile(&context).unwrap();
+            let jiteval = tree.jit_compile(&context).unwrap();
             let mut inpf32 = Vec::new();
             let mut outf32 = vec![0.; tree.num_roots()];
             let mut outf64 = Vec::new();
@@ -760,7 +760,7 @@ mod sphere_test {
         let mut val_jit: Vec<f64> = Vec::with_capacity(N_QUERIES);
         {
             let context = JitContext::default();
-            let mut eval = tree.jit_compile(&context).unwrap();
+            let eval = tree.jit_compile(&context).unwrap();
             val_jit.extend(queries.iter().map(|coords| {
                 let mut output = [0.];
                 eval.run(coords, &mut output).unwrap();

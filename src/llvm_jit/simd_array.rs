@@ -186,7 +186,7 @@ where
         }
     }
 
-    pub fn run(&mut self, buf: &mut JitSimdBuffers<T>) {
+    pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
         unsafe {
             self.func.call(
                 buf.inputs.as_ptr() as *const SimdType,
@@ -681,8 +681,8 @@ mod test {
         eps32: f32,
     ) {
         let context = JitContext::default();
-        let mut eval64 = tree.jit_compile_array::<f64>(&context).unwrap();
-        let mut eval32 = tree.jit_compile_array::<f32>(&context).unwrap();
+        let eval64 = tree.jit_compile_array::<f64>(&context).unwrap();
+        let eval32 = tree.jit_compile_array::<f32>(&context).unwrap();
         let mut buf64 = JitSimdBuffers::<f64>::new(tree);
         let mut buf32 = JitSimdBuffers::<f32>::new(tree);
         let mut eval = ValueEvaluator::new(tree);
@@ -1020,7 +1020,7 @@ mod sphere_test {
         }
         let val_jit: Vec<_> = {
             let context = JitContext::default();
-            let mut eval = tree.jit_compile_array(&context).unwrap();
+            let eval = tree.jit_compile_array(&context).unwrap();
             let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
                 buf.pack(&q).unwrap();
