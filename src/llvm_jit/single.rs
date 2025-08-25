@@ -28,22 +28,14 @@ where
     _phantom: PhantomData<T>,
 }
 
-impl<'ctx, T> JitFn<'ctx, T>
+pub struct JitFnSync<'ctx, T>
 where
     T: NumberType,
 {
-    pub fn create(
-        func: JitFunction<'ctx, UnsafeFuncType>,
-        num_inputs: usize,
-        num_outputs: usize,
-    ) -> JitFn<'ctx, T> {
-        JitFn {
-            func,
-            num_inputs,
-            num_outputs,
-            _phantom: PhantomData,
-        }
-    }
+    func: UnsafeFuncType,
+    num_inputs: usize,
+    num_outputs: usize,
+    _phantom: PhantomData<&'ctx JitFn<'ctx, T>>,
 }
 
 impl Tree {
@@ -324,11 +316,16 @@ impl Tree {
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
         let func = unsafe { engine.get_function(&func_name)? };
-        Ok(JitFn::create(func, symbols.len(), num_roots))
+        Ok(JitFn {
+            func,
+            num_inputs: symbols.len(),
+            num_outputs: num_roots,
+            _phantom: PhantomData,
+        })
     }
 }
 
-impl<T> JitFn<'_, T>
+impl<'ctx, T> JitFn<'ctx, T>
 where
     T: NumberType,
 {
@@ -354,6 +351,36 @@ where
         unsafe {
             self.func
                 .call(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast());
+        }
+    }
+
+    pub fn as_sync(&self) -> JitFnSync<'ctx, T> {
+        JitFnSync {
+            func: unsafe { self.func.as_raw() },
+            num_inputs: self.num_inputs,
+            num_outputs: self.num_outputs,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'ctx, T> JitFnSync<'ctx, T>
+where
+    T: NumberType,
+{
+    pub fn run(&self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
+        if inputs.len() != self.num_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        } else if outputs.len() != self.num_outputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        }
+        // SAFETY: We just checked above.
+        Ok(unsafe { self.run_unchecked(inputs, outputs) })
+    }
+
+    pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T]) {
+        unsafe {
+            (self.func)(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast());
         }
     }
 }
