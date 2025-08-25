@@ -243,38 +243,43 @@ mod spheres {
     #[cfg(feature = "llvm-jit")]
     pub mod jit_simd {
         use super::*;
-        use eiche::{JitContext, JitSimdFn, SimdVec, Wfloat, llvm_jit::NumberType};
+        use eiche::{
+            JitContext, JitSimdFn, SimdVec, Wfloat,
+            llvm_jit::{NumberType, simd_array::JitSimdBuffers},
+        };
 
-        fn no_compilation<T>(eval: &mut JitSimdFn<'_, T>, values: &mut Vec<T>)
+        fn no_compilation<T>(eval: &mut JitSimdFn<'_, T>, buf: &mut JitSimdBuffers<T>)
         where
             Wfloat: SimdVec<T>,
             T: Copy + NumberType,
         {
-            values.clear();
-            eval.run(values);
+            buf.clear_outputs();
+            eval.run(buf);
         }
 
         fn b_no_compilation_f64(c: &mut Criterion) {
-            let (tree, queries, mut values) = jit_single::init_benchmark::<f64>();
+            let (tree, queries, _) = jit_single::init_benchmark::<f64>();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
+            let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
-                eval.push(&q).unwrap();
+                buf.pack(&q).unwrap();
             }
             c.bench_function("spheres-jit-simd-f64-no-compilation", |b| {
-                b.iter(|| no_compilation(&mut eval, black_box(&mut values)))
+                b.iter(|| no_compilation(&mut eval, black_box(&mut buf)))
             });
         }
 
         fn b_no_compilation_f32(c: &mut Criterion) {
-            let (tree, queries, mut values) = jit_single::init_benchmark::<f32>();
+            let (tree, queries, _) = jit_single::init_benchmark::<f32>();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
+            let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
-                eval.push(&q).unwrap();
+                buf.pack(&q).unwrap();
             }
             c.bench_function("spheres-jit-simd-f32-no-compilation", |b| {
-                b.iter(|| no_compilation(&mut eval, black_box(&mut values)))
+                b.iter(|| no_compilation(&mut eval, black_box(&mut buf)))
             });
         }
 

@@ -42,16 +42,6 @@ pub union Wfloat {
     reg: SimdType,
 }
 
-impl Wfloat {
-    fn ptr(&self) -> *const SimdType {
-        unsafe { &self.reg as *const SimdType }
-    }
-
-    fn ptr_mut(&mut self) -> *mut SimdType {
-        unsafe { &mut self.reg as *mut SimdType }
-    }
-}
-
 /// This trait exists to allow reuse of code between f32 and f64 types with
 /// generics. i.e. this enables sharing the code to compile and run the compiled
 /// tree for both f32 and f64. This could represent a simd vector of f64 values,
@@ -167,12 +157,20 @@ where
     T: Copy + NumberType,
 {
     func: JitFunction<'ctx, UnsafeFuncType>,
+    phantom: PhantomData<T>, // This only exists to specialize the type for type T.
+}
+
+pub struct JitSimdBuffers<T>
+where
+    Wfloat: SimdVec<T>,
+    T: Copy + NumberType,
+{
+    num_samples: usize,
     num_inputs: usize,
     num_outputs: usize,
-    num_eval: usize,
     inputs: Vec<Wfloat>,
     outputs: Vec<Wfloat>,
-    phantom: PhantomData<T>, // This only exists to specialize the type for type T, as T is not used in anything else.
+    phantom: PhantomData<T>, // This only exists to specialize the type for type T.
 }
 
 impl<'ctx, T> JitSimdFn<'ctx, T>
@@ -180,23 +178,50 @@ where
     Wfloat: SimdVec<T>,
     T: Copy + NumberType,
 {
-    const SIMD_VEC_SIZE: usize = <Wfloat as SimdVec<T>>::SIMD_VEC_SIZE;
-
     /// Create a new instance from a compiled native function.
-    pub fn create(
-        func: JitFunction<'ctx, UnsafeFuncType>,
-        num_inputs: usize,
-        num_outputs: usize,
-    ) -> JitSimdFn<'ctx, T> {
+    fn create(func: JitFunction<'ctx, UnsafeFuncType>) -> JitSimdFn<'ctx, T> {
         JitSimdFn::<T> {
             func,
-            num_inputs,
-            num_outputs,
-            num_eval: 0,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn run(&mut self, buf: &mut JitSimdBuffers<T>) {
+        unsafe {
+            self.func.call(
+                buf.inputs.as_ptr() as *const SimdType,
+                buf.outputs.as_mut_ptr() as *mut SimdType,
+                buf.num_simd_iters() as u64,
+            );
+        }
+    }
+}
+
+impl<T> JitSimdBuffers<T>
+where
+    Wfloat: SimdVec<T>,
+    T: Copy + NumberType,
+{
+    const SIMD_VEC_SIZE: usize = <Wfloat as SimdVec<T>>::SIMD_VEC_SIZE;
+
+    pub fn new(tree: &Tree) -> Self {
+        Self {
+            num_samples: 0,
+            num_inputs: tree.symbols().len(),
+            num_outputs: tree.num_roots(),
             inputs: Vec::new(),
             outputs: Vec::new(),
             phantom: PhantomData,
         }
+    }
+
+    fn num_simd_iters(&self) -> usize {
+        (self.num_samples / Self::SIMD_VEC_SIZE)
+            + if self.num_samples % Self::SIMD_VEC_SIZE > 0 {
+                1
+            } else {
+                0
+            }
     }
 
     /// Push a new set of input values. The length of `sample` is expected to be
@@ -204,11 +229,11 @@ where
     /// produce this JIT evaluator. The values are substituted into the
     /// variables in the same order as they are returned by calling
     /// `tree.symbols` on the tree that produced this JIT evaluator.
-    pub fn push(&mut self, sample: &[T]) -> Result<(), Error> {
+    pub fn pack(&mut self, sample: &[T]) -> Result<(), Error> {
         if sample.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(sample.len(), self.num_inputs));
         }
-        let index = self.num_eval % Self::SIMD_VEC_SIZE;
+        let index = self.num_samples % Self::SIMD_VEC_SIZE;
         if index == 0 {
             self.inputs.extend(std::iter::repeat_n(
                 <Wfloat as SimdVec<T>>::nan(),
@@ -226,53 +251,34 @@ where
         {
             <Wfloat as SimdVec<T>>::set(reg, *val, index);
         }
-        self.num_eval += 1;
+        self.num_samples += 1;
         Ok(())
     }
 
     /// Clear all inputs and outputs.
     pub fn clear(&mut self) {
         self.inputs.clear();
+        self.clear_outputs();
+    }
+
+    pub fn clear_outputs(&mut self) {
         self.outputs.clear();
-        self.num_eval = 0;
+        self.num_samples = 0;
     }
 
-    fn num_regs(&self) -> usize {
-        (self.num_eval / Self::SIMD_VEC_SIZE)
-            + if self.num_eval % Self::SIMD_VEC_SIZE > 0 {
-                1
-            } else {
-                0
-            }
-    }
-
-    /// Run the evaluator with all the input values that are pushed into it, and
-    /// write the output values into the `dst` vector. Any values previously in
-    /// `dst` are erased.
-    pub fn run(&mut self, dst: &mut Vec<T>) {
-        unsafe {
-            self.func.call(
-                self.inputs[0].ptr(),
-                self.outputs[0].ptr_mut(),
-                self.num_regs() as u64,
-            );
-        }
-        dst.clear();
-        dst.reserve(self.num_outputs * self.num_eval);
-        let mut offset = 0;
-        let mut num_vals = 0;
-        while offset < self.outputs.len() && num_vals < self.num_eval {
-            for i in 0..Self::SIMD_VEC_SIZE {
-                for wf in &self.outputs[offset..(offset + self.num_outputs)] {
-                    dst.push(<Wfloat as SimdVec<T>>::get(wf, i));
-                }
-                num_vals += 1;
-                if num_vals >= self.num_eval {
-                    break;
-                }
-            }
-            offset += self.num_outputs;
-        }
+    pub fn unpack_outputs(&self) -> impl Iterator<Item = T> {
+        debug_assert_eq!(self.outputs.len() % self.num_outputs, 0);
+        dbg!(self.num_samples);
+        self.outputs
+            .chunks_exact(self.num_outputs)
+            .flat_map(|chunk| {
+                (0..Self::SIMD_VEC_SIZE).flat_map(|lane| {
+                    chunk
+                        .iter()
+                        .map(move |simd| <Wfloat as SimdVec<T>>::get(simd, lane))
+                })
+            })
+            .take(self.num_samples * self.num_outputs)
     }
 }
 
@@ -590,7 +596,7 @@ impl Tree {
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
         let func = unsafe { engine.get_function(&func_name)? };
-        Ok(JitSimdFn::<T>::create(func, symbols.len(), num_roots))
+        Ok(JitSimdFn::<T>::create(func))
     }
 }
 
@@ -667,8 +673,10 @@ mod test {
         eps32: f32,
     ) {
         let context = JitContext::default();
-        let mut eval64 = tree.jit_compile_array(&context).unwrap();
-        let mut eval32 = tree.jit_compile_array(&context).unwrap();
+        let mut eval64 = tree.jit_compile_array::<f64>(&context).unwrap();
+        let mut eval32 = tree.jit_compile_array::<f32>(&context).unwrap();
+        let mut buf64 = JitSimdBuffers::<f64>::new(tree);
+        let mut buf32 = JitSimdBuffers::<f32>::new(tree);
         let mut eval = ValueEvaluator::new(tree);
         let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         let mut expected = Vec::with_capacity(
@@ -685,18 +693,18 @@ mod test {
                     .iter()
                     .map(|value| value.scalar().unwrap()),
             );
-            eval64.push(sample).unwrap();
+            buf64.pack(sample).unwrap();
             {
                 // f32
                 sample32.clear();
                 sample32.extend(sample.iter().map(|s| *s as f32));
-                eval32.push(&sample32).unwrap();
+                buf32.pack(&sample32).unwrap();
             }
         }
         {
             // Run and check f64.
-            let mut actual = Vec::with_capacity(expected.capacity());
-            eval64.run(&mut actual);
+            eval64.run(&mut buf64);
+            let actual: Vec<_> = buf64.unpack_outputs().collect();
             assert_eq!(actual.len(), expected.len());
             for (l, r) in actual.iter().zip(expected.iter()) {
                 assert_float_eq!(l, r, eps64);
@@ -704,8 +712,8 @@ mod test {
         }
         {
             // Run and check f32.
-            let mut actual = Vec::with_capacity(expected.capacity());
-            eval32.run(&mut actual);
+            eval32.run(&mut buf32);
+            let actual: Vec<_> = buf32.unpack_outputs().collect();
             assert_eq!(actual.len(), expected.len());
             for (l, r) in actual.iter().zip(expected.iter()) {
                 assert_float_eq!(*l as f64, r, eps32 as f64);
@@ -1002,15 +1010,16 @@ mod sphere_test {
                 results[0].scalar().unwrap()
             }));
         }
-        let mut val_jit: Vec<f64> = Vec::with_capacity(N_QUERIES);
-        {
+        let val_jit: Vec<_> = {
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
+            let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
-                eval.push(&q).unwrap();
+                buf.pack(&q).unwrap();
             }
-            eval.run(&mut val_jit);
-        }
+            eval.run(&mut buf);
+            buf.unpack_outputs().collect()
+        };
         assert_eq!(val_eval.len(), val_jit.len());
         for (l, r) in val_eval.iter().zip(val_jit.iter()) {
             assert_float_eq!(l, r, 1e-15);
