@@ -26,7 +26,7 @@ pub mod llvm_jit;
 pub use llvm_jit::{
     JitContext,
     simd_array::{JitSimdFn, SimdVec, Wfloat},
-    single::JitFn,
+    single::{JitFn, JitFnSync},
 };
 
 #[cfg(test)]
