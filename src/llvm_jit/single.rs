@@ -356,7 +356,7 @@ where
         }
     }
 
-    pub fn as_sync(&self) -> JitFnSync<'ctx, T> {
+    pub fn as_sync(&'ctx self) -> JitFnSync<'ctx, T> {
         JitFnSync {
             func: unsafe { self.func.as_raw() },
             num_inputs: self.num_inputs,
