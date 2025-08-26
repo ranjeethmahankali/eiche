@@ -53,6 +53,9 @@ where
     /// The number of values of type T in the wide simd type.
     const SIMD_VEC_SIZE: usize;
 
+    /// Broadcast the value to all lanes of a simd vec and return in.
+    fn broadcast(val: T) -> Wfloat;
+
     /// Get a simd vector filled with NaNs.
     fn nan() -> Wfloat;
 
@@ -75,10 +78,14 @@ where
 impl SimdVec<f32> for Wfloat {
     const SIMD_VEC_SIZE: usize = SIMD_F32_SIZE;
 
-    fn nan() -> Wfloat {
+    fn broadcast(val: f32) -> Wfloat {
         Wfloat {
-            valsf32: [f32::NAN; <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
+            valsf32: [val; <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
         }
+    }
+
+    fn nan() -> Wfloat {
+        Self::broadcast(f32::NAN)
     }
 
     fn set(&mut self, val: f32, idx: usize) {
@@ -113,10 +120,14 @@ impl SimdVec<f32> for Wfloat {
 impl SimdVec<f64> for Wfloat {
     const SIMD_VEC_SIZE: usize = SIMD_F64_SIZE;
 
-    fn nan() -> Wfloat {
+    fn broadcast(val: f64) -> Wfloat {
         Wfloat {
-            valsf64: [f64::NAN; <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
+            valsf64: [val; <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
         }
+    }
+
+    fn nan() -> Wfloat {
+        Self::broadcast(f64::NAN)
     }
 
     fn set(&mut self, val: f64, idx: usize) {
