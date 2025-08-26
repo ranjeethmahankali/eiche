@@ -21,16 +21,17 @@ use crate::{
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
-use std::{marker::PhantomData, mem::size_of};
+use std::{ffi::c_void, marker::PhantomData, mem::size_of};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub type SimdType = __m256d;
+pub type SimdType64 = __m256d;
+pub type SimdType32 = __m256;
 
 #[cfg(target_arch = "aarch64")]
 type SimdType = float64x1x4_t;
 
-const SIMD_F32_SIZE: usize = size_of::<SimdType>() / size_of::<f32>();
-const SIMD_F64_SIZE: usize = size_of::<SimdType>() / size_of::<f64>();
+const SIMD_F32_SIZE: usize = size_of::<SimdType64>() / size_of::<f32>();
+const SIMD_F64_SIZE: usize = size_of::<SimdType64>() / size_of::<f64>();
 
 /// Thin wrapper around a simd floating point value. The union makes it easier
 /// to access the individual floating point numbers.
@@ -39,7 +40,8 @@ const SIMD_F64_SIZE: usize = size_of::<SimdType>() / size_of::<f64>();
 pub union Wfloat {
     valsf32: [f32; SIMD_F32_SIZE],
     valsf64: [f64; SIMD_F64_SIZE],
-    reg: SimdType,
+    reg64: SimdType64,
+    reg32: SimdType32,
 }
 
 /// This trait exists to allow reuse of code between f32 and f64 types with
@@ -73,6 +75,12 @@ where
 
     /// Get a constant value with all entries in the simd vector populated with `val`.
     fn const_bool(val: bool, context: &Context) -> BasicValueEnum<'_>;
+
+    fn mul(a: Self, b: Self) -> Self;
+
+    fn add(a: Self, b: Self) -> Self;
+
+    fn mul_add(a: Self, b: Self, c: Self) -> Self;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -114,6 +122,39 @@ impl SimdVec<f32> for Wfloat {
                 .const_int(if val { 1 } else { 0 }, false);
                 <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
         ))
+    }
+
+    fn mul(a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: std::arch::x86_64::_mm256_mul_ps(a.reg32, b.reg32),
+                }
+            }
+        }
+    }
+
+    fn add(a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: std::arch::x86_64::_mm256_add_ps(a.reg32, b.reg32),
+                }
+            }
+        }
+    }
+
+    fn mul_add(a: Self, b: Self, c: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: std::arch::x86_64::_mm256_fmadd_ps(a.reg32, b.reg32, c.reg32),
+                }
+            }
+        }
     }
 }
 
@@ -157,9 +198,54 @@ impl SimdVec<f64> for Wfloat {
                 <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
         ))
     }
+
+    fn mul(a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: std::arch::x86_64::_mm256_mul_pd(a.reg64, b.reg64),
+                }
+            }
+        }
+    }
+
+    fn add(a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: std::arch::x86_64::_mm256_add_pd(a.reg64, b.reg64),
+                }
+            }
+        }
+    }
+
+    fn mul_add(a: Self, b: Self, c: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: std::arch::x86_64::_mm256_fmadd_pd(a.reg64, b.reg64, c.reg64),
+                }
+            }
+        }
+    }
 }
 
-pub type NativeSimdFunc = unsafe extern "C" fn(*const SimdType, *mut SimdType, u64);
+impl From<f32> for Wfloat {
+    fn from(value: f32) -> Self {
+        <Self as SimdVec<f32>>::broadcast(value)
+    }
+}
+
+impl From<f64> for Wfloat {
+    fn from(value: f64) -> Self {
+        <Self as SimdVec<f64>>::broadcast(value)
+    }
+}
+
+pub type NativeSimdFunc = unsafe extern "C" fn(*const c_void, *mut c_void, u64);
 
 /// Thin wrapper around the compiled native JIT function to do simd evaluations.
 pub struct JitSimdFn<'ctx, T>
@@ -208,8 +294,8 @@ where
     pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
         unsafe {
             self.func.call(
-                buf.inputs.as_ptr() as *const SimdType,
-                buf.outputs.as_mut_ptr() as *mut SimdType,
+                buf.inputs.as_ptr().cast(),
+                buf.outputs.as_mut_ptr().cast(),
                 buf.num_simd_iters() as u64,
             );
         }
@@ -231,8 +317,8 @@ where
     pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
         unsafe {
             (self.func)(
-                buf.inputs.as_ptr() as *const SimdType,
-                buf.outputs.as_mut_ptr() as *mut SimdType,
+                buf.inputs.as_ptr().cast(),
+                buf.outputs.as_mut_ptr().cast(),
                 buf.num_simd_iters() as u64,
             );
         }
