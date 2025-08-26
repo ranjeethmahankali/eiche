@@ -154,16 +154,32 @@ type UnsafeFuncType = unsafe extern "C" fn(*const SimdType, *mut SimdType, u64);
 pub struct JitSimdFn<'ctx, T>
 where
     Wfloat: SimdVec<T>,
-    T: Copy + NumberType,
+    T: NumberType,
 {
     func: JitFunction<'ctx, UnsafeFuncType>,
     phantom: PhantomData<T>, // This only exists to specialize the type for type T.
 }
 
+pub struct JitSimdFnSync<'ctx, T>
+where
+    Wfloat: SimdVec<T>,
+    T: NumberType,
+{
+    func: UnsafeFuncType,
+    phantom: PhantomData<&'ctx JitSimdFn<'ctx, T>>,
+}
+
+unsafe impl<'ctx, T> Sync for JitSimdFnSync<'ctx, T>
+where
+    Wfloat: SimdVec<T>,
+    T: NumberType,
+{
+}
+
 pub struct JitSimdBuffers<T>
 where
     Wfloat: SimdVec<T>,
-    T: Copy + NumberType,
+    T: NumberType,
 {
     num_samples: usize,
     num_inputs: usize,
@@ -176,19 +192,34 @@ where
 impl<'ctx, T> JitSimdFn<'ctx, T>
 where
     Wfloat: SimdVec<T>,
-    T: Copy + NumberType,
+    T: NumberType,
 {
-    /// Create a new instance from a compiled native function.
-    fn create(func: JitFunction<'ctx, UnsafeFuncType>) -> JitSimdFn<'ctx, T> {
-        JitSimdFn::<T> {
-            func,
-            phantom: PhantomData,
-        }
-    }
-
     pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
         unsafe {
             self.func.call(
+                buf.inputs.as_ptr() as *const SimdType,
+                buf.outputs.as_mut_ptr() as *mut SimdType,
+                buf.num_simd_iters() as u64,
+            );
+        }
+    }
+
+    pub fn as_async(&'ctx self) -> JitSimdFnSync<'ctx, T> {
+        JitSimdFnSync {
+            func: unsafe { self.func.as_raw() },
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'ctx, T> JitSimdFnSync<'ctx, T>
+where
+    Wfloat: SimdVec<T>,
+    T: NumberType,
+{
+    pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
+        unsafe {
+            (self.func)(
                 buf.inputs.as_ptr() as *const SimdType,
                 buf.outputs.as_mut_ptr() as *mut SimdType,
                 buf.num_simd_iters() as u64,
@@ -200,7 +231,7 @@ where
 impl<T> JitSimdBuffers<T>
 where
     Wfloat: SimdVec<T>,
-    T: Copy + NumberType,
+    T: NumberType,
 {
     const SIMD_VEC_SIZE: usize = <Wfloat as SimdVec<T>>::SIMD_VEC_SIZE;
 
@@ -298,7 +329,7 @@ impl Tree {
     ) -> Result<JitSimdFn<'ctx, T>, Error>
     where
         Wfloat: SimdVec<T>,
-        T: Copy + NumberType,
+        T: NumberType,
     {
         let num_roots = self.num_roots();
         let symbols = self.symbols();
@@ -604,7 +635,10 @@ impl Tree {
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
         let func = unsafe { engine.get_function(&func_name)? };
-        Ok(JitSimdFn::<T>::create(func))
+        Ok(JitSimdFn::<T> {
+            func,
+            phantom: PhantomData,
+        })
     }
 }
 
