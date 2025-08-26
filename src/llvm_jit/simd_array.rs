@@ -24,7 +24,7 @@ use crate::{
 use std::{marker::PhantomData, mem::size_of};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-type SimdType = __m256d;
+pub type SimdType = __m256d;
 
 #[cfg(target_arch = "aarch64")]
 type SimdType = float64x1x4_t;
