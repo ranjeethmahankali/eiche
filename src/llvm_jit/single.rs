@@ -11,7 +11,7 @@ use inkwell::{
 };
 use std::{ffi::c_void, marker::PhantomData};
 
-type UnsafeFuncType = unsafe extern "C" fn(
+type NativeFunc = unsafe extern "C" fn(
     *const c_void, // Inputs
     *mut c_void,   // Outputs
 );
@@ -22,7 +22,7 @@ pub struct JitFn<'ctx, T>
 where
     T: NumberType,
 {
-    func: JitFunction<'ctx, UnsafeFuncType>,
+    func: JitFunction<'ctx, NativeFunc>,
     num_inputs: usize,
     num_outputs: usize,
     _phantom: PhantomData<T>,
@@ -32,7 +32,7 @@ pub struct JitFnSync<'ctx, T>
 where
     T: NumberType,
 {
-    func: UnsafeFuncType,
+    func: NativeFunc,
     num_inputs: usize,
     num_outputs: usize,
     _phantom: PhantomData<&'ctx JitFn<'ctx, T>>,

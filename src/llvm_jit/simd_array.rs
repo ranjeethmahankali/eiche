@@ -159,7 +159,7 @@ impl SimdVec<f64> for Wfloat {
     }
 }
 
-type UnsafeFuncType = unsafe extern "C" fn(*const SimdType, *mut SimdType, u64);
+pub type NativeSimdFunc = unsafe extern "C" fn(*const SimdType, *mut SimdType, u64);
 
 /// Thin wrapper around the compiled native JIT function to do simd evaluations.
 pub struct JitSimdFn<'ctx, T>
@@ -167,7 +167,7 @@ where
     Wfloat: SimdVec<T>,
     T: NumberType,
 {
-    func: JitFunction<'ctx, UnsafeFuncType>,
+    func: JitFunction<'ctx, NativeSimdFunc>,
     phantom: PhantomData<T>, // This only exists to specialize the type for type T.
 }
 
@@ -176,7 +176,7 @@ where
     Wfloat: SimdVec<T>,
     T: NumberType,
 {
-    func: UnsafeFuncType,
+    func: NativeSimdFunc,
     phantom: PhantomData<&'ctx JitSimdFn<'ctx, T>>,
 }
 
