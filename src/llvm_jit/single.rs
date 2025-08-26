@@ -35,7 +35,7 @@ where
     func: UnsafeFuncType,
     num_inputs: usize,
     num_outputs: usize,
-    _phantom: PhantomData<&'ctx T>,
+    _phantom: PhantomData<&'ctx JitFn<'ctx, T>>,
 }
 
 unsafe impl<'ctx, T> Sync for JitFnSync<'ctx, T> where T: NumberType {}
