@@ -35,8 +35,10 @@ where
     func: UnsafeFuncType,
     num_inputs: usize,
     num_outputs: usize,
-    _phantom: PhantomData<&'ctx JitFn<'ctx, T>>,
+    _phantom: PhantomData<&'ctx T>,
 }
+
+unsafe impl<'ctx, T> Sync for JitFnSync<'ctx, T> where T: NumberType {}
 
 impl Tree {
     /// JIT compile a tree and return a native evaluator.
