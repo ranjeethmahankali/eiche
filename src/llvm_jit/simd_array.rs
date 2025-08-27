@@ -323,9 +323,24 @@ where
     T: NumberType,
 {
     func: JitFunction<'ctx, NativeSimdFunc>,
-    phantom: PhantomData<T>, // This only exists to specialize the type for type T.
+    phantom: PhantomData<T>,
 }
 
+/**
+`JitSimdFn` is not thread safe, because it contains the executable memory where
+the JIT machine code resides, somewhere inside the Execution Engine. LLVM
+doesn't implement the `Send` trait for this block of memory, because it doesn't
+know what's in the JIT machine code, it doesn't know if that code itself is
+thread safe, or has side effects. This `JitSimdFnSync` can be pulled out of a
+`JitSimdFn`, via the `.as_async()` function, and is thread safe. It implements
+the `Send` trait. This is OK, because we know the machine code represents a
+mathematical expression without any side effects. So we pull out the function
+pointer and wrap it in this struct, that can be shared across threads. Still the
+execution engine held inside the original `JitSmdFn` needs to outlive this sync
+wrapper, because it owns the block of executable memory. To guarantee that, this
+structs pseudo borrows (via a phantom) from the `JitSimdFn`. It has to be done
+via a phantom othwerwise we can't implement The Sync trait on this.
+*/
 pub struct JitSimdFnSync<'ctx, T>
 where
     Wfloat: SimdVec<T>,
