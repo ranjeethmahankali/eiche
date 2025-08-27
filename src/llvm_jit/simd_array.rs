@@ -25,10 +25,13 @@ use std::{ffi::c_void, marker::PhantomData, mem::size_of};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub type SimdType64 = __m256d;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub type SimdType32 = __m256;
 
 #[cfg(target_arch = "aarch64")]
-type SimdType = float64x1x4_t;
+type SimdType64 = float64x2x2_t;
+#[cfg(target_arch = "aarch64")]
+type SimdType32 = float32x4x2_t;
 
 const SIMD_F32_SIZE: usize = size_of::<SimdType64>() / size_of::<f32>();
 const SIMD_F64_SIZE: usize = size_of::<SimdType64>() / size_of::<f64>();
@@ -133,6 +136,17 @@ impl SimdVec<f32> for Wfloat {
                 }
             }
         }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vmulq_f32(a.reg32.0, b.reg32.0),
+                        vmulq_f32(a.reg32.1, b.reg32.1),
+                    ),
+                }
+            }
+        }
     }
 
     fn add(a: Self, b: Self) -> Self {
@@ -144,6 +158,17 @@ impl SimdVec<f32> for Wfloat {
                 }
             }
         }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vaddq_f32(a.reg32.0, b.reg32.0),
+                        vaddq_f32(a.reg32.1, b.reg32.1),
+                    ),
+                }
+            }
+        }
     }
 
     fn mul_add(a: Self, b: Self, c: Self) -> Self {
@@ -152,6 +177,17 @@ impl SimdVec<f32> for Wfloat {
             unsafe {
                 Wfloat {
                     reg32: std::arch::x86_64::_mm256_fmadd_ps(a.reg32, b.reg32, c.reg32),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vfmaq_f32(c.reg32.0, a.reg32.0, b.reg32.0),
+                        vfmaq_f32(c.reg32.1, a.reg32.1, b.reg32.1),
+                    ),
                 }
             }
         }
@@ -208,6 +244,17 @@ impl SimdVec<f64> for Wfloat {
                 }
             }
         }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vmulq_f64(a.reg64.0, b.reg64.0),
+                        vmulq_f64(a.reg64.1, b.reg64.1),
+                    ),
+                }
+            }
+        }
     }
 
     fn add(a: Self, b: Self) -> Self {
@@ -219,6 +266,17 @@ impl SimdVec<f64> for Wfloat {
                 }
             }
         }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vaddq_f64(a.reg64.0, b.reg64.0),
+                        vaddq_f64(a.reg64.1, b.reg64.1),
+                    ),
+                }
+            }
+        }
     }
 
     fn mul_add(a: Self, b: Self, c: Self) -> Self {
@@ -227,6 +285,17 @@ impl SimdVec<f64> for Wfloat {
             unsafe {
                 Wfloat {
                     reg64: std::arch::x86_64::_mm256_fmadd_pd(a.reg64, b.reg64, c.reg64),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vfmaq_f64(c.reg64.0, a.reg64.0, b.reg64.0),
+                        vfmaq_f64(c.reg64.1, a.reg64.1, b.reg64.1),
+                    ),
                 }
             }
         }
@@ -1162,6 +1231,131 @@ mod sphere_test {
         assert_eq!(val_eval.len(), val_jit.len());
         for (l, r) in val_eval.iter().zip(val_jit.iter()) {
             assert_float_eq!(l, r, 1e-15);
+        }
+    }
+}
+
+#[cfg(test)]
+mod simd_ops_test {
+    use super::*;
+
+    #[test]
+    fn t_wfloat_f32_mul() {
+        let a = Wfloat {
+            valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        };
+        let b = Wfloat {
+            valsf32: [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::mul(a, b);
+        unsafe {
+            assert_eq!(result.valsf32[0], 2.0);
+            assert_eq!(result.valsf32[1], 6.0);
+            assert_eq!(result.valsf32[2], 12.0);
+            assert_eq!(result.valsf32[3], 20.0);
+            assert_eq!(result.valsf32[4], 30.0);
+            assert_eq!(result.valsf32[5], 42.0);
+            assert_eq!(result.valsf32[6], 56.0);
+            assert_eq!(result.valsf32[7], 72.0);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_add() {
+        let a = Wfloat {
+            valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        };
+        let b = Wfloat {
+            valsf32: [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::add(a, b);
+        unsafe {
+            assert_eq!(result.valsf32[0], 11.0);
+            assert_eq!(result.valsf32[1], 22.0);
+            assert_eq!(result.valsf32[2], 33.0);
+            assert_eq!(result.valsf32[3], 44.0);
+            assert_eq!(result.valsf32[4], 55.0);
+            assert_eq!(result.valsf32[5], 66.0);
+            assert_eq!(result.valsf32[6], 77.0);
+            assert_eq!(result.valsf32[7], 88.0);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_mul_add() {
+        let a = Wfloat {
+            valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        };
+        let b = Wfloat {
+            valsf32: [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        };
+        let c = Wfloat {
+            valsf32: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::mul_add(a, b, c);
+        unsafe {
+            assert_eq!(result.valsf32[0], 12.0); // 1*2 + 10
+            assert_eq!(result.valsf32[1], 16.0); // 2*3 + 10
+            assert_eq!(result.valsf32[2], 22.0); // 3*4 + 10
+            assert_eq!(result.valsf32[3], 30.0); // 4*5 + 10
+            assert_eq!(result.valsf32[4], 40.0); // 5*6 + 10
+            assert_eq!(result.valsf32[5], 52.0); // 6*7 + 10
+            assert_eq!(result.valsf32[6], 66.0); // 7*8 + 10
+            assert_eq!(result.valsf32[7], 82.0); // 8*9 + 10
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_mul() {
+        let a = Wfloat {
+            valsf64: [1.0, 2.0, 3.0, 4.0],
+        };
+        let b = Wfloat {
+            valsf64: [5.0, 6.0, 7.0, 8.0],
+        };
+        let result = <Wfloat as SimdVec<f64>>::mul(a, b);
+        unsafe {
+            assert_eq!(result.valsf64[0], 5.0);
+            assert_eq!(result.valsf64[1], 12.0);
+            assert_eq!(result.valsf64[2], 21.0);
+            assert_eq!(result.valsf64[3], 32.0);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_add() {
+        let a = Wfloat {
+            valsf64: [1.5, 2.5, 3.5, 4.5],
+        };
+        let b = Wfloat {
+            valsf64: [10.5, 20.5, 30.5, 40.5],
+        };
+        let result = <Wfloat as SimdVec<f64>>::add(a, b);
+        unsafe {
+            assert_eq!(result.valsf64[0], 12.0);
+            assert_eq!(result.valsf64[1], 23.0);
+            assert_eq!(result.valsf64[2], 34.0);
+            assert_eq!(result.valsf64[3], 45.0);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_mul_add() {
+        let a = Wfloat {
+            valsf64: [2.0, 3.0, 4.0, 5.0],
+        };
+        let b = Wfloat {
+            valsf64: [10.0, 10.0, 10.0, 10.0],
+        };
+        let c = Wfloat {
+            valsf64: [1.0, 2.0, 3.0, 4.0],
+        };
+        let result = <Wfloat as SimdVec<f64>>::mul_add(a, b, c);
+        unsafe {
+            assert_eq!(result.valsf64[0], 21.0); // 2*10 + 1
+            assert_eq!(result.valsf64[1], 32.0); // 3*10 + 2
+            assert_eq!(result.valsf64[2], 43.0); // 4*10 + 3
+            assert_eq!(result.valsf64[3], 54.0); // 5*10 + 4
         }
     }
 }
