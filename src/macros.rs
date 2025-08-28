@@ -94,9 +94,9 @@ macro_rules! deftree {
         let out: Result<$crate::Tree, $crate::Error> = Ok($crate::Tree::constant(($a).into()));
         out
     }};
-        // Rust variables.
+    // Rust variables.
     ($var:ident) => {
-        $var
+        $var.clone()
     };
     // Conditional / piecewise
     (if $cond:tt $a:tt $b:tt) => {
@@ -407,6 +407,34 @@ mod test {
                 Binary(Pow, 7, 8),
                 Binary(Add, 6, 9),
                 Binary(Divide, 5, 10)
+            ]
+        );
+    }
+
+    #[test]
+    fn t_let_multiple_bindings_multiple_uses() {
+        let tree = deftree!(let ((x (+ 1 'p))
+                                 (y (- 1 'q)))
+                            (/ (+ x y) (- x y)))
+        .unwrap();
+        assert_eq!(
+            tree.nodes(),
+            &[
+                Constant(Scalar(1.0)),
+                Symbol('p'),
+                Binary(Add, 0, 1),
+                Constant(Scalar(1.0)),
+                Symbol('q'),
+                Binary(Subtract, 3, 4),
+                Binary(Add, 2, 5),
+                Constant(Scalar(1.0)),
+                Symbol('p'),
+                Binary(Add, 7, 8),
+                Constant(Scalar(1.0)),
+                Symbol('q'),
+                Binary(Subtract, 10, 11),
+                Binary(Subtract, 9, 12),
+                Binary(Divide, 6, 13)
             ]
         );
     }

@@ -425,7 +425,7 @@ mod circles {
                     coord[0] = x as f64 + 0.5;
                     let mut output = [0.];
                     // SAFETY: Upstream functions assert to make sure the tree
-                    // has exactly 3 inputs. This is what the safe version
+                    // has exactly 2 inputs. This is what the safe version
                     // checks for, so we don't need to check agian.
                     unsafe { eval.run_unchecked(&coord, &mut output) };
                     let val = output[0];
@@ -463,8 +463,8 @@ mod circles {
             let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
             assert_eq!(
                 tree.symbols().len(),
-                3,
-                "Later calls require exactly three inputs."
+                2,
+                "Later calls require exactly two inputs."
             );
             let mut image = ImageBuffer::new(DIMS, DIMS);
             c.bench_function("circles-jit-single-eval-with-compile", |b| {

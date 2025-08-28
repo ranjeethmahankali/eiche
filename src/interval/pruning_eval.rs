@@ -163,7 +163,7 @@ where
 }
 
 /// Represents things that can go wrong when pruning.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum PruningError {
     /// This is returned when the trees (with instructions), or the stack of
     /// intervals is empty when they're expected to not be.
