@@ -98,6 +98,10 @@ where
     fn and(a: Self, b: Self) -> Wfloat;
 
     fn or(a: Self, b: Self) -> Wfloat;
+
+    fn check_bool(a: Self, lane: usize) -> bool;
+
+    unsafe fn check_bool_unchecked(a: Self, lane: usize) -> bool;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -336,6 +340,14 @@ impl SimdVec<f32> for Wfloat {
                 }
             }
         }
+    }
+
+    fn check_bool(a: Self, lane: usize) -> bool {
+        unsafe { a.valsu32[lane] != 0 }
+    }
+
+    unsafe fn check_bool_unchecked(a: Self, lane: usize) -> bool {
+        unsafe { *a.valsu32.get_unchecked(lane) != 0 }
     }
 }
 
@@ -581,6 +593,14 @@ impl SimdVec<f64> for Wfloat {
                 }
             }
         }
+    }
+
+    fn check_bool(a: Self, lane: usize) -> bool {
+        unsafe { a.valsu64[lane] != 0 }
+    }
+
+    unsafe fn check_bool_unchecked(a: Self, lane: usize) -> bool {
+        unsafe { *a.valsu64.get_unchecked(lane) != 0 }
     }
 }
 
