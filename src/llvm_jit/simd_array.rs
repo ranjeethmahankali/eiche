@@ -208,10 +208,7 @@ impl SimdVec<f32> for Wfloat {
         {
             unsafe {
                 Wfloat {
-                    reg32: float32x4x2_t(
-                        vnegq_f32(a.reg32.0),
-                        vnegq_f32(a.reg32.1),
-                    ),
+                    reg32: float32x4x2_t(vnegq_f32(a.reg32.0), vnegq_f32(a.reg32.1)),
                 }
             }
         }
@@ -338,10 +335,7 @@ impl SimdVec<f64> for Wfloat {
         {
             unsafe {
                 Wfloat {
-                    reg64: float64x2x2_t(
-                        vnegq_f64(a.reg64.0),
-                        vnegq_f64(a.reg64.1),
-                    ),
+                    reg64: float64x2x2_t(vnegq_f64(a.reg64.0), vnegq_f64(a.reg64.1)),
                 }
             }
         }
@@ -446,11 +440,17 @@ where
 {
     pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
         unsafe {
-            (self.func)(
+            self.run_raw(
                 buf.inputs.as_ptr().cast(),
                 buf.outputs.as_mut_ptr().cast(),
-                buf.num_simd_iters() as u64,
+                buf.num_simd_iters(),
             );
+        }
+    }
+
+    pub unsafe fn run_raw(&self, inputs: *const Wfloat, outputs: *mut Wfloat, num_iters: usize) {
+        unsafe {
+            (self.func)(inputs.cast(), outputs.cast(), num_iters as u64);
         }
     }
 }
