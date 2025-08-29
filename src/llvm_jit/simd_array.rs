@@ -1935,4 +1935,144 @@ mod simd_ops_test {
             assert_eq!(result.valsu64[3], 0x0000000000000000);
         }
     }
+
+    #[test]
+    fn t_wfloat_f32_check_bool() {
+        let mask = Wfloat {
+            valsu32: [
+                0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0x12345678, 0x00000000, 0xABCDEF00,
+                0x00000000,
+            ],
+        };
+
+        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 0), true);
+        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 1), false);
+        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 2), true);
+        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 3), false);
+        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 4), true);
+        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 5), false);
+        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 6), true);
+        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 7), false);
+    }
+
+    #[test]
+    fn t_wfloat_f32_check_bool_unchecked() {
+        let mask = Wfloat {
+            valsu32: [
+                0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0x12345678, 0x00000000, 0xABCDEF00,
+                0x00000000,
+            ],
+        };
+
+        unsafe {
+            assert_eq!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 0),
+                true
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 1),
+                false
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 2),
+                true
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 3),
+                false
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 4),
+                true
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 5),
+                false
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 6),
+                true
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 7),
+                false
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn t_wfloat_f32_check_bool_bounds() {
+        let mask = Wfloat {
+            valsu32: [
+                0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0x12345678, 0x00000000, 0xABCDEF00,
+                0x00000000,
+            ],
+        };
+
+        <Wfloat as SimdVec<f32>>::check_bool(mask, 8);
+    }
+
+    #[test]
+    fn t_wfloat_f64_check_bool() {
+        let mask = Wfloat {
+            valsu64: [
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+                0x123456789ABCDEF0,
+                0x0000000000000000,
+            ],
+        };
+
+        assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 0), true);
+        assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 1), false);
+        assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 2), true);
+        assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 3), false);
+    }
+
+    #[test]
+    fn t_wfloat_f64_check_bool_unchecked() {
+        let mask = Wfloat {
+            valsu64: [
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+                0x123456789ABCDEF0,
+                0x0000000000000000,
+            ],
+        };
+
+        unsafe {
+            assert_eq!(
+                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 0),
+                true
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 1),
+                false
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 2),
+                true
+            );
+            assert_eq!(
+                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 3),
+                false
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn t_wfloat_f64_check_bool_bounds() {
+        let mask = Wfloat {
+            valsu64: [
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+                0x123456789ABCDEF0,
+                0x0000000000000000,
+            ],
+        };
+
+        <Wfloat as SimdVec<f64>>::check_bool(mask, 4);
+    }
 }
