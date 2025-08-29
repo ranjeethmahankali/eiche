@@ -94,6 +94,10 @@ where
     fn eq(a: Self, b: Self) -> Wfloat;
 
     fn gt(a: Self, b: Self) -> Wfloat;
+
+    fn and(a: Self, b: Self) -> Wfloat;
+
+    fn or(a: Self, b: Self) -> Wfloat;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -235,7 +239,7 @@ impl SimdVec<f32> for Wfloat {
                 Wfloat {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vcltq_f32(a.reg32.0, b.reg32.0)),
-                        vreinterpretq_f32_u32(vcltq_f32(a.reg32.1, b.reg32.1))
+                        vreinterpretq_f32_u32(vcltq_f32(a.reg32.1, b.reg32.1)),
                     ),
                 }
             }
@@ -255,7 +259,7 @@ impl SimdVec<f32> for Wfloat {
                 Wfloat {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vceqq_f32(a.reg32.0, b.reg32.0)),
-                        vreinterpretq_f32_u32(vceqq_f32(a.reg32.1, b.reg32.1))
+                        vreinterpretq_f32_u32(vceqq_f32(a.reg32.1, b.reg32.1)),
                     ),
                 }
             }
@@ -275,10 +279,36 @@ impl SimdVec<f32> for Wfloat {
                 Wfloat {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vcgtq_f32(a.reg32.0, b.reg32.0)),
-                        vreinterpretq_f32_u32(vcgtq_f32(a.reg32.1, b.reg32.1))
+                        vreinterpretq_f32_u32(vcgtq_f32(a.reg32.1, b.reg32.1)),
                     ),
                 }
             }
+        }
+    }
+
+    fn and(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Wfloat {
+                reg32: unsafe { _mm256_and_ps(a.reg32, b.reg32) },
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            todo!("Not Implemented");
+        }
+    }
+
+    fn or(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Wfloat {
+                reg32: unsafe { _mm256_or_ps(a.reg32, b.reg32) },
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            todo!("Not Implemented");
         }
     }
 }
@@ -424,7 +454,7 @@ impl SimdVec<f64> for Wfloat {
                 Wfloat {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vcltq_f64(a.reg64.0, b.reg64.0)),
-                        vreinterpretq_f64_u64(vcltq_f64(a.reg64.1, b.reg64.1))
+                        vreinterpretq_f64_u64(vcltq_f64(a.reg64.1, b.reg64.1)),
                     ),
                 }
             }
@@ -446,7 +476,7 @@ impl SimdVec<f64> for Wfloat {
                 Wfloat {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vceqq_f64(a.reg64.0, b.reg64.0)),
-                        vreinterpretq_f64_u64(vceqq_f64(a.reg64.1, b.reg64.1))
+                        vreinterpretq_f64_u64(vceqq_f64(a.reg64.1, b.reg64.1)),
                     ),
                 }
             }
@@ -468,10 +498,36 @@ impl SimdVec<f64> for Wfloat {
                 Wfloat {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vcgtq_f64(a.reg64.0, b.reg64.0)),
-                        vreinterpretq_f64_u64(vcgtq_f64(a.reg64.1, b.reg64.1))
+                        vreinterpretq_f64_u64(vcgtq_f64(a.reg64.1, b.reg64.1)),
                     ),
                 }
             }
+        }
+    }
+
+    fn and(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Wfloat {
+                reg64: unsafe { _mm256_and_pd(a.reg64, b.reg64) },
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            todo!("Not Implemented");
+        }
+    }
+
+    fn or(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Wfloat {
+                reg64: unsafe { _mm256_or_pd(a.reg64, b.reg64) },
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            todo!("Not Implemented");
         }
     }
 }
