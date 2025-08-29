@@ -84,6 +84,8 @@ where
     fn add(a: Self, b: Self) -> Self;
 
     fn mul_add(a: Self, b: Self, c: Self) -> Self;
+
+    fn neg(a: Self) -> Self;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -132,7 +134,7 @@ impl SimdVec<f32> for Wfloat {
         {
             unsafe {
                 Wfloat {
-                    reg32: std::arch::x86_64::_mm256_mul_ps(a.reg32, b.reg32),
+                    reg32: _mm256_mul_ps(a.reg32, b.reg32),
                 }
             }
         }
@@ -154,7 +156,7 @@ impl SimdVec<f32> for Wfloat {
         {
             unsafe {
                 Wfloat {
-                    reg32: std::arch::x86_64::_mm256_add_ps(a.reg32, b.reg32),
+                    reg32: _mm256_add_ps(a.reg32, b.reg32),
                 }
             }
         }
@@ -176,7 +178,7 @@ impl SimdVec<f32> for Wfloat {
         {
             unsafe {
                 Wfloat {
-                    reg32: std::arch::x86_64::_mm256_fmadd_ps(a.reg32, b.reg32, c.reg32),
+                    reg32: _mm256_fmadd_ps(a.reg32, b.reg32, c.reg32),
                 }
             }
         }
@@ -187,6 +189,28 @@ impl SimdVec<f32> for Wfloat {
                     reg32: float32x4x2_t(
                         vfmaq_f32(c.reg32.0, a.reg32.0, b.reg32.0),
                         vfmaq_f32(c.reg32.1, a.reg32.1, b.reg32.1),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn neg(a: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: _mm256_sub_ps(_mm256_setzero_ps(), a.reg32),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vnegq_f32(a.reg32.0),
+                        vnegq_f32(a.reg32.1),
                     ),
                 }
             }
@@ -295,6 +319,28 @@ impl SimdVec<f64> for Wfloat {
                     reg64: float64x2x2_t(
                         vfmaq_f64(c.reg64.0, a.reg64.0, b.reg64.0),
                         vfmaq_f64(c.reg64.1, a.reg64.1, b.reg64.1),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn neg(a: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: _mm256_sub_pd(_mm256_setzero_pd(), a.reg64),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vnegq_f64(a.reg64.0),
+                        vnegq_f64(a.reg64.1),
                     ),
                 }
             }
@@ -1371,6 +1417,38 @@ mod simd_ops_test {
             assert_eq!(result.valsf64[1], 32.0); // 3*10 + 2
             assert_eq!(result.valsf64[2], 43.0); // 4*10 + 3
             assert_eq!(result.valsf64[3], 54.0); // 5*10 + 4
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_neg() {
+        let a = Wfloat {
+            valsf32: [1.0, -2.0, 3.5, -4.5, 0.0, 10.5, -7.25, 8.75],
+        };
+        let result = <Wfloat as SimdVec<f32>>::neg(a);
+        unsafe {
+            assert_eq!(result.valsf32[0], -1.0);
+            assert_eq!(result.valsf32[1], 2.0);
+            assert_eq!(result.valsf32[2], -3.5);
+            assert_eq!(result.valsf32[3], 4.5);
+            assert_eq!(result.valsf32[4], -0.0);
+            assert_eq!(result.valsf32[5], -10.5);
+            assert_eq!(result.valsf32[6], 7.25);
+            assert_eq!(result.valsf32[7], -8.75);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_neg() {
+        let a = Wfloat {
+            valsf64: [1.5, -2.75, 0.0, -10.25],
+        };
+        let result = <Wfloat as SimdVec<f64>>::neg(a);
+        unsafe {
+            assert_eq!(result.valsf64[0], -1.5);
+            assert_eq!(result.valsf64[1], 2.75);
+            assert_eq!(result.valsf64[2], -0.0);
+            assert_eq!(result.valsf64[3], 10.25);
         }
     }
 }
