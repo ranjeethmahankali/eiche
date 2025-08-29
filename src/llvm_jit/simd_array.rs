@@ -300,12 +300,12 @@ impl SimdVec<f32> for Wfloat {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vandq_u32(
                             vreinterpretq_u32_f32(a.reg32.0),
-                            vreinterpretq_u32_f32(b.reg32.0)
+                            vreinterpretq_u32_f32(b.reg32.0),
                         )),
                         vreinterpretq_f32_u32(vandq_u32(
                             vreinterpretq_u32_f32(a.reg32.1),
-                            vreinterpretq_u32_f32(b.reg32.1)
-                        ))
+                            vreinterpretq_u32_f32(b.reg32.1),
+                        )),
                     ),
                 }
             }
@@ -326,12 +326,12 @@ impl SimdVec<f32> for Wfloat {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vorrq_u32(
                             vreinterpretq_u32_f32(a.reg32.0),
-                            vreinterpretq_u32_f32(b.reg32.0)
+                            vreinterpretq_u32_f32(b.reg32.0),
                         )),
                         vreinterpretq_f32_u32(vorrq_u32(
                             vreinterpretq_u32_f32(a.reg32.1),
-                            vreinterpretq_u32_f32(b.reg32.1)
-                        ))
+                            vreinterpretq_u32_f32(b.reg32.1),
+                        )),
                     ),
                 }
             }
@@ -545,12 +545,12 @@ impl SimdVec<f64> for Wfloat {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vandq_u64(
                             vreinterpretq_u64_f64(a.reg64.0),
-                            vreinterpretq_u64_f64(b.reg64.0)
+                            vreinterpretq_u64_f64(b.reg64.0),
                         )),
                         vreinterpretq_f64_u64(vandq_u64(
                             vreinterpretq_u64_f64(a.reg64.1),
-                            vreinterpretq_u64_f64(b.reg64.1)
-                        ))
+                            vreinterpretq_u64_f64(b.reg64.1),
+                        )),
                     ),
                 }
             }
@@ -571,12 +571,12 @@ impl SimdVec<f64> for Wfloat {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vorrq_u64(
                             vreinterpretq_u64_f64(a.reg64.0),
-                            vreinterpretq_u64_f64(b.reg64.0)
+                            vreinterpretq_u64_f64(b.reg64.0),
                         )),
                         vreinterpretq_f64_u64(vorrq_u64(
                             vreinterpretq_u64_f64(a.reg64.1),
-                            vreinterpretq_u64_f64(b.reg64.1)
-                        ))
+                            vreinterpretq_u64_f64(b.reg64.1),
+                        )),
                     ),
                 }
             }
@@ -1811,10 +1811,16 @@ mod simd_ops_test {
     #[test]
     fn t_wfloat_f32_and() {
         let a = Wfloat {
-            valsu32: [0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000],
+            valsu32: [
+                0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF,
+                0x00000000,
+            ],
         };
         let b = Wfloat {
-            valsu32: [0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000],
+            valsu32: [
+                0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000,
+                0x00000000,
+            ],
         };
         let result = <Wfloat as SimdVec<f32>>::and(a, b);
         unsafe {
@@ -1832,10 +1838,16 @@ mod simd_ops_test {
     #[test]
     fn t_wfloat_f32_or() {
         let a = Wfloat {
-            valsu32: [0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000],
+            valsu32: [
+                0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF,
+                0x00000000,
+            ],
         };
         let b = Wfloat {
-            valsu32: [0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000],
+            valsu32: [
+                0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000,
+                0x00000000,
+            ],
         };
         let result = <Wfloat as SimdVec<f32>>::or(a, b);
         unsafe {
@@ -1853,10 +1865,20 @@ mod simd_ops_test {
     #[test]
     fn t_wfloat_f64_and() {
         let a = Wfloat {
-            valsu64: [0xFFFFFFFFFFFFFFFF, 0x0000000000000000, 0xFFFFFFFFFFFFFFFF, 0x0000000000000000],
+            valsu64: [
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+            ],
         };
         let b = Wfloat {
-            valsu64: [0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0x0000000000000000, 0x0000000000000000],
+            valsu64: [
+                0xFFFFFFFFFFFFFFFF,
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+                0x0000000000000000,
+            ],
         };
         let result = <Wfloat as SimdVec<f64>>::and(a, b);
         unsafe {
@@ -1870,10 +1892,20 @@ mod simd_ops_test {
     #[test]
     fn t_wfloat_f64_or() {
         let a = Wfloat {
-            valsu64: [0xFFFFFFFFFFFFFFFF, 0x0000000000000000, 0xFFFFFFFFFFFFFFFF, 0x0000000000000000],
+            valsu64: [
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+            ],
         };
         let b = Wfloat {
-            valsu64: [0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0x0000000000000000, 0x0000000000000000],
+            valsu64: [
+                0xFFFFFFFFFFFFFFFF,
+                0xFFFFFFFFFFFFFFFF,
+                0x0000000000000000,
+                0x0000000000000000,
+            ],
         };
         let result = <Wfloat as SimdVec<f64>>::or(a, b);
         unsafe {
