@@ -43,6 +43,8 @@ const SIMD_F64_SIZE: usize = size_of::<SimdType64>() / size_of::<f64>();
 pub union Wfloat {
     valsf32: [f32; SIMD_F32_SIZE],
     valsf64: [f64; SIMD_F64_SIZE],
+    valsu32: [u32; SIMD_F32_SIZE],
+    valsu64: [u64; SIMD_F64_SIZE],
     reg64: SimdType64,
     reg32: SimdType32,
 }
@@ -86,6 +88,12 @@ where
     fn mul_add(a: Self, b: Self, c: Self) -> Self;
 
     fn neg(a: Self) -> Self;
+
+    fn lt(a: Self, b: Self) -> Wfloat;
+
+    fn eq(a: Self, b: Self) -> Wfloat;
+
+    fn gt(a: Self, b: Self) -> Wfloat;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -213,6 +221,66 @@ impl SimdVec<f32> for Wfloat {
             }
         }
     }
+
+    fn lt(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Wfloat {
+                reg32: unsafe { _mm256_cmp_ps::<_CMP_LT_OQ>(a.reg32, b.reg32) },
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vreinterpretq_f32_u32(vcltq_f32(a.reg32.0, b.reg32.0)),
+                        vreinterpretq_f32_u32(vcltq_f32(a.reg32.1, b.reg32.1))
+                    ),
+                }
+            }
+        }
+    }
+
+    fn eq(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Wfloat {
+                reg32: unsafe { _mm256_cmp_ps::<_CMP_EQ_OQ>(a.reg32, b.reg32) },
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vreinterpretq_f32_u32(vceqq_f32(a.reg32.0, b.reg32.0)),
+                        vreinterpretq_f32_u32(vceqq_f32(a.reg32.1, b.reg32.1))
+                    ),
+                }
+            }
+        }
+    }
+
+    fn gt(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Wfloat {
+                reg32: unsafe { _mm256_cmp_ps::<_CMP_GT_OQ>(a.reg32, b.reg32) },
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vreinterpretq_f32_u32(vcgtq_f32(a.reg32.0, b.reg32.0)),
+                        vreinterpretq_f32_u32(vcgtq_f32(a.reg32.1, b.reg32.1))
+                    ),
+                }
+            }
+        }
+    }
 }
 
 impl SimdVec<f64> for Wfloat {
@@ -336,6 +404,72 @@ impl SimdVec<f64> for Wfloat {
             unsafe {
                 Wfloat {
                     reg64: float64x2x2_t(vnegq_f64(a.reg64.0), vnegq_f64(a.reg64.1)),
+                }
+            }
+        }
+    }
+
+    fn lt(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: _mm256_cmp_pd::<_CMP_LT_OQ>(a.reg64, b.reg64),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vreinterpretq_f64_u64(vcltq_f64(a.reg64.0, b.reg64.0)),
+                        vreinterpretq_f64_u64(vcltq_f64(a.reg64.1, b.reg64.1))
+                    ),
+                }
+            }
+        }
+    }
+
+    fn eq(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: _mm256_cmp_pd::<_CMP_EQ_OQ>(a.reg64, b.reg64),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vreinterpretq_f64_u64(vceqq_f64(a.reg64.0, b.reg64.0)),
+                        vreinterpretq_f64_u64(vceqq_f64(a.reg64.1, b.reg64.1))
+                    ),
+                }
+            }
+        }
+    }
+
+    fn gt(a: Self, b: Self) -> Wfloat {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: _mm256_cmp_pd::<_CMP_GT_OQ>(a.reg64, b.reg64),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vreinterpretq_f64_u64(vcgtq_f64(a.reg64.0, b.reg64.0)),
+                        vreinterpretq_f64_u64(vcgtq_f64(a.reg64.1, b.reg64.1))
+                    ),
                 }
             }
         }
@@ -1449,6 +1583,120 @@ mod simd_ops_test {
             assert_eq!(result.valsf64[1], 2.75);
             assert_eq!(result.valsf64[2], -0.0);
             assert_eq!(result.valsf64[3], 10.25);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_lt() {
+        let a = Wfloat {
+            valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        };
+        let b = Wfloat {
+            valsf32: [2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::lt(a, b);
+        unsafe {
+            assert_eq!(result.valsu32[0], 0xFFFFFFFF);
+            assert_eq!(result.valsu32[1], 0x00000000);
+            assert_eq!(result.valsu32[2], 0x00000000);
+            assert_eq!(result.valsu32[3], 0x00000000);
+            assert_eq!(result.valsu32[4], 0xFFFFFFFF);
+            assert_eq!(result.valsu32[5], 0x00000000);
+            assert_eq!(result.valsu32[6], 0x00000000);
+            assert_eq!(result.valsu32[7], 0x00000000);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_eq() {
+        let a = Wfloat {
+            valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        };
+        let b = Wfloat {
+            valsf32: [2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::eq(a, b);
+        unsafe {
+            assert_eq!(result.valsu32[0], 0x00000000);
+            assert_eq!(result.valsu32[1], 0xFFFFFFFF);
+            assert_eq!(result.valsu32[2], 0x00000000);
+            assert_eq!(result.valsu32[3], 0x00000000);
+            assert_eq!(result.valsu32[4], 0x00000000);
+            assert_eq!(result.valsu32[5], 0xFFFFFFFF);
+            assert_eq!(result.valsu32[6], 0x00000000);
+            assert_eq!(result.valsu32[7], 0x00000000);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_gt() {
+        let a = Wfloat {
+            valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        };
+        let b = Wfloat {
+            valsf32: [2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::gt(a, b);
+        unsafe {
+            assert_eq!(result.valsu32[0], 0x00000000);
+            assert_eq!(result.valsu32[1], 0x00000000);
+            assert_eq!(result.valsu32[2], 0xFFFFFFFF);
+            assert_eq!(result.valsu32[3], 0xFFFFFFFF);
+            assert_eq!(result.valsu32[4], 0x00000000);
+            assert_eq!(result.valsu32[5], 0x00000000);
+            assert_eq!(result.valsu32[6], 0xFFFFFFFF);
+            assert_eq!(result.valsu32[7], 0xFFFFFFFF);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_lt() {
+        let a = Wfloat {
+            valsf64: [1.0, 2.0, 3.0, 4.0],
+        };
+        let b = Wfloat {
+            valsf64: [2.0, 2.0, 2.0, 2.0],
+        };
+        let result = <Wfloat as SimdVec<f64>>::lt(a, b);
+        unsafe {
+            assert_eq!(result.valsu64[0], 0xFFFFFFFFFFFFFFFF);
+            assert_eq!(result.valsu64[1], 0x0000000000000000);
+            assert_eq!(result.valsu64[2], 0x0000000000000000);
+            assert_eq!(result.valsu64[3], 0x0000000000000000);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_eq() {
+        let a = Wfloat {
+            valsf64: [1.0, 2.0, 3.0, 4.0],
+        };
+        let b = Wfloat {
+            valsf64: [2.0, 2.0, 2.0, 2.0],
+        };
+        let result = <Wfloat as SimdVec<f64>>::eq(a, b);
+        unsafe {
+            assert_eq!(result.valsu64[0], 0x0000000000000000);
+            assert_eq!(result.valsu64[1], 0xFFFFFFFFFFFFFFFF);
+            assert_eq!(result.valsu64[2], 0x0000000000000000);
+            assert_eq!(result.valsu64[3], 0x0000000000000000);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_gt() {
+        let a = Wfloat {
+            valsf64: [1.0, 2.0, 3.0, 4.0],
+        };
+        let b = Wfloat {
+            valsf64: [2.0, 2.0, 2.0, 2.0],
+        };
+        let result = <Wfloat as SimdVec<f64>>::gt(a, b);
+        unsafe {
+            assert_eq!(result.valsu64[0], 0x0000000000000000);
+            assert_eq!(result.valsu64[1], 0x0000000000000000);
+            assert_eq!(result.valsu64[2], 0xFFFFFFFFFFFFFFFF);
+            assert_eq!(result.valsu64[3], 0xFFFFFFFFFFFFFFFF);
         }
     }
 }
