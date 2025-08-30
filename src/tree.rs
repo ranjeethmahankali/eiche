@@ -467,16 +467,20 @@ impl Tree {
     }
 
     fn push_nodes(&mut self, other: &Tree) -> usize {
-        let offset: usize = self.nodes.len();
-        self.nodes.extend(other.nodes.iter().map(|node| match node {
-            Constant(value) => Constant(*value),
-            Symbol(label) => Symbol(*label),
-            Unary(op, input) => Unary(*op, *input + offset),
-            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
-            Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
-        }));
-        offset
+        extend_nodes_from_slice(&mut self.nodes, &other.nodes)
     }
+}
+
+pub(crate) fn extend_nodes_from_slice(dst: &mut Vec<Node>, other: &[Node]) -> usize {
+    let offset = dst.len();
+    dst.extend(other.iter().map(|node| match node {
+        Constant(value) => Constant(*value),
+        Symbol(label) => Symbol(*label),
+        Unary(op, input) => Unary(*op, *input + offset),
+        Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
+        Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
+    }));
+    offset
 }
 
 macro_rules! unary_func {

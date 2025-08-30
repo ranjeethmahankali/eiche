@@ -17,6 +17,7 @@ mod reduce;
 mod substitute;
 mod template;
 mod tree;
+mod vec_ops;
 mod walk;
 
 #[cfg(feature = "llvm-jit")]
