@@ -2,8 +2,10 @@ use crate::{
     BinaryOp::*,
     Error,
     Node::{self, *},
+    TernaryOp::*,
     Tree,
     UnaryOp::*,
+    Value,
     tree::extend_nodes_from_slice,
 };
 
@@ -127,8 +129,8 @@ impl Tree {
         match dims {
             (1, 1) => crate::abs(Tree::from_nodes(nodes, dims)),
             (1, _) | (_, 1) => {
-                let n_total = nodes.len();
-                nodes.extend(((n_total - n_roots)..n_total).map(|ri| Binary(Multiply, ri, ri)));
+                let n_before = nodes.len();
+                nodes.extend(((n_before - n_roots)..n_before).map(|ri| Binary(Multiply, ri, ri)));
                 let n_total = nodes.len();
                 let sqrange = (n_total - n_roots)..n_total;
                 nodes.extend(
@@ -139,6 +141,69 @@ impl Tree {
                 );
                 nodes.push(Unary(Sqrt, nodes.len() - 1));
                 Tree::from_nodes(nodes, (1, 1))
+            }
+            _ => Err(Error::InvalidDimensions),
+        }
+    }
+
+    pub fn normalized_vec(self) -> Result<Tree, Error> {
+        let n_roots = self.num_roots();
+        if n_roots == 0 {
+            return Err(Error::InvalidDimensions);
+        }
+        let (mut nodes, dims) = self.take();
+        match dims {
+            (1, 1) => {
+                let val = nodes.len() - 1;
+                let zero = {
+                    let out = nodes.len();
+                    nodes.push(Constant(Value::Scalar(0.)));
+                    out
+                };
+                let ltz = {
+                    let out = nodes.len();
+                    nodes.push(Binary(Less, val, zero));
+                    out
+                };
+                let gtz = {
+                    let out = nodes.len();
+                    nodes.push(Binary(Greater, val, zero));
+                    out
+                };
+                let one = {
+                    let out = nodes.len();
+                    nodes.push(Constant(Value::Scalar(1.)));
+                    out
+                };
+                let neg_one = {
+                    let out = nodes.len();
+                    nodes.push(Constant(Value::Scalar(-1.)));
+                    out
+                };
+                let first_choice = {
+                    let out = nodes.len();
+                    nodes.push(Ternary(Choose, gtz, one, zero));
+                    out
+                };
+                nodes.push(Ternary(Choose, ltz, neg_one, first_choice));
+                Tree::from_nodes(nodes, (1, 1))
+            }
+            (1, _) | (_, 1) => {
+                let n_before = nodes.len();
+                let comp_range = (n_before - n_roots)..n_before; // Components of the vector.
+                nodes.extend(comp_range.clone().map(|ri| Binary(Multiply, ri, ri)));
+                let n_total = nodes.len();
+                let sqrange = (n_total - n_roots)..n_total; // Squares of the components.
+                nodes.extend(
+                    std::iter::once(sqrange.start)
+                        .chain(n_total..(n_total + sqrange.len().saturating_sub(2)))
+                        .zip(sqrange.skip(1))
+                        .map(|(l, r)| Binary(Add, l, r)),
+                );
+                let vlen = nodes.len(); // l2 norm of the vector.
+                nodes.push(Unary(Sqrt, nodes.len() - 1));
+                nodes.extend(comp_range.map(|i| Binary(Divide, i, vlen)));
+                Tree::from_nodes(nodes, dims)
             }
             _ => Err(Error::InvalidDimensions),
         }
@@ -1469,6 +1534,341 @@ mod test {
                 Err(Error::InvalidDimensions) => {}
                 other => panic!("Expected InvalidDimensions error, got: {:?}", other),
             }
+        }
+    }
+
+    #[test]
+    fn t_normalized_vec_scalar_cases() {
+        // Positive scalar (1x1) case
+        {
+            let scalar = deftree!('x).unwrap().reshaped(1, 1).unwrap();
+            let result = scalar.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            // Expected: if x > 0 then 1 else if x < 0 then -1 else 0
+            let expected = deftree!(if (< 'x 0) (const -1.0) (if (> 'x 0) 1 0)).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Scalar normalization should use ternary conditions"
+            );
+            compare_trees(&result, &expected, &[('x', -5.0, 5.0)], 20, 1e-15);
+        }
+    }
+
+    #[test]
+    fn t_normalized_vec_basic_vectors() {
+        // 2D column vector
+        {
+            // Normalize [3, 4] -> [3/5, 4/5] since ||[3,4]|| = 5
+            let vector = deftree!(concat 3 4).unwrap(); // (2,1)
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (2, 1));
+            // Expected: [3/sqrt(9+16), 4/sqrt(9+16)] = [3/sqrt(25), 4/sqrt(25)]
+            let expected = deftree!(concat
+                (/ 3 (sqrt (+ (* 3 3) (* 4 4))))
+                (/ 4 (sqrt (+ (* 3 3) (* 4 4))))
+            )
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "2D vector normalization should work"
+            );
+            compare_trees(
+                &result,
+                &expected,
+                &[],
+                1, // No variables, just constants
+                1e-14,
+            );
+        }
+        // 2D row vector with variables
+        {
+            // Normalize [x, y]
+            let vector = deftree!(concat 'x 'y).unwrap().reshaped(1, 2).unwrap(); // (1,2)
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (1, 2));
+            let expected = deftree!(concat
+                (/ 'x (sqrt (+ (* 'x 'x) (* 'y 'y))))
+                (/ 'y (sqrt (+ (* 'x 'x) (* 'y 'y))))
+            )
+            .unwrap()
+            .reshaped(1, 2)
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Row vector normalization should work"
+            );
+            compare_trees(
+                &result,
+                &expected,
+                &[('x', -3.0, 3.0), ('y', -3.0, 3.0)],
+                20, // 20^2 = 400 samples
+                1e-13,
+            );
+        }
+    }
+
+    #[test]
+    fn t_normalized_vec_expression_vectors() {
+        // 3D vector with expressions
+        {
+            // Normalize [sin(x), cos(y), 2]
+            let vector = deftree!(concat (sin 'x) (cos 'y) 2).unwrap(); // (3,1)
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat
+                (/ (sin 'x) (sqrt (+ (+ (* (sin 'x) (sin 'x)) (* (cos 'y) (cos 'y))) (* 2 2))))
+                (/ (cos 'y) (sqrt (+ (+ (* (sin 'x) (sin 'x)) (* (cos 'y) (cos 'y))) (* 2 2))))
+                (/ 2 (sqrt (+ (+ (* (sin 'x) (sin 'x)) (* (cos 'y) (cos 'y))) (* 2 2))))
+            )
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Expression vector normalization should work"
+            );
+            compare_trees(
+                &result,
+                &expected,
+                &[('x', -1.5, 1.5), ('y', -1.5, 1.5)],
+                20, // 20^2 = 400 samples
+                1e-12,
+            );
+        }
+        // 4D vector with mixed expressions
+        {
+            // Normalize [x+1, x-1, x^2, exp(y)]
+            let vector = deftree!(concat (+ 'x 1) (- 'x 1) (pow 'x 2) (exp 'y)).unwrap(); // (4,1)
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (4, 1));
+            let expected = deftree!(concat
+                (/ (+ 'x 1)
+                 (sqrt (+ (+ (+
+                              (* (+ 'x 1) (+ 'x 1))
+                              (* (- 'x 1) (- 'x 1)))
+                           (* (pow 'x 2) (pow 'x 2)))
+                        (* (exp 'y) (exp 'y)))))
+                (/ (- 'x 1)
+                 (sqrt (+ (+ (+
+                              (* (+ 'x 1) (+ 'x 1))
+                              (* (- 'x 1) (- 'x 1)))
+                           (* (pow 'x 2) (pow 'x 2)))
+                        (* (exp 'y) (exp 'y)))))
+                (/ (pow 'x 2)
+                 (sqrt (+ (+ (+
+                              (* (+ 'x 1) (+ 'x 1))
+                              (* (- 'x 1) (- 'x 1)))
+                           (* (pow 'x 2) (pow 'x 2)))
+                        (* (exp 'y) (exp 'y)))))
+                (/ (exp 'y)
+                 (sqrt (+ (+ (+
+                              (* (+ 'x 1) (+ 'x 1))
+                              (* (- 'x 1) (- 'x 1)))
+                           (* (pow 'x 2) (pow 'x 2)))
+                        (* (exp 'y) (exp 'y)))))
+            )
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Mixed expression vector normalization should work"
+            );
+            compare_trees(
+                &result,
+                &expected,
+                &[('x', -2.0, 2.0), ('y', -1.0, 1.0)], // Keep y small to prevent exp overflow
+                18,                                    // 18^2 = 324 samples
+                1e-12,
+            );
+        }
+    }
+
+    #[test]
+    fn t_normalized_vec_edge_cases() {
+        // Single element vector (should behave like scalar)
+        {
+            let vector = deftree!('a).unwrap(); // (1,1) but treated as vector
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(if (< 'a 0) (const -1.) (if (> 'a 0) 1 0)).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Single element vector should use scalar normalization"
+            );
+            compare_trees(&result, &expected, &[('a', -4.0, 4.0)], 20, 1e-15);
+        }
+        // Vector with zeros and negatives
+        {
+            // Normalize [0, -3, 4] -> [0, -3/5, 4/5]
+            let vector = deftree!(concat 0 (- 3) 4).unwrap(); // (3,1)
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat
+                (/ 0 (sqrt (+ (+ (* 0 0) (* (- 3) (- 3))) (* 4 4))))
+                (/ (- 3) (sqrt (+ (+ (* 0 0) (* (- 3) (- 3))) (* 4 4))))
+                (/ 4 (sqrt (+ (+ (* 0 0) (* (- 3) (- 3))) (* 4 4))))
+            )
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Vector with zeros and negatives should normalize correctly"
+            );
+            compare_trees(
+                &result,
+                &expected,
+                &[],
+                1, // No variables
+                1e-14,
+            );
+        }
+        // Longer vector (5D) to test chaining logic
+        {
+            // Normalize [1, 1, 1, 1, 1] -> all components become 1/sqrt(5)
+            let vector = deftree!(concat 1 1 1 1 1).unwrap(); // (5,1)
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (5, 1));
+            let expected = deftree!(concat
+                (/ 1 (sqrt (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1))))
+                (/ 1 (sqrt (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1))))
+                (/ 1 (sqrt (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1))))
+                (/ 1 (sqrt (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1))))
+                (/ 1 (sqrt (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1))))
+            )
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "5D vector normalization should work"
+            );
+            compare_trees(
+                &result,
+                &expected,
+                &[],
+                1, // No variables
+                1e-14,
+            );
+        }
+    }
+
+    #[test]
+    fn t_normalized_vec_complex_expressions() {
+        // Vector with trigonometric expressions
+        {
+            // Normalize [cos(x), sin(x)] -> should have unit norm for any x
+            let vector = deftree!(concat (cos 'x) (sin 'x)).unwrap(); // (2,1)
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (2, 1));
+            let expected = deftree!(concat
+                (/ (cos 'x) (sqrt (+ (* (cos 'x) (cos 'x)) (* (sin 'x) (sin 'x)))))
+                (/ (sin 'x) (sqrt (+ (* (cos 'x) (cos 'x)) (* (sin 'x) (sin 'x)))))
+            )
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Trigonometric vector normalization should work"
+            );
+            compare_trees(&result, &expected, &[('x', -2.0, 2.0)], 20, 1e-13);
+        }
+        // Vector with polynomial and logarithmic terms
+        {
+            // Normalize [x^2, log(y), sqrt(z)]
+            let vector = deftree!(concat (pow 'x 2) (log 'y) (sqrt 'z)).unwrap(); // (3,1)
+            let result = vector.normalized_vec().unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat
+                                    (/ (pow 'x 2)
+                                     (sqrt (+ (+
+                                               (* (pow 'x 2) (pow 'x 2))
+                                               (* (log 'y) (log 'y)))
+                                            (* (sqrt 'z) (sqrt 'z)))))
+                                    (/ (log 'y)
+                                     (sqrt (+ (+
+                                               (* (pow 'x 2) (pow 'x 2))
+                                               (* (log 'y) (log 'y)))
+                                            (* (sqrt 'z) (sqrt 'z)))))
+                                    (/ (sqrt 'z)
+                                     (sqrt (+ (+
+                                               (* (pow 'x 2) (pow 'x 2))
+                                               (* (log 'y) (log 'y)))
+                                            (* (sqrt 'z) (sqrt 'z)))))
+            )
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Complex expression vector normalization should work"
+            );
+            compare_trees(
+                &result,
+                &expected,
+                &[('x', -2.0, 2.0), ('y', 0.1, 5.0), ('z', 0.1, 5.0)], // Positive y,z for log/sqrt
+                7,                                                     // 7^3 = 343 samples
+                1e-11,
+            );
+        }
+    }
+
+    #[test]
+    fn t_normalized_vec_error_cases() {
+        // Matrix (not a vector) should fail
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap();
+            let result = matrix.normalized_vec();
+            match result {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
+            }
+        }
+        // 3x2 matrix should fail
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
+                .unwrap()
+                .reshaped(3, 2)
+                .unwrap();
+            let result = matrix.normalized_vec();
+            match result {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
+            }
+        }
+        // Empty vector should fail (though this might not be constructible)
+        {
+            // This tests the n_roots == 0 check
+            // Creating such a case might be impossible through normal API,
+            // but the check exists for safety
+        }
+    }
+
+    #[test]
+    fn t_normalized_vec_properties() {
+        // Test that normalization preserves direction and makes unit vectors
+        // This is mainly tested through numerical comparison, but we can
+        // verify some algebraic properties
+        // Normalizing a unit vector should be close to identity (for cos/sin case)
+        {
+            // [cos(x), sin(x)] is already unit, so normalizing should give same result
+            let unit_vector = deftree!(concat (cos 'x) (sin 'x)).unwrap();
+            let normalized = unit_vector.clone().normalized_vec().unwrap();
+            // The normalized version should be very close to the original
+            // since cos²(x) + sin²(x) = 1
+            compare_trees(
+                &normalized,
+                &unit_vector,
+                &[('x', -3.0, 3.0)],
+                20,
+                1e-12, // Should be very close since original is already normalized
+            );
+        }
+        // Double normalization should be idempotent (normalizing normalized vector)
+        {
+            let vector = deftree!(concat 'x 'y 'z).unwrap();
+            let once_normalized = vector.normalized_vec().unwrap();
+            let twice_normalized = once_normalized.clone().normalized_vec().unwrap();
+            compare_trees(
+                &once_normalized,
+                &twice_normalized,
+                &[('x', -2.0, 2.0), ('y', -2.0, 2.0), ('z', -2.0, 2.0)],
+                7,     // 7^3 = 343 samples
+                1e-10, // Slightly looser tolerance due to double computation
+            );
         }
     }
 }
