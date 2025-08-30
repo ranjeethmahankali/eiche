@@ -39,7 +39,7 @@ const SIMD_F64_SIZE: usize = size_of::<SimdType64>() / size_of::<f64>();
 /// Thin wrapper around a simd floating point value. The union makes it easier
 /// to access the individual floating point numbers.
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub union Wfloat {
     valsf32: [f32; SIMD_F32_SIZE],
     valsf64: [f64; SIMD_F64_SIZE],
