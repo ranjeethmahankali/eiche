@@ -4,7 +4,7 @@ macro_rules! concat_trees {
         $crate::deftree!($tree)
     };
     ($lhs:tt $($rhs:tt) +) => {
-        $crate::tree::Tree::concat($crate::deftree!($lhs), $crate::concat_trees!($($rhs) +))
+        $crate::Tree::concat($crate::deftree!($lhs), $crate::concat_trees!($($rhs) +))
     };
 }
 
