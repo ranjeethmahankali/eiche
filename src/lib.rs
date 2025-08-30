@@ -11,13 +11,13 @@ mod interval;
 mod io;
 mod latex;
 mod macros;
+mod matrix_ops;
 mod mutate;
 mod prune;
 mod reduce;
 mod substitute;
 mod template;
 mod tree;
-mod vec_ops;
 mod walk;
 
 #[cfg(feature = "llvm-jit")]
