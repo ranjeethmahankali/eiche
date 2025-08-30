@@ -70,7 +70,7 @@ impl Tree {
                 let mut newroots = roots.to_vec();
                 for i in 0..rows {
                     for j in 0..cols {
-                        newroots[j * rows + i] = roots[i * cols + j];
+                        newroots[i * cols + j] = roots[j * rows + i];
                     }
                 }
                 roots.copy_from_slice(&newroots);
@@ -443,5 +443,266 @@ mod test {
             18,
             1e-12,
         );
+    }
+
+    #[test]
+    fn t_transpose_vectors() {
+        // Test row vectors
+        {
+            // [a b c] -> [a]
+            //            [b]
+            //            [c]
+            let matrix = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat 'a 'b 'c).unwrap(); // column vector (3, 1)
+            assert!(
+                result.equivalent(&expected),
+                "Row vector transpose should be equivalent to column vector"
+            );
+        }
+        {
+            // [a b c d] -> [a]
+            //              [b]
+            //              [c]
+            //              [d]
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(1, 4).unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (4, 1));
+            let expected = deftree!(concat 'a 'b 'c 'd).unwrap(); // column vector (4, 1)
+            assert!(result.equivalent(&expected), "1x4 transpose should be 4x1");
+        }
+        // Test column vectors
+        {
+            // [a] -> [a b c]
+            // [b]
+            // [c]
+            let matrix = deftree!(concat 'a 'b 'c).unwrap(); // column vector (3, 1)
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (1, 3));
+            let expected = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Column vector transpose should be equivalent to row vector"
+            );
+        }
+        {
+            // [a] -> [a b c d]
+            // [b]
+            // [c]
+            // [d]
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap(); // column vector (4, 1)
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (1, 4));
+            let expected = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(1, 4).unwrap();
+            assert!(result.equivalent(&expected), "4x1 transpose should be 1x4");
+        }
+    }
+
+    #[test]
+    fn t_transpose_square_matrices() {
+        // Test 1x1 scalar
+        {
+            // [a] -> [a] (no change)
+            let matrix = deftree!('a).unwrap().reshape(1, 1).unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!('a).unwrap().reshape(1, 1).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "1x1 transpose should be equivalent to original"
+            );
+        }
+        // Test 2x2 matrix
+        {
+            // [a c] -> [a b]
+            // [b d]    [c d]
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (2, 2));
+            let expected = deftree!(concat 'a 'c 'b 'd).unwrap().reshape(2, 2).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "2x2 transpose should swap off-diagonal elements"
+            );
+        }
+        // Test 3x3 matrix
+        {
+            // [a d g] -> [a b c]
+            // [b e h]    [d e f]
+            // [c f i]    [g h i]
+            let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f 'g 'h 'i)
+                .unwrap()
+                .reshape(3, 3)
+                .unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (3, 3));
+            let expected = deftree!(concat 'a 'd 'g 'b 'e 'h 'c 'f 'i)
+                .unwrap()
+                .reshape(3, 3)
+                .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "3x3 transpose should reflect across diagonal"
+            );
+        }
+        // Test diagonal matrix (should be symmetric)
+        {
+            // [a 0 0] -> [a 0 0]
+            // [0 b 0]    [0 b 0]
+            // [0 0 c]    [0 0 c]
+            let matrix = deftree!(concat 'a 0 0 0 'b 0 0 0 'c)
+                .unwrap()
+                .reshape(3, 3)
+                .unwrap();
+            let result = matrix.clone().transposed().unwrap();
+            assert_eq!(result.dims(), (3, 3));
+            assert!(
+                result.equivalent(&matrix),
+                "Diagonal matrix should be equivalent to its transpose"
+            );
+        }
+        // Test identity matrix (should be symmetric)
+        {
+            // [1 0] -> [1 0]
+            // [0 1]    [0 1]
+            let matrix = deftree!(concat 1 0 0 1).unwrap().reshape(2, 2).unwrap();
+            let result = matrix.clone().transposed().unwrap();
+            assert_eq!(result.dims(), (2, 2));
+            assert!(
+                result.equivalent(&matrix),
+                "Identity matrix should be equivalent to its transpose"
+            );
+        }
+    }
+
+    #[test]
+    fn t_transpose_rectangular_matrices() {
+        // Test 2x3 matrix
+        {
+            // [a c e] -> [a b]
+            // [b d f]    [c d]
+            //            [e f]
+            let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
+                .unwrap()
+                .reshape(2, 3)
+                .unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (3, 2));
+            let expected = deftree!(concat 'a 'c 'e 'b 'd 'f)
+                .unwrap()
+                .reshape(3, 2)
+                .unwrap();
+            println!("{:?}", result);
+            println!("{:?}", expected);
+            assert!(
+                result.equivalent(&expected),
+                "2x3 transpose should become 3x2"
+            );
+        }
+        // Test 3x2 matrix
+        {
+            // [a d] -> [a b c]
+            // [b e]    [d e f]
+            // [c f]
+            let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
+                .unwrap()
+                .reshape(3, 2)
+                .unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (2, 3));
+            let expected = deftree!(concat 'a 'd 'b 'e 'c 'f)
+                .unwrap()
+                .reshape(2, 3)
+                .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "3x2 transpose should become 2x3"
+            );
+        }
+        // Test with constants
+        {
+            // [1 3 5] -> [1 2]
+            // [2 4 6]    [3 4]
+            //            [5 6]
+            let matrix = deftree!(concat 1 2 3 4 5 6).unwrap().reshape(2, 3).unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (3, 2));
+            let expected = deftree!(concat 1 3 5 2 4 6).unwrap().reshape(3, 2).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Transpose should work with constants"
+            );
+        }
+    }
+
+    #[test]
+    fn t_transpose_with_expressions() {
+        // Test with complex expressions
+        {
+            // [x+1  sin(y)] -> [x+1   x^2]
+            // [x^2  cos(z)]    [sin(y) cos(z)]
+            let matrix = deftree!(concat (+ 'x 1) (pow 'x 2) (sin 'y) (cos 'z))
+                .unwrap()
+                .reshape(2, 2)
+                .unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (2, 2));
+            let expected = deftree!(concat (+ 'x 1) (sin 'y) (pow 'x 2) (cos 'z))
+                .unwrap()
+                .reshape(2, 2)
+                .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Transpose should work with complex expressions"
+            );
+        }
+        // Test with mixed expressions
+        {
+            // [x   2  ] -> [x    sin(y)]
+            // [sin(y) 3]    [2    3]
+            let matrix = deftree!(concat 'x (sin 'y) 2 3)
+                .unwrap()
+                .reshape(2, 2)
+                .unwrap();
+            let result = matrix.transposed().unwrap();
+            assert_eq!(result.dims(), (2, 2));
+            let expected = deftree!(concat 'x 2 (sin 'y) 3)
+                .unwrap()
+                .reshape(2, 2)
+                .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Transpose should work with mixed symbols and constants"
+            );
+        }
+    }
+
+    #[test]
+    fn t_transpose_properties() {
+        // Test double transpose: (A^T)^T = A
+        {
+            let original = deftree!(concat 'a 'b 'c 'd 'e 'f)
+                .unwrap()
+                .reshape(2, 3)
+                .unwrap();
+            let once_transposed = original.clone().transposed().unwrap();
+            let twice_transposed = once_transposed.transposed().unwrap();
+            assert_eq!(twice_transposed.dims(), original.dims());
+            assert!(
+                twice_transposed.equivalent(&original),
+                "Double transpose should return to original"
+            );
+        }
+        // Test with different dimensions
+        {
+            let original = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(1, 4).unwrap();
+            let twice_transposed = original.clone().transposed().unwrap().transposed().unwrap();
+            assert_eq!(twice_transposed.dims(), original.dims());
+            assert!(
+                twice_transposed.equivalent(&original),
+                "Double transpose should return to original for vectors"
+            );
+        }
     }
 }
