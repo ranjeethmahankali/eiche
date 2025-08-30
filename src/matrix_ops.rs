@@ -1019,8 +1019,8 @@ mod test {
         // Row vector extraction
         {
             // [a b c d]  -> extract [(0,3), (0,1), (0,0)] -> [d]
-            //                                                   [b]
-            //                                                   [a]
+            //                                                [b]
+            //                                                [a]
             let vector = deftree!(concat 'a 'b 'c 'd)
                 .unwrap()
                 .reshaped(1, 4)
@@ -1056,8 +1056,8 @@ mod test {
         // Extract with duplicates (same element multiple times)
         {
             // [a b]  -> extract [(0,0), (1,1), (0,0)] -> [a]
-            // [c d]                                        [d]
-            //                                              [a]
+            // [c d]                                      [d]
+            //                                            [a]
             let matrix = deftree!(concat 'a 'c 'b 'd)
                 .unwrap()
                 .reshaped(2, 2)
@@ -1073,9 +1073,9 @@ mod test {
         // Extract all elements (full matrix flattening)
         {
             // [a c]  -> extract [(0,0), (1,0), (0,1), (1,1)] -> [a]
-            // [b d]                                               [b]
-            //                                                     [c]
-            //                                                     [d]
+            // [b d]                                             [b]
+            //                                                   [c]
+            //                                                   [d]
             let matrix = deftree!(concat 'a 'b 'c 'd)
                 .unwrap()
                 .reshaped(2, 2)
@@ -1107,9 +1107,9 @@ mod test {
         {
             // Extract corners from 3x3 matrix
             // [a d g]  -> extract [(0,0), (0,2), (2,0), (2,2)] -> [a]
-            // [b e h]                                              [g]
-            // [c f i]                                              [c]
-            //                                                      [i]
+            // [b e h]                                             [g]
+            // [c f i]                                             [c]
+            //                                                     [i]
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f 'g 'h 'i)
                 .unwrap()
                 .reshaped(3, 3)
@@ -1125,8 +1125,8 @@ mod test {
         // Reverse order extraction
         {
             // [a b c]  -> extract [(0,2), (0,1), (0,0)] -> [c]
-            //                                                [b]
-            //                                                [a]
+            //                                              [b]
+            //                                              [a]
             let vector = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap();
             let result = vector.extract(&[(0, 2), (0, 1), (0, 0)]).unwrap();
             assert_eq!(result.dims(), (3, 1));
