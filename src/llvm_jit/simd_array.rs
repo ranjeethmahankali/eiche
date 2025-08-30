@@ -951,7 +951,7 @@ where
         }
     }
 
-    pub fn as_async(&'ctx self) -> JitSimdFnSync<'ctx, T> {
+    pub fn as_sync(&'ctx self) -> JitSimdFnSync<'ctx, T> {
         JitSimdFnSync {
             func: unsafe { self.func.as_raw() },
             phantom: PhantomData,
