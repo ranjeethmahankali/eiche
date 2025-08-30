@@ -37,12 +37,13 @@ impl Tree {
                         .map(|(li, ri)| Binary(Multiply, li + roots_lt.start, ri + roots_rt.start)),
                 );
                 let n_after = lnodes.len();
-                let mut total = n_before;
-                for curr in (n_before + 1)..n_after {
-                    let next = lnodes.len();
-                    lnodes.push(Binary(Add, total, curr));
-                    total = next;
-                }
+                let prod_range = n_before..n_after;
+                lnodes.extend(
+                    std::iter::once(prod_range.start)
+                        .chain(n_after..(n_after + prod_range.len().saturating_sub(2)))
+                        .zip(prod_range.skip(1))
+                        .map(|(l, r)| Binary(Add, l, r)),
+                );
                 if let Some(last) = lnodes.pop() {
                     newroots.push(last);
                 }
@@ -130,9 +131,8 @@ impl Tree {
                 nodes.extend(((n_total - n_roots)..n_total).map(|ri| Binary(Multiply, ri, ri)));
                 let n_total = nodes.len();
                 let sqrange = (n_total - n_roots)..n_total;
-                let start = sqrange.start;
                 nodes.extend(
-                    std::iter::once(start)
+                    std::iter::once(sqrange.start)
                         .chain(n_total..(n_total + sqrange.len().saturating_sub(2)))
                         .zip(sqrange.skip(1))
                         .map(|(l, r)| Binary(Add, l, r)),
