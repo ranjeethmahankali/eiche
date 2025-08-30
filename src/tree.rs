@@ -551,6 +551,10 @@ pub fn normalize(vec: Result<Tree, Error>) -> Result<Tree, Error> {
     vec?.normalize()
 }
 
+pub fn extract(mat: Result<Tree, Error>, indices: &[(usize, usize)]) -> Result<Tree, Error> {
+    mat?.extract(indices)
+}
+
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Scalar(value)

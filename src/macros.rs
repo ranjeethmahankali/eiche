@@ -38,9 +38,12 @@ macro_rules! deftree {
         let params = stringify!($params);
         $crate::numerical_deriv($crate::deftree!($tree), &params[1..], $eps)
     }};
-    // Matrix and vector operations
+    // Matrix and vector operations that are not unary and binary ops.
     (reshape $tree:tt $rows:literal $cols:literal) => {
         $crate::reshape($crate::deftree!($tree), $rows, $cols)
+    };
+    (extract $tree:tt ($(($i:literal $j:literal))+)) => {
+        $crate::extract($crate::deftree!($tree), &[$(($i, $j)),+])
     };
     // Constants.
     (const $tt:expr) => {{
@@ -496,6 +499,18 @@ mod test {
             (/ 'y (sqrt (+ (* 'x 'x) (* 'y 'y))))
         )
         .unwrap();
+        assert!(tree.equivalent(&expected));
+    }
+
+    #[test]
+    fn t_extract_deftree() {
+        // Test extracting elements from a 2x2 matrix
+        let tree = deftree!(let ((mat (reshape (concat 'a 'b 'c 'd) 2 2)))
+                            (extract mat ((0 0) (1 1) (0 1))))
+        .unwrap();
+        assert_eq!(tree.dims(), (3, 1));
+        // Should extract elements [a, d, c] (positions (0,0), (1,1), (0,1))
+        let expected = deftree!(concat 'a 'd 'c).unwrap();
         assert!(tree.equivalent(&expected));
     }
 
