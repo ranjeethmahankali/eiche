@@ -104,6 +104,8 @@ where
     unsafe fn check_bool_unchecked(a: Self, lane: usize) -> bool;
 
     fn abs(a: Self) -> Self;
+
+    fn recip_sqrt(a: Self) -> Self;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -366,6 +368,25 @@ impl SimdVec<f32> for Wfloat {
             unsafe {
                 Wfloat {
                     reg32: float32x4x2_t(vabsq_f32(a.reg32.0), vabsq_f32(a.reg32.1)),
+                }
+            }
+        }
+    }
+
+    fn recip_sqrt(a: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: _mm256_rsqrt_ps(a.reg32),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(vrsqrteq_f32(a.reg32.0), vrsqrteq_f32(a.reg32.1)),
                 }
             }
         }
@@ -638,6 +659,25 @@ impl SimdVec<f64> for Wfloat {
             unsafe {
                 Wfloat {
                     reg64: float64x2x2_t(vabsq_f64(a.reg64.0), vabsq_f64(a.reg64.1)),
+                }
+            }
+        }
+    }
+
+    fn recip_sqrt(a: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: _mm256_rsqrt_pd(a.reg64),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(vrsqrteq_f64(a.reg64.0), vrsqrteq_f64(a.reg64.1)),
                 }
             }
         }
@@ -2143,6 +2183,42 @@ mod simd_ops_test {
             assert_eq!(result.valsf64[1], 2.25);
             assert_eq!(result.valsf64[2], 3.125);
             assert_eq!(result.valsf64[3], 4.0625);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_recip_sqrt() {
+        let a = Wfloat {
+            valsf32: [1.0, 4.0, 9.0, 16.0, 25.0, 36.0, 49.0, 64.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::recip_sqrt(a);
+        unsafe {
+            // Check that recip_sqrt gives approximately 1/sqrt(x)
+            // Using loose tolerance since rsqrt is an approximation
+            assert!((result.valsf32[0] - 1.0).abs() < 0.01); // 1/sqrt(1) = 1
+            assert!((result.valsf32[1] - 0.5).abs() < 0.01); // 1/sqrt(4) = 0.5
+            assert!((result.valsf32[2] - (1.0 / 3.0)).abs() < 0.01); // 1/sqrt(9) = 1/3
+            assert!((result.valsf32[3] - 0.25).abs() < 0.01); // 1/sqrt(16) = 0.25
+            assert!((result.valsf32[4] - 0.2).abs() < 0.01); // 1/sqrt(25) = 0.2
+            assert!((result.valsf32[5] - (1.0 / 6.0)).abs() < 0.01); // 1/sqrt(36) = 1/6
+            assert!((result.valsf32[6] - (1.0 / 7.0)).abs() < 0.01); // 1/sqrt(49) = 1/7
+            assert!((result.valsf32[7] - 0.125).abs() < 0.01); // 1/sqrt(64) = 0.125
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_recip_sqrt() {
+        let a = Wfloat {
+            valsf64: [1.0, 4.0, 9.0, 16.0],
+        };
+        let result = <Wfloat as SimdVec<f64>>::recip_sqrt(a);
+        unsafe {
+            // Check that recip_sqrt gives approximately 1/sqrt(x)
+            // Using loose tolerance since rsqrt is an approximation
+            assert!((result.valsf64[0] - 1.0).abs() < 0.01); // 1/sqrt(1) = 1
+            assert!((result.valsf64[1] - 0.5).abs() < 0.01); // 1/sqrt(4) = 0.5
+            assert!((result.valsf64[2] - (1.0 / 3.0)).abs() < 0.01); // 1/sqrt(9) = 1/3
+            assert!((result.valsf64[3] - 0.25).abs() < 0.01); // 1/sqrt(16) = 0.25
         }
     }
 }
