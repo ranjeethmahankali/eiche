@@ -350,7 +350,7 @@ mod test {
             "\\begin{bmatrix}{a} & {c} \\\\ {b} & {d}\\end{bmatrix}",
             deftree!(concat 'a 'b 'c 'd)
                 .unwrap()
-                .reshaped(2, 2)
+                .reshape(2, 2)
                 .unwrap()
                 .to_latex()
         );
@@ -358,7 +358,7 @@ mod test {
             "\\begin{bmatrix}{{x} + {y}} & {{x} - {y}} \\\\ {{x}.{y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
             deftree!(concat (+ 'x 'y) (* 'x 'y) (- 'x 'y) (/ 'x 'y))
                 .unwrap()
-                .reshaped(2, 2)
+                .reshape(2, 2)
                 .unwrap()
                 .to_latex()
         );
@@ -384,7 +384,7 @@ mod test {
             "\\begin{bmatrix}{a} & {b} & {c} & {d}\\end{bmatrix}",
             deftree!(concat 'a 'b 'c 'd)
                 .unwrap()
-                .reshaped(1, 4)
+                .reshape(1, 4)
                 .unwrap()
                 .to_latex()
         );
@@ -392,7 +392,7 @@ mod test {
             "\\begin{bmatrix}{{x} + {y}} & {{x}.{y}} & {{x} - {y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
             deftree!(concat (+ 'x 'y) (* 'x 'y) (- 'x 'y) (/ 'x 'y))
                 .unwrap()
-                .reshaped(1, 4)
+                .reshape(1, 4)
                 .unwrap()
                 .to_latex()
         );

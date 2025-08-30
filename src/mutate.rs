@@ -746,11 +746,11 @@ mod test {
         check_mutations(
             deftree!(concat (+ (* 'p 'x) (* 'p 'y)) 1.)
                 .unwrap()
-                .reshaped(1, 2)
+                .reshape(1, 2)
                 .unwrap(),
             deftree!(concat (* 'p (+ 'x 'y)) 1.)
                 .unwrap()
-                .reshaped(1, 2)
+                .reshape(1, 2)
                 .unwrap(),
         );
     }

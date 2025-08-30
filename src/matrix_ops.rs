@@ -55,7 +55,7 @@ impl Tree {
         Tree::from_nodes(lnodes, (orows, ocols))
     }
 
-    pub fn transposed(self) -> Result<Tree, Error> {
+    pub fn transpose(self) -> Result<Tree, Error> {
         let nroots = self.num_roots();
         let (mut nodes, dims) = self.take();
         let (rows, cols) = dims;
@@ -89,8 +89,8 @@ impl Tree {
         let ldims = self.dims();
         let rdims = other.dims();
         match (ldims, rdims) {
-            ((lr, 1), (rr, 1)) if lr == rr => self.transposed()?.matmul(other),
-            ((1, lc), (1, rc)) if lc == rc => self.matmul(other.transposed()?),
+            ((lr, 1), (rr, 1)) if lr == rr => self.transpose()?.matmul(other),
+            ((1, lc), (1, rc)) if lc == rc => self.matmul(other.transpose()?),
             ((lr, 1), (1, rc)) if lr == rc => other.matmul(self),
             ((1, lc), (rr, 1)) if lc == rr => self.matmul(other),
             _ => Err(Error::InvalidDimensions),
@@ -146,7 +146,7 @@ impl Tree {
         }
     }
 
-    pub fn normalized(self) -> Result<Tree, Error> {
+    pub fn normalize(self) -> Result<Tree, Error> {
         let n_roots = self.num_roots();
         if n_roots == 0 {
             return Err(Error::InvalidDimensions);
@@ -219,10 +219,7 @@ mod test {
     fn t_matmul_2x2_times_2x1_simple() {
         // [a c] * [p] = [a*p + c*q]
         // [b d]   [q]   [b*p + d*q]
-        let lhs = deftree!(concat 'a 'b 'c 'd)
-            .unwrap()
-            .reshaped(2, 2)
-            .unwrap();
+        let lhs = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
         let rhs = deftree!(concat 'p 'q).unwrap();
         let result = lhs.matmul(rhs).unwrap();
         assert_eq!(result.dims(), (2, 1));
@@ -264,7 +261,7 @@ mod test {
         //                   [log(z) ]
         let lhs = deftree!(concat (sin 'x) (cos 'y))
             .unwrap()
-            .reshaped(1, 2)
+            .reshape(1, 2)
             .unwrap();
         let rhs = deftree!(concat (pow 'x 2) (log 'z)).unwrap();
         let result = lhs.matmul(rhs).unwrap();
@@ -295,7 +292,7 @@ mod test {
         let lhs = deftree!(concat (+ 'x 1) (pow 'x 2)).unwrap();
         let rhs = deftree!(concat (- 'y 1) (pow 'y 2))
             .unwrap()
-            .reshaped(1, 2)
+            .reshape(1, 2)
             .unwrap();
         let result = lhs.matmul(rhs).unwrap();
         assert_eq!(result.dims(), (2, 2));
@@ -306,7 +303,7 @@ mod test {
             (* (pow 'x 2) (pow 'y 2))
         )
         .unwrap()
-        .reshaped(2, 2)
+        .reshape(2, 2)
         .unwrap();
         // Check dimensions and root count
         let result_roots = result.roots();
@@ -330,8 +327,8 @@ mod test {
     #[test]
     fn t_matmul_1x1_times_1x1_scalar() {
         // [sqrt(x)] * [exp(y)] = [sqrt(x)*exp(y)]
-        let lhs = deftree!(sqrt 'x).unwrap().reshaped(1, 1).unwrap();
-        let rhs = deftree!(exp 'y).unwrap().reshaped(1, 1).unwrap();
+        let lhs = deftree!(sqrt 'x).unwrap().reshape(1, 1).unwrap();
+        let rhs = deftree!(exp 'y).unwrap().reshape(1, 1).unwrap();
         let result = lhs.matmul(rhs).unwrap();
         println!("{:?}", result.nodes());
         assert_eq!(result.dims(), (1, 1));
@@ -370,14 +367,14 @@ mod test {
             2 3
         )
         .unwrap()
-        .reshaped(2, 3)
+        .reshape(2, 3)
         .unwrap();
         let rhs = deftree!(concat
             'a (log 'a) 5
             (pow 'b 2) 'c (+ 'd 1)
         )
         .unwrap()
-        .reshaped(3, 2)
+        .reshape(3, 2)
         .unwrap();
         let result = lhs.matmul(rhs).unwrap();
         assert_eq!(result.dims(), (2, 2));
@@ -388,7 +385,7 @@ mod test {
             (+ (+ (* (pow 'x 2) (pow 'b 2)) (* (cos 'y) 'c)) (* 3 (+ 'd 1)))
         )
         .unwrap()
-        .reshaped(2, 2)
+        .reshape(2, 2)
         .unwrap();
         let result_roots = result.roots();
         let expected_roots = expected.roots();
@@ -421,7 +418,7 @@ mod test {
         // [x-y ]              [(x-y)*a  (x-y)*b  (x-y)*c]
         // [x*y ]              [(x*y)*a  (x*y)*b  (x*y)*c]
         let lhs = deftree!(concat (+ 'x 'y) (- 'x 'y) (* 'x 'y)).unwrap();
-        let rhs = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap();
+        let rhs = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap();
         let result = lhs.matmul(rhs).unwrap();
         assert_eq!(result.dims(), (3, 3));
         let expected = deftree!(concat
@@ -430,7 +427,7 @@ mod test {
             (* (+ 'x 'y) 'c) (* (- 'x 'y) 'c) (* (* 'x 'y) 'c)
         )
         .unwrap()
-        .reshaped(3, 3)
+        .reshape(3, 3)
         .unwrap();
         assert_eq!(result.roots().len(), 9);
         assert_eq!(expected.roots().len(), 9);
@@ -460,7 +457,7 @@ mod test {
         // [x+1  5   ]   [3  ]   [(x+1)*y + 5*3]
         let lhs = deftree!(concat 2 (+ 'x 1) (pow 'x 2) 5)
             .unwrap()
-            .reshaped(2, 2)
+            .reshape(2, 2)
             .unwrap();
         let rhs = deftree!(concat 'y 3).unwrap();
         let result = lhs.matmul(rhs).unwrap();
@@ -489,13 +486,10 @@ mod test {
     #[test]
     fn t_matmul_dimension_mismatch() {
         // 2x2 matrix times 3x2 matrix should fail (2 != 3)
-        let lhs = deftree!(concat 'a 'b 'c 'd)
-            .unwrap()
-            .reshaped(2, 2)
-            .unwrap();
+        let lhs = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
         let rhs = deftree!(concat 'p 'q 'r 's 't 'u)
             .unwrap()
-            .reshaped(3, 2)
+            .reshape(3, 2)
             .unwrap();
         match lhs.matmul(rhs) {
             Err(Error::DimensionMismatch((2, 2), (3, 2))) => {}
@@ -517,10 +511,7 @@ mod test {
     #[test]
     fn t_matmul_dimension_mismatch_3() {
         // 1x4 matrix times 2x1 matrix should fail (4 != 2)
-        let lhs = deftree!(concat 'a 'b 'c 'd)
-            .unwrap()
-            .reshaped(1, 4)
-            .unwrap();
+        let lhs = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(1, 4).unwrap();
         let rhs = deftree!(concat 'p 'q).unwrap();
         match lhs.matmul(rhs) {
             Err(Error::DimensionMismatch((1, 4), (2, 1))) => {}
@@ -534,16 +525,16 @@ mod test {
         let valid = deftree!(concat 'a 'b).unwrap();
         // These reshape operations should fail, but if they succeed by some means,
         // matmul should handle them appropriately
-        if let Ok(zero_row) = valid.clone().reshaped(0, 2) {
-            if let Ok(valid_mat) = valid.clone().reshaped(2, 1) {
+        if let Ok(zero_row) = valid.clone().reshape(0, 2) {
+            if let Ok(valid_mat) = valid.clone().reshape(2, 1) {
                 match zero_row.matmul(valid_mat) {
                     Err(Error::InvalidDimensions) => {}
                     other => panic!("Expected InvalidDimensions error, got: {:?}", other),
                 }
             }
         }
-        if let Ok(zero_col) = valid.clone().reshaped(2, 0) {
-            if let Ok(valid_mat) = valid.clone().reshaped(1, 2) {
+        if let Ok(zero_col) = valid.clone().reshape(2, 0) {
+            if let Ok(valid_mat) = valid.clone().reshape(1, 2) {
                 match valid_mat.matmul(zero_col) {
                     Err(Error::InvalidDimensions) => {}
                     other => panic!("Expected InvalidDimensions error, got: {:?}", other),
@@ -558,7 +549,7 @@ mod test {
         // [1       0     ]   [1/tan(y)]  [1*tan(y) + 0*1/tan(y)]
         let lhs = deftree!(concat (sin 'x) 1 (cos 'x) 0)
             .unwrap()
-            .reshaped(2, 2)
+            .reshape(2, 2)
             .unwrap();
         let rhs = deftree!(concat (tan 'y) (/ 1 (tan 'y))).unwrap();
         let result = lhs.matmul(rhs).unwrap();
@@ -591,8 +582,8 @@ mod test {
             // [a b c] -> [a]
             //            [b]
             //            [c]
-            let matrix = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap();
-            let result = matrix.transposed().unwrap();
+            let matrix = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat 'a 'b 'c).unwrap(); // column vector (3, 1)
             assert!(
@@ -605,11 +596,8 @@ mod test {
             //              [b]
             //              [c]
             //              [d]
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(1, 4)
-                .unwrap();
-            let result = matrix.transposed().unwrap();
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(1, 4).unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (4, 1));
             let expected = deftree!(concat 'a 'b 'c 'd).unwrap(); // column vector (4, 1)
             assert!(result.equivalent(&expected), "1x4 transpose should be 4x1");
@@ -620,9 +608,9 @@ mod test {
             // [b]
             // [c]
             let matrix = deftree!(concat 'a 'b 'c).unwrap(); // column vector (3, 1)
-            let result = matrix.transposed().unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (1, 3));
-            let expected = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap();
+            let expected = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap();
             assert!(
                 result.equivalent(&expected),
                 "Column vector transpose should be equivalent to row vector"
@@ -634,12 +622,9 @@ mod test {
             // [c]
             // [d]
             let matrix = deftree!(concat 'a 'b 'c 'd).unwrap(); // column vector (4, 1)
-            let result = matrix.transposed().unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (1, 4));
-            let expected = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(1, 4)
-                .unwrap();
+            let expected = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(1, 4).unwrap();
             assert!(result.equivalent(&expected), "4x1 transpose should be 1x4");
         }
     }
@@ -649,10 +634,10 @@ mod test {
         // Test 1x1 scalar
         {
             // [a] -> [a] (no change)
-            let matrix = deftree!('a).unwrap().reshaped(1, 1).unwrap();
-            let result = matrix.transposed().unwrap();
+            let matrix = deftree!('a).unwrap().reshape(1, 1).unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (1, 1));
-            let expected = deftree!('a).unwrap().reshaped(1, 1).unwrap();
+            let expected = deftree!('a).unwrap().reshape(1, 1).unwrap();
             assert!(
                 result.equivalent(&expected),
                 "1x1 transpose should be equivalent to original"
@@ -662,16 +647,10 @@ mod test {
         {
             // [a c] -> [a b]
             // [b d]    [c d]
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap();
-            let result = matrix.transposed().unwrap();
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (2, 2));
-            let expected = deftree!(concat 'a 'c 'b 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap();
+            let expected = deftree!(concat 'a 'c 'b 'd).unwrap().reshape(2, 2).unwrap();
             assert!(
                 result.equivalent(&expected),
                 "2x2 transpose should swap off-diagonal elements"
@@ -684,13 +663,13 @@ mod test {
             // [c f i]    [g h i]
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f 'g 'h 'i)
                 .unwrap()
-                .reshaped(3, 3)
+                .reshape(3, 3)
                 .unwrap();
-            let result = matrix.transposed().unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (3, 3));
             let expected = deftree!(concat 'a 'd 'g 'b 'e 'h 'c 'f 'i)
                 .unwrap()
-                .reshaped(3, 3)
+                .reshape(3, 3)
                 .unwrap();
             assert!(
                 result.equivalent(&expected),
@@ -704,9 +683,9 @@ mod test {
             // [0 0 c]    [0 0 c]
             let matrix = deftree!(concat 'a 0 0 0 'b 0 0 0 'c)
                 .unwrap()
-                .reshaped(3, 3)
+                .reshape(3, 3)
                 .unwrap();
-            let result = matrix.clone().transposed().unwrap();
+            let result = matrix.clone().transpose().unwrap();
             assert_eq!(result.dims(), (3, 3));
             assert!(
                 result.equivalent(&matrix),
@@ -717,8 +696,8 @@ mod test {
         {
             // [1 0] -> [1 0]
             // [0 1]    [0 1]
-            let matrix = deftree!(concat 1 0 0 1).unwrap().reshaped(2, 2).unwrap();
-            let result = matrix.clone().transposed().unwrap();
+            let matrix = deftree!(concat 1 0 0 1).unwrap().reshape(2, 2).unwrap();
+            let result = matrix.clone().transpose().unwrap();
             assert_eq!(result.dims(), (2, 2));
             assert!(
                 result.equivalent(&matrix),
@@ -736,13 +715,13 @@ mod test {
             //            [e f]
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
                 .unwrap()
-                .reshaped(2, 3)
+                .reshape(2, 3)
                 .unwrap();
-            let result = matrix.transposed().unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (3, 2));
             let expected = deftree!(concat 'a 'c 'e 'b 'd 'f)
                 .unwrap()
-                .reshaped(3, 2)
+                .reshape(3, 2)
                 .unwrap();
             println!("{:?}", result);
             println!("{:?}", expected);
@@ -758,13 +737,13 @@ mod test {
             // [c f]
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
                 .unwrap()
-                .reshaped(3, 2)
+                .reshape(3, 2)
                 .unwrap();
-            let result = matrix.transposed().unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (2, 3));
             let expected = deftree!(concat 'a 'd 'b 'e 'c 'f)
                 .unwrap()
-                .reshaped(2, 3)
+                .reshape(2, 3)
                 .unwrap();
             assert!(
                 result.equivalent(&expected),
@@ -776,16 +755,10 @@ mod test {
             // [1 3 5] -> [1 2]
             // [2 4 6]    [3 4]
             //            [5 6]
-            let matrix = deftree!(concat 1 2 3 4 5 6)
-                .unwrap()
-                .reshaped(2, 3)
-                .unwrap();
-            let result = matrix.transposed().unwrap();
+            let matrix = deftree!(concat 1 2 3 4 5 6).unwrap().reshape(2, 3).unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (3, 2));
-            let expected = deftree!(concat 1 3 5 2 4 6)
-                .unwrap()
-                .reshaped(3, 2)
-                .unwrap();
+            let expected = deftree!(concat 1 3 5 2 4 6).unwrap().reshape(3, 2).unwrap();
             assert!(
                 result.equivalent(&expected),
                 "Transpose should work with constants"
@@ -801,13 +774,13 @@ mod test {
             // [x^2  cos(z)]    [sin(y) cos(z)]
             let matrix = deftree!(concat (+ 'x 1) (pow 'x 2) (sin 'y) (cos 'z))
                 .unwrap()
-                .reshaped(2, 2)
+                .reshape(2, 2)
                 .unwrap();
-            let result = matrix.transposed().unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (2, 2));
             let expected = deftree!(concat (+ 'x 1) (sin 'y) (pow 'x 2) (cos 'z))
                 .unwrap()
-                .reshaped(2, 2)
+                .reshape(2, 2)
                 .unwrap();
             assert!(
                 result.equivalent(&expected),
@@ -820,13 +793,13 @@ mod test {
             // [sin(y) 3]    [2    3]
             let matrix = deftree!(concat 'x (sin 'y) 2 3)
                 .unwrap()
-                .reshaped(2, 2)
+                .reshape(2, 2)
                 .unwrap();
-            let result = matrix.transposed().unwrap();
+            let result = matrix.transpose().unwrap();
             assert_eq!(result.dims(), (2, 2));
             let expected = deftree!(concat 'x 2 (sin 'y) 3)
                 .unwrap()
-                .reshaped(2, 2)
+                .reshape(2, 2)
                 .unwrap();
             assert!(
                 result.equivalent(&expected),
@@ -841,10 +814,10 @@ mod test {
         {
             let original = deftree!(concat 'a 'b 'c 'd 'e 'f)
                 .unwrap()
-                .reshaped(2, 3)
+                .reshape(2, 3)
                 .unwrap();
-            let once_transposed = original.clone().transposed().unwrap();
-            let twice_transposed = once_transposed.transposed().unwrap();
+            let once_transposed = original.clone().transpose().unwrap();
+            let twice_transposed = once_transposed.transpose().unwrap();
             assert_eq!(twice_transposed.dims(), original.dims());
             assert!(
                 twice_transposed.equivalent(&original),
@@ -853,11 +826,8 @@ mod test {
         }
         // Test with different dimensions
         {
-            let original = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(1, 4)
-                .unwrap();
-            let twice_transposed = original.clone().transposed().unwrap().transposed().unwrap();
+            let original = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(1, 4).unwrap();
+            let twice_transposed = original.clone().transpose().unwrap().transpose().unwrap();
             assert_eq!(twice_transposed.dims(), original.dims());
             assert!(
                 twice_transposed.equivalent(&original),
@@ -886,8 +856,8 @@ mod test {
         // Test row vectors
         {
             // [a b c] · [x y z] = a*x + b*y + c*z
-            let u = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap(); // (1,3)
-            let v = deftree!(concat 'x 'y 'z).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let u = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap(); // (1,3)
+            let v = deftree!(concat 'x 'y 'z).unwrap().reshape(1, 3).unwrap(); // (1,3)
             let result = u.dot_product(v).unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(+ (+ (* 'a 'x) (* 'b 'y)) (* 'c 'z)).unwrap();
@@ -913,8 +883,8 @@ mod test {
         // Test scalar (1x1)
         {
             // [a] · [b] = a*b
-            let u = deftree!('a).unwrap().reshaped(1, 1).unwrap(); // (1,1)
-            let v = deftree!('b).unwrap().reshaped(1, 1).unwrap(); // (1,1)
+            let u = deftree!('a).unwrap().reshape(1, 1).unwrap(); // (1,1)
+            let v = deftree!('b).unwrap().reshape(1, 1).unwrap(); // (1,1)
             let result = u.dot_product(v).unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(* 'a 'b).unwrap();
@@ -933,7 +903,7 @@ mod test {
             // [b]
             // [c]
             let u = deftree!(concat 'a 'b 'c).unwrap(); // (3,1)
-            let v = deftree!(concat 'x 'y 'z).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let v = deftree!(concat 'x 'y 'z).unwrap().reshape(1, 3).unwrap(); // (1,3)
             let result = u.dot_product(v).unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(+ (+ (* 'a 'x) (* 'b 'y)) (* 'c 'z)).unwrap();
@@ -947,7 +917,7 @@ mod test {
             // [a b c] · [x] = a*x + b*y + c*z
             //           [y]
             //           [z]
-            let u = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let u = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap(); // (1,3)
             let v = deftree!(concat 'x 'y 'z).unwrap(); // (3,1)
             let result = u.dot_product(v).unwrap();
             assert_eq!(result.dims(), (1, 1));
@@ -963,7 +933,7 @@ mod test {
             //                   [exp(w)]
             let u = deftree!(concat (sin 'x) (cos 'y))
                 .unwrap()
-                .reshaped(1, 2)
+                .reshape(1, 2)
                 .unwrap(); // (1,2)
             let v = deftree!(concat (tan 'z) (exp 'w)).unwrap(); // (2,1)
             let result = u.dot_product(v).unwrap();
@@ -989,10 +959,7 @@ mod test {
         }
         // Test non-vector operands (matrix)
         {
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap(); // (2,2)
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap(); // (2,2)
             let vector = deftree!(concat 'x 'y).unwrap(); // (2,1)
             match matrix.dot_product(vector) {
                 Err(Error::InvalidDimensions) => {}
@@ -1001,10 +968,10 @@ mod test {
         }
         // Test mixed vector/matrix mismatch
         {
-            let vector = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let vector = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap(); // (1,3)
             let matrix = deftree!(concat 'x 'y 'z 'w 'p 'q)
                 .unwrap()
-                .reshaped(2, 3)
+                .reshape(2, 3)
                 .unwrap(); // (2,3)
             match vector.dot_product(matrix) {
                 Err(Error::InvalidDimensions) => {}
@@ -1013,11 +980,8 @@ mod test {
         }
         // Test row vector dimension mismatch
         {
-            let u = deftree!(concat 'a 'b).unwrap().reshaped(1, 2).unwrap(); // (1,2)
-            let v = deftree!(concat 'x 'y 'z 'w)
-                .unwrap()
-                .reshaped(1, 4)
-                .unwrap(); // (1,4)
+            let u = deftree!(concat 'a 'b).unwrap().reshape(1, 2).unwrap(); // (1,2)
+            let v = deftree!(concat 'x 'y 'z 'w).unwrap().reshape(1, 4).unwrap(); // (1,4)
             match u.dot_product(v) {
                 Err(Error::InvalidDimensions) => {}
                 other => panic!("Expected InvalidDimensions error, got: {:?}", other),
@@ -1038,7 +1002,7 @@ mod test {
         // Test commutativity with mixed orientations
         {
             let u = deftree!(concat 'a 'b).unwrap(); // (2,1)
-            let v = deftree!(concat 'x 'y).unwrap().reshaped(1, 2).unwrap(); // (1,2)
+            let v = deftree!(concat 'x 'y).unwrap().reshape(1, 2).unwrap(); // (1,2)
             let uv = u.clone().dot_product(v.clone()).unwrap();
             let vu = v.dot_product(u).unwrap();
             assert!(
@@ -1068,7 +1032,7 @@ mod test {
             // [b d f]
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
                 .unwrap()
-                .reshaped(2, 3)
+                .reshape(2, 3)
                 .unwrap();
             let result = matrix.extract(&[(1, 2)]).unwrap();
             assert_eq!(result.dims(), (1, 1));
@@ -1085,7 +1049,7 @@ mod test {
             //                                                [e]
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
                 .unwrap()
-                .reshaped(2, 3)
+                .reshape(2, 3)
                 .unwrap();
             let result = matrix.extract(&[(0, 0), (1, 1), (0, 2)]).unwrap();
             assert_eq!(result.dims(), (3, 1));
@@ -1114,10 +1078,7 @@ mod test {
             // [a b c d]  -> extract [(0,3), (0,1), (0,0)] -> [d]
             //                                                [b]
             //                                                [a]
-            let vector = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(1, 4)
-                .unwrap(); // (1,4)
+            let vector = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(1, 4).unwrap(); // (1,4)
             let result = vector.extract(&[(0, 3), (0, 1), (0, 0)]).unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat 'd 'b 'a).unwrap();
@@ -1136,7 +1097,7 @@ mod test {
             // [x^2   cos(z)]                               [sin(y)]
             let matrix = deftree!(concat (+ 'x 1) (pow 'x 2) (sin 'y) (cos 'z))
                 .unwrap()
-                .reshaped(2, 2)
+                .reshape(2, 2)
                 .unwrap();
             let result = matrix.extract(&[(1, 0), (0, 1)]).unwrap();
             assert_eq!(result.dims(), (2, 1));
@@ -1151,10 +1112,7 @@ mod test {
             // [a b]  -> extract [(0,0), (1,1), (0,0)] -> [a]
             // [c d]                                      [d]
             //                                            [a]
-            let matrix = deftree!(concat 'a 'c 'b 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap();
+            let matrix = deftree!(concat 'a 'c 'b 'd).unwrap().reshape(2, 2).unwrap();
             let result = matrix.extract(&[(0, 0), (1, 1), (0, 0)]).unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat 'a 'd 'a).unwrap();
@@ -1169,10 +1127,7 @@ mod test {
             // [b d]                                             [b]
             //                                                   [c]
             //                                                   [d]
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap();
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
             let result = matrix.extract(&[(0, 0), (1, 0), (0, 1), (1, 1)]).unwrap();
             assert_eq!(result.dims(), (4, 1));
             let expected = deftree!(concat 'a 'b 'c 'd).unwrap();
@@ -1187,7 +1142,7 @@ mod test {
     fn t_extract_edge_cases() {
         // 1x1 matrix (scalar)
         {
-            let scalar = deftree!('x).unwrap().reshaped(1, 1).unwrap();
+            let scalar = deftree!('x).unwrap().reshape(1, 1).unwrap();
             let result = scalar.extract(&[(0, 0)]).unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!('x).unwrap();
@@ -1205,7 +1160,7 @@ mod test {
             //                                                     [i]
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f 'g 'h 'i)
                 .unwrap()
-                .reshaped(3, 3)
+                .reshape(3, 3)
                 .unwrap();
             let result = matrix.extract(&[(0, 0), (0, 2), (2, 0), (2, 2)]).unwrap();
             assert_eq!(result.dims(), (4, 1));
@@ -1220,7 +1175,7 @@ mod test {
             // [a b c]  -> extract [(0,2), (0,1), (0,0)] -> [c]
             //                                              [b]
             //                                              [a]
-            let vector = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap();
+            let vector = deftree!(concat 'a 'b 'c).unwrap().reshape(1, 3).unwrap();
             let result = vector.extract(&[(0, 2), (0, 1), (0, 0)]).unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat 'c 'b 'a).unwrap();
@@ -1235,10 +1190,7 @@ mod test {
     fn t_extract_error_cases() {
         // Empty indices should return InvalidDimensions error
         {
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap();
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
             let result = matrix.extract(&[]);
             match result {
                 Err(Error::InvalidDimensions) => {}
@@ -1247,10 +1199,7 @@ mod test {
         }
         // Out of bounds access should return IndexOutOfBounds error
         {
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap(); // Valid indices: (0,0), (0,1), (1,0), (1,1)
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap(); // Valid indices: (0,0), (0,1), (1,0), (1,1)
             // Try to access (2, 0) which is out of bounds for rows
             let result = matrix.extract(&[(2, 0)]);
             match result {
@@ -1260,10 +1209,7 @@ mod test {
         }
         // Out of bounds column access
         {
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap(); // Valid indices: (0,0), (0,1), (1,0), (1,1)
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap(); // Valid indices: (0,0), (0,1), (1,0), (1,1)
             // Try to access (0, 3) which is out of bounds for columns
             let result = matrix.extract(&[(0, 3)]);
             match result {
@@ -1273,10 +1219,7 @@ mod test {
         }
         // Mixed valid and invalid indices
         {
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap();
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
             // First index valid, second invalid
             let result = matrix.extract(&[(0, 0), (3, 1)]);
             match result {
@@ -1290,7 +1233,7 @@ mod test {
     fn t_l2norm_basic_cases() {
         // Scalar (1x1) case
         {
-            let scalar = deftree!(5).unwrap().reshaped(1, 1).unwrap();
+            let scalar = deftree!(5).unwrap().reshape(1, 1).unwrap();
             let result = scalar.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(abs 5).unwrap();
@@ -1314,7 +1257,7 @@ mod test {
         // 2D row vector
         {
             // ||[3, 4]|| = sqrt(3² + 4²)
-            let vector = deftree!(concat 3 4).unwrap().reshaped(1, 2).unwrap(); // (1,2)
+            let vector = deftree!(concat 3 4).unwrap().reshape(1, 2).unwrap(); // (1,2)
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(sqrt (+ (* 3 3) (* 4 4))).unwrap();
@@ -1376,7 +1319,7 @@ mod test {
             // ||[cos(a), x+1, exp(b), 0, sqrt(c)]||
             let vector = deftree!(concat (cos 'a) (+ 'x 1) (exp 'b) 0 (sqrt 'c))
                 .unwrap()
-                .reshaped(1, 5)
+                .reshape(1, 5)
                 .unwrap(); // (1,5)
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
@@ -1513,10 +1456,7 @@ mod test {
     fn t_l2norm_error_cases() {
         // Matrix (not a vector) should fail
         {
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap();
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
             let result = matrix.l2norm();
             match result {
                 Err(Error::InvalidDimensions) => {}
@@ -1527,7 +1467,7 @@ mod test {
         {
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
                 .unwrap()
-                .reshaped(3, 2)
+                .reshape(3, 2)
                 .unwrap();
             let result = matrix.l2norm();
             match result {
@@ -1541,8 +1481,8 @@ mod test {
     fn t_normalized_vec_scalar_cases() {
         // Positive scalar (1x1) case
         {
-            let scalar = deftree!('x).unwrap().reshaped(1, 1).unwrap();
-            let result = scalar.normalized().unwrap();
+            let scalar = deftree!('x).unwrap().reshape(1, 1).unwrap();
+            let result = scalar.normalize().unwrap();
             assert_eq!(result.dims(), (1, 1));
             // Expected: if x > 0 then 1 else if x < 0 then -1 else 0
             let expected = deftree!(if (< 'x 0) (const -1.0) (if (> 'x 0) 1 0)).unwrap();
@@ -1560,7 +1500,7 @@ mod test {
         {
             // Normalize [3, 4] -> [3/5, 4/5] since ||[3,4]|| = 5
             let vector = deftree!(concat 3 4).unwrap(); // (2,1)
-            let result = vector.normalized().unwrap();
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (2, 1));
             // Expected: [3/sqrt(9+16), 4/sqrt(9+16)] = [3/sqrt(25), 4/sqrt(25)]
             let expected = deftree!(concat
@@ -1583,15 +1523,15 @@ mod test {
         // 2D row vector with variables
         {
             // Normalize [x, y]
-            let vector = deftree!(concat 'x 'y).unwrap().reshaped(1, 2).unwrap(); // (1,2)
-            let result = vector.normalized().unwrap();
+            let vector = deftree!(concat 'x 'y).unwrap().reshape(1, 2).unwrap(); // (1,2)
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (1, 2));
             let expected = deftree!(concat
                 (/ 'x (sqrt (+ (* 'x 'x) (* 'y 'y))))
                 (/ 'y (sqrt (+ (* 'x 'x) (* 'y 'y))))
             )
             .unwrap()
-            .reshaped(1, 2)
+            .reshape(1, 2)
             .unwrap();
             assert!(
                 result.equivalent(&expected),
@@ -1613,7 +1553,7 @@ mod test {
         {
             // Normalize [sin(x), cos(y), 2]
             let vector = deftree!(concat (sin 'x) (cos 'y) 2).unwrap(); // (3,1)
-            let result = vector.normalized().unwrap();
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat
                 (/ (sin 'x) (sqrt (+ (+ (* (sin 'x) (sin 'x)) (* (cos 'y) (cos 'y))) (* 2 2))))
@@ -1637,7 +1577,7 @@ mod test {
         {
             // Normalize [x+1, x-1, x^2, exp(y)]
             let vector = deftree!(concat (+ 'x 1) (- 'x 1) (pow 'x 2) (exp 'y)).unwrap(); // (4,1)
-            let result = vector.normalized().unwrap();
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (4, 1));
             let expected = deftree!(concat
                 (/ (+ 'x 1)
@@ -1685,7 +1625,7 @@ mod test {
         // Single element vector (should behave like scalar)
         {
             let vector = deftree!('a).unwrap(); // (1,1) but treated as vector
-            let result = vector.normalized().unwrap();
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(if (< 'a 0) (const -1.) (if (> 'a 0) 1 0)).unwrap();
             assert!(
@@ -1698,7 +1638,7 @@ mod test {
         {
             // Normalize [0, -3, 4] -> [0, -3/5, 4/5]
             let vector = deftree!(concat 0 (- 3) 4).unwrap(); // (3,1)
-            let result = vector.normalized().unwrap();
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat
                 (/ 0 (sqrt (+ (+ (* 0 0) (* (- 3) (- 3))) (* 4 4))))
@@ -1722,7 +1662,7 @@ mod test {
         {
             // Normalize [1, 1, 1, 1, 1] -> all components become 1/sqrt(5)
             let vector = deftree!(concat 1 1 1 1 1).unwrap(); // (5,1)
-            let result = vector.normalized().unwrap();
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (5, 1));
             let expected = deftree!(concat
                 (/ 1 (sqrt (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1))))
@@ -1752,7 +1692,7 @@ mod test {
         {
             // Normalize [cos(x), sin(x)] -> should have unit norm for any x
             let vector = deftree!(concat (cos 'x) (sin 'x)).unwrap(); // (2,1)
-            let result = vector.normalized().unwrap();
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (2, 1));
             let expected = deftree!(concat
                 (/ (cos 'x) (sqrt (+ (* (cos 'x) (cos 'x)) (* (sin 'x) (sin 'x)))))
@@ -1769,7 +1709,7 @@ mod test {
         {
             // Normalize [x^2, log(y), sqrt(z)]
             let vector = deftree!(concat (pow 'x 2) (log 'y) (sqrt 'z)).unwrap(); // (3,1)
-            let result = vector.normalized().unwrap();
+            let result = vector.normalize().unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat
                                     (/ (pow 'x 2)
@@ -1807,11 +1747,8 @@ mod test {
     fn t_normalized_vec_error_cases() {
         // Matrix (not a vector) should fail
         {
-            let matrix = deftree!(concat 'a 'b 'c 'd)
-                .unwrap()
-                .reshaped(2, 2)
-                .unwrap();
-            let result = matrix.normalized();
+            let matrix = deftree!(concat 'a 'b 'c 'd).unwrap().reshape(2, 2).unwrap();
+            let result = matrix.normalize();
             match result {
                 Err(Error::InvalidDimensions) => {}
                 other => panic!("Expected InvalidDimensions error, got: {:?}", other),
@@ -1821,9 +1758,9 @@ mod test {
         {
             let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
                 .unwrap()
-                .reshaped(3, 2)
+                .reshape(3, 2)
                 .unwrap();
-            let result = matrix.normalized();
+            let result = matrix.normalize();
             match result {
                 Err(Error::InvalidDimensions) => {}
                 other => panic!("Expected InvalidDimensions error, got: {:?}", other),
@@ -1846,7 +1783,7 @@ mod test {
         {
             // [cos(x), sin(x)] is already unit, so normalizing should give same result
             let unit_vector = deftree!(concat (cos 'x) (sin 'x)).unwrap();
-            let normalized = unit_vector.clone().normalized().unwrap();
+            let normalized = unit_vector.clone().normalize().unwrap();
             // The normalized version should be very close to the original
             // since cos²(x) + sin²(x) = 1
             compare_trees(
@@ -1860,8 +1797,8 @@ mod test {
         // Double normalization should be idempotent (normalizing normalized vector)
         {
             let vector = deftree!(concat 'x 'y 'z).unwrap();
-            let once_normalized = vector.normalized().unwrap();
-            let twice_normalized = once_normalized.clone().normalized().unwrap();
+            let once_normalized = vector.normalize().unwrap();
+            let twice_normalized = once_normalized.clone().normalize().unwrap();
             compare_trees(
                 &once_normalized,
                 &twice_normalized,

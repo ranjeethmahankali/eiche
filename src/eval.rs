@@ -442,7 +442,7 @@ mod test {
     fn t_bug_repro() {
         let tree = deftree!(concat 1 (const -1.))
             .unwrap()
-            .reshaped(1, 2)
+            .reshape(1, 2)
             .unwrap();
         let mut eval = ValueEvaluator::new(&tree);
         let output = eval.run().unwrap();
