@@ -50,6 +50,34 @@ impl Tree {
         lnodes.extend(newroots.drain(..));
         Tree::from_nodes(lnodes, (orows, ocols))
     }
+
+    pub fn transposed(self) -> Result<Tree, Error> {
+        let nroots = self.num_roots();
+        let (mut nodes, dims) = self.take();
+        let (rows, cols) = dims;
+        let ntotal = nodes.len();
+        let roots = &mut nodes[(ntotal - nroots)..];
+        if rows != 1 && cols != 1 {
+            if rows == cols {
+                // Square case: do in place
+                for i in 0..rows {
+                    for j in (i + 1)..cols {
+                        roots.swap(i * cols + j, j * cols + i);
+                    }
+                }
+            } else {
+                // Rectangular case: allocate new matrix
+                let mut newroots = roots.to_vec();
+                for i in 0..rows {
+                    for j in 0..cols {
+                        newroots[j * rows + i] = roots[i * cols + j];
+                    }
+                }
+                roots.copy_from_slice(&newroots);
+            }
+        }
+        Tree::from_nodes(nodes, (cols, rows))
+    }
 }
 
 #[cfg(test)]
