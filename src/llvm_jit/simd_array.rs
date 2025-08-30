@@ -809,7 +809,7 @@ impl SimdVec<f64> for Wfloat {
         {
             unsafe {
                 Wfloat {
-                    reg64: _mm256_rsqrt_pd(a.reg64),
+                    reg64: _mm256_div_pd(_mm256_set1_pd(1.), _mm256_sqrt_pd(a.reg64)),
                 }
             }
         }
