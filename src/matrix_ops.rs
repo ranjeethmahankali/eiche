@@ -92,6 +92,29 @@ impl Tree {
             _ => Err(Error::InvalidDimensions),
         }
     }
+
+    pub fn extract(self, indices: &[(usize, usize)]) -> Result<Tree, Error> {
+        let n_roots_new = indices.len();
+        if n_roots_new == 0 {
+            return Err(Error::InvalidDimensions);
+        }
+        let n_roots_old = self.num_roots();
+        let (mut nodes, dims) = self.take();
+        let (rows, cols) = dims;
+        let n_nodes_old = nodes.len();
+        let n_keep = n_nodes_old - n_roots_old;
+        let old_roots = &nodes[n_keep..];
+        if let Some((r, c)) = indices.iter().find(|(r, c)| !(*r < rows && *c < cols)) {
+            return Err(Error::IndexOutOfBounds(*r, *c));
+        }
+        let mut new_roots: Vec<Node> = indices
+            .iter()
+            .map(|(r, c)| old_roots[c * rows + r])
+            .collect();
+        nodes.truncate(n_keep);
+        nodes.extend(new_roots.drain(..));
+        Tree::from_nodes(nodes, (n_roots_new, 1))
+    }
 }
 
 #[cfg(test)]
@@ -941,6 +964,232 @@ mod test {
                 result.equivalent(&expected),
                 "Dot product with constants should work"
             );
+        }
+    }
+
+    #[test]
+    fn t_extract_basic_cases() {
+        // Single element extraction
+        {
+            // [a c e]  -> extract (1,2) -> [f]
+            // [b d f]
+            let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
+                .unwrap()
+                .reshaped(2, 3)
+                .unwrap();
+            let result = matrix.extract(&[(1, 2)]).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!('f).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Single element extraction should work"
+            );
+        }
+        // Multiple elements in order
+        {
+            // [a c e]  -> extract [(0,0), (1,1), (0,2)] -> [a]
+            // [b d f]                                        [d]
+            //                                                [e]
+            let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
+                .unwrap()
+                .reshaped(2, 3)
+                .unwrap();
+            let result = matrix.extract(&[(0, 0), (1, 1), (0, 2)]).unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat 'a 'd 'e).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Multiple element extraction should work"
+            );
+        }
+        // Column vector extraction
+        {
+            // [a]  -> extract [(1,0), (0,0), (2,0)] -> [b]
+            // [b]                                        [a]
+            // [c]                                        [c]
+            let vector = deftree!(concat 'a 'b 'c).unwrap(); // (3,1)
+            let result = vector.extract(&[(1, 0), (0, 0), (2, 0)]).unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat 'b 'a 'c).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Column vector reordering should work"
+            );
+        }
+        // Row vector extraction
+        {
+            // [a b c d]  -> extract [(0,3), (0,1), (0,0)] -> [d]
+            //                                                   [b]
+            //                                                   [a]
+            let vector = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(1, 4)
+                .unwrap(); // (1,4)
+            let result = vector.extract(&[(0, 3), (0, 1), (0, 0)]).unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat 'd 'b 'a).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Row vector extraction should work"
+            );
+        }
+    }
+
+    #[test]
+    fn t_extract_with_expressions() {
+        // Extract from matrix with expressions
+        {
+            // [x+1   sin(y)]  -> extract [(1,0), (0,1)] -> [x^2  ]
+            // [x^2   cos(z)]                               [sin(y)]
+            let matrix = deftree!(concat (+ 'x 1) (pow 'x 2) (sin 'y) (cos 'z))
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap();
+            let result = matrix.extract(&[(1, 0), (0, 1)]).unwrap();
+            assert_eq!(result.dims(), (2, 1));
+            let expected = deftree!(concat (pow 'x 2) (sin 'y)).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Expression extraction should work"
+            );
+        }
+        // Extract with duplicates (same element multiple times)
+        {
+            // [a b]  -> extract [(0,0), (1,1), (0,0)] -> [a]
+            // [c d]                                        [d]
+            //                                              [a]
+            let matrix = deftree!(concat 'a 'c 'b 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap();
+            let result = matrix.extract(&[(0, 0), (1, 1), (0, 0)]).unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat 'a 'd 'a).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Duplicate extraction should work"
+            );
+        }
+        // Extract all elements (full matrix flattening)
+        {
+            // [a c]  -> extract [(0,0), (1,0), (0,1), (1,1)] -> [a]
+            // [b d]                                               [b]
+            //                                                     [c]
+            //                                                     [d]
+            let matrix = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap();
+            let result = matrix.extract(&[(0, 0), (1, 0), (0, 1), (1, 1)]).unwrap();
+            assert_eq!(result.dims(), (4, 1));
+            let expected = deftree!(concat 'a 'b 'c 'd).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Full matrix extraction should work"
+            );
+        }
+    }
+
+    #[test]
+    fn t_extract_edge_cases() {
+        // 1x1 matrix (scalar)
+        {
+            let scalar = deftree!('x).unwrap().reshaped(1, 1).unwrap();
+            let result = scalar.extract(&[(0, 0)]).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!('x).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Scalar extraction should work"
+            );
+        }
+        // Large matrix with selective extraction
+        {
+            // Extract corners from 3x3 matrix
+            // [a d g]  -> extract [(0,0), (0,2), (2,0), (2,2)] -> [a]
+            // [b e h]                                              [g]
+            // [c f i]                                              [c]
+            //                                                      [i]
+            let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f 'g 'h 'i)
+                .unwrap()
+                .reshaped(3, 3)
+                .unwrap();
+            let result = matrix.extract(&[(0, 0), (0, 2), (2, 0), (2, 2)]).unwrap();
+            assert_eq!(result.dims(), (4, 1));
+            let expected = deftree!(concat 'a 'g 'c 'i).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Corner extraction should work"
+            );
+        }
+        // Reverse order extraction
+        {
+            // [a b c]  -> extract [(0,2), (0,1), (0,0)] -> [c]
+            //                                                [b]
+            //                                                [a]
+            let vector = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap();
+            let result = vector.extract(&[(0, 2), (0, 1), (0, 0)]).unwrap();
+            assert_eq!(result.dims(), (3, 1));
+            let expected = deftree!(concat 'c 'b 'a).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Reverse extraction should work"
+            );
+        }
+    }
+
+    #[test]
+    fn t_extract_error_cases() {
+        // Empty indices should return InvalidDimensions error
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap();
+            let result = matrix.extract(&[]);
+            match result {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
+            }
+        }
+        // Out of bounds access should return IndexOutOfBounds error
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap(); // Valid indices: (0,0), (0,1), (1,0), (1,1)
+            // Try to access (2, 0) which is out of bounds for rows
+            let result = matrix.extract(&[(2, 0)]);
+            match result {
+                Err(Error::IndexOutOfBounds(2, 0)) => {}
+                other => panic!("Expected IndexOutOfBounds(2, 0) error, got: {:?}", other),
+            }
+        }
+        // Out of bounds column access
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap(); // Valid indices: (0,0), (0,1), (1,0), (1,1)
+            // Try to access (0, 3) which is out of bounds for columns
+            let result = matrix.extract(&[(0, 3)]);
+            match result {
+                Err(Error::IndexOutOfBounds(0, 3)) => {}
+                other => panic!("Expected IndexOutOfBounds(0, 3) error, got: {:?}", other),
+            }
+        }
+        // Mixed valid and invalid indices
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap();
+            // First index valid, second invalid
+            let result = matrix.extract(&[(0, 0), (3, 1)]);
+            match result {
+                Err(Error::IndexOutOfBounds(3, 1)) => {}
+                other => panic!("Expected IndexOutOfBounds(3, 1) error, got: {:?}", other),
+            }
         }
     }
 }

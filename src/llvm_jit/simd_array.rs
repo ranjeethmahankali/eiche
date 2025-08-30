@@ -2080,7 +2080,6 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-
         unsafe {
             assert_eq!(
                 <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 0),
@@ -2112,7 +2111,6 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-
         <Wfloat as SimdVec<f64>>::check_bool(mask, 4);
     }
 
