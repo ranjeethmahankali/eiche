@@ -57,15 +57,17 @@ impl Tree {
         let (rows, cols) = dims;
         let ntotal = nodes.len();
         let roots = &mut nodes[(ntotal - nroots)..];
-        if rows != 1 && cols != 1 {
-            if rows == cols {
+        match (rows, cols) {
+            (1, 1) => {} // Do nothing
+            (r, c) if r == c => {
                 // Square case: do in place
                 for i in 0..rows {
                     for j in (i + 1)..cols {
                         roots.swap(i * cols + j, j * cols + i);
                     }
                 }
-            } else {
+            }
+            _ => {
                 // Rectangular case: allocate new matrix
                 let mut newroots = roots.to_vec();
                 for i in 0..rows {
@@ -77,6 +79,18 @@ impl Tree {
             }
         }
         Tree::from_nodes(nodes, (cols, rows))
+    }
+
+    pub fn dot_product(self, other: Tree) -> Result<Tree, Error> {
+        let ldims = self.dims();
+        let rdims = other.dims();
+        match (ldims, rdims) {
+            ((lr, 1), (rr, 1)) if lr == rr => self.transposed()?.matmul(other),
+            ((1, lc), (1, rc)) if lc == rc => self.matmul(other.transposed()?),
+            ((lr, 1), (1, rc)) if lr == rc => other.matmul(self),
+            ((1, lc), (rr, 1)) if lc == rr => self.matmul(other),
+            _ => Err(Error::InvalidDimensions),
+        }
     }
 }
 
