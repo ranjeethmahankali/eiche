@@ -87,6 +87,8 @@ where
 
     fn mul_add(a: Self, b: Self, c: Self) -> Self;
 
+    fn sub(a: Self, b: Self) -> Self;
+
     fn neg(a: Self) -> Self;
 
     fn lt(a: Self, b: Self) -> Wfloat;
@@ -187,6 +189,28 @@ impl SimdVec<f32> for Wfloat {
                     reg32: float32x4x2_t(
                         vaddq_f32(a.reg32.0, b.reg32.0),
                         vaddq_f32(a.reg32.1, b.reg32.1),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn sub(a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: _mm256_sub_ps(a.reg32, b.reg32),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vsubq_f32(a.reg32.0, b.reg32.0),
+                        vsubq_f32(a.reg32.1, b.reg32.1),
                     ),
                 }
             }
@@ -472,6 +496,28 @@ impl SimdVec<f64> for Wfloat {
                     reg64: float64x2x2_t(
                         vaddq_f64(a.reg64.0, b.reg64.0),
                         vaddq_f64(a.reg64.1, b.reg64.1),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn sub(a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: std::arch::x86_64::_mm256_sub_pd(a.reg64, b.reg64),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vsubq_f64(a.reg64.0, b.reg64.0),
+                        vsubq_f64(a.reg64.1, b.reg64.1),
                     ),
                 }
             }
@@ -2024,7 +2070,6 @@ mod simd_ops_test {
                 0x00000000,
             ],
         };
-
         assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 0), true);
         assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 1), false);
         assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 2), true);
@@ -2043,7 +2088,6 @@ mod simd_ops_test {
                 0x00000000,
             ],
         };
-
         unsafe {
             assert_eq!(
                 <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 0),
@@ -2089,7 +2133,6 @@ mod simd_ops_test {
                 0x00000000,
             ],
         };
-
         <Wfloat as SimdVec<f32>>::check_bool(mask, 8);
     }
 
@@ -2103,7 +2146,6 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-
         assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 0), true);
         assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 1), false);
         assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 2), true);
@@ -2219,6 +2261,44 @@ mod simd_ops_test {
             assert!((result.valsf64[1] - 0.5).abs() < 0.01); // 1/sqrt(4) = 0.5
             assert!((result.valsf64[2] - (1.0 / 3.0)).abs() < 0.01); // 1/sqrt(9) = 1/3
             assert!((result.valsf64[3] - 0.25).abs() < 0.01); // 1/sqrt(16) = 0.25
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_sub() {
+        let a = Wfloat {
+            valsf32: [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0],
+        };
+        let b = Wfloat {
+            valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::sub(a, b);
+        unsafe {
+            assert_eq!(result.valsf32[0], 9.0);
+            assert_eq!(result.valsf32[1], 18.0);
+            assert_eq!(result.valsf32[2], 27.0);
+            assert_eq!(result.valsf32[3], 36.0);
+            assert_eq!(result.valsf32[4], 45.0);
+            assert_eq!(result.valsf32[5], 54.0);
+            assert_eq!(result.valsf32[6], 63.0);
+            assert_eq!(result.valsf32[7], 72.0);
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_sub() {
+        let a = Wfloat {
+            valsf64: [10.5, 20.25, 30.125, 40.0625],
+        };
+        let b = Wfloat {
+            valsf64: [1.5, 2.25, 3.125, 4.0625],
+        };
+        let result = <Wfloat as SimdVec<f64>>::sub(a, b);
+        unsafe {
+            assert_eq!(result.valsf64[0], 9.0);
+            assert_eq!(result.valsf64[1], 18.0);
+            assert_eq!(result.valsf64[2], 27.0);
+            assert_eq!(result.valsf64[3], 36.0);
         }
     }
 }
