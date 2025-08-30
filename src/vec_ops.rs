@@ -37,13 +37,14 @@ impl Tree {
                 );
                 let n_after = lnodes.len();
                 let mut total = n_before;
-                let n_prods = n_after - n_before;
-                for curr in ((n_before + 1)..n_after).take(n_prods.saturating_sub(2)) {
+                for curr in (n_before + 1)..n_after {
                     let next = lnodes.len();
                     lnodes.push(Binary(Add, total, curr));
                     total = next;
                 }
-                newroots.push(Binary(Add, total, n_after - 1));
+                if let Some(last) = lnodes.pop() {
+                    newroots.push(last);
+                }
             }
         }
         lnodes.extend(newroots.drain(..));
