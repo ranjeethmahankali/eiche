@@ -531,6 +531,22 @@ pub fn reshape(tree: Result<Tree, Error>, rows: usize, cols: usize) -> Result<Tr
     tree?.reshape(rows, cols)
 }
 
+pub fn dot(lhs: Result<Tree, Error>, rhs: Result<Tree, Error>) -> Result<Tree, Error> {
+    lhs?.dot_product(rhs?)
+}
+
+pub fn matmul(lhs: Result<Tree, Error>, rhs: Result<Tree, Error>) -> Result<Tree, Error> {
+    lhs?.matmul(rhs?)
+}
+
+pub fn transpose(mat: Result<Tree, Error>) -> Result<Tree, Error> {
+    mat?.transpose()
+}
+
+pub fn l2norm(vec: Result<Tree, Error>) -> Result<Tree, Error> {
+    vec?.l2norm()
+}
+
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Scalar(value)

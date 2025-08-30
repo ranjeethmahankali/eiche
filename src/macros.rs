@@ -38,7 +38,7 @@ macro_rules! deftree {
         let params = stringify!($params);
         $crate::numerical_deriv($crate::deftree!($tree), &params[1..], $eps)
     }};
-    // Reshape
+    // Matrix and vector operations
     (reshape $tree:tt $rows:literal $cols:literal) => {
         $crate::reshape($crate::deftree!($tree), $rows, $cols)
     };
@@ -437,5 +437,64 @@ mod test {
                 Binary(Divide, 6, 13)
             ]
         );
+    }
+
+    // Matrix operation tests
+    #[test]
+    fn t_transpose_deftree() {
+        let tree = deftree!(transpose (concat 'x 'y 'z)).unwrap();
+        assert_eq!(tree.dims(), (1, 3));
+        // Should be equivalent to reshaping the vector
+        let expected = deftree!(reshape (concat 'x 'y 'z) 1 3).unwrap();
+        assert!(tree.equivalent(&expected));
+    }
+
+    #[test]
+    fn t_l2norm_deftree() {
+        let tree = deftree!(l2norm (concat 'x 'y)).unwrap();
+        assert_eq!(tree.dims(), (1, 1));
+        // Should compute sqrt(x² + y²)
+        let expected = deftree!(sqrt (+ (* 'x 'x) (* 'y 'y))).unwrap();
+        assert!(tree.equivalent(&expected));
+    }
+
+    #[test]
+    fn t_dot_deftree() {
+        let tree = deftree!(let ((vec1 (concat 'a 'b))
+                                 (vec2 (concat 'x 'y)))
+                            (dot vec1 vec2))
+        .unwrap();
+        assert_eq!(tree.dims(), (1, 1));
+        // Should compute a*x + b*y
+        let expected = deftree!(+ (* 'a 'x) (* 'b 'y)).unwrap();
+        assert!(tree.equivalent(&expected));
+    }
+
+    #[test]
+    fn t_matmul_deftree() {
+        let tree = deftree!(let ((mat1 (reshape (concat 'a 'b 'c 'd) 2 2))
+                                 (mat2 (concat 'x 'y)))
+                            (matmul mat1 mat2))
+        .unwrap();
+        assert_eq!(tree.dims(), (2, 1));
+        // Should compute matrix multiplication: [a c; b d] * [x; y] = [a*x + c*y; b*x + d*y]
+        let expected = deftree!(concat
+            (+ (* 'a 'x) (* 'c 'y))
+            (+ (* 'b 'x) (* 'd 'y))
+        )
+        .unwrap();
+        assert!(tree.equivalent(&expected));
+    }
+
+    #[test]
+    fn t_matrix_operations_composition() {
+        // Test composition of matrix operations
+        let tree = deftree!(let ((vec (concat 'x 'y 'z)))
+                            (l2norm (transpose vec)))
+        .unwrap();
+        assert_eq!(tree.dims(), (1, 1));
+        // Should be equivalent to l2norm of the original vector since transpose of column vector is row vector
+        let expected = deftree!(l2norm (concat 'x 'y 'z)).unwrap();
+        assert!(tree.equivalent(&expected));
     }
 }

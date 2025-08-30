@@ -45,8 +45,8 @@ pub use interval::{
 pub use prune::Pruner;
 pub use reduce::reduce;
 pub use tree::{
-    BinaryOp, Node, TernaryOp, Tree, UnaryOp, Value, abs, add, and, cos, div, equals, exp, floor,
-    geq, greater, leq, less, log, max, min, mul, negate, neq, not, or, pow, rem, reshape, sin,
-    sqrt, sub, tan,
+    BinaryOp, Node, TernaryOp, Tree, UnaryOp, Value, abs, add, and, cos, div, dot, equals, exp,
+    floor, geq, greater, l2norm, leq, less, log, matmul, max, min, mul, negate, neq, not, or, pow,
+    rem, reshape, sin, sqrt, sub, tan, transpose,
 };
 pub use walk::{DepthIterator, DepthWalker};
