@@ -1264,7 +1264,11 @@ mod test {
             let vector = deftree!(concat 'x (sin 'y) 2).unwrap(); // (3,1)
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
-            let expected = deftree!(sqrt (+ (+ (* 'x 'x) (* (sin 'y) (sin 'y))) (* 2 2))).unwrap();
+            let expected = deftree!(sqrt (+ (+
+                                             (* 'x 'x)
+                                             (* (sin 'y) (sin 'y)))
+                                          (* 2 2)))
+            .unwrap();
             assert!(
                 result.equivalent(&expected),
                 "L2 norm should work with expressions"
@@ -1292,7 +1296,11 @@ mod test {
             let vector = deftree!(concat 1 2 3 4).unwrap(); // (4,1)
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
-            let expected = deftree!(sqrt (+ (+ (+ (* 1 1) (* 2 2)) (* 3 3)) (* 4 4))).unwrap();
+            let expected = deftree!(sqrt (+ (+
+                                             (+ (* 1 1) (* 2 2))
+                                             (* 3 3))
+                                          (* 4 4)))
+            .unwrap();
             assert!(
                 result.equivalent(&expected),
                 "L2 norm should work for 4D vector"
@@ -1308,8 +1316,12 @@ mod test {
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(sqrt (
-                + (+ (+ (+ (* (cos 'a) (cos 'a)) (* (+ 'x 1) (+ 'x 1))) (* (exp 'b) (exp 'b))) (* 0 0)) (* (sqrt 'c) (sqrt 'c))
-            )).unwrap();
+                + (+ (+
+                      (+ (* (cos 'a) (cos 'a)) (* (+ 'x 1) (+ 'x 1)))
+                      (* (exp 'b) (exp 'b)))
+                   (* 0 0)) (* (sqrt 'c) (sqrt 'c))
+            ))
+            .unwrap();
             assert!(
                 result.equivalent(&expected),
                 "L2 norm should work for 5D vector with mixed expressions"
@@ -1322,7 +1334,10 @@ mod test {
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(sqrt (
-                + (+ (+ (+ (+ (* 'a 'a) (* 'a 'a)) (* 'b 'b)) (* 'b 'b)) (* 'c 'c)) (* 'c 'c)
+                + (+ (+
+                      (+ (+ (* 'a 'a) (* 'a 'a)) (* 'b 'b))
+                      (* 'b 'b))
+                   (* 'c 'c)) (* 'c 'c)
             ))
             .unwrap();
             assert!(
@@ -1401,7 +1416,10 @@ mod test {
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(sqrt (
-                + (+ (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1)
+                + (+ (+
+                      (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1))
+                      (* 1 1))
+                   (* 1 1)) (* 1 1)
             ))
             .unwrap();
             assert!(
@@ -1412,11 +1430,11 @@ mod test {
         // Negative values (should be squared away)
         {
             // ||[-3, 4, -5]|| = sqrt(9 + 16 + 25) = sqrt(50)
-            let vector = deftree!(concat (negate 3) 4 (negate 5)).unwrap(); // (3,1)
+            let vector = deftree!(concat (- 3) 4 (- 5)).unwrap(); // (3,1)
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(sqrt (
-                + (+ (* (negate 3) (negate 3)) (* 4 4)) (* (negate 5) (negate 5))
+                + (+ (* (- 3) (- 3)) (* 4 4)) (* (- 5) (- 5))
             ))
             .unwrap();
             assert!(
