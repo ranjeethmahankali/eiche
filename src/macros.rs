@@ -487,6 +487,19 @@ mod test {
     }
 
     #[test]
+    fn t_normalize_deftree() {
+        let tree = deftree!(normalize (concat 'x 'y)).unwrap();
+        assert_eq!(tree.dims(), (2, 1));
+        // Should compute [x/sqrt(x²+y²), y/sqrt(x²+y²)]
+        let expected = deftree!(concat
+            (/ 'x (sqrt (+ (* 'x 'x) (* 'y 'y))))
+            (/ 'y (sqrt (+ (* 'x 'x) (* 'y 'y))))
+        )
+        .unwrap();
+        assert!(tree.equivalent(&expected));
+    }
+
+    #[test]
     fn t_matrix_operations_composition() {
         // Test composition of matrix operations
         let tree = deftree!(let ((vec (concat 'x 'y 'z)))
@@ -496,5 +509,14 @@ mod test {
         // Should be equivalent to l2norm of the original vector since transpose of column vector is row vector
         let expected = deftree!(l2norm (concat 'x 'y 'z)).unwrap();
         assert!(tree.equivalent(&expected));
+
+        // Test normalize composition
+        let normalized_tree = deftree!(let ((vec (concat 'a 'b)))
+                                       (l2norm (normalize vec)))
+        .unwrap();
+        assert_eq!(normalized_tree.dims(), (1, 1));
+        // L2 norm of normalized vector should be 1 (unit vector)
+        let expected_unit = deftree!(1).unwrap();
+        assert!(normalized_tree.equivalent(&expected_unit));
     }
 }

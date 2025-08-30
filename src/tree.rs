@@ -547,6 +547,10 @@ pub fn l2norm(vec: Result<Tree, Error>) -> Result<Tree, Error> {
     vec?.l2norm()
 }
 
+pub fn normalize(vec: Result<Tree, Error>) -> Result<Tree, Error> {
+    vec?.normalize()
+}
+
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Scalar(value)
