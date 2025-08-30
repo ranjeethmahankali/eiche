@@ -112,6 +112,8 @@ where
     fn recip_sqrt(a: Self) -> Self;
 
     fn max(a: Self, b: Self) -> Self;
+
+    fn min(a: Self, b: Self) -> Self;
 }
 
 impl SimdVec<f32> for Wfloat {
@@ -458,6 +460,28 @@ impl SimdVec<f32> for Wfloat {
                     reg32: float32x4x2_t(
                         vmaxq_f32(a.reg32.0, b.reg32.0),
                         vmaxq_f32(a.reg32.1, b.reg32.1),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn min(a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: _mm256_min_ps(a.reg32, b.reg32),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg32: float32x4x2_t(
+                        vminq_f32(a.reg32.0, b.reg32.0),
+                        vminq_f32(a.reg32.1, b.reg32.1),
                     ),
                 }
             }
@@ -815,6 +839,28 @@ impl SimdVec<f64> for Wfloat {
                     reg64: float64x2x2_t(
                         vmaxq_f64(a.reg64.0, b.reg64.0),
                         vmaxq_f64(a.reg64.1, b.reg64.1),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn min(a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: _mm256_min_pd(a.reg64, b.reg64),
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                Wfloat {
+                    reg64: float64x2x2_t(
+                        vminq_f64(a.reg64.0, b.reg64.0),
+                        vminq_f64(a.reg64.1, b.reg64.1),
                     ),
                 }
             }
@@ -2467,6 +2513,44 @@ mod simd_ops_test {
             assert_eq!(result.valsf64[1], 8.25); // max(8.25, 4.5) = 8.25
             assert_eq!(result.valsf64[2], 9.875); // max(3.125, 9.875) = 9.875
             assert_eq!(result.valsf64[3], 6.0); // max(6.0, 1.25) = 6.0
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f32_min() {
+        let a = Wfloat {
+            valsf32: [1.0, 5.0, 3.0, 8.0, 2.0, 9.0, 4.0, 6.0],
+        };
+        let b = Wfloat {
+            valsf32: [4.0, 2.0, 7.0, 1.0, 6.0, 3.0, 8.0, 5.0],
+        };
+        let result = <Wfloat as SimdVec<f32>>::min(a, b);
+        unsafe {
+            assert_eq!(result.valsf32[0], 1.0); // min(1.0, 4.0) = 4.0
+            assert_eq!(result.valsf32[1], 2.0); // min(5.0, 2.0) = 5.0
+            assert_eq!(result.valsf32[2], 3.0); // min(3.0, 7.0) = 7.0
+            assert_eq!(result.valsf32[3], 1.0); // min(8.0, 1.0) = 8.0
+            assert_eq!(result.valsf32[4], 2.0); // min(2.0, 6.0) = 6.0
+            assert_eq!(result.valsf32[5], 3.0); // min(9.0, 3.0) = 9.0
+            assert_eq!(result.valsf32[6], 4.0); // min(4.0, 8.0) = 8.0
+            assert_eq!(result.valsf32[7], 5.0); // min(6.0, 5.0) = 6.0
+        }
+    }
+
+    #[test]
+    fn t_wfloat_f64_min() {
+        let a = Wfloat {
+            valsf64: [1.5, 8.25, 3.125, 6.0],
+        };
+        let b = Wfloat {
+            valsf64: [2.75, 4.5, 9.875, 1.25],
+        };
+        let result = <Wfloat as SimdVec<f64>>::min(a, b);
+        unsafe {
+            assert_eq!(result.valsf64[0], 1.5); // min(1.5, 2.75) = 2.75
+            assert_eq!(result.valsf64[1], 4.5); // min(8.25, 4.5) = 8.25
+            assert_eq!(result.valsf64[2], 3.125); // min(3.125, 9.875) = 9.875
+            assert_eq!(result.valsf64[3], 1.25); // min(6.0, 1.25) = 6.0
         }
     }
 }
