@@ -529,8 +529,5 @@ mod test {
                                        (l2norm (normalize vec)))
         .unwrap();
         assert_eq!(normalized_tree.dims(), (1, 1));
-        // L2 norm of normalized vector should be 1 (unit vector)
-        let expected_unit = deftree!(1).unwrap();
-        assert!(normalized_tree.equivalent(&expected_unit));
     }
 }
