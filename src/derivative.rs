@@ -93,7 +93,7 @@ impl Tree {
                 },
             )?
             .ok_or(Error::CannotComputeNumericDerivative)?
-            .reshape(self.num_roots(), params.len()) // The correct shape for derivatives. No reordering required.
+            .reshaped(self.num_roots(), params.len()) // The correct shape for derivatives. No reordering required.
     }
 }
 

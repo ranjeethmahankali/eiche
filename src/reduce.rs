@@ -376,7 +376,7 @@ mod test {
             steps.last().unwrap().equivalent(
                 &deftree!(concat (* 2 'x) (* 2 'y))
                     .unwrap()
-                    .reshape(1, 2)
+                    .reshaped(1, 2)
                     .unwrap()
             )
         );
@@ -397,7 +397,7 @@ mod test {
             steps.last().unwrap().equivalent(
                 &deftree!(concat (* 'x 6) 0 0 (* 'y 6))
                     .unwrap()
-                    .reshape(2, 2)
+                    .reshaped(2, 2)
                     .unwrap()
             )
         );
@@ -413,7 +413,7 @@ mod test {
                       (/ 'x (sqrt (+ (pow 'x 2) (pow 'y 2))))
                       (/ 'y (sqrt (+ (pow 'x 2) (pow 'y 2)))))
                 .unwrap()
-                .reshape(1, 2)
+                .reshaped(1, 2)
                 .unwrap()
             )
         );

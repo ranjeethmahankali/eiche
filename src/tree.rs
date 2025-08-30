@@ -275,7 +275,7 @@ impl Tree {
 
     /// Change the shape of this tree. If the new shape doesn't correspond to
     /// the same number of elements, an error is returned.
-    pub fn reshape(self, rows: usize, cols: usize) -> Result<Tree, Error> {
+    pub fn reshaped(self, rows: usize, cols: usize) -> Result<Tree, Error> {
         if matsize((rows, cols)) == self.num_roots() {
             Ok(Tree {
                 nodes: self.nodes,
@@ -528,7 +528,7 @@ binary_func!(and, And);
 binary_func!(or, Or);
 
 pub fn reshape(tree: Result<Tree, Error>, rows: usize, cols: usize) -> Result<Tree, Error> {
-    tree?.reshape(rows, cols)
+    tree?.reshaped(rows, cols)
 }
 
 impl From<f64> for Value {
@@ -710,15 +710,15 @@ mod test {
     fn t_reshape() {
         let mat = deftree!(concat 'a 'b 'c 'p 'q 'r 'x 'y 'z)
             .unwrap()
-            .reshape(3, 3)
+            .reshaped(3, 3)
             .unwrap();
         assert_eq!(mat.dims(), (3, 3));
-        let mat = mat.reshape(1, 9).unwrap();
+        let mat = mat.reshaped(1, 9).unwrap();
         assert_eq!(mat.dims(), (1, 9));
-        let mat = mat.reshape(9, 1).unwrap();
+        let mat = mat.reshaped(9, 1).unwrap();
         assert_eq!(mat.dims(), (9, 1));
         matches!(
-            mat.reshape(7, 3),
+            mat.reshaped(7, 3),
             Err(Error::DimensionMismatch((9, 1), (7, 3)))
         );
     }
