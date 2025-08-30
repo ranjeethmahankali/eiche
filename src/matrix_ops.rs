@@ -749,4 +749,198 @@ mod test {
             );
         }
     }
+
+    #[test]
+    fn t_dot_product_same_orientation() {
+        // Test column vectors
+        {
+            // [a] · [x] = a*x + b*y + c*z
+            // [b]   [y]
+            // [c]   [z]
+            let u = deftree!(concat 'a 'b 'c).unwrap(); // (3,1)
+            let v = deftree!(concat 'x 'y 'z).unwrap(); // (3,1)
+            let result = u.dot_product(v).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(+ (+ (* 'a 'x) (* 'b 'y)) (* 'c 'z)).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Column vector dot product should work"
+            );
+        }
+        // Test row vectors
+        {
+            // [a b c] · [x y z] = a*x + b*y + c*z
+            let u = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let v = deftree!(concat 'x 'y 'z).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let result = u.dot_product(v).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(+ (+ (* 'a 'x) (* 'b 'y)) (* 'c 'z)).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Row vector dot product should work"
+            );
+        }
+        // Test 2D vectors
+        {
+            // [x+1] · [y-1] = (x+1)*(y-1) + x^2*y^2
+            // [x^2]   [y^2]
+            let u = deftree!(concat (+ 'x 1) (pow 'x 2)).unwrap(); // (2,1)
+            let v = deftree!(concat (- 'y 1) (pow 'y 2)).unwrap(); // (2,1)
+            let result = u.dot_product(v).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(+ (* (+ 'x 1) (- 'y 1)) (* (pow 'x 2) (pow 'y 2))).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Expression vector dot product should work"
+            );
+        }
+        // Test scalar (1x1)
+        {
+            // [a] · [b] = a*b
+            let u = deftree!('a).unwrap().reshaped(1, 1).unwrap(); // (1,1)
+            let v = deftree!('b).unwrap().reshaped(1, 1).unwrap(); // (1,1)
+            let result = u.dot_product(v).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(* 'a 'b).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "1x1 dot product should be multiplication"
+            );
+        }
+    }
+
+    #[test]
+    fn t_dot_product_mixed_orientation() {
+        // Test column · row
+        {
+            // [a] · [x y z] = a*x + b*y + c*z
+            // [b]
+            // [c]
+            let u = deftree!(concat 'a 'b 'c).unwrap(); // (3,1)
+            let v = deftree!(concat 'x 'y 'z).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let result = u.dot_product(v).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(+ (+ (* 'a 'x) (* 'b 'y)) (* 'c 'z)).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Column · row dot product should work"
+            );
+        }
+        // Test row · column
+        {
+            // [a b c] · [x] = a*x + b*y + c*z
+            //           [y]
+            //           [z]
+            let u = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let v = deftree!(concat 'x 'y 'z).unwrap(); // (3,1)
+            let result = u.dot_product(v).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(+ (+ (* 'a 'x) (* 'b 'y)) (* 'c 'z)).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Row · column dot product should work"
+            );
+        }
+        // Test with expressions
+        {
+            // [sin(x) cos(y)] · [tan(z)] = sin(x)*tan(z) + cos(y)*exp(w)
+            //                   [exp(w)]
+            let u = deftree!(concat (sin 'x) (cos 'y))
+                .unwrap()
+                .reshaped(1, 2)
+                .unwrap(); // (1,2)
+            let v = deftree!(concat (tan 'z) (exp 'w)).unwrap(); // (2,1)
+            let result = u.dot_product(v).unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(+ (* (sin 'x) (tan 'z)) (* (cos 'y) (exp 'w))).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Mixed orientation with expressions should work"
+            );
+        }
+    }
+
+    #[test]
+    fn t_dot_product_errors() {
+        // Test dimension mismatch
+        {
+            let u = deftree!(concat 'a 'b).unwrap(); // (2,1)
+            let v = deftree!(concat 'x 'y 'z).unwrap(); // (3,1)
+            match u.dot_product(v) {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
+            }
+        }
+        // Test non-vector operands (matrix)
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap(); // (2,2)
+            let vector = deftree!(concat 'x 'y).unwrap(); // (2,1)
+            match matrix.dot_product(vector) {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
+            }
+        }
+        // Test mixed vector/matrix mismatch
+        {
+            let vector = deftree!(concat 'a 'b 'c).unwrap().reshaped(1, 3).unwrap(); // (1,3)
+            let matrix = deftree!(concat 'x 'y 'z 'w 'p 'q)
+                .unwrap()
+                .reshaped(2, 3)
+                .unwrap(); // (2,3)
+            match vector.dot_product(matrix) {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
+            }
+        }
+        // Test row vector dimension mismatch
+        {
+            let u = deftree!(concat 'a 'b).unwrap().reshaped(1, 2).unwrap(); // (1,2)
+            let v = deftree!(concat 'x 'y 'z 'w)
+                .unwrap()
+                .reshaped(1, 4)
+                .unwrap(); // (1,4)
+            match u.dot_product(v) {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn t_dot_product_properties() {
+        // Test commutativity: u · v = v · u
+        {
+            let u = deftree!(concat 'a 'b 'c).unwrap(); // (3,1)
+            let v = deftree!(concat 'x 'y 'z).unwrap(); // (3,1)
+            let uv = u.clone().dot_product(v.clone()).unwrap();
+            let vu = v.dot_product(u).unwrap();
+            assert!(uv.equivalent(&vu), "Dot product should be commutative");
+        }
+        // Test commutativity with mixed orientations
+        {
+            let u = deftree!(concat 'a 'b).unwrap(); // (2,1)
+            let v = deftree!(concat 'x 'y).unwrap().reshaped(1, 2).unwrap(); // (1,2)
+            let uv = u.clone().dot_product(v.clone()).unwrap();
+            let vu = v.dot_product(u).unwrap();
+            assert!(
+                uv.equivalent(&vu),
+                "Dot product should be commutative across orientations"
+            );
+        }
+        // Test with constants
+        {
+            let u = deftree!(concat 1 2 3).unwrap(); // (3,1)
+            let v = deftree!(concat 4 5 6).unwrap(); // (3,1)
+            let result = u.dot_product(v).unwrap();
+            // 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+            let expected = deftree!(+ (+ (* 1 4) (* 2 5)) (* 3 6)).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "Dot product with constants should work"
+            );
+        }
+    }
 }
