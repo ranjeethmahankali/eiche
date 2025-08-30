@@ -3,6 +3,7 @@ use crate::{
     Error,
     Node::{self, *},
     Tree,
+    UnaryOp::*,
     tree::extend_nodes_from_slice,
 };
 
@@ -114,6 +115,33 @@ impl Tree {
         nodes.truncate(n_keep);
         nodes.extend(new_roots.drain(..));
         Tree::from_nodes(nodes, (n_roots_new, 1))
+    }
+
+    pub fn l2norm(self) -> Result<Tree, Error> {
+        let n_roots = self.num_roots();
+        if n_roots == 0 {
+            return Err(Error::InvalidDimensions);
+        }
+        let (mut nodes, dims) = self.take();
+        match dims {
+            (1, 1) => crate::abs(Tree::from_nodes(nodes, dims)),
+            (1, _) | (_, 1) => {
+                let n_total = nodes.len();
+                nodes.extend(((n_total - n_roots)..n_total).map(|ri| Binary(Multiply, ri, ri)));
+                let n_total = nodes.len();
+                let sqrange = (n_total - n_roots)..n_total;
+                let start = sqrange.start;
+                nodes.extend(
+                    std::iter::once(start)
+                        .chain(n_total..(n_total + sqrange.len().saturating_sub(2)))
+                        .zip(sqrange.skip(1))
+                        .map(|(l, r)| Binary(Add, l, r)),
+                );
+                nodes.push(Unary(Sqrt, nodes.len() - 1));
+                Tree::from_nodes(nodes, (1, 1))
+            }
+            _ => Err(Error::InvalidDimensions),
+        }
     }
 }
 
@@ -1189,6 +1217,239 @@ mod test {
             match result {
                 Err(Error::IndexOutOfBounds(3, 1)) => {}
                 other => panic!("Expected IndexOutOfBounds(3, 1) error, got: {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn t_l2norm_basic_cases() {
+        // Scalar (1x1) case
+        {
+            let scalar = deftree!(5).unwrap().reshaped(1, 1).unwrap();
+            let result = scalar.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(abs 5).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm of scalar should be absolute value"
+            );
+        }
+        // 2D column vector
+        {
+            // ||[3, 4]|| = sqrt(3² + 4²) = sqrt(9 + 16) = sqrt(25) = 5
+            let vector = deftree!(concat 3 4).unwrap(); // (2,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (+ (* 3 3) (* 4 4))).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work for 2D column vector"
+            );
+        }
+        // 2D row vector
+        {
+            // ||[3, 4]|| = sqrt(3² + 4²)
+            let vector = deftree!(concat 3 4).unwrap().reshaped(1, 2).unwrap(); // (1,2)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (+ (* 3 3) (* 4 4))).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work for 2D row vector"
+            );
+        }
+        // 3D column vector with expressions
+        {
+            // ||[x, sin(y), 2]|| = sqrt(x² + sin²(y) + 4)
+            let vector = deftree!(concat 'x (sin 'y) 2).unwrap(); // (3,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (+ (+ (* 'x 'x) (* (sin 'y) (sin 'y))) (* 2 2))).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work with expressions"
+            );
+        }
+        // Single element column vector
+        {
+            // ||[a]|| = sqrt(a²) = |a|
+            let vector = deftree!('a).unwrap(); // (1,1) treated as vector
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(abs 'a).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm of single element should be absolute value"
+            );
+        }
+    }
+
+    #[test]
+    fn t_l2norm_larger_vectors() {
+        // 4D column vector
+        {
+            // ||[1, 2, 3, 4]|| = sqrt(1² + 2² + 3² + 4²) = sqrt(30)
+            let vector = deftree!(concat 1 2 3 4).unwrap(); // (4,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (+ (+ (+ (* 1 1) (* 2 2)) (* 3 3)) (* 4 4))).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work for 4D vector"
+            );
+        }
+        // 5D row vector with mixed expressions
+        {
+            // ||[cos(a), x+1, exp(b), 0, sqrt(c)]||
+            let vector = deftree!(concat (cos 'a) (+ 'x 1) (exp 'b) 0 (sqrt 'c))
+                .unwrap()
+                .reshaped(1, 5)
+                .unwrap(); // (1,5)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (
+                + (+ (+ (+ (* (cos 'a) (cos 'a)) (* (+ 'x 1) (+ 'x 1))) (* (exp 'b) (exp 'b))) (* 0 0)) (* (sqrt 'c) (sqrt 'c))
+            )).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work for 5D vector with mixed expressions"
+            );
+        }
+        // 6D vector with repeated elements
+        {
+            // ||[a, a, b, b, c, c]|| = sqrt(2a² + 2b² + 2c²)
+            let vector = deftree!(concat 'a 'a 'b 'b 'c 'c).unwrap(); // (6,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (
+                + (+ (+ (+ (+ (* 'a 'a) (* 'a 'a)) (* 'b 'b)) (* 'b 'b)) (* 'c 'c)) (* 'c 'c)
+            ))
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work for vector with repeated elements"
+            );
+        }
+    }
+
+    #[test]
+    fn t_l2norm_complex_expressions() {
+        // Vector with nested mathematical expressions
+        {
+            // ||[sin(x)·cos(y), tan(z), log(w)]||
+            let vector = deftree!(concat (* (sin 'x) (cos 'y)) (tan 'z) (log 'w)).unwrap(); // (3,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (
+                + (+ (* (* (sin 'x) (cos 'y)) (* (sin 'x) (cos 'y))) (* (tan 'z) (tan 'z))) (* (log 'w) (log 'w))
+            )).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work with nested expressions"
+            );
+        }
+        // Vector with polynomial expressions
+        {
+            // ||[x², x+1, x-1]|| = sqrt((x²)² + (x+1)² + (x-1)²)
+            let vector = deftree!(concat (pow 'x 2) (+ 'x 1) (- 'x 1)).unwrap(); // (3,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (
+                + (+ (* (pow 'x 2) (pow 'x 2)) (* (+ 'x 1) (+ 'x 1))) (* (- 'x 1) (- 'x 1))
+            ))
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work with polynomial expressions"
+            );
+        }
+        // Vector with constants and variables mixed
+        {
+            // ||[π, e, x, 42]|| where π and e are constants
+            let vector = deftree!(concat 3.14159 2.71828 'x 42).unwrap(); // (4,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (
+                + (+ (+ (* 3.14159 3.14159) (* 2.71828 2.71828)) (* 'x 'x)) (* 42 42)
+            ))
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work with mixed constants and variables"
+            );
+        }
+    }
+
+    #[test]
+    fn t_l2norm_edge_cases() {
+        // Vector with zero elements
+        {
+            // ||[0, 0, 0]|| = sqrt(0 + 0 + 0) = 0
+            let vector = deftree!(concat 0 0 0).unwrap(); // (3,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (+ (+ (* 0 0) (* 0 0)) (* 0 0))).unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm of zero vector should work"
+            );
+        }
+        // Very long vector (testing the chaining logic)
+        {
+            // ||[1, 1, 1, 1, 1, 1, 1]|| = sqrt(7)
+            let vector = deftree!(concat 1 1 1 1 1 1 1).unwrap(); // (7,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (
+                + (+ (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1)
+            ))
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work for long vectors"
+            );
+        }
+        // Negative values (should be squared away)
+        {
+            // ||[-3, 4, -5]|| = sqrt(9 + 16 + 25) = sqrt(50)
+            let vector = deftree!(concat (negate 3) 4 (negate 5)).unwrap(); // (3,1)
+            let result = vector.l2norm().unwrap();
+            assert_eq!(result.dims(), (1, 1));
+            let expected = deftree!(sqrt (
+                + (+ (* (negate 3) (negate 3)) (* 4 4)) (* (negate 5) (negate 5))
+            ))
+            .unwrap();
+            assert!(
+                result.equivalent(&expected),
+                "L2 norm should work with negative values"
+            );
+        }
+    }
+
+    #[test]
+    fn t_l2norm_error_cases() {
+        // Matrix (not a vector) should fail
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd)
+                .unwrap()
+                .reshaped(2, 2)
+                .unwrap();
+            let result = matrix.l2norm();
+            match result {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
+            }
+        }
+        // 3x2 matrix should fail
+        {
+            let matrix = deftree!(concat 'a 'b 'c 'd 'e 'f)
+                .unwrap()
+                .reshaped(3, 2)
+                .unwrap();
+            let result = matrix.l2norm();
+            match result {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
             }
         }
     }
