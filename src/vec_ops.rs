@@ -24,8 +24,8 @@ impl Tree {
         let (rrows, rcols) = rdims;
         let (orows, ocols) = (lrows, rcols);
         let mut newroots: Vec<Node> = Vec::with_capacity(ocols * orows);
-        for or in 0..orows {
-            for oc in 0..ocols {
+        for oc in 0..ocols {
+            for or in 0..orows {
                 let n_before = lnodes.len();
                 let rcol_start = oc * rrows;
                 let rcol_idx = rcol_start..(rcol_start + rrows);
@@ -75,6 +75,11 @@ mod test {
         let result_roots = result.roots();
         let expected_roots = expected.roots();
         assert_eq!(result_roots.len(), expected_roots.len());
+        // Check tree equivalence
+        assert!(
+            result.equivalent(&expected),
+            "Result tree should be equivalent to expected tree"
+        );
         // Numerical verification
         compare_trees(
             &result,
@@ -87,7 +92,7 @@ mod test {
                 ('p', -1., 2.),
                 ('q', -4., 1.),
             ],
-            10,
+            2,
             1e-14,
         );
     }
@@ -107,12 +112,17 @@ mod test {
         // Verify root structure
         let result_roots = result.roots();
         assert_eq!(result_roots.len(), 1);
+        // Check tree equivalence
+        assert!(
+            result.equivalent(&expected),
+            "Result tree should be equivalent to expected tree"
+        );
         // Numerical verification with appropriate ranges
         compare_trees(
             &result,
             &expected,
             &[('x', -2., 2.), ('y', -3., 3.), ('z', 0.1, 10.)],
-            15,
+            7,
             1e-13,
         );
     }
@@ -142,11 +152,16 @@ mod test {
         let expected_roots = expected.roots();
         assert_eq!(result_roots.len(), expected_roots.len());
         assert_eq!(result_roots.len(), 4);
+        // Check tree equivalence
+        assert!(
+            result.equivalent(&expected),
+            "Result tree should be equivalent to expected tree"
+        );
         compare_trees(
             &result,
             &expected,
             &[('x', -3., 3.), ('y', -2., 2.)],
-            12,
+            18,
             1e-14,
         );
     }
@@ -166,11 +181,16 @@ mod test {
             Binary(Multiply, _, _) => {}
             _ => panic!("Expected multiplication node at root"),
         }
+        // Check tree equivalence
+        assert!(
+            result.equivalent(&expected),
+            "Result tree should be equivalent to expected tree"
+        );
         compare_trees(
             &result,
             &expected,
             &[('x', 0.1, 4.), ('y', -2., 2.)],
-            20,
+            18,
             1e-14,
         );
     }
@@ -213,6 +233,11 @@ mod test {
         let expected_roots = expected.roots();
         assert_eq!(result_roots.len(), expected_roots.len());
         assert_eq!(result_roots.len(), 4);
+        // Check tree equivalence
+        assert!(
+            result.equivalent(&expected),
+            "Result tree should be equivalent to expected tree"
+        );
         compare_trees(
             &result,
             &expected,
@@ -224,7 +249,7 @@ mod test {
                 ('c', -1., 1.),
                 ('d', -2., 2.),
             ],
-            8,
+            2,
             1e-12,
         );
     }
@@ -248,6 +273,11 @@ mod test {
         .unwrap();
         assert_eq!(result.roots().len(), 9);
         assert_eq!(expected.roots().len(), 9);
+        // Check tree equivalence
+        assert!(
+            result.equivalent(&expected),
+            "Result tree should be equivalent to expected tree"
+        );
         compare_trees(
             &result,
             &expected,
@@ -258,7 +288,7 @@ mod test {
                 ('b', -2., 2.),
                 ('c', -1., 1.),
             ],
-            10,
+            3,
             1e-14,
         );
     }
@@ -281,11 +311,16 @@ mod test {
         .unwrap();
         assert_eq!(result.roots().len(), 2);
         assert_eq!(expected.roots().len(), 2);
+        // Check tree equivalence
+        assert!(
+            result.equivalent(&expected),
+            "Result tree should be equivalent to expected tree"
+        );
         compare_trees(
             &result,
             &expected,
             &[('x', -2., 2.), ('y', -1., 1.)],
-            15,
+            18,
             1e-14,
         );
     }
@@ -367,12 +402,17 @@ mod test {
         )
         .unwrap();
         assert_eq!(result.roots().len(), 2);
+        // Check tree equivalence
+        assert!(
+            result.equivalent(&expected),
+            "Result tree should be equivalent to expected tree"
+        );
         // Use smaller range for tangent to avoid singularities
         compare_trees(
             &result,
             &expected,
             &[('x', -1., 1.), ('y', -1., 1.)],
-            12,
+            18,
             1e-12,
         );
     }
