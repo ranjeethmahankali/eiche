@@ -524,7 +524,6 @@ mod test {
         // Should be equivalent to l2norm of the original vector since transpose of column vector is row vector
         let expected = deftree!(l2norm (concat 'x 'y 'z)).unwrap();
         assert!(tree.equivalent(&expected));
-
         // Test normalize composition
         let normalized_tree = deftree!(let ((vec (concat 'a 'b)))
                                        (l2norm (normalize vec)))
