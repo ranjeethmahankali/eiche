@@ -146,7 +146,7 @@ impl Tree {
         }
     }
 
-    pub fn normalized_vec(self) -> Result<Tree, Error> {
+    pub fn normalized(self) -> Result<Tree, Error> {
         let n_roots = self.num_roots();
         if n_roots == 0 {
             return Err(Error::InvalidDimensions);
@@ -1542,7 +1542,7 @@ mod test {
         // Positive scalar (1x1) case
         {
             let scalar = deftree!('x).unwrap().reshaped(1, 1).unwrap();
-            let result = scalar.normalized_vec().unwrap();
+            let result = scalar.normalized().unwrap();
             assert_eq!(result.dims(), (1, 1));
             // Expected: if x > 0 then 1 else if x < 0 then -1 else 0
             let expected = deftree!(if (< 'x 0) (const -1.0) (if (> 'x 0) 1 0)).unwrap();
@@ -1560,7 +1560,7 @@ mod test {
         {
             // Normalize [3, 4] -> [3/5, 4/5] since ||[3,4]|| = 5
             let vector = deftree!(concat 3 4).unwrap(); // (2,1)
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (2, 1));
             // Expected: [3/sqrt(9+16), 4/sqrt(9+16)] = [3/sqrt(25), 4/sqrt(25)]
             let expected = deftree!(concat
@@ -1584,7 +1584,7 @@ mod test {
         {
             // Normalize [x, y]
             let vector = deftree!(concat 'x 'y).unwrap().reshaped(1, 2).unwrap(); // (1,2)
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (1, 2));
             let expected = deftree!(concat
                 (/ 'x (sqrt (+ (* 'x 'x) (* 'y 'y))))
@@ -1613,7 +1613,7 @@ mod test {
         {
             // Normalize [sin(x), cos(y), 2]
             let vector = deftree!(concat (sin 'x) (cos 'y) 2).unwrap(); // (3,1)
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat
                 (/ (sin 'x) (sqrt (+ (+ (* (sin 'x) (sin 'x)) (* (cos 'y) (cos 'y))) (* 2 2))))
@@ -1637,7 +1637,7 @@ mod test {
         {
             // Normalize [x+1, x-1, x^2, exp(y)]
             let vector = deftree!(concat (+ 'x 1) (- 'x 1) (pow 'x 2) (exp 'y)).unwrap(); // (4,1)
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (4, 1));
             let expected = deftree!(concat
                 (/ (+ 'x 1)
@@ -1685,7 +1685,7 @@ mod test {
         // Single element vector (should behave like scalar)
         {
             let vector = deftree!('a).unwrap(); // (1,1) but treated as vector
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(if (< 'a 0) (const -1.) (if (> 'a 0) 1 0)).unwrap();
             assert!(
@@ -1698,7 +1698,7 @@ mod test {
         {
             // Normalize [0, -3, 4] -> [0, -3/5, 4/5]
             let vector = deftree!(concat 0 (- 3) 4).unwrap(); // (3,1)
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat
                 (/ 0 (sqrt (+ (+ (* 0 0) (* (- 3) (- 3))) (* 4 4))))
@@ -1722,7 +1722,7 @@ mod test {
         {
             // Normalize [1, 1, 1, 1, 1] -> all components become 1/sqrt(5)
             let vector = deftree!(concat 1 1 1 1 1).unwrap(); // (5,1)
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (5, 1));
             let expected = deftree!(concat
                 (/ 1 (sqrt (+ (+ (+ (+ (* 1 1) (* 1 1)) (* 1 1)) (* 1 1)) (* 1 1))))
@@ -1752,7 +1752,7 @@ mod test {
         {
             // Normalize [cos(x), sin(x)] -> should have unit norm for any x
             let vector = deftree!(concat (cos 'x) (sin 'x)).unwrap(); // (2,1)
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (2, 1));
             let expected = deftree!(concat
                 (/ (cos 'x) (sqrt (+ (* (cos 'x) (cos 'x)) (* (sin 'x) (sin 'x)))))
@@ -1769,7 +1769,7 @@ mod test {
         {
             // Normalize [x^2, log(y), sqrt(z)]
             let vector = deftree!(concat (pow 'x 2) (log 'y) (sqrt 'z)).unwrap(); // (3,1)
-            let result = vector.normalized_vec().unwrap();
+            let result = vector.normalized().unwrap();
             assert_eq!(result.dims(), (3, 1));
             let expected = deftree!(concat
                                     (/ (pow 'x 2)
@@ -1811,7 +1811,7 @@ mod test {
                 .unwrap()
                 .reshaped(2, 2)
                 .unwrap();
-            let result = matrix.normalized_vec();
+            let result = matrix.normalized();
             match result {
                 Err(Error::InvalidDimensions) => {}
                 other => panic!("Expected InvalidDimensions error, got: {:?}", other),
@@ -1823,7 +1823,7 @@ mod test {
                 .unwrap()
                 .reshaped(3, 2)
                 .unwrap();
-            let result = matrix.normalized_vec();
+            let result = matrix.normalized();
             match result {
                 Err(Error::InvalidDimensions) => {}
                 other => panic!("Expected InvalidDimensions error, got: {:?}", other),
@@ -1846,7 +1846,7 @@ mod test {
         {
             // [cos(x), sin(x)] is already unit, so normalizing should give same result
             let unit_vector = deftree!(concat (cos 'x) (sin 'x)).unwrap();
-            let normalized = unit_vector.clone().normalized_vec().unwrap();
+            let normalized = unit_vector.clone().normalized().unwrap();
             // The normalized version should be very close to the original
             // since cos²(x) + sin²(x) = 1
             compare_trees(
@@ -1860,8 +1860,8 @@ mod test {
         // Double normalization should be idempotent (normalizing normalized vector)
         {
             let vector = deftree!(concat 'x 'y 'z).unwrap();
-            let once_normalized = vector.normalized_vec().unwrap();
-            let twice_normalized = once_normalized.clone().normalized_vec().unwrap();
+            let once_normalized = vector.normalized().unwrap();
+            let twice_normalized = once_normalized.clone().normalized().unwrap();
             compare_trees(
                 &once_normalized,
                 &twice_normalized,
