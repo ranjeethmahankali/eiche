@@ -687,7 +687,7 @@ impl SimdVec<f64> for Wide {
         {
             Wide {
                 // SAFETY: SIMD intrinsics. reg64 is correct.
-                reg64: unsafe { _mm256_cmp_pd::<_CMP_LT_OQ> }(a.reg64, b.reg64),
+                reg64: unsafe { _mm256_cmp_pd::<_CMP_LT_OQ>(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
@@ -709,7 +709,7 @@ impl SimdVec<f64> for Wide {
         {
             Wide {
                 // SAFETY: SIMD intrinsics. reg64 is correct.
-                reg64: unsafe { _mm256_cmp_pd::<_CMP_EQ_OQ> }(a.reg64, b.reg64),
+                reg64: unsafe { _mm256_cmp_pd::<_CMP_EQ_OQ>(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
