@@ -248,13 +248,13 @@ mod spheres {
     pub mod jit_simd {
         use super::*;
         use eiche::{
-            JitContext, JitSimdFn, SimdVec, Wfloat,
+            JitContext, JitSimdFn, SimdVec, Wide,
             llvm_jit::{NumberType, simd_array::JitSimdBuffers},
         };
 
         fn no_compilation<T>(eval: &mut JitSimdFn<'_, T>, buf: &mut JitSimdBuffers<T>)
         where
-            Wfloat: SimdVec<T>,
+            Wide: SimdVec<T>,
             T: Copy + NumberType,
         {
             buf.clear_outputs();

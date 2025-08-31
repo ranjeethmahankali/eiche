@@ -212,6 +212,8 @@ impl Tree {
 
 #[cfg(test)]
 mod test {
+    use core::f64;
+
     use super::*;
     use crate::{deftree, test::compare_trees};
 
@@ -526,19 +528,21 @@ mod test {
         // These reshape operations should fail, but if they succeed by some means,
         // matmul should handle them appropriately
         if let Ok(zero_row) = valid.clone().reshape(0, 2)
-            && let Ok(valid_mat) = valid.clone().reshape(2, 1) {
-                match zero_row.matmul(valid_mat) {
-                    Err(Error::InvalidDimensions) => {}
-                    other => panic!("Expected InvalidDimensions error, got: {:?}", other),
-                }
+            && let Ok(valid_mat) = valid.clone().reshape(2, 1)
+        {
+            match zero_row.matmul(valid_mat) {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
             }
+        }
         if let Ok(zero_col) = valid.clone().reshape(2, 0)
-            && let Ok(valid_mat) = valid.clone().reshape(1, 2) {
-                match valid_mat.matmul(zero_col) {
-                    Err(Error::InvalidDimensions) => {}
-                    other => panic!("Expected InvalidDimensions error, got: {:?}", other),
-                }
+            && let Ok(valid_mat) = valid.clone().reshape(1, 2)
+        {
+            match valid_mat.matmul(zero_col) {
+                Err(Error::InvalidDimensions) => {}
+                other => panic!("Expected InvalidDimensions error, got: {:?}", other),
             }
+        }
     }
 
     #[test]
@@ -1387,11 +1391,19 @@ mod test {
         // Vector with constants and variables mixed
         {
             // ||[π, e, x, 42]|| where π and e are constants
-            let vector = deftree!(concat 3.14159 2.71828 'x 42).unwrap(); // (4,1)
+            let vector = deftree!(concat
+                                  (const f64::consts::PI)
+                                  (const f64::consts::E)
+                                  'x
+                                  42)
+            .unwrap(); // (4,1)
             let result = vector.l2norm().unwrap();
             assert_eq!(result.dims(), (1, 1));
             let expected = deftree!(sqrt (
-                + (+ (+ (* 3.14159 3.14159) (* 2.71828 2.71828)) (* 'x 'x)) (* 42 42)
+                + (+ (+
+                      (* (const f64::consts::PI) (const f64::consts::PI))
+                      (* (const f64::consts::E) (const f64::consts::E)))
+                   (* 'x 'x)) (* 42 42)
             ))
             .unwrap();
             assert!(

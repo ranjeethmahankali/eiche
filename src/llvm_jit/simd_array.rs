@@ -40,7 +40,7 @@ const SIMD_F64_SIZE: usize = size_of::<SimdType64>() / size_of::<f64>();
 /// to access the individual floating point numbers.
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub union Wfloat {
+pub union Wide {
     valsf32: [f32; SIMD_F32_SIZE],
     valsf64: [f64; SIMD_F64_SIZE],
     valsu32: [u32; SIMD_F32_SIZE],
@@ -61,10 +61,10 @@ where
     const SIMD_VEC_SIZE: usize;
 
     /// Broadcast the value to all lanes of a simd vec and return in.
-    fn broadcast(val: T) -> Wfloat;
+    fn broadcast(val: T) -> Wide;
 
     /// Get a simd vector filled with NaNs.
-    fn nan() -> Wfloat;
+    fn nan() -> Wide;
 
     /// Set the entry at `idx` to value `val`.
     fn set(&mut self, val: T, idx: usize);
@@ -93,18 +93,28 @@ where
 
     fn neg(a: Self) -> Self;
 
-    fn lt(a: Self, b: Self) -> Wfloat;
+    fn lt(a: Self, b: Self) -> Wide;
 
-    fn eq(a: Self, b: Self) -> Wfloat;
+    fn eq(a: Self, b: Self) -> Wide;
 
-    fn gt(a: Self, b: Self) -> Wfloat;
+    fn gt(a: Self, b: Self) -> Wide;
 
-    fn and(a: Self, b: Self) -> Wfloat;
+    fn and(a: Self, b: Self) -> Wide;
 
-    fn or(a: Self, b: Self) -> Wfloat;
+    fn or(a: Self, b: Self) -> Wide;
 
     fn check_bool(a: Self, lane: usize) -> bool;
 
+    /**
+    Check if the given simd lane is set to a non-zero integer value. This is
+    useful for checking a specific lane after doing a simd comparison or other
+    Boolean operation.
+
+    # Safety
+
+    This function doesn't do any bounds checking. It is the caller's
+    responsibility to make sure the lane index is within bounds.
+     */
     unsafe fn check_bool_unchecked(a: Self, lane: usize) -> bool;
 
     fn abs(a: Self) -> Self;
@@ -116,16 +126,16 @@ where
     fn min(a: Self, b: Self) -> Self;
 }
 
-impl SimdVec<f32> for Wfloat {
+impl SimdVec<f32> for Wide {
     const SIMD_VEC_SIZE: usize = SIMD_F32_SIZE;
 
-    fn broadcast(val: f32) -> Wfloat {
-        Wfloat {
+    fn broadcast(val: f32) -> Wide {
+        Wide {
             valsf32: [val; <Self as SimdVec<f32>>::SIMD_VEC_SIZE],
         }
     }
 
-    fn nan() -> Wfloat {
+    fn nan() -> Wide {
         Self::broadcast(f32::NAN)
     }
 
@@ -161,7 +171,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_mul_ps(a.reg32, b.reg32),
                 }
             }
@@ -169,7 +179,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vmulq_f32(a.reg32.0, b.reg32.0),
                         vmulq_f32(a.reg32.1, b.reg32.1),
@@ -183,7 +193,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_div_ps(a.reg32, b.reg32),
                 }
             }
@@ -191,7 +201,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vdivq_f32(a.reg32.0, b.reg32.0),
                         vdivq_f32(a.reg32.1, b.reg32.1),
@@ -205,7 +215,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_add_ps(a.reg32, b.reg32),
                 }
             }
@@ -213,7 +223,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vaddq_f32(a.reg32.0, b.reg32.0),
                         vaddq_f32(a.reg32.1, b.reg32.1),
@@ -227,7 +237,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_sub_ps(a.reg32, b.reg32),
                 }
             }
@@ -235,7 +245,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vsubq_f32(a.reg32.0, b.reg32.0),
                         vsubq_f32(a.reg32.1, b.reg32.1),
@@ -249,7 +259,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_fmadd_ps(a.reg32, b.reg32, c.reg32),
                 }
             }
@@ -257,7 +267,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vfmaq_f32(c.reg32.0, a.reg32.0, b.reg32.0),
                         vfmaq_f32(c.reg32.1, a.reg32.1, b.reg32.1),
@@ -271,7 +281,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_sub_ps(_mm256_setzero_ps(), a.reg32),
                 }
             }
@@ -279,24 +289,24 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(vnegq_f32(a.reg32.0), vnegq_f32(a.reg32.1)),
                 }
             }
         }
     }
 
-    fn lt(a: Self, b: Self) -> Wfloat {
+    fn lt(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            Wfloat {
+            Wide {
                 reg32: unsafe { _mm256_cmp_ps::<_CMP_LT_OQ>(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vcltq_f32(a.reg32.0, b.reg32.0)),
                         vreinterpretq_f32_u32(vcltq_f32(a.reg32.1, b.reg32.1)),
@@ -306,17 +316,17 @@ impl SimdVec<f32> for Wfloat {
         }
     }
 
-    fn eq(a: Self, b: Self) -> Wfloat {
+    fn eq(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            Wfloat {
+            Wide {
                 reg32: unsafe { _mm256_cmp_ps::<_CMP_EQ_OQ>(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vceqq_f32(a.reg32.0, b.reg32.0)),
                         vreinterpretq_f32_u32(vceqq_f32(a.reg32.1, b.reg32.1)),
@@ -326,17 +336,17 @@ impl SimdVec<f32> for Wfloat {
         }
     }
 
-    fn gt(a: Self, b: Self) -> Wfloat {
+    fn gt(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            Wfloat {
+            Wide {
                 reg32: unsafe { _mm256_cmp_ps::<_CMP_GT_OQ>(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vcgtq_f32(a.reg32.0, b.reg32.0)),
                         vreinterpretq_f32_u32(vcgtq_f32(a.reg32.1, b.reg32.1)),
@@ -346,17 +356,17 @@ impl SimdVec<f32> for Wfloat {
         }
     }
 
-    fn and(a: Self, b: Self) -> Wfloat {
+    fn and(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            Wfloat {
+            Wide {
                 reg32: unsafe { _mm256_and_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vandq_u32(
                             vreinterpretq_u32_f32(a.reg32.0),
@@ -372,17 +382,17 @@ impl SimdVec<f32> for Wfloat {
         }
     }
 
-    fn or(a: Self, b: Self) -> Wfloat {
+    fn or(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            Wfloat {
+            Wide {
                 reg32: unsafe { _mm256_or_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vreinterpretq_f32_u32(vorrq_u32(
                             vreinterpretq_u32_f32(a.reg32.0),
@@ -410,7 +420,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_andnot_ps(_mm256_set1_ps(-0.0f32), a.reg32), // Clear the sign bit.
                 }
             }
@@ -418,7 +428,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(vabsq_f32(a.reg32.0), vabsq_f32(a.reg32.1)),
                 }
             }
@@ -429,7 +439,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_rsqrt_ps(a.reg32),
                 }
             }
@@ -437,7 +447,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(vrsqrteq_f32(a.reg32.0), vrsqrteq_f32(a.reg32.1)),
                 }
             }
@@ -448,7 +458,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_max_ps(a.reg32, b.reg32),
                 }
             }
@@ -456,7 +466,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vmaxq_f32(a.reg32.0, b.reg32.0),
                         vmaxq_f32(a.reg32.1, b.reg32.1),
@@ -470,7 +480,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: _mm256_min_ps(a.reg32, b.reg32),
                 }
             }
@@ -478,7 +488,7 @@ impl SimdVec<f32> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg32: float32x4x2_t(
                         vminq_f32(a.reg32.0, b.reg32.0),
                         vminq_f32(a.reg32.1, b.reg32.1),
@@ -489,16 +499,16 @@ impl SimdVec<f32> for Wfloat {
     }
 }
 
-impl SimdVec<f64> for Wfloat {
+impl SimdVec<f64> for Wide {
     const SIMD_VEC_SIZE: usize = SIMD_F64_SIZE;
 
-    fn broadcast(val: f64) -> Wfloat {
-        Wfloat {
+    fn broadcast(val: f64) -> Wide {
+        Wide {
             valsf64: [val; <Self as SimdVec<f64>>::SIMD_VEC_SIZE],
         }
     }
 
-    fn nan() -> Wfloat {
+    fn nan() -> Wide {
         Self::broadcast(f64::NAN)
     }
 
@@ -534,7 +544,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: std::arch::x86_64::_mm256_mul_pd(a.reg64, b.reg64),
                 }
             }
@@ -542,7 +552,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vmulq_f64(a.reg64.0, b.reg64.0),
                         vmulq_f64(a.reg64.1, b.reg64.1),
@@ -556,7 +566,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: std::arch::x86_64::_mm256_div_pd(a.reg64, b.reg64),
                 }
             }
@@ -564,7 +574,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vdivq_f64(a.reg64.0, b.reg64.0),
                         vdivq_f64(a.reg64.1, b.reg64.1),
@@ -578,7 +588,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: std::arch::x86_64::_mm256_add_pd(a.reg64, b.reg64),
                 }
             }
@@ -586,7 +596,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vaddq_f64(a.reg64.0, b.reg64.0),
                         vaddq_f64(a.reg64.1, b.reg64.1),
@@ -600,7 +610,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: std::arch::x86_64::_mm256_sub_pd(a.reg64, b.reg64),
                 }
             }
@@ -608,7 +618,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vsubq_f64(a.reg64.0, b.reg64.0),
                         vsubq_f64(a.reg64.1, b.reg64.1),
@@ -622,7 +632,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: std::arch::x86_64::_mm256_fmadd_pd(a.reg64, b.reg64, c.reg64),
                 }
             }
@@ -630,7 +640,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vfmaq_f64(c.reg64.0, a.reg64.0, b.reg64.0),
                         vfmaq_f64(c.reg64.1, a.reg64.1, b.reg64.1),
@@ -644,7 +654,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: _mm256_sub_pd(_mm256_setzero_pd(), a.reg64),
                 }
             }
@@ -652,18 +662,18 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(vnegq_f64(a.reg64.0), vnegq_f64(a.reg64.1)),
                 }
             }
         }
     }
 
-    fn lt(a: Self, b: Self) -> Wfloat {
+    fn lt(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: _mm256_cmp_pd::<_CMP_LT_OQ>(a.reg64, b.reg64),
                 }
             }
@@ -671,7 +681,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vcltq_f64(a.reg64.0, b.reg64.0)),
                         vreinterpretq_f64_u64(vcltq_f64(a.reg64.1, b.reg64.1)),
@@ -681,11 +691,11 @@ impl SimdVec<f64> for Wfloat {
         }
     }
 
-    fn eq(a: Self, b: Self) -> Wfloat {
+    fn eq(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: _mm256_cmp_pd::<_CMP_EQ_OQ>(a.reg64, b.reg64),
                 }
             }
@@ -693,7 +703,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vceqq_f64(a.reg64.0, b.reg64.0)),
                         vreinterpretq_f64_u64(vceqq_f64(a.reg64.1, b.reg64.1)),
@@ -703,11 +713,11 @@ impl SimdVec<f64> for Wfloat {
         }
     }
 
-    fn gt(a: Self, b: Self) -> Wfloat {
+    fn gt(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: _mm256_cmp_pd::<_CMP_GT_OQ>(a.reg64, b.reg64),
                 }
             }
@@ -715,7 +725,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vcgtq_f64(a.reg64.0, b.reg64.0)),
                         vreinterpretq_f64_u64(vcgtq_f64(a.reg64.1, b.reg64.1)),
@@ -725,17 +735,17 @@ impl SimdVec<f64> for Wfloat {
         }
     }
 
-    fn and(a: Self, b: Self) -> Wfloat {
+    fn and(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            Wfloat {
+            Wide {
                 reg64: unsafe { _mm256_and_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vandq_u64(
                             vreinterpretq_u64_f64(a.reg64.0),
@@ -751,17 +761,17 @@ impl SimdVec<f64> for Wfloat {
         }
     }
 
-    fn or(a: Self, b: Self) -> Wfloat {
+    fn or(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            Wfloat {
+            Wide {
                 reg64: unsafe { _mm256_or_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vreinterpretq_f64_u64(vorrq_u64(
                             vreinterpretq_u64_f64(a.reg64.0),
@@ -789,7 +799,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: _mm256_andnot_pd(_mm256_set1_pd(-0.0f64), a.reg64), // Clear the sign bit.
                 }
             }
@@ -797,7 +807,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(vabsq_f64(a.reg64.0), vabsq_f64(a.reg64.1)),
                 }
             }
@@ -808,7 +818,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: _mm256_div_pd(_mm256_set1_pd(1.), _mm256_sqrt_pd(a.reg64)),
                 }
             }
@@ -816,7 +826,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(vrsqrteq_f64(a.reg64.0), vrsqrteq_f64(a.reg64.1)),
                 }
             }
@@ -827,7 +837,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: _mm256_max_pd(a.reg64, b.reg64),
                 }
             }
@@ -835,7 +845,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vmaxq_f64(a.reg64.0, b.reg64.0),
                         vmaxq_f64(a.reg64.1, b.reg64.1),
@@ -849,7 +859,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "x86_64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: _mm256_min_pd(a.reg64, b.reg64),
                 }
             }
@@ -857,7 +867,7 @@ impl SimdVec<f64> for Wfloat {
         #[cfg(target_arch = "aarch64")]
         {
             unsafe {
-                Wfloat {
+                Wide {
                     reg64: float64x2x2_t(
                         vminq_f64(a.reg64.0, b.reg64.0),
                         vminq_f64(a.reg64.1, b.reg64.1),
@@ -868,13 +878,13 @@ impl SimdVec<f64> for Wfloat {
     }
 }
 
-impl From<f32> for Wfloat {
+impl From<f32> for Wide {
     fn from(value: f32) -> Self {
         <Self as SimdVec<f32>>::broadcast(value)
     }
 }
 
-impl From<f64> for Wfloat {
+impl From<f64> for Wide {
     fn from(value: f64) -> Self {
         <Self as SimdVec<f64>>::broadcast(value)
     }
@@ -885,7 +895,7 @@ pub type NativeSimdFunc = unsafe extern "C" fn(*const c_void, *mut c_void, u64);
 /// Thin wrapper around the compiled native JIT function to do simd evaluations.
 pub struct JitSimdFn<'ctx, T>
 where
-    Wfloat: SimdVec<T>,
+    Wide: SimdVec<T>,
     T: NumberType,
 {
     func: JitFunction<'ctx, NativeSimdFunc>,
@@ -909,7 +919,7 @@ via a phantom othwerwise we can't implement The Sync trait on this.
 */
 pub struct JitSimdFnSync<'ctx, T>
 where
-    Wfloat: SimdVec<T>,
+    Wide: SimdVec<T>,
     T: NumberType,
 {
     func: NativeSimdFunc,
@@ -918,27 +928,27 @@ where
 
 unsafe impl<'ctx, T> Sync for JitSimdFnSync<'ctx, T>
 where
-    Wfloat: SimdVec<T>,
+    Wide: SimdVec<T>,
     T: NumberType,
 {
 }
 
 pub struct JitSimdBuffers<T>
 where
-    Wfloat: SimdVec<T>,
+    Wide: SimdVec<T>,
     T: NumberType,
 {
     num_samples: usize,
     num_inputs: usize,
     num_outputs: usize,
-    inputs: Vec<Wfloat>,
-    outputs: Vec<Wfloat>,
+    inputs: Vec<Wide>,
+    outputs: Vec<Wide>,
     phantom: PhantomData<T>, // This only exists to specialize the type for type T.
 }
 
 impl<'ctx, T> JitSimdFn<'ctx, T>
 where
-    Wfloat: SimdVec<T>,
+    Wide: SimdVec<T>,
     T: NumberType,
 {
     pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
@@ -961,7 +971,7 @@ where
 
 impl<'ctx, T> JitSimdFnSync<'ctx, T>
 where
-    Wfloat: SimdVec<T>,
+    Wide: SimdVec<T>,
     T: NumberType,
 {
     pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
@@ -974,7 +984,26 @@ where
         }
     }
 
-    pub unsafe fn run_raw(&self, inputs: *const Wfloat, outputs: *mut Wfloat, num_iters: usize) {
+    /**
+    Same as [`run`], except this version doesn't do bounds checking, because it
+    works with pointers. The inputs must be packed in the right order. Say a
+    tree has three inputs `a`, `b`, and `c`. The first `Wide` should contain the
+    first `SIMD_VEC_SIZE` values of `a` (e.g. either 4 or 8 depending on
+    precision). The next `Wide` should contain the next `SIMD_VEC_SIZE` of `b`,
+    and so on. The data ust be interleaved in this way to ensure the inputs of
+    one iteration are together in memory.
+
+    # Safety
+
+    It is the caller's responsibility to make sure the length of the input slice
+    matches the number of symbols of the tree, and the length of the outputs
+    slice matches the number of roots of the tree used to create this JIT
+    function. Further more, because this JIT array function supports multiple
+    iterations, the slices must be large enough to accomodate that. The inputs
+    slice must be `n_symbols * num_iters` long, and the output slice must be
+    `n_roots * num_iters` long.
+     */
+    pub unsafe fn run_raw(&self, inputs: *const Wide, outputs: *mut Wide, num_iters: usize) {
         unsafe {
             (self.func)(inputs.cast(), outputs.cast(), num_iters as u64);
         }
@@ -983,10 +1012,10 @@ where
 
 impl<T> JitSimdBuffers<T>
 where
-    Wfloat: SimdVec<T>,
+    Wide: SimdVec<T>,
     T: NumberType,
 {
-    const SIMD_VEC_SIZE: usize = <Wfloat as SimdVec<T>>::SIMD_VEC_SIZE;
+    const SIMD_VEC_SIZE: usize = <Wide as SimdVec<T>>::SIMD_VEC_SIZE;
 
     pub fn new(tree: &Tree) -> Self {
         Self {
@@ -1028,11 +1057,11 @@ where
         let index = self.num_samples % Self::SIMD_VEC_SIZE;
         if index == 0 {
             self.inputs.extend(std::iter::repeat_n(
-                <Wfloat as SimdVec<T>>::nan(),
+                <Wide as SimdVec<T>>::nan(),
                 self.num_inputs,
             ));
             self.outputs.extend(std::iter::repeat_n(
-                <Wfloat as SimdVec<T>>::nan(),
+                <Wide as SimdVec<T>>::nan(),
                 self.num_outputs,
             ));
         }
@@ -1041,7 +1070,7 @@ where
             .iter_mut()
             .zip(sample.iter())
         {
-            <Wfloat as SimdVec<T>>::set(reg, *val, index);
+            <Wide as SimdVec<T>>::set(reg, *val, index);
         }
         self.num_samples += 1;
         Ok(())
@@ -1067,7 +1096,7 @@ where
                 (0..Self::SIMD_VEC_SIZE).flat_map(|lane| {
                     chunk
                         .iter()
-                        .map(move |simd| <Wfloat as SimdVec<T>>::get(simd, lane))
+                        .map(move |simd| <Wide as SimdVec<T>>::get(simd, lane))
                 })
             })
             .take(self.num_samples * self.num_outputs)
@@ -1081,7 +1110,7 @@ impl Tree {
         context: &'ctx JitContext,
     ) -> Result<JitSimdFn<'ctx, T>, Error>
     where
-        Wfloat: SimdVec<T>,
+        Wide: SimdVec<T>,
         T: NumberType,
     {
         let num_roots = self.num_roots();
@@ -1090,9 +1119,9 @@ impl Tree {
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
-        let float_type = <Wfloat as SimdVec<T>>::float_type(context);
+        let float_type = <Wide as SimdVec<T>>::float_type(context);
         let i64_type = context.i64_type();
-        let fvec_type = float_type.vec_type(<Wfloat as SimdVec<T>>::SIMD_VEC_SIZE as u32);
+        let fvec_type = float_type.vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
         let fptr_type = context.ptr_type(AddressSpace::default());
         let fn_type = context.void_type().fn_type(
             &[fptr_type.into(), fptr_type.into(), i64_type.into()],
@@ -1124,8 +1153,8 @@ impl Tree {
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
                 Constant(val) => match val {
-                    Bool(val) => <Wfloat as SimdVec<T>>::const_bool(*val, context),
-                    Scalar(val) => <Wfloat as SimdVec<T>>::const_float(*val, context),
+                    Bool(val) => <Wide as SimdVec<T>>::const_bool(*val, context),
+                    Scalar(val) => <Wide as SimdVec<T>>::const_float(*val, context),
                 },
                 Symbol(label) => {
                     let offset = builder.build_int_add(
@@ -1828,13 +1857,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_mul() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::mul(a, b);
+        let result = <Wide as SimdVec<f32>>::mul(a, b);
         unsafe {
             assert_eq!(result.valsf32[0], 2.0);
             assert_eq!(result.valsf32[1], 6.0);
@@ -1849,13 +1878,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_add() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::add(a, b);
+        let result = <Wide as SimdVec<f32>>::add(a, b);
         unsafe {
             assert_eq!(result.valsf32[0], 11.0);
             assert_eq!(result.valsf32[1], 22.0);
@@ -1870,16 +1899,16 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_mul_add() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
         };
-        let c = Wfloat {
+        let c = Wide {
             valsf32: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::mul_add(a, b, c);
+        let result = <Wide as SimdVec<f32>>::mul_add(a, b, c);
         unsafe {
             assert_eq!(result.valsf32[0], 12.0); // 1*2 + 10
             assert_eq!(result.valsf32[1], 16.0); // 2*3 + 10
@@ -1894,13 +1923,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_mul() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.0, 2.0, 3.0, 4.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [5.0, 6.0, 7.0, 8.0],
         };
-        let result = <Wfloat as SimdVec<f64>>::mul(a, b);
+        let result = <Wide as SimdVec<f64>>::mul(a, b);
         unsafe {
             assert_eq!(result.valsf64[0], 5.0);
             assert_eq!(result.valsf64[1], 12.0);
@@ -1911,13 +1940,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_add() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.5, 2.5, 3.5, 4.5],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [10.5, 20.5, 30.5, 40.5],
         };
-        let result = <Wfloat as SimdVec<f64>>::add(a, b);
+        let result = <Wide as SimdVec<f64>>::add(a, b);
         unsafe {
             assert_eq!(result.valsf64[0], 12.0);
             assert_eq!(result.valsf64[1], 23.0);
@@ -1928,16 +1957,16 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_mul_add() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [2.0, 3.0, 4.0, 5.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [10.0, 10.0, 10.0, 10.0],
         };
-        let c = Wfloat {
+        let c = Wide {
             valsf64: [1.0, 2.0, 3.0, 4.0],
         };
-        let result = <Wfloat as SimdVec<f64>>::mul_add(a, b, c);
+        let result = <Wide as SimdVec<f64>>::mul_add(a, b, c);
         unsafe {
             assert_eq!(result.valsf64[0], 21.0); // 2*10 + 1
             assert_eq!(result.valsf64[1], 32.0); // 3*10 + 2
@@ -1948,10 +1977,10 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_neg() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, -2.0, 3.5, -4.5, 0.0, 10.5, -7.25, 8.75],
         };
-        let result = <Wfloat as SimdVec<f32>>::neg(a);
+        let result = <Wide as SimdVec<f32>>::neg(a);
         unsafe {
             assert_eq!(result.valsf32[0], -1.0);
             assert_eq!(result.valsf32[1], 2.0);
@@ -1966,10 +1995,10 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_neg() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.5, -2.75, 0.0, -10.25],
         };
-        let result = <Wfloat as SimdVec<f64>>::neg(a);
+        let result = <Wide as SimdVec<f64>>::neg(a);
         unsafe {
             assert_eq!(result.valsf64[0], -1.5);
             assert_eq!(result.valsf64[1], 2.75);
@@ -1980,13 +2009,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_lt() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::lt(a, b);
+        let result = <Wide as SimdVec<f32>>::lt(a, b);
         unsafe {
             assert_eq!(result.valsu32[0], 0xFFFFFFFF);
             assert_eq!(result.valsu32[1], 0x00000000);
@@ -2001,13 +2030,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_eq() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::eq(a, b);
+        let result = <Wide as SimdVec<f32>>::eq(a, b);
         unsafe {
             assert_eq!(result.valsu32[0], 0x00000000);
             assert_eq!(result.valsu32[1], 0xFFFFFFFF);
@@ -2022,13 +2051,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_gt() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::gt(a, b);
+        let result = <Wide as SimdVec<f32>>::gt(a, b);
         unsafe {
             assert_eq!(result.valsu32[0], 0x00000000);
             assert_eq!(result.valsu32[1], 0x00000000);
@@ -2043,13 +2072,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_lt() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.0, 2.0, 3.0, 4.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [2.0, 2.0, 2.0, 2.0],
         };
-        let result = <Wfloat as SimdVec<f64>>::lt(a, b);
+        let result = <Wide as SimdVec<f64>>::lt(a, b);
         unsafe {
             assert_eq!(result.valsu64[0], 0xFFFFFFFFFFFFFFFF);
             assert_eq!(result.valsu64[1], 0x0000000000000000);
@@ -2060,13 +2089,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_eq() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.0, 2.0, 3.0, 4.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [2.0, 2.0, 2.0, 2.0],
         };
-        let result = <Wfloat as SimdVec<f64>>::eq(a, b);
+        let result = <Wide as SimdVec<f64>>::eq(a, b);
         unsafe {
             assert_eq!(result.valsu64[0], 0x0000000000000000);
             assert_eq!(result.valsu64[1], 0xFFFFFFFFFFFFFFFF);
@@ -2077,13 +2106,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_gt() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.0, 2.0, 3.0, 4.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [2.0, 2.0, 2.0, 2.0],
         };
-        let result = <Wfloat as SimdVec<f64>>::gt(a, b);
+        let result = <Wide as SimdVec<f64>>::gt(a, b);
         unsafe {
             assert_eq!(result.valsu64[0], 0x0000000000000000);
             assert_eq!(result.valsu64[1], 0x0000000000000000);
@@ -2094,19 +2123,19 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_and() {
-        let a = Wfloat {
+        let a = Wide {
             valsu32: [
                 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF,
                 0x00000000,
             ],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsu32: [
                 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000,
                 0x00000000,
             ],
         };
-        let result = <Wfloat as SimdVec<f32>>::and(a, b);
+        let result = <Wide as SimdVec<f32>>::and(a, b);
         unsafe {
             assert_eq!(result.valsu32[0], 0xFFFFFFFF);
             assert_eq!(result.valsu32[1], 0x00000000);
@@ -2121,19 +2150,19 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_or() {
-        let a = Wfloat {
+        let a = Wide {
             valsu32: [
                 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF,
                 0x00000000,
             ],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsu32: [
                 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000,
                 0x00000000,
             ],
         };
-        let result = <Wfloat as SimdVec<f32>>::or(a, b);
+        let result = <Wide as SimdVec<f32>>::or(a, b);
         unsafe {
             assert_eq!(result.valsu32[0], 0xFFFFFFFF);
             assert_eq!(result.valsu32[1], 0xFFFFFFFF);
@@ -2148,7 +2177,7 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_and() {
-        let a = Wfloat {
+        let a = Wide {
             valsu64: [
                 0xFFFFFFFFFFFFFFFF,
                 0x0000000000000000,
@@ -2156,7 +2185,7 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsu64: [
                 0xFFFFFFFFFFFFFFFF,
                 0xFFFFFFFFFFFFFFFF,
@@ -2164,7 +2193,7 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-        let result = <Wfloat as SimdVec<f64>>::and(a, b);
+        let result = <Wide as SimdVec<f64>>::and(a, b);
         unsafe {
             assert_eq!(result.valsu64[0], 0xFFFFFFFFFFFFFFFF);
             assert_eq!(result.valsu64[1], 0x0000000000000000);
@@ -2175,7 +2204,7 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_or() {
-        let a = Wfloat {
+        let a = Wide {
             valsu64: [
                 0xFFFFFFFFFFFFFFFF,
                 0x0000000000000000,
@@ -2183,7 +2212,7 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsu64: [
                 0xFFFFFFFFFFFFFFFF,
                 0xFFFFFFFFFFFFFFFF,
@@ -2191,7 +2220,7 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-        let result = <Wfloat as SimdVec<f64>>::or(a, b);
+        let result = <Wide as SimdVec<f64>>::or(a, b);
         unsafe {
             assert_eq!(result.valsu64[0], 0xFFFFFFFFFFFFFFFF);
             assert_eq!(result.valsu64[1], 0xFFFFFFFFFFFFFFFF);
@@ -2202,73 +2231,57 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_check_bool() {
-        let mask = Wfloat {
+        let mask = Wide {
             valsu32: [
                 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0x12345678, 0x00000000, 0xABCDEF00,
                 0x00000000,
             ],
         };
-        assert!(<Wfloat as SimdVec<f32>>::check_bool(mask, 0));
-        assert!(!<Wfloat as SimdVec<f32>>::check_bool(mask, 1));
-        assert!(<Wfloat as SimdVec<f32>>::check_bool(mask, 2));
-        assert!(!<Wfloat as SimdVec<f32>>::check_bool(mask, 3));
-        assert!(<Wfloat as SimdVec<f32>>::check_bool(mask, 4));
-        assert!(!<Wfloat as SimdVec<f32>>::check_bool(mask, 5));
-        assert!(<Wfloat as SimdVec<f32>>::check_bool(mask, 6));
-        assert!(!<Wfloat as SimdVec<f32>>::check_bool(mask, 7));
+        assert!(<Wide as SimdVec<f32>>::check_bool(mask, 0));
+        assert!(!<Wide as SimdVec<f32>>::check_bool(mask, 1));
+        assert!(<Wide as SimdVec<f32>>::check_bool(mask, 2));
+        assert!(!<Wide as SimdVec<f32>>::check_bool(mask, 3));
+        assert!(<Wide as SimdVec<f32>>::check_bool(mask, 4));
+        assert!(!<Wide as SimdVec<f32>>::check_bool(mask, 5));
+        assert!(<Wide as SimdVec<f32>>::check_bool(mask, 6));
+        assert!(!<Wide as SimdVec<f32>>::check_bool(mask, 7));
     }
 
     #[test]
     fn t_wfloat_f32_check_bool_unchecked() {
-        let mask = Wfloat {
+        let mask = Wide {
             valsu32: [
                 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0x12345678, 0x00000000, 0xABCDEF00,
                 0x00000000,
             ],
         };
         unsafe {
-            assert!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 0)
-            );
-            assert!(
-                !<Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 1)
-            );
-            assert!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 2)
-            );
-            assert!(
-                !<Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 3)
-            );
-            assert!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 4)
-            );
-            assert!(
-                !<Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 5)
-            );
-            assert!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 6)
-            );
-            assert!(
-                !<Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 7)
-            );
+            assert!(<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 0));
+            assert!(!<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 1));
+            assert!(<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 2));
+            assert!(!<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 3));
+            assert!(<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 4));
+            assert!(!<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 5));
+            assert!(<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 6));
+            assert!(!<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 7));
         }
     }
 
     #[test]
     #[should_panic]
     fn t_wfloat_f32_check_bool_bounds() {
-        let mask = Wfloat {
+        let mask = Wide {
             valsu32: [
                 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000, 0x12345678, 0x00000000, 0xABCDEF00,
                 0x00000000,
             ],
         };
-        <Wfloat as SimdVec<f32>>::check_bool(mask, 8);
+        <Wide as SimdVec<f32>>::check_bool(mask, 8);
     }
 
     #[test]
     fn t_wfloat_f64_check_bool() {
-        let mask = Wfloat {
+        let mask = Wide {
             valsu64: [
                 0xFFFFFFFFFFFFFFFF,
                 0x0000000000000000,
@@ -2276,15 +2289,15 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-        assert!(<Wfloat as SimdVec<f64>>::check_bool(mask, 0));
-        assert!(!<Wfloat as SimdVec<f64>>::check_bool(mask, 1));
-        assert!(<Wfloat as SimdVec<f64>>::check_bool(mask, 2));
-        assert!(!<Wfloat as SimdVec<f64>>::check_bool(mask, 3));
+        assert!(<Wide as SimdVec<f64>>::check_bool(mask, 0));
+        assert!(!<Wide as SimdVec<f64>>::check_bool(mask, 1));
+        assert!(<Wide as SimdVec<f64>>::check_bool(mask, 2));
+        assert!(!<Wide as SimdVec<f64>>::check_bool(mask, 3));
     }
 
     #[test]
     fn t_wfloat_f64_check_bool_unchecked() {
-        let mask = Wfloat {
+        let mask = Wide {
             valsu64: [
                 0xFFFFFFFFFFFFFFFF,
                 0x0000000000000000,
@@ -2293,25 +2306,17 @@ mod simd_ops_test {
             ],
         };
         unsafe {
-            assert!(
-                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 0)
-            );
-            assert!(
-                !<Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 1)
-            );
-            assert!(
-                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 2)
-            );
-            assert!(
-                !<Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 3)
-            );
+            assert!(<Wide as SimdVec<f64>>::check_bool_unchecked(mask, 0));
+            assert!(!<Wide as SimdVec<f64>>::check_bool_unchecked(mask, 1));
+            assert!(<Wide as SimdVec<f64>>::check_bool_unchecked(mask, 2));
+            assert!(!<Wide as SimdVec<f64>>::check_bool_unchecked(mask, 3));
         }
     }
 
     #[test]
     #[should_panic]
     fn t_wfloat_f64_check_bool_bounds() {
-        let mask = Wfloat {
+        let mask = Wide {
             valsu64: [
                 0xFFFFFFFFFFFFFFFF,
                 0x0000000000000000,
@@ -2319,15 +2324,15 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-        <Wfloat as SimdVec<f64>>::check_bool(mask, 4);
+        <Wide as SimdVec<f64>>::check_bool(mask, 4);
     }
 
     #[test]
     fn t_wfloat_f32_abs() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [-1.0, 2.0, -3.5, 4.25, -5.75, 6.125, -7.875, 8.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::abs(a);
+        let result = <Wide as SimdVec<f32>>::abs(a);
         unsafe {
             assert_eq!(result.valsf32[0], 1.0);
             assert_eq!(result.valsf32[1], 2.0);
@@ -2342,10 +2347,10 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_abs() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [-1.5, 2.25, -3.125, 4.0625],
         };
-        let result = <Wfloat as SimdVec<f64>>::abs(a);
+        let result = <Wide as SimdVec<f64>>::abs(a);
         unsafe {
             assert_eq!(result.valsf64[0], 1.5);
             assert_eq!(result.valsf64[1], 2.25);
@@ -2356,10 +2361,10 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_recip_sqrt() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 4.0, 9.0, 16.0, 25.0, 36.0, 49.0, 64.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::recip_sqrt(a);
+        let result = <Wide as SimdVec<f32>>::recip_sqrt(a);
         unsafe {
             // Check that recip_sqrt gives approximately 1/sqrt(x)
             // Using loose tolerance since rsqrt is an approximation
@@ -2376,10 +2381,10 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_recip_sqrt() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.0, 4.0, 9.0, 16.0],
         };
-        let result = <Wfloat as SimdVec<f64>>::recip_sqrt(a);
+        let result = <Wide as SimdVec<f64>>::recip_sqrt(a);
         unsafe {
             // Check that recip_sqrt gives approximately 1/sqrt(x)
             // Using loose tolerance since rsqrt is an approximation
@@ -2392,13 +2397,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_sub() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::sub(a, b);
+        let result = <Wide as SimdVec<f32>>::sub(a, b);
         unsafe {
             assert_eq!(result.valsf32[0], 9.0);
             assert_eq!(result.valsf32[1], 18.0);
@@ -2413,13 +2418,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_sub() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [10.5, 20.25, 30.125, 40.0625],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [1.5, 2.25, 3.125, 4.0625],
         };
-        let result = <Wfloat as SimdVec<f64>>::sub(a, b);
+        let result = <Wide as SimdVec<f64>>::sub(a, b);
         unsafe {
             assert_eq!(result.valsf64[0], 9.0);
             assert_eq!(result.valsf64[1], 18.0);
@@ -2430,13 +2435,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_div() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [2.0, 4.0, 5.0, 8.0, 10.0, 12.0, 14.0, 16.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::div(a, b);
+        let result = <Wide as SimdVec<f32>>::div(a, b);
         unsafe {
             assert_eq!(result.valsf32[0], 5.0); // 10.0 / 2.0
             assert_eq!(result.valsf32[1], 5.0); // 20.0 / 4.0
@@ -2451,13 +2456,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_div() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [12.0, 24.0, 36.0, 48.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [3.0, 6.0, 9.0, 12.0],
         };
-        let result = <Wfloat as SimdVec<f64>>::div(a, b);
+        let result = <Wide as SimdVec<f64>>::div(a, b);
         unsafe {
             assert_eq!(result.valsf64[0], 4.0); // 12.0 / 3.0
             assert_eq!(result.valsf64[1], 4.0); // 24.0 / 6.0
@@ -2468,13 +2473,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_max() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 5.0, 3.0, 8.0, 2.0, 9.0, 4.0, 6.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [4.0, 2.0, 7.0, 1.0, 6.0, 3.0, 8.0, 5.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::max(a, b);
+        let result = <Wide as SimdVec<f32>>::max(a, b);
         unsafe {
             assert_eq!(result.valsf32[0], 4.0); // max(1.0, 4.0) = 4.0
             assert_eq!(result.valsf32[1], 5.0); // max(5.0, 2.0) = 5.0
@@ -2489,13 +2494,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_max() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.5, 8.25, 3.125, 6.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [2.75, 4.5, 9.875, 1.25],
         };
-        let result = <Wfloat as SimdVec<f64>>::max(a, b);
+        let result = <Wide as SimdVec<f64>>::max(a, b);
         unsafe {
             assert_eq!(result.valsf64[0], 2.75); // max(1.5, 2.75) = 2.75
             assert_eq!(result.valsf64[1], 8.25); // max(8.25, 4.5) = 8.25
@@ -2506,13 +2511,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f32_min() {
-        let a = Wfloat {
+        let a = Wide {
             valsf32: [1.0, 5.0, 3.0, 8.0, 2.0, 9.0, 4.0, 6.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf32: [4.0, 2.0, 7.0, 1.0, 6.0, 3.0, 8.0, 5.0],
         };
-        let result = <Wfloat as SimdVec<f32>>::min(a, b);
+        let result = <Wide as SimdVec<f32>>::min(a, b);
         unsafe {
             assert_eq!(result.valsf32[0], 1.0); // min(1.0, 4.0) = 4.0
             assert_eq!(result.valsf32[1], 2.0); // min(5.0, 2.0) = 5.0
@@ -2527,13 +2532,13 @@ mod simd_ops_test {
 
     #[test]
     fn t_wfloat_f64_min() {
-        let a = Wfloat {
+        let a = Wide {
             valsf64: [1.5, 8.25, 3.125, 6.0],
         };
-        let b = Wfloat {
+        let b = Wide {
             valsf64: [2.75, 4.5, 9.875, 1.25],
         };
-        let result = <Wfloat as SimdVec<f64>>::min(a, b);
+        let result = <Wide as SimdVec<f64>>::min(a, b);
         unsafe {
             assert_eq!(result.valsf64[0], 1.5); // min(1.5, 2.75) = 2.75
             assert_eq!(result.valsf64[1], 4.5); // min(8.25, 4.5) = 8.25

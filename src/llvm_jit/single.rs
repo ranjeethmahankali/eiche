@@ -337,9 +337,7 @@ where
     /// order as returned by calling `tree.symbols()` which was compiled to
     /// produce this evaluator.
     pub fn run(&self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
-        if inputs.len() != self.num_inputs {
-            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
-        } else if outputs.len() != self.num_outputs {
+        if (inputs.len() != self.num_inputs) || (outputs.len() != self.num_outputs) {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         }
         // SAFETY: We just checked above.
@@ -347,9 +345,17 @@ where
         Ok(())
     }
 
-    /// Same as `run` except it doesn't check to make sure the `inputs` slice is
-    /// of the correct length. This can be used when the caller is sure the
-    /// inputs are correct, and this check can be omitted.
+    /**
+    Same as `run` except it doesn't check to make sure the `inputs` slice is of
+    the correct length. This can be used when the caller is sure the inputs are
+    correct, and this check can be omitted.
+
+    # Safety
+
+    The caller has to make sure the number of inputs matches the
+    number of symbols of the tree, and the number of outputs match the number
+    of roots of the tree from which this JIT function was created.
+     */
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T]) {
         unsafe {
             self.func
@@ -372,9 +378,7 @@ where
     T: NumberType,
 {
     pub fn run(&self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
-        if inputs.len() != self.num_inputs {
-            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
-        } else if outputs.len() != self.num_outputs {
+        if (inputs.len() != self.num_inputs) || (outputs.len() != self.num_outputs) {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         }
         // SAFETY: We just checked above.
@@ -382,6 +386,15 @@ where
         Ok(())
     }
 
+    /**
+    Same as [`run`], without the bounds checking.
+
+    # Safety
+
+    The caller has to make sure the number of inputs matches the number of
+    symbols of the tree, and the number of outputs match the number of roots of
+    the tree from which this JIT function was created.
+     */
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T]) {
         unsafe {
             (self.func)(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast());
