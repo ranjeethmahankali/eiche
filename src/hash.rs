@@ -78,28 +78,28 @@ mod test {
     fn t_commutative() {
         let mut hashbuf = Vec::new();
 
-        let t1 = deftree!(+ x y).unwrap();
-        let t2 = deftree!(+ y x).unwrap();
+        let t1 = deftree!(+ 'x 'y).unwrap();
+        let t2 = deftree!(+ 'y 'x).unwrap();
         assert_eq!(t1.hash(&mut hashbuf), t2.hash(&mut hashbuf));
 
-        let t1 = deftree!(* x y).unwrap();
-        let t2 = deftree!(* y x).unwrap();
+        let t1 = deftree!(* 'x 'y).unwrap();
+        let t2 = deftree!(* 'y 'x).unwrap();
         assert_eq!(t1.hash(&mut hashbuf), t2.hash(&mut hashbuf));
 
-        let t1 = deftree!(- x y).unwrap();
-        let t2 = deftree!(- y x).unwrap();
+        let t1 = deftree!(- 'x 'y).unwrap();
+        let t2 = deftree!(- 'y 'x).unwrap();
         assert_ne!(t1.hash(&mut hashbuf), t2.hash(&mut hashbuf));
 
-        let t1 = deftree!(/ x y).unwrap();
-        let t2 = deftree!(/ y x).unwrap();
+        let t1 = deftree!(/ 'x 'y).unwrap();
+        let t2 = deftree!(/ 'y 'x).unwrap();
         assert_ne!(t1.hash(&mut hashbuf), t2.hash(&mut hashbuf));
 
-        let t1 = deftree!(/ 1 (- (log (+ x y)) x)).unwrap();
-        let t2 = deftree!(/ 1 (- (log (+ y x)) x)).unwrap();
+        let t1 = deftree!(/ 1 (- (log (+ 'x 'y)) 'x)).unwrap();
+        let t2 = deftree!(/ 1 (- (log (+ 'y 'x)) 'x)).unwrap();
         assert_eq!(t1.hash(&mut hashbuf), t2.hash(&mut hashbuf));
 
-        let t1 = deftree!(/ 1 (- (log (/ x y)) x)).unwrap();
-        let t2 = deftree!(/ 1 (- (log (/ y x)) x)).unwrap();
+        let t1 = deftree!(/ 1 (- (log (/ 'x 'y)) 'x)).unwrap();
+        let t2 = deftree!(/ 1 (- (log (/ 'y 'x)) 'x)).unwrap();
         assert_ne!(t1.hash(&mut hashbuf), t2.hash(&mut hashbuf));
     }
 }

@@ -330,15 +330,15 @@ impl Tree {
     /// ```
     /// use eiche::deftree;
     /// assert_eq!(
-    ///     deftree!(* (+ x y) a).unwrap().symbols(),
+    ///     deftree!(* (+ 'x 'y) 'a).unwrap().symbols(),
     ///     vec!['x', 'y', 'a']
     /// );
     /// assert_eq!(
-    ///     deftree!(* (+ a x) y).unwrap().symbols(),
+    ///     deftree!(* (+ 'a 'x) 'y).unwrap().symbols(),
     ///     vec!['a', 'x', 'y']
     /// );
     /// assert_eq!(
-    ///     deftree!(* (+ a y) x).unwrap().symbols(),
+    ///     deftree!(* (+ 'a 'y) 'x).unwrap().symbols(),
     ///     vec!['a', 'y', 'x']
     /// );
     /// ```
@@ -467,16 +467,20 @@ impl Tree {
     }
 
     fn push_nodes(&mut self, other: &Tree) -> usize {
-        let offset: usize = self.nodes.len();
-        self.nodes.extend(other.nodes.iter().map(|node| match node {
-            Constant(value) => Constant(*value),
-            Symbol(label) => Symbol(*label),
-            Unary(op, input) => Unary(*op, *input + offset),
-            Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
-            Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
-        }));
-        offset
+        extend_nodes_from_slice(&mut self.nodes, &other.nodes)
     }
+}
+
+pub(crate) fn extend_nodes_from_slice(dst: &mut Vec<Node>, other: &[Node]) -> usize {
+    let offset = dst.len();
+    dst.extend(other.iter().map(|node| match node {
+        Constant(value) => Constant(*value),
+        Symbol(label) => Symbol(*label),
+        Unary(op, input) => Unary(*op, *input + offset),
+        Binary(op, lhs, rhs) => Binary(*op, *lhs + offset, *rhs + offset),
+        Ternary(op, a, b, c) => Ternary(*op, *a + offset, *b + offset, *c + offset),
+    }));
+    offset
 }
 
 macro_rules! unary_func {
@@ -525,6 +529,30 @@ binary_func!(or, Or);
 
 pub fn reshape(tree: Result<Tree, Error>, rows: usize, cols: usize) -> Result<Tree, Error> {
     tree?.reshape(rows, cols)
+}
+
+pub fn dot(lhs: Result<Tree, Error>, rhs: Result<Tree, Error>) -> Result<Tree, Error> {
+    lhs?.dot_product(rhs?)
+}
+
+pub fn matmul(lhs: Result<Tree, Error>, rhs: Result<Tree, Error>) -> Result<Tree, Error> {
+    lhs?.matmul(rhs?)
+}
+
+pub fn transpose(mat: Result<Tree, Error>) -> Result<Tree, Error> {
+    mat?.transpose()
+}
+
+pub fn l2norm(vec: Result<Tree, Error>) -> Result<Tree, Error> {
+    vec?.l2norm()
+}
+
+pub fn normalize(vec: Result<Tree, Error>) -> Result<Tree, Error> {
+    vec?.normalize()
+}
+
+pub fn extract(mat: Result<Tree, Error>, indices: &[(usize, usize)]) -> Result<Tree, Error> {
+    mat?.extract(indices)
 }
 
 impl From<f64> for Value {
@@ -623,7 +651,7 @@ mod test {
 
     #[test]
     fn t_element_wise_unary_op() {
-        let p = deftree!(* 2 (concat x y)).unwrap();
+        let p = deftree!(* 2 (concat 'x 'y)).unwrap();
         assert_eq!(
             p.nodes,
             vec![
@@ -639,7 +667,7 @@ mod test {
     #[test]
     fn t_element_wise_binary_op() {
         // Matrix and a scalar.
-        let tree = deftree!(* 2 (concat x y z)).unwrap();
+        let tree = deftree!(* 2 (concat 'x 'y 'z)).unwrap();
         let expected = vec![
             Constant(Scalar(2.)),
             Symbol('x'),
@@ -651,10 +679,10 @@ mod test {
         ];
         assert_eq!(tree.nodes, expected);
         // Scalar and a matrix
-        let tree = deftree!(* 2 (concat x y z)).unwrap();
+        let tree = deftree!(* 2 (concat 'x 'y 'z)).unwrap();
         assert_eq!(tree.nodes, expected);
         // Matrix and a matrix - multiply
-        let tree = deftree!(* (concat x y z) (concat a b c)).unwrap();
+        let tree = deftree!(* (concat 'x 'y 'z) (concat 'a 'b 'c)).unwrap();
         assert_eq!(
             tree.nodes,
             vec![
@@ -670,7 +698,7 @@ mod test {
             ]
         );
         // Matrix and a matrix - add.
-        let tree = deftree!(+ (concat x y z) (concat a b c)).unwrap();
+        let tree = deftree!(+ (concat 'x 'y 'z) (concat 'a 'b 'c)).unwrap();
         assert_eq!(
             tree.nodes,
             vec![
@@ -704,7 +732,7 @@ mod test {
 
     #[test]
     fn t_reshape() {
-        let mat = deftree!(concat a b c p q r x y z)
+        let mat = deftree!(concat 'a 'b 'c 'p 'q 'r 'x 'y 'z)
             .unwrap()
             .reshape(3, 3)
             .unwrap();
@@ -721,7 +749,7 @@ mod test {
 
     #[test]
     fn t_choose_greater() {
-        let tree = deftree!(if (> x 0) x (- x)).unwrap();
+        let tree = deftree!(if (> 'x 0) 'x (- 'x)).unwrap();
         assert_eq!(
             tree.nodes(),
             &[
@@ -738,7 +766,7 @@ mod test {
 
     #[test]
     fn t_choose_geq() {
-        let tree = deftree!(if (>= x 0) x (- x)).unwrap();
+        let tree = deftree!(if (>= 'x 0) 'x (- 'x)).unwrap();
         assert_eq!(
             tree.nodes(),
             &[
@@ -755,7 +783,7 @@ mod test {
 
     #[test]
     fn t_concat_op_inside_macro() {
-        let tree = deftree!(/ (concat x y) 2.).unwrap();
+        let tree = deftree!(/ (concat 'x 'y) 2.).unwrap();
         assert_eq!(
             tree.nodes(),
             &[
@@ -771,15 +799,15 @@ mod test {
     #[test]
     fn t_symbols() {
         assert_eq!(
-            deftree!(* (+ x y) a).unwrap().symbols(),
+            deftree!(* (+ 'x 'y) 'a).unwrap().symbols(),
             vec!['x', 'y', 'a']
         );
         assert_eq!(
-            deftree!(* (+ a x) y).unwrap().symbols(),
+            deftree!(* (+ 'a 'x) 'y).unwrap().symbols(),
             vec!['a', 'x', 'y']
         );
         assert_eq!(
-            deftree!(* (+ a y) x).unwrap().symbols(),
+            deftree!(* (+ 'a 'y) 'x).unwrap().symbols(),
             vec!['a', 'y', 'x']
         );
     }

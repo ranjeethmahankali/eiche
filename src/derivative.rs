@@ -248,37 +248,37 @@ mod test {
 
     #[test]
     fn t_polynomial() {
-        assert_eq!(deftree!(sderiv x x).unwrap(), deftree!(1).unwrap());
+        assert_eq!(deftree!(sderiv 'x 'x).unwrap(), deftree!(1).unwrap());
         // Our symbolic derivative implementation is super general. For that
         // reason, when we differentiate something like x^2, instead of getting
         // back 2x, we'll get something that is mathematically equivalent to it,
         // but more complex. So instead of comparing trees directly, we compare
         // them numerically.
         compare_trees(
-            &deftree!(sderiv (pow x 2) x).unwrap(),
-            &deftree!(* 2 x).unwrap(),
+            &deftree!(sderiv (pow 'x 2) 'x).unwrap(),
+            &deftree!(* 2 'x).unwrap(),
             &[('x', -10., 10.)],
             100,
             1e-14,
         );
         compare_trees(
-            &deftree!(sderiv (pow x 3) x).unwrap(),
-            &deftree!(* 3 (pow x 2)).unwrap(),
+            &deftree!(sderiv (pow 'x 3) 'x).unwrap(),
+            &deftree!(* 3 (pow 'x 2)).unwrap(),
             &[('x', -10., 10.)],
             100,
             1e-13,
         );
         compare_trees(
-            &deftree!(sderiv (+ (* 1.5 (pow x 2)) (+ (* 2.3 x) 3.46)) x).unwrap(),
-            &deftree!(+ (* 3 x) 2.3).unwrap(),
+            &deftree!(sderiv (+ (* 1.5 (pow 'x 2)) (+ (* 2.3 'x) 3.46)) 'x).unwrap(),
+            &deftree!(+ (* 3 'x) 2.3).unwrap(),
             &[('x', -10., 10.)],
             100,
             1e-14,
         );
         compare_trees(
-            &deftree!(sderiv (+ (* 1.2 (pow x 3)) (+ (* 2.3 (pow x 2)) (+ (* 3.4 x) 4.5))) x)
+            &deftree!(sderiv (+ (* 1.2 (pow 'x 3)) (+ (* 2.3 (pow 'x 2)) (+ (* 3.4 'x) 4.5))) 'x)
                 .unwrap(),
-            &deftree!(+ (* 3.6 (pow x 2)) (+ (* 4.6 x) 3.4)).unwrap(),
+            &deftree!(+ (* 3.6 (pow 'x 2)) (+ (* 4.6 'x) 3.4)).unwrap(),
             &[('x', -10., 10.)],
             100,
             1e-12,
@@ -288,8 +288,8 @@ mod test {
     #[test]
     fn t_gradient_2d() {
         compare_trees(
-            &deftree!(sderiv (- (+ (pow x 2) (pow y 2)) 5) xy).unwrap(),
-            &deftree!(reshape (concat (* 2 x) (* 2 y)) 1 2).unwrap(),
+            &deftree!(sderiv (- (+ (pow 'x 2) (pow 'y 2)) 5) 'xy).unwrap(),
+            &deftree!(reshape (concat (* 2 'x) (* 2 'y)) 1 2).unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
             20,
             1e-14,
@@ -299,8 +299,8 @@ mod test {
     #[test]
     fn t_hessian_2d() {
         compare_trees(
-            &deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) xy) xy).unwrap(),
-            &deftree!(reshape (concat (* 6 x) 0 0 (* 6 y)) 2 2).unwrap(),
+            &deftree!(sderiv (sderiv (- (+ (pow 'x 3) (pow 'y 3)) 5) 'xy) 'xy).unwrap(),
+            &deftree!(reshape (concat (* 6 'x) 0 0 (* 6 'y)) 2 2).unwrap(),
             &[('x', -10., 10.), ('y', -10., 10.)],
             20,
             1e-13,
@@ -310,29 +310,29 @@ mod test {
     #[test]
     fn t_trigonometry() {
         compare_trees(
-            &deftree!(sderiv (pow (sin x) 2) x).unwrap(),
-            &deftree!(* 2 (* (sin x) (cos x))).unwrap(),
+            &deftree!(sderiv (pow (sin 'x) 2) 'x).unwrap(),
+            &deftree!(* 2 (* (sin 'x) (cos 'x))).unwrap(),
             &[('x', -5., 5.)],
             100,
             1e-15,
         );
         compare_trees(
-            &deftree!(sderiv (pow (cos x) 2) x).unwrap(),
-            &deftree!(* (- 2) (* (cos x) (sin x))).unwrap(),
+            &deftree!(sderiv (pow (cos 'x) 2) 'x).unwrap(),
+            &deftree!(* (- 2) (* (cos 'x) (sin 'x))).unwrap(),
             &[('x', -5., 5.)],
             100,
             1e-15,
         );
         compare_trees(
-            &deftree!(sderiv (tan x) x).unwrap(),
-            &deftree!(pow (/ 1 (cos x)) 2).unwrap(),
+            &deftree!(sderiv (tan 'x) 'x).unwrap(),
+            &deftree!(pow (/ 1 (cos 'x)) 2).unwrap(),
             &[('x', -1.5, 1.5)],
             100,
             1e-14,
         );
         compare_trees(
-            &deftree!(sderiv (sin (pow x 2)) x).unwrap(),
-            &deftree!(* (cos (pow x 2)) (* 2 x)).unwrap(),
+            &deftree!(sderiv (sin (pow 'x 2)) 'x).unwrap(),
+            &deftree!(* (cos (pow 'x 2)) (* 2 'x)).unwrap(),
             &[('x', -2., 2.)],
             100,
             1e-14,
@@ -342,15 +342,15 @@ mod test {
     #[test]
     fn t_sqrt() {
         compare_trees(
-            &deftree!(sderiv (sqrt x) x).unwrap(),
-            &deftree!(* 0.5 (pow x (- 0.5))).unwrap(),
+            &deftree!(sderiv (sqrt 'x) 'x).unwrap(),
+            &deftree!(* 0.5 (pow 'x (- 0.5))).unwrap(),
             &[('x', 0.01, 10.)],
             100,
             1e-15,
         );
         compare_trees(
-            &deftree!(sderiv (* x (sqrt x)) x).unwrap(),
-            &deftree!(* 1.5 (pow x 0.5)).unwrap(),
+            &deftree!(sderiv (* 'x (sqrt 'x)) 'x).unwrap(),
+            &deftree!(* 1.5 (pow 'x 0.5)).unwrap(),
             &[('x', 0.01, 10.)],
             100,
             1e-15,
@@ -360,8 +360,8 @@ mod test {
     #[test]
     fn t_abs() {
         compare_trees(
-            &deftree!(sderiv (abs x) x).unwrap(),
-            &deftree!(if (< x 0) (- 1.) 1.).unwrap(),
+            &deftree!(sderiv (abs 'x) 'x).unwrap(),
+            &deftree!(if (< 'x 0) (- 1.) 1.).unwrap(),
             &[('x', -10., 10.)],
             100,
             0.,
@@ -371,8 +371,8 @@ mod test {
     #[test]
     fn t_log() {
         compare_trees(
-            &deftree!(sderiv (log (pow x 2)) x).unwrap(),
-            &deftree!(/ 2 x).unwrap(),
+            &deftree!(sderiv (log (pow 'x 2)) 'x).unwrap(),
+            &deftree!(/ 2 'x).unwrap(),
             &[('x', 0.01, 10.)],
             100,
             1e-14,
@@ -381,7 +381,7 @@ mod test {
 
     #[test]
     fn t_exp() {
-        let tree = deftree!(exp x).unwrap();
+        let tree = deftree!(exp 'x).unwrap();
         compare_trees(
             &tree.clone().symbolic_deriv("x").unwrap(),
             &tree,
@@ -390,8 +390,8 @@ mod test {
             0.,
         );
         compare_trees(
-            &deftree!(sderiv (exp (pow x 2)) x).unwrap(),
-            &deftree!(* 2 (* x (exp (pow x 2)))).unwrap(),
+            &deftree!(sderiv (exp (pow 'x 2)) 'x).unwrap(),
+            &deftree!(* 2 (* 'x (exp (pow 'x 2)))).unwrap(),
             &[('x', -4., 4.)],
             100,
             1e-8,
@@ -401,15 +401,15 @@ mod test {
     #[test]
     fn t_min_max() {
         compare_trees(
-            &deftree!(sderiv (min x (pow x 2)) x).unwrap(),
-            &deftree!(if (and (> x 0) (< x 1)) (* 2 x) 1).unwrap(),
+            &deftree!(sderiv (min 'x (pow 'x 2)) 'x).unwrap(),
+            &deftree!(if (and (> 'x 0) (< 'x 1)) (* 2 'x) 1).unwrap(),
             &[('x', -3., 3.)],
             100,
             1e-14,
         );
         compare_trees(
-            &deftree!(sderiv (max x (pow x 2)) x).unwrap(),
-            &deftree!(if (and (> x 0) (< x 1)) 1 (* 2 x)).unwrap(),
+            &deftree!(sderiv (max 'x (pow 'x 2)) 'x).unwrap(),
+            &deftree!(if (and (> 'x 0) (< 'x 1)) 1 (* 2 'x)).unwrap(),
             &[('x', -3., 3.)],
             100,
             1e-14,
@@ -419,8 +419,8 @@ mod test {
     #[test]
     fn t_ternary() {
         compare_trees(
-            &deftree!(sderiv (sderiv (min x (pow x 2)) x) x).unwrap(),
-            &deftree!(if (and (> x 0) (< x 1)) 2 0).unwrap(),
+            &deftree!(sderiv (sderiv (min 'x (pow 'x 2)) 'x) 'x).unwrap(),
+            &deftree!(if (and (> 'x 0) (< 'x 1)) 2 0).unwrap(),
             &[('x', -3., 5.)],
             100,
             1e-15,
@@ -430,7 +430,7 @@ mod test {
     #[test]
     fn t_floor() {
         compare_trees(
-            &deftree!(sderiv (floor (+ x y)) x).unwrap(),
+            &deftree!(sderiv (floor (+ 'x 'y)) 'x).unwrap(),
             &deftree!(0.).unwrap(),
             &[('x', -1., 1.), ('y', -1., 1.)],
             20,
@@ -441,14 +441,15 @@ mod test {
     #[test]
     fn t_remainder() {
         compare_trees(
-            &deftree!(sderiv (rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)) x).unwrap(),
+            &deftree!(sderiv (rem (+ (+ (* (pow 'x 2) 5) (* 'x 2)) 3) (* (pow 'x 2) 3)) 'x)
+                .unwrap(),
             &deftree!(-
-                      (+ (* 10 x) 2)
+                      (+ (* 10 'x) 2)
                       (*
-                       (* 6 x)
+                       (* 6 'x)
                        (floor (/
-                               (+ (+ (* (pow x 2) 5) (* x 2)) 3)
-                               (* (pow x 2) 3)))))
+                               (+ (+ (* (pow 'x 2) 5) (* 'x 2)) 3)
+                               (* (pow 'x 2) 3)))))
             .unwrap(),
             &[('x', -1., 1.)],
             100,
@@ -459,22 +460,23 @@ mod test {
     #[test]
     fn t_numerical() {
         compare_trees(
-            &deftree!(nderiv (pow x 2) x 1e-4).unwrap(),
-            &deftree!(* 2 x).unwrap(),
+            &deftree!(nderiv (pow 'x 2) 'x 1e-4).unwrap(),
+            &deftree!(* 2 'x).unwrap(),
             &[('x', -10., 10.)],
             100,
             1e-10,
         );
         compare_trees(
-            &deftree!(nderiv (- (sqrt (+ (pow x 2) (pow y 2))) 5.) xy 1e-4).unwrap(),
-            &deftree!(reshape (/ (concat x y) (sqrt (+ (pow x 2) (pow y 2)))) 1 2).unwrap(),
+            &deftree!(nderiv (- (sqrt (+ (pow 'x 2) (pow 'y 2))) 5.) 'xy 1e-4).unwrap(),
+            &deftree!(reshape (/ (concat 'x 'y) (sqrt (+ (pow 'x 2) (pow 'y 2)))) 1 2).unwrap(),
             &[('y', -10., 10.), ('x', -10., 10.)],
             20,
             1e-7,
         );
         compare_trees(
-            &deftree!(nderiv (concat (+ (* 3 (pow x 2)) y) (+ (* 3 (pow y 2)) x)) xy 1e-4).unwrap(),
-            &deftree!(reshape (concat (* 6 x) 1 1 (* 6 y)) 2 2).unwrap(),
+            &deftree!(nderiv (concat (+ (* 3 (pow 'x 2)) 'y) (+ (* 3 (pow 'y 2)) 'x)) 'xy 1e-4)
+                .unwrap(),
+            &deftree!(reshape (concat (* 6 'x) 1 1 (* 6 'y)) 2 2).unwrap(),
             &[('y', -10., 10.), ('x', -10., 10.)],
             20,
             1e-7,

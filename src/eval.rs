@@ -240,7 +240,7 @@ mod test {
             (20., 21., 29.),
             (12., 35., 37.),
         ];
-        let h = deftree!(sqrt (+ (pow x 2.) (pow y 2.))).unwrap();
+        let h = deftree!(sqrt (+ (pow 'x 2.) (pow 'y 2.))).unwrap();
         let mut eval = ValueEvaluator::new(&h);
         for (x, y, expected) in TRIPLETS {
             eval.set_value('x', x.into());
@@ -255,7 +255,7 @@ mod test {
     #[test]
     fn t_trig_identity() {
         const PI_2: f64 = std::f64::consts::TAU;
-        let sum = deftree!(+ (pow (sin x) 2.) (pow (cos x) 2.)).unwrap();
+        let sum = deftree!(+ (pow (sin 'x) 2.) (pow (cos 'x) 2.)).unwrap();
         let mut eval = ValueEvaluator::new(&sum);
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
@@ -270,7 +270,7 @@ mod test {
     #[test]
     fn t_sum() {
         check_value_eval(
-            deftree!(+ x y).unwrap(),
+            deftree!(+ 'x 'y).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
                     output[0] = x + y;
@@ -285,7 +285,7 @@ mod test {
     #[test]
     fn t_tree_1() {
         check_value_eval(
-            deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap(),
+            deftree!(/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
                     output[0] = f64::powf(f64::ln(f64::sin(x) + 2.), 3.) / (f64::cos(x) + 2.);
@@ -302,9 +302,9 @@ mod test {
         check_value_eval(
             deftree!(
                 (max (min
-                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+                      (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
             )
             .unwrap(),
             |vars: &[f64], output: &mut [f64]| {
@@ -331,8 +331,8 @@ mod test {
     fn t_trees_concat_0() {
         check_value_eval(
             deftree!(concat
-                            (log x)
-                            (+ x (pow y 2.)))
+                            (log 'x)
+                            (+ 'x (pow 'y 2.)))
             .unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y] = vars[..] {
@@ -350,12 +350,12 @@ mod test {
     fn t_trees_concat_1() {
         check_value_eval(
             deftree!(concat
-                     (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
-                     (+ x y)
+                     (/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.))
+                     (+ 'x 'y)
                      ((max (min
-                            (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                            (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-                       (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+                            (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                            (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                       (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
             )).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x, y, z] = vars[..] {
@@ -385,7 +385,7 @@ mod test {
     #[test]
     fn t_choose() {
         check_value_eval(
-            deftree!(if (> x 0) x (-x)).unwrap(),
+            deftree!(if (> 'x 0) 'x (- 'x)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
                     output[0] = if x < 0. { -x } else { x };
@@ -396,7 +396,7 @@ mod test {
             0.,
         );
         check_value_eval(
-            deftree!(if (< x 0) (- x) x).unwrap(),
+            deftree!(if (< 'x 0) (- 'x) 'x).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
                     output[0] = if x < 0. { -x } else { x };
@@ -411,7 +411,7 @@ mod test {
     #[test]
     fn t_floor() {
         check_value_eval(
-            deftree!(floor (log x)).unwrap(),
+            deftree!(floor (log 'x)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
                     output[0] = f64::ln(x).floor();
@@ -426,7 +426,7 @@ mod test {
     #[test]
     fn t_remainder() {
         check_value_eval(
-            deftree!(rem (+ (+ (* (pow x 2) 5) (* x 2)) 3) (* (pow x 2) 3)).unwrap(),
+            deftree!(rem (+ (+ (* (pow 'x 2) 5) (* 'x 2)) 3) (* (pow 'x 2) 3)).unwrap(),
             |vars: &[f64], output: &mut [f64]| {
                 if let [x] = vars[..] {
                     output[0] = (5. * x * x + 2. * x + 3.).rem_euclid(3. * x * x);

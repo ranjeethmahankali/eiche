@@ -119,125 +119,125 @@ impl Template {
 static BASE_TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
     vec![
         deftemplate!(distribute_mul
-                     ping (+ (* k a) (* k b))
-                     pong (* k (+ a b))
+                     ping (+ (* 'k 'a) (* 'k 'b))
+                     pong (* 'k (+ 'a 'b))
         ),
         deftemplate!(min_of_sqrt
-                     ping (min (sqrt a) (sqrt b))
-                     pong (sqrt (min a b))
+                     ping (min (sqrt 'a) (sqrt 'b))
+                     pong (sqrt (min 'a 'b))
         ),
         deftemplate!(rearrange_frac
-                     ping (* (/ a b) (/ x y))
-                     pong (* (/ a y) (/ x b))
+                     ping (* (/ 'a 'b) (/ 'x 'y))
+                     pong (* (/ 'a 'y) (/ 'x 'b))
         ),
         deftemplate!(rearrange_mul_div_1
-                     ping (/ (* x y) z)
-                     pong (* x (/ y z))
+                     ping (/ (* 'x 'y) 'z)
+                     pong (* 'x (/ 'y 'z))
         ),
         deftemplate!(rearrange_mul_div_2
-                     ping (/ (* x y) z)
-                     pong (* y (/ x z))
+                     ping (/ (* 'x 'y) 'z)
+                     pong (* 'y (/ 'x 'z))
         ),
         deftemplate!(rearrange_div_div_1
-                     ping (/ (/ a b) c)
-                     pong (/ a (* b c))),
+                     ping (/ (/ 'a 'b) 'c)
+                     pong (/ 'a (* 'b 'c))),
         deftemplate!(rearrange_mul_1
-                     ping (* x (* y z))
-                     pong (* (* x z) y)),
+                     ping (* 'x (* 'y 'z))
+                     pong (* (* 'x 'z) 'y)),
         deftemplate!(rearrange_mul_2
-                     ping (* x (* y z))
-                     pong (* (* x y) z)),
+                     ping (* 'x (* 'y 'z))
+                     pong (* (* 'x 'y) 'z)),
         deftemplate!(rearrange_add_1
-                     ping (+ x (+ y z))
-                     pong (+ (+ x z) y)),
+                     ping (+ 'x (+ 'y 'z))
+                     pong (+ (+ 'x 'z) 'y)),
         deftemplate!(rearrange_add_2
-                     ping (+ x (+ y z))
-                     pong (+ (+ x y) z)),
+                     ping (+ 'x (+ 'y 'z))
+                     pong (+ (+ 'x 'y) 'z)),
         deftemplate!(rearrange_add_sub_1
-                     ping (- (+ x y) z)
-                     pong (+ (- x z) y)),
+                     ping (- (+ 'x 'y) 'z)
+                     pong (+ (- 'x 'z) 'y)),
         deftemplate!(rearrange_add_sub_2
-                     ping (- (+ x y) z)
-                     pong (+ x (- y z))),
+                     ping (- (+ 'x 'y) 'z)
+                     pong (+ 'x (- 'y 'z))),
         deftemplate!(divide_by_self
-                     ping (/ a a)
+                     ping (/ 'a 'a)
                      pong (1.0)
         ),
         deftemplate!(pow_divide_by_self
-                     ping (/ (pow x a) x)
-                     pong (pow x (- a 1))),
+                     ping (/ (pow 'x 'a) 'x)
+                     pong (pow 'x (- 'a 1))),
         deftemplate!(pow_divide_collapse
-                     ping (/ (pow x a) (pow x b))
-                     pong (pow x (- a b))),
+                     ping (/ (pow 'x 'a) (pow 'x 'b))
+                     pong (pow 'x (- 'a 'b))),
         deftemplate!(distribute_pow_div
-                     ping (pow (/ a b) k)
-                     pong (/ (pow a k) (pow b k))
+                     ping (pow (/ 'a 'b) 'k)
+                     pong (/ (pow 'a 'k) (pow 'b 'k))
         ),
         deftemplate!(distribute_pow_mul
-                     ping (pow (* a b) k)
-                     pong (* (pow a k) (pow b k))
+                     ping (pow (* 'a 'b) 'k)
+                     pong (* (pow 'a 'k) (pow 'b 'k))
         ),
         deftemplate!(square_sqrt
-                     ping (pow (sqrt a) 2.)
-                     pong (a)
+                     ping (pow (sqrt 'a) 2.)
+                     pong ('a)
         ),
         deftemplate!(sqrt_square
-                     ping (sqrt (pow a 2.))
-                     pong (abs a)
+                     ping (sqrt (pow 'a 2.))
+                     pong (abs 'a)
         ),
         deftemplate!(square_abs
-                     ping (pow (abs x) 2.)
-                     pong (pow x 2.)
+                     ping (pow (abs 'x) 2.)
+                     pong (pow 'x 2.)
         ),
         deftemplate!(mul_exponents
-                     ping (pow (pow a x) y)
-                     pong (pow a (* x y))
+                     ping (pow (pow 'a 'x) 'y)
+                     pong (pow 'a (* 'x 'y))
         ),
         deftemplate!(add_exponents
-                     ping (* (pow a x) (pow a y))
-                     pong (pow a (+ x y))
+                     ping (* (pow 'a 'x) (pow 'a 'y))
+                     pong (pow 'a (+ 'x 'y))
         ),
         deftemplate!(add_frac
-                     ping (+ (/ x z) (/ y z))
-                     pong (/ (+ x y) z)
+                     ping (+ (/ 'x 'z) (/ 'y 'z))
+                     pong (/ (+ 'x 'y) 'z)
         ),
         // ====== Min and max simplifications ======
 
         // https://math.stackexchange.com/questions/1195917/simplifying-a-function-that-has-max-and-min-expressions
         deftemplate!(min_expand
-                     ping (min a b)
-                     pong (/ (- (+ a b) (abs (- b a))) 2.)
+                     ping (min 'a 'b)
+                     pong (/ (- (+ 'a 'b) (abs (- 'b 'a))) 2.)
         ),
         deftemplate!(max_expand
-                     ping (max a b)
-                     pong (/ (+ (+ a b) (abs (- b a))) 2.)
+                     ping (max 'a 'b)
+                     pong (/ (+ (+ 'a 'b) (abs (- 'b 'a))) 2.)
 
         ),
         deftemplate!(min_of_sub_1
-                     ping (min (- z x) (- z y))
-                     pong (- z (max x y))
+                     ping (min (- 'z 'x) (- 'z 'y))
+                     pong (- 'z (max 'x 'y))
         ),
         deftemplate!(min_of_sub_2
-                     ping (min (- x z) (- y z))
-                     pong (- (min x y) z)
+                     ping (min (- 'x 'z) (- 'y 'z))
+                     pong (- (min 'x 'y) 'z)
         ),
         deftemplate!(min_of_add_1
-                     ping (min (+ x z) (+ y z))
-                     pong (+ z (min x y))
+                     ping (min (+ 'x 'z) (+ 'y 'z))
+                     pong (+ 'z (min 'x 'y))
         ),
         deftemplate!(min_self
-                     ping (min x x)
-                     pong (x)),
+                     ping (min 'x 'x)
+                     pong ('x)),
         deftemplate!(max_self
-                     ping (max x x)
-                     pong (x)),
+                     ping (max 'x 'x)
+                     pong ('x)),
         // ======== Polynomial simplifications ========
         deftemplate!(x_plus_y_squared
-                     ping (pow (+ x y) 2.)
-                     pong ((+ (+ (pow x 2.) (pow y 2.)) (* 2. (* x y))))),
+                     ping (pow (+ 'x 'y) 2.)
+                     pong ((+ (+ (pow 'x 2.) (pow 'y 2.)) (* 2. (* 'x 'y))))),
         deftemplate!(x_minus_y_squared
-                     ping (pow (- x y) 2.)
-                     pong ((- (+ (pow x 2.) (pow y 2.)) (* 2. (* x y))))),
+                     ping (pow (- 'x 'y) 2.)
+                     pong ((- (+ (pow 'x 2.) (pow 'y 2.)) (* 2. (* 'x 'y))))),
     ]
 });
 

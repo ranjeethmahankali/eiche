@@ -163,7 +163,7 @@ where
 }
 
 /// Represents things that can go wrong when pruning.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum PruningError {
     /// This is returned when the trees (with instructions), or the stack of
     /// intervals is empty when they're expected to not be.
@@ -536,15 +536,15 @@ mod test {
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
     fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
-        deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
+        deftree!(- (sqrt (+ (pow (- 'x (const cx)) 2) (pow (- 'y (const cy)) 2))) (const r))
     }
 
     fn sphere(cx: f64, cy: f64, cz: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+
-                          (pow (- x (const cx)) 2)
+                          (pow (- 'x (const cx)) 2)
                           (+
-                           (pow (- y (const cy)) 2)
-                           (pow (- z (const cz)) 2))))
+                           (pow (- 'y (const cy)) 2)
+                           (pow (- 'z (const cz)) 2))))
                  (const r))
     }
 

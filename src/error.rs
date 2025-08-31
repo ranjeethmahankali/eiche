@@ -1,6 +1,6 @@
 use crate::interval::pruning_eval::PruningError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Error {
     /// Nodes are not in a valid topological order.
     WrongNodeOrder,
@@ -23,6 +23,8 @@ pub enum Error {
     TypeMismatch,
     /// Something went wrong when trying to do interval airthmetic.
     InvalidInterval,
+    /// Index out of bounds,
+    IndexOutOfBounds(usize, usize),
 
     // Evaluation related errors
     /// A symbol was not assigned a value before evaluating.
@@ -38,6 +40,7 @@ pub enum Error {
 
     // Jit
     InputSizeMismatch(usize, usize),
+    OutputSizeMismatch(usize, usize),
     CannotCreateJitModule,
     CannotCompileIntrinsic(&'static str),
     JitCompilationError(String),

@@ -52,9 +52,9 @@ mod spheres {
         let mut rng = StdRng::seed_from_u64(42);
         let mut make_sphere = || -> Result<Tree, Error> {
             deftree!(- (sqrt (+ (+
-                                 (pow (- x (const sample_range(X_RANGE, &mut rng))) 2)
-                                 (pow (- y (const sample_range(Y_RANGE, &mut rng))) 2))
-                              (pow (- z (const sample_range(Z_RANGE, &mut rng))) 2)))
+                                 (pow (- 'x (const sample_range(X_RANGE, &mut rng))) 2)
+                                 (pow (- 'y (const sample_range(Y_RANGE, &mut rng))) 2))
+                              (pow (- 'z (const sample_range(Z_RANGE, &mut rng))) 2)))
                      (const sample_range(RADIUS_RANGE, &mut rng)))
         };
         let mut tree = make_sphere();
@@ -134,13 +134,19 @@ mod spheres {
                 {
                     let mut dedup = Deduplicater::new();
                     let mut pruner = Pruner::new();
-                    random_sphere_union()
+                    let tree = random_sphere_union()
                         .fold()
                         .unwrap()
                         .deduplicate(&mut dedup)
                         .unwrap()
                         .prune(&mut pruner)
-                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        tree.symbols().len(),
+                        3,
+                        "Several unchecked function calls in other benchmarks require the the tree to haev exactly three inputs."
+                    );
+                    tree
                 },
                 (0..N_QUERIES)
                     .map(|_| {
@@ -158,12 +164,21 @@ mod spheres {
         /// Includes the time to jit-compile the tree.
         fn with_compilation<T>(tree: &Tree, values: &mut Vec<T>, queries: &[[T; 3]])
         where
-            T: NumberType,
+            T: NumberType + Copy,
         {
             values.clear();
             let context = JitContext::default();
-            let mut eval = tree.jit_compile(&context).unwrap();
-            values.extend(queries.iter().map(|coords| eval.run_unchecked(coords)[0]));
+            let eval = tree.jit_compile(&context).unwrap();
+            values.extend(queries.iter().map(|coords| {
+                let mut output = [T::nan()];
+                // SAFETY: There is an assert to make sure the tree has 3 input
+                // symbols. That is what the safe version would check for, so
+                // we don't need to check here.
+                unsafe {
+                    eval.run_unchecked(coords, &mut output);
+                }
+                output[0]
+            }));
         }
 
         /// Does not include the time to jit-compile the tree.
@@ -172,7 +187,16 @@ mod spheres {
             T: NumberType,
         {
             values.clear();
-            values.extend(queries.iter().map(|coords| eval.run_unchecked(coords)[0]));
+            values.extend(queries.iter().map(|coords| {
+                let mut output = [T::nan()];
+                // SAFETY: There is an assert to make sure the tree has 3 input
+                // symbols. That is what the safe version would check for, so we
+                // don't need to check here.
+                unsafe {
+                    eval.run_unchecked(coords, &mut output);
+                }
+                output[0]
+            }));
         }
 
         fn b_with_compile(c: &mut Criterion) {
@@ -223,38 +247,43 @@ mod spheres {
     #[cfg(feature = "llvm-jit")]
     pub mod jit_simd {
         use super::*;
-        use eiche::{JitContext, JitSimdFn, SimdVec, Wfloat};
+        use eiche::{
+            JitContext, JitSimdFn, SimdVec, Wide,
+            llvm_jit::{NumberType, simd_array::JitSimdBuffers},
+        };
 
-        fn no_compilation<T>(eval: &mut JitSimdFn<'_, T>, values: &mut Vec<T>)
+        fn no_compilation<T>(eval: &mut JitSimdFn<'_, T>, buf: &mut JitSimdBuffers<T>)
         where
-            Wfloat: SimdVec<T>,
-            T: Copy,
+            Wide: SimdVec<T>,
+            T: Copy + NumberType,
         {
-            values.clear();
-            eval.run(values);
+            buf.clear_outputs();
+            eval.run(buf);
         }
 
         fn b_no_compilation_f64(c: &mut Criterion) {
-            let (tree, queries, mut values) = jit_single::init_benchmark::<f64>();
+            let (tree, queries, _) = jit_single::init_benchmark::<f64>();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
+            let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
-                eval.push(&q).unwrap();
+                buf.pack(&q).unwrap();
             }
             c.bench_function("spheres-jit-simd-f64-no-compilation", |b| {
-                b.iter(|| no_compilation(&mut eval, black_box(&mut values)))
+                b.iter(|| no_compilation(black_box(&mut eval), black_box(&mut buf)))
             });
         }
 
         fn b_no_compilation_f32(c: &mut Criterion) {
-            let (tree, queries, mut values) = jit_single::init_benchmark::<f32>();
+            let (tree, queries, _) = jit_single::init_benchmark::<f32>();
             let context = JitContext::default();
             let mut eval = tree.jit_compile_array(&context).unwrap();
+            let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
-                eval.push(&q).unwrap();
+                buf.pack(&q).unwrap();
             }
             c.bench_function("spheres-jit-simd-f32-no-compilation", |b| {
-                b.iter(|| no_compilation(&mut eval, black_box(&mut values)))
+                b.iter(|| no_compilation(black_box(&mut eval), black_box(&mut buf)))
             });
         }
 
@@ -274,7 +303,7 @@ mod circles {
     const N_CIRCLES: usize = 100;
 
     fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
-        deftree!(- (sqrt (+ (pow (- x (const cx)) 2) (pow (- y (const cy)) 2))) (const r))
+        deftree!(- (sqrt (+ (pow (- 'x (const cx)) 2) (pow (- 'y (const cy)) 2))) (const r))
     }
 
     fn random_circles(
@@ -388,13 +417,18 @@ mod circles {
 
         fn with_compilation(tree: &Tree, image: &mut ImageBuffer) {
             let context = JitContext::default();
-            let mut eval = tree.jit_compile(&context).unwrap();
+            let eval = tree.jit_compile(&context).unwrap();
             let mut coord = [0., 0.];
             for y in 0..DIMS {
                 coord[1] = y as f64 + 0.5;
                 for x in 0..DIMS {
                     coord[0] = x as f64 + 0.5;
-                    let val = eval.run_unchecked(&coord)[0];
+                    let mut output = [0.];
+                    // SAFETY: Upstream functions assert to make sure the tree
+                    // has exactly 2 inputs. This is what the safe version
+                    // checks for, so we don't need to check agian.
+                    unsafe { eval.run_unchecked(&coord, &mut output) };
+                    let val = output[0];
                     *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
                         f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
                     } else {
@@ -410,7 +444,12 @@ mod circles {
                 coord[1] = y as f64 + 0.5;
                 for x in 0..DIMS {
                     coord[0] = x as f64 + 0.5;
-                    let val = eval.run_unchecked(&coord)[0];
+                    let mut output = [0.];
+                    // SAFETY: Upstream functions assert to make sure the tree
+                    // has exactly 3 inputs. This is what the safe version
+                    // checks for, so we don't need to check agian.
+                    unsafe { eval.run_unchecked(&coord, &mut output) };
+                    let val = output[0];
                     *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
                         f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
                     } else {
@@ -422,6 +461,11 @@ mod circles {
 
         fn b_with_compile(c: &mut Criterion) {
             let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+            assert_eq!(
+                tree.symbols().len(),
+                2,
+                "Later calls require exactly two inputs."
+            );
             let mut image = ImageBuffer::new(DIMS, DIMS);
             c.bench_function("circles-jit-single-eval-with-compile", |b| {
                 b.iter(|| {

@@ -313,28 +313,28 @@ mod test {
 
     #[test]
     fn t_recursive_compare_2() {
-        let tree1 = deftree!(/ (+ (* x y) (+ b a)) (* (+ y x) (* a b))).unwrap();
-        let tree2 = deftree!(/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))).unwrap();
+        let tree1 = deftree!(/ (+ (* 'x 'y) (+ 'b 'a)) (* (+ 'y 'x) (* 'a 'b))).unwrap();
+        let tree2 = deftree!(/ (+ (* 'y 'x) (+ 'a 'b)) (* (+ 'y 'x) (* 'b 'a))).unwrap();
         assert!(tree1.equivalent(&tree2));
     }
 
     #[test]
     fn t_recursive_compare_concat() {
-        let tree1 = deftree!(concat (+ x y) (* y x)).unwrap();
-        let tree2 = deftree!(concat (+ y x) (* x y)).unwrap();
+        let tree1 = deftree!(concat (+ 'x 'y) (* 'y 'x)).unwrap();
+        let tree2 = deftree!(concat (+ 'y 'x) (* 'x 'y)).unwrap();
         assert!(tree1.equivalent(&tree2));
         let tree1 = deftree!(concat
-                             (/ 1 (log (+ x y)))
-                             (/ (+ (* x y) (+ b a)) (* (+ y x) (* a b))))
+                             (/ 1 (log (+ 'x 'y)))
+                             (/ (+ (* 'x 'y) (+ 'b 'a)) (* (+ 'y 'x) (* 'a 'b))))
         .unwrap();
         let tree2 = deftree!(concat
-                             (/ 1 (log (+ x y)))
-                             (/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))))
+                             (/ 1 (log (+ 'x 'y)))
+                             (/ (+ (* 'y 'x) (+ 'a 'b)) (* (+ 'y 'x) (* 'b 'a))))
         .unwrap();
         assert!(tree1.equivalent(&tree2));
         let tree2 = deftree!(concat
-                             (/ 1 (log (* x y)))
-                             (/ (+ (* y x) (+ a b)) (* (+ y x) (* b a))))
+                             (/ 1 (log (* 'x 'y)))
+                             (/ (+ (* 'y 'x) (+ 'a 'b)) (* (+ 'y 'x) (* 'b 'a))))
         .unwrap();
         assert!(!tree1.equivalent(&tree2));
     }
@@ -344,13 +344,13 @@ mod test {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         // Sanity check with the same tree.
-        let a = deftree!(/ (* k (+ x y)) (+ x y))
+        let a = deftree!(/ (* 'k (+ 'x 'y)) (+ 'x 'y))
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
             .prune(&mut pruner)
             .unwrap();
-        let b = deftree!(/ (* k (+ x y)) (+ x y))
+        let b = deftree!(/ (* 'k (+ 'x 'y)) (+ 'x 'y))
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
@@ -369,9 +369,9 @@ mod test {
         let tree = deftree!(
             max (
                 min
-                    (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                    (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-                (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25)
+                    (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                    (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25)
         )
         .unwrap();
         let nodup = tree
@@ -395,7 +395,7 @@ mod test {
     fn t_deduplication_2() {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
-        let tree = deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap();
+        let tree = deftree!(/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.)).unwrap();
         let nodup = tree
             .clone()
             .deduplicate(&mut dedup)
@@ -413,8 +413,8 @@ mod test {
         let mut pruner = Pruner::new();
         let tree = deftree!(
             (/
-             (+ (pow (sin x) 2.) (+ (pow (cos x) 2.) (* 2. (* (sin x) (cos x)))))
-             (+ (pow (sin y) 2.) (+ (pow (cos y) 2.) (* 2. (* (sin y) (cos y))))))
+             (+ (pow (sin 'x) 2.) (+ (pow (cos 'x) 2.) (* 2. (* (sin 'x) (cos 'x)))))
+             (+ (pow (sin 'y) 2.) (+ (pow (cos 'y) 2.) (* 2. (* (sin 'y) (cos 'y))))))
         )
         .unwrap();
         let nodup = tree
@@ -431,9 +431,9 @@ mod test {
     #[test]
     fn t_ternary() {
         assert!(
-            deftree!(if (< x 0) (log (* x 3)) (exp (+ x 3)))
+            deftree!(if (< 'x 0) (log (* 'x 3)) (exp (+ 'x 3)))
                 .unwrap()
-                .equivalent(&deftree!(if (< x 0) (log (* 3 x)) (exp (+ 3 x))).unwrap())
+                .equivalent(&deftree!(if (< 'x 0) (log (* 3 'x)) (exp (+ 3 'x))).unwrap())
         );
     }
 }

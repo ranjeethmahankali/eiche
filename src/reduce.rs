@@ -176,10 +176,13 @@ pub fn reduce(tree: Tree, max_iter: usize) -> Result<Vec<Tree>, Error> {
     }
     let mut steps = Vec::<Tree>::new();
     let mut i = best_candidate;
-    while explored[i].prev != i {
+    loop {
         let cand = &explored[i];
         steps.push(cand.tree.clone());
         i = cand.prev;
+        if explored[i].prev == i {
+            break;
+        }
     }
     steps.reverse();
     Ok(steps)
@@ -195,7 +198,7 @@ mod test {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
-        let tree = deftree!(+ x x)
+        let tree = deftree!(+ 'x 'x)
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
@@ -209,7 +212,7 @@ mod test {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
-        let tree = deftree!(+ (* 2 x) (* 3 x))
+        let tree = deftree!(+ (* 2 'x) (* 3 'x))
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
@@ -223,7 +226,7 @@ mod test {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
-        let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (* 4 x))
+        let tree = deftree!(+ (+ (* 2 'x) (* 3 'x)) (* 4 'x))
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
@@ -231,7 +234,7 @@ mod test {
             .unwrap();
         assert_eq!(h.euler_walk_cost(tree.nodes(), tree.root_indices()), 13);
         // Make sure the same heuristic instance can be reused on other trees.
-        let tree = deftree!(+ (+ (* 2 x) (* 3 x)) (+ (* 4 x) 2))
+        let tree = deftree!(+ (+ (* 2 'x) (* 3 'x)) (+ (* 4 'x) 2))
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
@@ -245,7 +248,7 @@ mod test {
         let mut dedup = Deduplicater::new();
         let mut pruner = Pruner::new();
         let mut h = Heuristic::new();
-        let tree = deftree!(+ (* 2 (+ x y)) (* (+ x y) 3))
+        let tree = deftree!(+ (* 2 (+ 'x 'y)) (* (+ 'x 'y) 3))
             .unwrap()
             .deduplicate(&mut dedup)
             .unwrap()
@@ -288,30 +291,30 @@ mod test {
     #[test]
     fn t_heuristic_cost_1() {
         check_heuristic_and_mutations(
-            deftree!(/ (+ (* p x) (* p y)) (+ x y)).unwrap(),
-            deftree!(/ (* p (+ x y)) (+ x y)).unwrap(),
+            deftree!(/ (+ (* 'p 'x) (* 'p 'y)) (+ 'x 'y)).unwrap(),
+            deftree!(/ (* 'p (+ 'x 'y)) (+ 'x 'y)).unwrap(),
         );
     }
 
     #[test]
     fn t_heuristic_cost_2() {
         check_heuristic_and_mutations(
-            deftree!(log (+ 1 (exp (min (sqrt x) (sqrt y))))).unwrap(),
-            deftree!(log (+ 1 (exp (sqrt (min x y))))).unwrap(),
+            deftree!(log (+ 1 (exp (min (sqrt 'x) (sqrt 'y))))).unwrap(),
+            deftree!(log (+ 1 (exp (sqrt (min 'x 'y))))).unwrap(),
         );
     }
 
     #[test]
     fn t_factoring() {
-        let tree = deftree!(/ (+ (* p x) (* p y)) (+ x y)).unwrap();
+        let tree = deftree!(/ (+ (* 'p 'x) (* 'p 'y)) (+ 'x 'y)).unwrap();
         let steps = reduce(tree, 8).unwrap();
-        assert!(steps.last().unwrap().equivalent(&deftree!(p).unwrap()));
+        assert!(steps.last().unwrap().equivalent(&deftree!('p).unwrap()));
     }
 
     #[test]
     fn t_norm_vec_len() {
-        let tree = deftree!(sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
-                                  (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
+        let tree = deftree!(sqrt (+ (pow (/ 'x (sqrt (+ (pow 'x 2) (pow 'y 2)))) 2)
+                                  (pow (/ 'y (sqrt (+ (pow 'x 2) (pow 'y 2)))) 2)))
         .unwrap();
         let steps = reduce(tree, 8).unwrap();
         assert!(steps.last().unwrap().equivalent(&deftree!(1).unwrap()));
@@ -320,7 +323,7 @@ mod test {
     #[test]
     fn t_concat_1() {
         let tree = deftree!(concat
-                            (/ (+ (* p x) (* p y)) (+ x y))
+                            (/ (+ (* 'p 'x) (* 'p 'y)) (+ 'x 'y))
                             1.
         )
         .unwrap();
@@ -329,15 +332,15 @@ mod test {
             steps
                 .last()
                 .unwrap()
-                .equivalent(&deftree!(concat p 1).unwrap())
+                .equivalent(&deftree!(concat 'p 1).unwrap())
         );
     }
 
     #[test]
     fn t_concat_2() {
         let tree = deftree!(concat
-                            (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
-                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2)))
+                            (sqrt (+ (pow (/ 'x (sqrt (+ (pow 'x 2) (pow 'y 2)))) 2)
+                                   (pow (/ 'y (sqrt (+ (pow 'x 2) (pow 'y 2)))) 2)))
                             42.)
         .unwrap();
         let steps = reduce(tree, 12).unwrap();
@@ -352,26 +355,26 @@ mod test {
     #[test]
     fn t_concat_3() {
         let tree = deftree!(concat
-                            (/ (+ (* p x) (* p y)) (+ x y))
-                            (sqrt (+ (pow (/ x (sqrt (+ (pow x 2) (pow y 2)))) 2)
-                                   (pow (/ y (sqrt (+ (pow x 2) (pow y 2)))) 2))))
+                            (/ (+ (* 'p 'x) (* 'p 'y)) (+ 'x 'y))
+                            (sqrt (+ (pow (/ 'x (sqrt (+ (pow 'x 2) (pow 'y 2)))) 2)
+                                   (pow (/ 'y (sqrt (+ (pow 'x 2) (pow 'y 2)))) 2))))
         .unwrap();
         let steps = reduce(tree, 12).unwrap();
         assert!(
             steps
                 .last()
                 .unwrap()
-                .equivalent(&deftree!(concat p 1.).unwrap())
+                .equivalent(&deftree!(concat 'p 1.).unwrap())
         );
     }
 
     #[test]
     fn t_gradient() {
-        let tree = deftree!(sderiv (- (+ (pow x 2) (pow y 2)) 5) xy).unwrap();
+        let tree = deftree!(sderiv (- (+ (pow 'x 2) (pow 'y 2)) 5) 'xy).unwrap();
         let steps = reduce(tree, 12).unwrap();
         assert!(
             steps.last().unwrap().equivalent(
-                &deftree!(concat (* 2 x) (* 2 y))
+                &deftree!(concat (* 2 'x) (* 2 'y))
                     .unwrap()
                     .reshape(1, 2)
                     .unwrap()
@@ -381,18 +384,18 @@ mod test {
 
     #[test]
     fn t_second_deriv() {
-        let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) x) x).unwrap();
+        let tree = deftree!(sderiv (sderiv (- (+ (pow 'x 3) (pow 'y 3)) 5) 'x) 'x).unwrap();
         let steps = reduce(tree, 32).unwrap();
-        assert!(steps.last().unwrap().equivalent(&deftree!(* 6 x).unwrap()));
+        assert!(steps.last().unwrap().equivalent(&deftree!(* 6 'x).unwrap()));
     }
 
     #[test]
     fn t_hessian() {
-        let tree = deftree!(sderiv (sderiv (- (+ (pow x 3) (pow y 3)) 5) xy) xy).unwrap();
+        let tree = deftree!(sderiv (sderiv (- (+ (pow 'x 3) (pow 'y 3)) 5) 'xy) 'xy).unwrap();
         let steps = reduce(tree, 256).unwrap();
         assert!(
             steps.last().unwrap().equivalent(
-                &deftree!(concat (* x 6) 0 0 (* y 6))
+                &deftree!(concat (* 'x 6) 0 0 (* 'y 6))
                     .unwrap()
                     .reshape(2, 2)
                     .unwrap()
@@ -402,13 +405,13 @@ mod test {
 
     #[test]
     fn t_circle_gradient() {
-        let tree = deftree!(sderiv (- (sqrt (+ (pow x 2) (pow y 2))) 3) xy).unwrap();
+        let tree = deftree!(sderiv (- (sqrt (+ (pow 'x 2) (pow 'y 2))) 3) 'xy).unwrap();
         let steps = reduce(tree, 64).unwrap();
         assert!(
             steps.last().unwrap().equivalent(
                 &deftree!(concat
-                      (/ x (sqrt (+ (pow x 2) (pow y 2))))
-                      (/ y (sqrt (+ (pow x 2) (pow y 2)))))
+                      (/ 'x (sqrt (+ (pow 'x 2) (pow 'y 2))))
+                      (/ 'y (sqrt (+ (pow 'x 2) (pow 'y 2)))))
                 .unwrap()
                 .reshape(1, 2)
                 .unwrap()
@@ -419,18 +422,24 @@ mod test {
     #[test]
     fn t_min_max_self() {
         assert!(
-            reduce(deftree!(min (+ (pow x 2) y) (+ y (pow x 2))).unwrap(), 2)
-                .unwrap()
-                .last()
-                .unwrap()
-                .equivalent(&deftree!(+ (pow x 2) y).unwrap())
+            reduce(
+                deftree!(min (+ (pow 'x 2) 'y) (+ 'y (pow 'x 2))).unwrap(),
+                2
+            )
+            .unwrap()
+            .last()
+            .unwrap()
+            .equivalent(&deftree!(+ (pow 'x 2) 'y).unwrap())
         );
         assert!(
-            reduce(deftree!(max (+ (pow x 2) y) (+ y (pow x 2))).unwrap(), 2)
-                .unwrap()
-                .last()
-                .unwrap()
-                .equivalent(&deftree!(+ (pow x 2) y).unwrap())
+            reduce(
+                deftree!(max (+ (pow 'x 2) 'y) (+ 'y (pow 'x 2))).unwrap(),
+                2
+            )
+            .unwrap()
+            .last()
+            .unwrap()
+            .equivalent(&deftree!(+ (pow 'x 2) 'y).unwrap())
         );
     }
 }
