@@ -140,10 +140,12 @@ impl SimdVec<f32> for Wide {
     }
 
     fn set(&mut self, val: f32, idx: usize) {
+        // SAFETY: accessing the union. valsf32 is correct.
         unsafe { self.valsf32[idx] = val }
     }
 
     fn get(&self, idx: usize) -> f32 {
+        // SAFETY: accesing the union, valsf32 is correct.
         unsafe { self.valsf32[idx] }
     }
 
@@ -170,21 +172,21 @@ impl SimdVec<f32> for Wide {
     fn mul(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_mul_ps(a.reg32, b.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrnsics. reg32 is correct.
+                reg32: unsafe { _mm256_mul_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrnsics. reg32 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vmulq_f32(a.reg32.0, b.reg32.0),
                         vmulq_f32(a.reg32.1, b.reg32.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -192,21 +194,21 @@ impl SimdVec<f32> for Wide {
     fn div(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_div_ps(a.reg32, b.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrnsics. reg32 is correct.
+                reg32: unsafe { _mm256_div_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vdivq_f32(a.reg32.0, b.reg32.0),
                         vdivq_f32(a.reg32.1, b.reg32.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -214,21 +216,21 @@ impl SimdVec<f32> for Wide {
     fn add(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_add_ps(a.reg32, b.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe { _mm256_add_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vaddq_f32(a.reg32.0, b.reg32.0),
                         vaddq_f32(a.reg32.1, b.reg32.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -236,21 +238,21 @@ impl SimdVec<f32> for Wide {
     fn sub(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_sub_ps(a.reg32, b.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe { _mm256_sub_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vsubq_f32(a.reg32.0, b.reg32.0),
                         vsubq_f32(a.reg32.1, b.reg32.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -258,21 +260,21 @@ impl SimdVec<f32> for Wide {
     fn mul_add(a: Self, b: Self, c: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_fmadd_ps(a.reg32, b.reg32, c.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe { _mm256_fmadd_ps(a.reg32, b.reg32, c.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vfmaq_f32(c.reg32.0, a.reg32.0, b.reg32.0),
                         vfmaq_f32(c.reg32.1, a.reg32.1, b.reg32.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -280,18 +282,16 @@ impl SimdVec<f32> for Wide {
     fn neg(a: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_sub_ps(_mm256_setzero_ps(), a.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe { _mm256_sub_ps(_mm256_setzero_ps(), a.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(vnegq_f32(a.reg32.0), vnegq_f32(a.reg32.1)),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe { float32x4x2_t(vnegq_f32(a.reg32.0), vnegq_f32(a.reg32.1)) },
             }
         }
     }
@@ -300,18 +300,20 @@ impl SimdVec<f32> for Wide {
         #[cfg(target_arch = "x86_64")]
         {
             Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
                 reg32: unsafe { _mm256_cmp_ps::<_CMP_LT_OQ>(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vreinterpretq_f32_u32(vcltq_f32(a.reg32.0, b.reg32.0)),
                         vreinterpretq_f32_u32(vcltq_f32(a.reg32.1, b.reg32.1)),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -320,18 +322,20 @@ impl SimdVec<f32> for Wide {
         #[cfg(target_arch = "x86_64")]
         {
             Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
                 reg32: unsafe { _mm256_cmp_ps::<_CMP_EQ_OQ>(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vreinterpretq_f32_u32(vceqq_f32(a.reg32.0, b.reg32.0)),
                         vreinterpretq_f32_u32(vceqq_f32(a.reg32.1, b.reg32.1)),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -340,18 +344,20 @@ impl SimdVec<f32> for Wide {
         #[cfg(target_arch = "x86_64")]
         {
             Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
                 reg32: unsafe { _mm256_cmp_ps::<_CMP_GT_OQ>(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vreinterpretq_f32_u32(vcgtq_f32(a.reg32.0, b.reg32.0)),
                         vreinterpretq_f32_u32(vcgtq_f32(a.reg32.1, b.reg32.1)),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -360,14 +366,16 @@ impl SimdVec<f32> for Wide {
         #[cfg(target_arch = "x86_64")]
         {
             Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
                 reg32: unsafe { _mm256_and_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vreinterpretq_f32_u32(vandq_u32(
                             vreinterpretq_u32_f32(a.reg32.0),
                             vreinterpretq_u32_f32(b.reg32.0),
@@ -376,8 +384,8 @@ impl SimdVec<f32> for Wide {
                             vreinterpretq_u32_f32(a.reg32.1),
                             vreinterpretq_u32_f32(b.reg32.1),
                         )),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -386,14 +394,16 @@ impl SimdVec<f32> for Wide {
         #[cfg(target_arch = "x86_64")]
         {
             Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
                 reg32: unsafe { _mm256_or_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vreinterpretq_f32_u32(vorrq_u32(
                             vreinterpretq_u32_f32(a.reg32.0),
                             vreinterpretq_u32_f32(b.reg32.0),
@@ -402,35 +412,40 @@ impl SimdVec<f32> for Wide {
                             vreinterpretq_u32_f32(a.reg32.1),
                             vreinterpretq_u32_f32(b.reg32.1),
                         )),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
 
     fn check_bool(a: Self, lane: usize) -> bool {
+        // SAFETY: union access. valsu32 is correct.
         unsafe { a.valsu32[lane] != 0 }
     }
 
+    /** # Safety
+
+    See the trait function for more details: [`SimdVec::check_bool_unchecked`].
+     */
     unsafe fn check_bool_unchecked(a: Self, lane: usize) -> bool {
+        // SAFETY: union access. valsu32 is correct.
         unsafe { *a.valsu32.get_unchecked(lane) != 0 }
     }
 
     fn abs(a: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_andnot_ps(_mm256_set1_ps(-0.0f32), a.reg32), // Clear the sign bit.
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg32 is correct.
+                // Clear the sign bit.
+                reg32: unsafe { _mm256_andnot_ps(_mm256_set1_ps(-0.0f32), a.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(vabsq_f32(a.reg32.0), vabsq_f32(a.reg32.1)),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg32 is correct.
+                reg32: unsafe { float32x4x2_t(vabsq_f32(a.reg32.0), vabsq_f32(a.reg32.1)) },
             }
         }
     }
@@ -438,18 +453,16 @@ impl SimdVec<f32> for Wide {
     fn recip_sqrt(a: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_rsqrt_ps(a.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg32 is correct.
+                reg32: unsafe { _mm256_rsqrt_ps(a.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(vrsqrteq_f32(a.reg32.0), vrsqrteq_f32(a.reg32.1)),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg32 is correct.
+                reg32: unsafe { float32x4x2_t(vrsqrteq_f32(a.reg32.0), vrsqrteq_f32(a.reg32.1)) },
             }
         }
     }
@@ -457,21 +470,21 @@ impl SimdVec<f32> for Wide {
     fn max(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_max_ps(a.reg32, b.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg32 is correct.
+                reg32: unsafe { _mm256_max_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg32 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vmaxq_f32(a.reg32.0, b.reg32.0),
                         vmaxq_f32(a.reg32.1, b.reg32.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -479,21 +492,21 @@ impl SimdVec<f32> for Wide {
     fn min(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg32: _mm256_min_ps(a.reg32, b.reg32),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg32 is correct.
+                reg32: unsafe { _mm256_min_ps(a.reg32, b.reg32) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg32: float32x4x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg32 is correct.
+                reg32: unsafe {
+                    float32x4x2_t(
                         vminq_f32(a.reg32.0, b.reg32.0),
                         vminq_f32(a.reg32.1, b.reg32.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -513,10 +526,12 @@ impl SimdVec<f64> for Wide {
     }
 
     fn set(&mut self, val: f64, idx: usize) {
+        // SAFETY: union access. valsf64 is correct.
         unsafe { self.valsf64[idx] = val }
     }
 
     fn get(&self, idx: usize) -> f64 {
+        // SAFETY: union access. valsf64 is correct.
         unsafe { self.valsf64[idx] }
     }
 
@@ -543,21 +558,21 @@ impl SimdVec<f64> for Wide {
     fn mul(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: std::arch::x86_64::_mm256_mul_pd(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_mul_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vmulq_f64(a.reg64.0, b.reg64.0),
                         vmulq_f64(a.reg64.1, b.reg64.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -565,21 +580,21 @@ impl SimdVec<f64> for Wide {
     fn div(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: std::arch::x86_64::_mm256_div_pd(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_div_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vdivq_f64(a.reg64.0, b.reg64.0),
                         vdivq_f64(a.reg64.1, b.reg64.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -587,21 +602,21 @@ impl SimdVec<f64> for Wide {
     fn add(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: std::arch::x86_64::_mm256_add_pd(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_add_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vaddq_f64(a.reg64.0, b.reg64.0),
                         vaddq_f64(a.reg64.1, b.reg64.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -609,21 +624,21 @@ impl SimdVec<f64> for Wide {
     fn sub(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: std::arch::x86_64::_mm256_sub_pd(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_sub_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vsubq_f64(a.reg64.0, b.reg64.0),
                         vsubq_f64(a.reg64.1, b.reg64.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -631,21 +646,21 @@ impl SimdVec<f64> for Wide {
     fn mul_add(a: Self, b: Self, c: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: std::arch::x86_64::_mm256_fmadd_pd(a.reg64, b.reg64, c.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_fmadd_pd(a.reg64, b.reg64, c.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vfmaq_f64(c.reg64.0, a.reg64.0, b.reg64.0),
                         vfmaq_f64(c.reg64.1, a.reg64.1, b.reg64.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -653,18 +668,16 @@ impl SimdVec<f64> for Wide {
     fn neg(a: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: _mm256_sub_pd(_mm256_setzero_pd(), a.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_sub_pd(_mm256_setzero_pd(), a.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(vnegq_f64(a.reg64.0), vnegq_f64(a.reg64.1)),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { float64x2x2_t(vnegq_f64(a.reg64.0), vnegq_f64(a.reg64.1)) },
             }
         }
     }
@@ -672,21 +685,21 @@ impl SimdVec<f64> for Wide {
     fn lt(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: _mm256_cmp_pd::<_CMP_LT_OQ>(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_cmp_pd::<_CMP_LT_OQ> }(a.reg64, b.reg64),
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vreinterpretq_f64_u64(vcltq_f64(a.reg64.0, b.reg64.0)),
                         vreinterpretq_f64_u64(vcltq_f64(a.reg64.1, b.reg64.1)),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -694,21 +707,21 @@ impl SimdVec<f64> for Wide {
     fn eq(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: _mm256_cmp_pd::<_CMP_EQ_OQ>(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_cmp_pd::<_CMP_EQ_OQ> }(a.reg64, b.reg64),
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vreinterpretq_f64_u64(vceqq_f64(a.reg64.0, b.reg64.0)),
                         vreinterpretq_f64_u64(vceqq_f64(a.reg64.1, b.reg64.1)),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -716,21 +729,21 @@ impl SimdVec<f64> for Wide {
     fn gt(a: Self, b: Self) -> Wide {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: _mm256_cmp_pd::<_CMP_GT_OQ>(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_cmp_pd::<_CMP_GT_OQ> }(a.reg64, b.reg64),
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vreinterpretq_f64_u64(vcgtq_f64(a.reg64.0, b.reg64.0)),
                         vreinterpretq_f64_u64(vcgtq_f64(a.reg64.1, b.reg64.1)),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -739,14 +752,16 @@ impl SimdVec<f64> for Wide {
         #[cfg(target_arch = "x86_64")]
         {
             Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
                 reg64: unsafe { _mm256_and_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vreinterpretq_f64_u64(vandq_u64(
                             vreinterpretq_u64_f64(a.reg64.0),
                             vreinterpretq_u64_f64(b.reg64.0),
@@ -755,8 +770,8 @@ impl SimdVec<f64> for Wide {
                             vreinterpretq_u64_f64(a.reg64.1),
                             vreinterpretq_u64_f64(b.reg64.1),
                         )),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -765,14 +780,16 @@ impl SimdVec<f64> for Wide {
         #[cfg(target_arch = "x86_64")]
         {
             Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
                 reg64: unsafe { _mm256_or_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vreinterpretq_f64_u64(vorrq_u64(
                             vreinterpretq_u64_f64(a.reg64.0),
                             vreinterpretq_u64_f64(b.reg64.0),
@@ -781,35 +798,40 @@ impl SimdVec<f64> for Wide {
                             vreinterpretq_u64_f64(a.reg64.1),
                             vreinterpretq_u64_f64(b.reg64.1),
                         )),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
 
     fn check_bool(a: Self, lane: usize) -> bool {
+        // SAFETY: valsu64 is correct.
         unsafe { a.valsu64[lane] != 0 }
     }
 
+    /** # Safety
+
+    See the trait function for more details: [`SimdVec::check_bool_unchecked`].
+     */
     unsafe fn check_bool_unchecked(a: Self, lane: usize) -> bool {
+        // SAFETY: valsu64 is correct.
         unsafe { *a.valsu64.get_unchecked(lane) != 0 }
     }
 
     fn abs(a: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: _mm256_andnot_pd(_mm256_set1_pd(-0.0f64), a.reg64), // Clear the sign bit.
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                // Clear the sign bit.
+                reg64: unsafe { _mm256_andnot_pd(_mm256_set1_pd(-0.0f64), a.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(vabsq_f64(a.reg64.0), vabsq_f64(a.reg64.1)),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { float64x2x2_t(vabsq_f64(a.reg64.0), vabsq_f64(a.reg64.1)) },
             }
         }
     }
@@ -817,18 +839,16 @@ impl SimdVec<f64> for Wide {
     fn recip_sqrt(a: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: _mm256_div_pd(_mm256_set1_pd(1.), _mm256_sqrt_pd(a.reg64)),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_div_pd(_mm256_set1_pd(1.), _mm256_sqrt_pd(a.reg64)) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(vrsqrteq_f64(a.reg64.0), vrsqrteq_f64(a.reg64.1)),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { float64x2x2_t(vrsqrteq_f64(a.reg64.0), vrsqrteq_f64(a.reg64.1)) },
             }
         }
     }
@@ -836,21 +856,21 @@ impl SimdVec<f64> for Wide {
     fn max(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: _mm256_max_pd(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_max_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vmaxq_f64(a.reg64.0, b.reg64.0),
                         vmaxq_f64(a.reg64.1, b.reg64.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -858,21 +878,21 @@ impl SimdVec<f64> for Wide {
     fn min(a: Self, b: Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                Wide {
-                    reg64: _mm256_min_pd(a.reg64, b.reg64),
-                }
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe { _mm256_min_pd(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            unsafe {
-                Wide {
-                    reg64: float64x2x2_t(
+            Wide {
+                // SAFETY: SIMD intrinsics. reg64 is correct.
+                reg64: unsafe {
+                    float64x2x2_t(
                         vminq_f64(a.reg64.0, b.reg64.0),
                         vminq_f64(a.reg64.1, b.reg64.1),
-                    ),
-                }
+                    )
+                },
             }
         }
     }
@@ -952,6 +972,9 @@ where
     T: NumberType,
 {
     pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
+        // SAFETY: Calling a raw function pointer. `JitSimdBuffers` is a safe
+        // wrapper that populates the inputs correctly via it's public API, and
+        // knows the correct number of SIMD iterations required.
         unsafe {
             self.func.call(
                 buf.inputs.as_ptr().cast(),
@@ -963,6 +986,10 @@ where
 
     pub fn as_sync(&'ctx self) -> JitSimdFnSync<'ctx, T> {
         JitSimdFnSync {
+            // SAFETY: Accessing the raw function pointer. This is ok, because
+            // this borrows from Self, which owns an Rc reference to the
+            // execution engine that owns the block of executable memory to
+            // which the function pointer points.
             func: unsafe { self.func.as_raw() },
             phantom: PhantomData,
         }
@@ -975,6 +1002,9 @@ where
     T: NumberType,
 {
     pub fn run(&self, buf: &mut JitSimdBuffers<T>) {
+        // SAFETY: Calling a raw function pointer. `JitSimdBuffers` is a safe
+        // wrapper that populates the inputs correctly via it's public API, and
+        // knows the correct number of SIMD iterations required.
         unsafe {
             self.run_raw(
                 buf.inputs.as_ptr().cast(),
@@ -1004,6 +1034,8 @@ where
     `n_roots * num_iters` long.
      */
     pub unsafe fn run_raw(&self, inputs: *const Wide, outputs: *mut Wide, num_iters: usize) {
+        // SAFETY: Calling a raw functin pointer. We told the caller it's their
+        // responsibility to make sure inputs are correct.
         unsafe {
             (self.func)(inputs.cast(), outputs.cast(), num_iters as u64);
         }
@@ -1173,6 +1205,9 @@ impl Tree {
                     )?;
                     builder.build_load(
                         fvec_type,
+                        // SAFETY: GEP can segfault if the index is out of
+                        // bounds. The offset calculation looks pretty solid,
+                        // and is thoroughly tested.
                         unsafe {
                             builder.build_gep(fvec_type, inputs, &[offset], &format!("arg_{label}"))
                         }?,
@@ -1398,6 +1433,8 @@ impl Tree {
                 i64_type.const_int(i as u64, false),
                 "offset_add",
             )?;
+            // SAFETY: GEP can segfault if the index is out of bounds. The
+            // offset calculation looks pretty solid, and is thoroughly tested.
             let dst = unsafe {
                 builder.build_gep(fvec_type, outputs, &[offset], &format!("output_{i}"))?
             };
