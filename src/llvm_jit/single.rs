@@ -77,6 +77,9 @@ impl Tree {
                         .get_first_param()
                         .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
                         .into_pointer_value();
+                    // SAFETY: GEP can segfault if the index is out of
+                    // bounds. The offset calculation looks pretty solid, and is
+                    // thoroughly tested.
                     let ptr = unsafe {
                         builder.build_gep(
                             float_type,
@@ -301,6 +304,8 @@ impl Tree {
             ))?
             .into_pointer_value();
         for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
+            // SAFETY: GEP can segfault if the index is out of bounds. The
+            // offset calculation looks pretty solid, and is thoroughly tested.
             let dst = unsafe {
                 builder.build_gep(
                     float_type,
@@ -317,6 +322,10 @@ impl Tree {
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
         let func = unsafe { engine.get_function(&func_name)? };
         Ok(JitFn {
             func,
@@ -357,6 +366,7 @@ where
     of roots of the tree from which this JIT function was created.
      */
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T]) {
+        // SAFETY: We told the caller it is their responsiblity.
         unsafe {
             self.func
                 .call(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast());
@@ -365,6 +375,10 @@ where
 
     pub fn as_sync(&'ctx self) -> JitFnSync<'ctx, T> {
         JitFnSync {
+            // SAFETY: Accessing the raw function pointer. This is ok, because
+            // this borrows from Self, which owns an Rc reference to the
+            // execution engine that owns the block of executable memory to
+            // which the function pointer points.
             func: unsafe { self.func.as_raw() },
             num_inputs: self.num_inputs,
             num_outputs: self.num_outputs,
@@ -396,6 +410,7 @@ where
     the tree from which this JIT function was created.
      */
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T]) {
+        // SAFETY: We told the caller it is their responsiblity.
         unsafe {
             (self.func)(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast());
         }

@@ -72,12 +72,10 @@ impl DomTable {
 
     fn dominate(&mut self, parent: usize, child: usize, visited: &mut [bool]) {
         let (poff, coff) = (parent * self.n_chunks, child * self.n_chunks);
-        let [parent_bits, child_bits] = unsafe {
-            self.bits.get_disjoint_unchecked_mut([
-                poff..(poff + self.n_chunks),
-                coff..(coff + self.n_chunks),
-            ])
-        };
+        let [parent_bits, child_bits] = self
+            .bits
+            .get_disjoint_mut([poff..(poff + self.n_chunks), coff..(coff + self.n_chunks)])
+            .expect("INTERNAL ERROR: Incorrect disjoint indices. This should never happen");
         if std::mem::replace(&mut visited[child], true) {
             for (p, c) in parent_bits.iter().zip(child_bits.iter_mut()) {
                 *c &= *p;

@@ -169,11 +169,11 @@ mod spheres {
             values.clear();
             let context = JitContext::default();
             let eval = tree.jit_compile(&context).unwrap();
-            // SAFETY: There is an assert to make sure the tree has 3 input
-            // symbols. That is what the safe version would check for, so we
-            // don't need to check here.
             values.extend(queries.iter().map(|coords| {
                 let mut output = [T::nan()];
+                // SAFETY: There is an assert to make sure the tree has 3 input
+                // symbols. That is what the safe version would check for, so
+                // we don't need to check here.
                 unsafe {
                     eval.run_unchecked(coords, &mut output);
                 }
@@ -187,11 +187,11 @@ mod spheres {
             T: NumberType,
         {
             values.clear();
-            // SAFETY: There is an assert to make sure the tree has 3 input
-            // symbols. That is what the safe version would check for, so we
-            // don't need to check here.
             values.extend(queries.iter().map(|coords| {
                 let mut output = [T::nan()];
+                // SAFETY: There is an assert to make sure the tree has 3 input
+                // symbols. That is what the safe version would check for, so we
+                // don't need to check here.
                 unsafe {
                     eval.run_unchecked(coords, &mut output);
                 }

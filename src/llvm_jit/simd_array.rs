@@ -731,7 +731,7 @@ impl SimdVec<f64> for Wide {
         {
             Wide {
                 // SAFETY: SIMD intrinsics. reg64 is correct.
-                reg64: unsafe { _mm256_cmp_pd::<_CMP_GT_OQ> }(a.reg64, b.reg64),
+                reg64: unsafe { _mm256_cmp_pd::<_CMP_GT_OQ>(a.reg64, b.reg64) },
             }
         }
         #[cfg(target_arch = "aarch64")]
@@ -1453,6 +1453,10 @@ impl Tree {
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
             .map_err(|_| Error::CannotCreateJitModule)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
         let func = unsafe { engine.get_function(&func_name)? };
         Ok(JitSimdFn::<T> {
             func,
@@ -1901,6 +1905,7 @@ mod simd_ops_test {
             valsf32: [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
         };
         let result = <Wide as SimdVec<f32>>::mul(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], 2.0);
             assert_eq!(result.valsf32[1], 6.0);
@@ -1922,6 +1927,7 @@ mod simd_ops_test {
             valsf32: [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0],
         };
         let result = <Wide as SimdVec<f32>>::add(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], 11.0);
             assert_eq!(result.valsf32[1], 22.0);
@@ -1946,6 +1952,7 @@ mod simd_ops_test {
             valsf32: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
         };
         let result = <Wide as SimdVec<f32>>::mul_add(a, b, c);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], 12.0); // 1*2 + 10
             assert_eq!(result.valsf32[1], 16.0); // 2*3 + 10
@@ -1984,6 +1991,7 @@ mod simd_ops_test {
             valsf64: [10.5, 20.5, 30.5, 40.5],
         };
         let result = <Wide as SimdVec<f64>>::add(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf64[0], 12.0);
             assert_eq!(result.valsf64[1], 23.0);
@@ -2018,6 +2026,7 @@ mod simd_ops_test {
             valsf32: [1.0, -2.0, 3.5, -4.5, 0.0, 10.5, -7.25, 8.75],
         };
         let result = <Wide as SimdVec<f32>>::neg(a);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], -1.0);
             assert_eq!(result.valsf32[1], 2.0);
@@ -2053,6 +2062,7 @@ mod simd_ops_test {
             valsf32: [2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0],
         };
         let result = <Wide as SimdVec<f32>>::lt(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsu32[0], 0xFFFFFFFF);
             assert_eq!(result.valsu32[1], 0x00000000);
@@ -2095,6 +2105,7 @@ mod simd_ops_test {
             valsf32: [2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0],
         };
         let result = <Wide as SimdVec<f32>>::gt(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsu32[0], 0x00000000);
             assert_eq!(result.valsu32[1], 0x00000000);
@@ -2133,6 +2144,7 @@ mod simd_ops_test {
             valsf64: [2.0, 2.0, 2.0, 2.0],
         };
         let result = <Wide as SimdVec<f64>>::eq(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsu64[0], 0x0000000000000000);
             assert_eq!(result.valsu64[1], 0xFFFFFFFFFFFFFFFF);
@@ -2150,6 +2162,7 @@ mod simd_ops_test {
             valsf64: [2.0, 2.0, 2.0, 2.0],
         };
         let result = <Wide as SimdVec<f64>>::gt(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsu64[0], 0x0000000000000000);
             assert_eq!(result.valsu64[1], 0x0000000000000000);
@@ -2173,6 +2186,7 @@ mod simd_ops_test {
             ],
         };
         let result = <Wide as SimdVec<f32>>::and(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsu32[0], 0xFFFFFFFF);
             assert_eq!(result.valsu32[1], 0x00000000);
@@ -2200,6 +2214,7 @@ mod simd_ops_test {
             ],
         };
         let result = <Wide as SimdVec<f32>>::or(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsu32[0], 0xFFFFFFFF);
             assert_eq!(result.valsu32[1], 0xFFFFFFFF);
@@ -2231,6 +2246,7 @@ mod simd_ops_test {
             ],
         };
         let result = <Wide as SimdVec<f64>>::and(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsu64[0], 0xFFFFFFFFFFFFFFFF);
             assert_eq!(result.valsu64[1], 0x0000000000000000);
@@ -2258,6 +2274,7 @@ mod simd_ops_test {
             ],
         };
         let result = <Wide as SimdVec<f64>>::or(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsu64[0], 0xFFFFFFFFFFFFFFFF);
             assert_eq!(result.valsu64[1], 0xFFFFFFFFFFFFFFFF);
@@ -2292,6 +2309,7 @@ mod simd_ops_test {
                 0x00000000,
             ],
         };
+        // SAFETY: Union access to assert values.
         unsafe {
             assert!(<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 0));
             assert!(!<Wide as SimdVec<f32>>::check_bool_unchecked(mask, 1));
@@ -2342,6 +2360,7 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
+        // SAFETY: Union access to assert values.
         unsafe {
             assert!(<Wide as SimdVec<f64>>::check_bool_unchecked(mask, 0));
             assert!(!<Wide as SimdVec<f64>>::check_bool_unchecked(mask, 1));
@@ -2370,6 +2389,7 @@ mod simd_ops_test {
             valsf32: [-1.0, 2.0, -3.5, 4.25, -5.75, 6.125, -7.875, 8.0],
         };
         let result = <Wide as SimdVec<f32>>::abs(a);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], 1.0);
             assert_eq!(result.valsf32[1], 2.0);
@@ -2388,6 +2408,7 @@ mod simd_ops_test {
             valsf64: [-1.5, 2.25, -3.125, 4.0625],
         };
         let result = <Wide as SimdVec<f64>>::abs(a);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf64[0], 1.5);
             assert_eq!(result.valsf64[1], 2.25);
@@ -2402,6 +2423,7 @@ mod simd_ops_test {
             valsf32: [1.0, 4.0, 9.0, 16.0, 25.0, 36.0, 49.0, 64.0],
         };
         let result = <Wide as SimdVec<f32>>::recip_sqrt(a);
+        // SAFETY: Union access to assert values.
         unsafe {
             // Check that recip_sqrt gives approximately 1/sqrt(x)
             // Using loose tolerance since rsqrt is an approximation
@@ -2422,6 +2444,7 @@ mod simd_ops_test {
             valsf64: [1.0, 4.0, 9.0, 16.0],
         };
         let result = <Wide as SimdVec<f64>>::recip_sqrt(a);
+        // SAFETY: Union access to assert values.
         unsafe {
             // Check that recip_sqrt gives approximately 1/sqrt(x)
             // Using loose tolerance since rsqrt is an approximation
@@ -2441,6 +2464,7 @@ mod simd_ops_test {
             valsf32: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
         };
         let result = <Wide as SimdVec<f32>>::sub(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], 9.0);
             assert_eq!(result.valsf32[1], 18.0);
@@ -2462,6 +2486,7 @@ mod simd_ops_test {
             valsf64: [1.5, 2.25, 3.125, 4.0625],
         };
         let result = <Wide as SimdVec<f64>>::sub(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf64[0], 9.0);
             assert_eq!(result.valsf64[1], 18.0);
@@ -2479,6 +2504,7 @@ mod simd_ops_test {
             valsf32: [2.0, 4.0, 5.0, 8.0, 10.0, 12.0, 14.0, 16.0],
         };
         let result = <Wide as SimdVec<f32>>::div(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], 5.0); // 10.0 / 2.0
             assert_eq!(result.valsf32[1], 5.0); // 20.0 / 4.0
@@ -2500,6 +2526,7 @@ mod simd_ops_test {
             valsf64: [3.0, 6.0, 9.0, 12.0],
         };
         let result = <Wide as SimdVec<f64>>::div(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf64[0], 4.0); // 12.0 / 3.0
             assert_eq!(result.valsf64[1], 4.0); // 24.0 / 6.0
@@ -2517,6 +2544,7 @@ mod simd_ops_test {
             valsf32: [4.0, 2.0, 7.0, 1.0, 6.0, 3.0, 8.0, 5.0],
         };
         let result = <Wide as SimdVec<f32>>::max(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], 4.0); // max(1.0, 4.0) = 4.0
             assert_eq!(result.valsf32[1], 5.0); // max(5.0, 2.0) = 5.0
@@ -2538,6 +2566,7 @@ mod simd_ops_test {
             valsf64: [2.75, 4.5, 9.875, 1.25],
         };
         let result = <Wide as SimdVec<f64>>::max(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf64[0], 2.75); // max(1.5, 2.75) = 2.75
             assert_eq!(result.valsf64[1], 8.25); // max(8.25, 4.5) = 8.25
@@ -2555,6 +2584,7 @@ mod simd_ops_test {
             valsf32: [4.0, 2.0, 7.0, 1.0, 6.0, 3.0, 8.0, 5.0],
         };
         let result = <Wide as SimdVec<f32>>::min(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf32[0], 1.0); // min(1.0, 4.0) = 4.0
             assert_eq!(result.valsf32[1], 2.0); // min(5.0, 2.0) = 5.0
@@ -2576,6 +2606,7 @@ mod simd_ops_test {
             valsf64: [2.75, 4.5, 9.875, 1.25],
         };
         let result = <Wide as SimdVec<f64>>::min(a, b);
+        // SAFETY: Union access to assert values.
         unsafe {
             assert_eq!(result.valsf64[0], 1.5); // min(1.5, 2.75) = 2.75
             assert_eq!(result.valsf64[1], 4.5); // min(8.25, 4.5) = 8.25
