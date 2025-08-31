@@ -2208,14 +2208,14 @@ mod simd_ops_test {
                 0x00000000,
             ],
         };
-        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 0), true);
-        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 1), false);
-        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 2), true);
-        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 3), false);
-        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 4), true);
-        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 5), false);
-        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 6), true);
-        assert_eq!(<Wfloat as SimdVec<f32>>::check_bool(mask, 7), false);
+        assert!(<Wfloat as SimdVec<f32>>::check_bool(mask, 0));
+        assert!(!<Wfloat as SimdVec<f32>>::check_bool(mask, 1));
+        assert!(<Wfloat as SimdVec<f32>>::check_bool(mask, 2));
+        assert!(!<Wfloat as SimdVec<f32>>::check_bool(mask, 3));
+        assert!(<Wfloat as SimdVec<f32>>::check_bool(mask, 4));
+        assert!(!<Wfloat as SimdVec<f32>>::check_bool(mask, 5));
+        assert!(<Wfloat as SimdVec<f32>>::check_bool(mask, 6));
+        assert!(!<Wfloat as SimdVec<f32>>::check_bool(mask, 7));
     }
 
     #[test]
@@ -2227,37 +2227,29 @@ mod simd_ops_test {
             ],
         };
         unsafe {
-            assert_eq!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 0),
-                true
+            assert!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 0)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 1),
-                false
+            assert!(
+                !<Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 1)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 2),
-                true
+            assert!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 2)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 3),
-                false
+            assert!(
+                !<Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 3)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 4),
-                true
+            assert!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 4)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 5),
-                false
+            assert!(
+                !<Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 5)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 6),
-                true
+            assert!(
+                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 6)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 7),
-                false
+            assert!(
+                !<Wfloat as SimdVec<f32>>::check_bool_unchecked(mask, 7)
             );
         }
     }
@@ -2284,10 +2276,10 @@ mod simd_ops_test {
                 0x0000000000000000,
             ],
         };
-        assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 0), true);
-        assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 1), false);
-        assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 2), true);
-        assert_eq!(<Wfloat as SimdVec<f64>>::check_bool(mask, 3), false);
+        assert!(<Wfloat as SimdVec<f64>>::check_bool(mask, 0));
+        assert!(!<Wfloat as SimdVec<f64>>::check_bool(mask, 1));
+        assert!(<Wfloat as SimdVec<f64>>::check_bool(mask, 2));
+        assert!(!<Wfloat as SimdVec<f64>>::check_bool(mask, 3));
     }
 
     #[test]
@@ -2301,21 +2293,17 @@ mod simd_ops_test {
             ],
         };
         unsafe {
-            assert_eq!(
-                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 0),
-                true
+            assert!(
+                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 0)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 1),
-                false
+            assert!(
+                !<Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 1)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 2),
-                true
+            assert!(
+                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 2)
             );
-            assert_eq!(
-                <Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 3),
-                false
+            assert!(
+                !<Wfloat as SimdVec<f64>>::check_bool_unchecked(mask, 3)
             );
         }
     }

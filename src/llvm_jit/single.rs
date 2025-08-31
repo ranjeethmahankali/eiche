@@ -343,7 +343,8 @@ where
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         }
         // SAFETY: We just checked above.
-        Ok(unsafe { self.run_unchecked(inputs, outputs) })
+        let _: () = unsafe { self.run_unchecked(inputs, outputs) };
+        Ok(())
     }
 
     /// Same as `run` except it doesn't check to make sure the `inputs` slice is
@@ -377,7 +378,8 @@ where
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         }
         // SAFETY: We just checked above.
-        Ok(unsafe { self.run_unchecked(inputs, outputs) })
+        let _: () = unsafe { self.run_unchecked(inputs, outputs) };
+        Ok(())
     }
 
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T]) {

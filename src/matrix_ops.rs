@@ -51,7 +51,7 @@ impl Tree {
                 }
             }
         }
-        lnodes.extend(newroots.drain(..));
+        lnodes.append(&mut newroots);
         Tree::from_nodes(lnodes, (orows, ocols))
     }
 
@@ -116,7 +116,7 @@ impl Tree {
             .map(|(r, c)| old_roots[c * rows + r])
             .collect();
         nodes.truncate(n_keep);
-        nodes.extend(new_roots.drain(..));
+        nodes.append(&mut new_roots);
         Tree::from_nodes(nodes, (n_roots_new, 1))
     }
 
@@ -525,22 +525,20 @@ mod test {
         let valid = deftree!(concat 'a 'b).unwrap();
         // These reshape operations should fail, but if they succeed by some means,
         // matmul should handle them appropriately
-        if let Ok(zero_row) = valid.clone().reshape(0, 2) {
-            if let Ok(valid_mat) = valid.clone().reshape(2, 1) {
+        if let Ok(zero_row) = valid.clone().reshape(0, 2)
+            && let Ok(valid_mat) = valid.clone().reshape(2, 1) {
                 match zero_row.matmul(valid_mat) {
                     Err(Error::InvalidDimensions) => {}
                     other => panic!("Expected InvalidDimensions error, got: {:?}", other),
                 }
             }
-        }
-        if let Ok(zero_col) = valid.clone().reshape(2, 0) {
-            if let Ok(valid_mat) = valid.clone().reshape(1, 2) {
+        if let Ok(zero_col) = valid.clone().reshape(2, 0)
+            && let Ok(valid_mat) = valid.clone().reshape(1, 2) {
                 match valid_mat.matmul(zero_col) {
                     Err(Error::InvalidDimensions) => {}
                     other => panic!("Expected InvalidDimensions error, got: {:?}", other),
                 }
             }
-        }
     }
 
     #[test]

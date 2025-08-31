@@ -161,7 +161,7 @@ impl NumberType for f32 {
     }
 
     fn type_str() -> &'static str {
-        return "f32";
+        "f32"
     }
 }
 
@@ -187,7 +187,7 @@ impl NumberType for f64 {
     }
 
     fn type_str() -> &'static str {
-        return "f64";
+        "f64"
     }
 }
 
