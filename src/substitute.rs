@@ -42,11 +42,11 @@ impl Tree {
         // the current logic for checking equivalence to take advantage of
         // results from the past. I am skipping this optimization for now.
         let (mapping, found) = {
-            let mut mapping = vec![None; self.len()];
-            let mut found = false;
             let old_start = old.root_indices().start;
             let new_start = new.root_indices().start;
-            for i in 0..self.len() {
+            let mut found = false;
+            let mut mapping = vec![None; self.len()];
+            for (i, mapped) in mapping.iter_mut().enumerate() {
                 'inner: for j in old.root_indices() {
                     if equivalent(
                         // We don't need to check because the nodes are from a tree.
@@ -57,7 +57,7 @@ impl Tree {
                         &mut lwalker,
                         &mut rwalker,
                     )? {
-                        mapping[i] = Some(j + new_start - old_start);
+                        *mapped = Some(j + new_start - old_start);
                         found = true;
                         break 'inner;
                     }
@@ -126,10 +126,7 @@ mod test {
         let old = deftree!(concat 'x 'y).unwrap();
         let new = deftree!('z).unwrap();
         let result = original.substitute(&old, &new);
-        assert!(match result {
-            Err(Error::InvalidDimensions) => true,
-            _ => false,
-        });
+        assert!(matches!(result, Err(Error::InvalidDimensions)));
     }
 
     #[test]
