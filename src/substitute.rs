@@ -92,7 +92,7 @@ impl Tree {
 
 #[cfg(test)]
 mod test {
-    use crate::deftree;
+    use crate::{Error, deftree};
 
     #[test]
     fn t_substitution_0() {
@@ -118,5 +118,29 @@ mod test {
         ));
         let reverted = replaced.substitute(&new, &old).unwrap();
         assert!(original.equivalent(&reverted));
+    }
+
+    #[test]
+    fn t_mismatched_root_counts() {
+        let original = deftree!(+ 'x 'y).unwrap();
+        let old = deftree!(concat 'x 'y).unwrap();
+        let new = deftree!('z).unwrap();
+        let result = original.substitute(&old, &new);
+        assert!(match result {
+            Err(Error::InvalidDimensions) => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    fn t_deeply_nested_patterns() {
+        let original = deftree!(
+            pow (exp (sqrt (log (abs (sin (cos (tan (+ (* (pow (+ (* 'x (exp (+ 'y (sin (* 'z (cos (+ 'x 'y))))))) (sqrt (+ (pow 'y 3) (log (+ 'z 1))))) 2) (exp (/ 'x (+ 'y 'z)))) (* (+ 'x 'y) (- 'z (sqrt (* 'x 'y)))))))))))) 0.5).unwrap();
+        let old = deftree!(* 'x 'y).unwrap();
+        let new = deftree!(+ 'x 'y).unwrap();
+        let replaced = original.clone().substitute(&old, &new).unwrap();
+        assert!(replaced.equivalent(&deftree!(pow (exp (sqrt (log (abs (sin (cos (tan (+ (* (pow (+ (* 'x (exp (+ 'y (sin (* 'z (cos (+ 'x 'y))))))) (sqrt (+ (pow 'y 3) (log (+ 'z 1))))) 2) (exp (/ 'x (+ 'y 'z)))) (* (+ 'x 'y) (- 'z (sqrt (+ 'x 'y)))))))))))) 0.5).unwrap()));
+        let reverted = replaced.substitute(&new, &old).unwrap();
+        assert!(reverted.equivalent(&deftree!(pow (exp (sqrt (log (abs (sin (cos (tan (+ (* (pow (+ (* 'x (exp (+ 'y (sin (* 'z (cos (* 'x 'y))))))) (sqrt (+ (pow 'y 3) (log (+ 'z 1))))) 2) (exp (/ 'x (+ 'y 'z)))) (* (* 'x 'y) (- 'z (sqrt (* 'x 'y)))))))))))) 0.5).unwrap()));
     }
 }
