@@ -1,5 +1,3 @@
-use crate::interval::pruning_eval::PruningError;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// Nodes are not in a valid topological order.
@@ -44,7 +42,4 @@ pub enum Error {
     CannotCreateJitModule,
     CannotCompileIntrinsic(&'static str),
     JitCompilationError(String),
-
-    // Pruning.
-    Pruning(PruningError),
 }
