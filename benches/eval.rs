@@ -168,7 +168,7 @@ mod spheres {
         {
             values.clear();
             let context = JitContext::default();
-            let eval = tree.jit_compile(&context).unwrap();
+            let eval = tree.jit_compile(&context, "xyz").unwrap();
             values.extend(queries.iter().map(|coords| {
                 let mut output = [T::nan()];
                 // SAFETY: There is an assert to make sure the tree has 3 input
@@ -222,7 +222,7 @@ mod spheres {
             {
                 let (tree, queries, mut values) = init_benchmark::<f64>();
                 let context = JitContext::default();
-                let mut eval = tree.jit_compile(&context).unwrap();
+                let mut eval = tree.jit_compile(&context, "xyz").unwrap();
                 c.bench_function("spheres-jit-f64-single-eval-no-compile", |b| {
                     b.iter(|| {
                         no_compilation(&mut eval, black_box(&mut values), &queries);
@@ -232,7 +232,7 @@ mod spheres {
             {
                 let (tree, queries, mut values) = init_benchmark::<f32>();
                 let context = JitContext::default();
-                let mut eval = tree.jit_compile(&context).unwrap();
+                let mut eval = tree.jit_compile(&context, "xyz").unwrap();
                 c.bench_function("spheres-jit-f32-single-eval-no-compile", |b| {
                     b.iter(|| {
                         no_compilation(&mut eval, black_box(&mut values), &queries);
@@ -264,7 +264,7 @@ mod spheres {
         fn b_no_compilation_f64(c: &mut Criterion) {
             let (tree, queries, _) = jit_single::init_benchmark::<f64>();
             let context = JitContext::default();
-            let mut eval = tree.jit_compile_array(&context).unwrap();
+            let mut eval = tree.jit_compile_array(&context, "xyz").unwrap();
             let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
                 buf.pack(&q).unwrap();
@@ -277,7 +277,7 @@ mod spheres {
         fn b_no_compilation_f32(c: &mut Criterion) {
             let (tree, queries, _) = jit_single::init_benchmark::<f32>();
             let context = JitContext::default();
-            let mut eval = tree.jit_compile_array(&context).unwrap();
+            let mut eval = tree.jit_compile_array(&context, "xyz").unwrap();
             let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
                 buf.pack(&q).unwrap();
@@ -417,7 +417,7 @@ mod circles {
 
         fn with_compilation(tree: &Tree, image: &mut ImageBuffer) {
             let context = JitContext::default();
-            let eval = tree.jit_compile(&context).unwrap();
+            let eval = tree.jit_compile(&context, "xy").unwrap();
             let mut coord = [0., 0.];
             for y in 0..DIMS {
                 coord[1] = y as f64 + 0.5;
@@ -478,7 +478,7 @@ mod circles {
             let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let context = JitContext::default();
-            let mut eval = tree.jit_compile(&context).unwrap();
+            let mut eval = tree.jit_compile(&context, "xy").unwrap();
             c.bench_function("circles-jit-single-eval-no-compile", |b| {
                 b.iter(|| {
                     no_compilation(&mut eval, black_box(&mut image));
