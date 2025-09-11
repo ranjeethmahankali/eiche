@@ -50,6 +50,10 @@ impl Tree {
     where
         T: NumberType,
     {
+        if !self.is_scalar() {
+            // Only support scalar output trees.
+            return Err(Error::TypeMismatch);
+        }
         let num_roots = self.num_roots();
         let func_name = context.new_func_name::<T, false>();
         let context = &context.inner;
