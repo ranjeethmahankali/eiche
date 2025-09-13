@@ -155,7 +155,7 @@ pub fn is_node_scalar(nodes: &[Node], index: usize) -> bool {
             Bool(_) => false,
             Scalar(_) => true,
         },
-        Symbol(_) => false,
+        Symbol(_) => true,
         Unary(op, _) => match op {
             Negate => true,
             Sqrt => true,
