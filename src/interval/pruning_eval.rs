@@ -313,7 +313,7 @@ where
                 debug_assert_eq!(rem_index, 0); // Ensure we consumed the
                 // n-dimensional index fully, and that the index was not out of bounds.
             }
-            Err(e) => return PruningState::Failure(e.into()),
+            Err(e) => return PruningState::Failure(e),
         };
         if let Err(e) = fold_for_interval(
             match self.nodes.last_slice() {
