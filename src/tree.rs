@@ -149,6 +149,49 @@ pub enum Node {
 
 use Node::*;
 
+pub fn is_node_scalar(nodes: &[Node], index: usize) -> bool {
+    match &nodes[index] {
+        Constant(value) => match value {
+            Bool(_) => false,
+            Scalar(_) => true,
+        },
+        Symbol(_) => true,
+        Unary(op, _) => match op {
+            Negate => true,
+            Sqrt => true,
+            Abs => true,
+            Sin => true,
+            Cos => true,
+            Tan => true,
+            Log => true,
+            Exp => true,
+            Floor => true,
+            Not => false,
+        },
+        Binary(op, _, _) => match op {
+            Add => true,
+            Subtract => true,
+            Multiply => true,
+            Divide => true,
+            Pow => true,
+            Min => true,
+            Max => true,
+            Remainder => true,
+            Less => false,
+            LessOrEqual => false,
+            Equal => false,
+            NotEqual => false,
+            Greater => false,
+            GreaterOrEqual => false,
+            And => false,
+            Or => false,
+        },
+        Ternary(op, _, a, b) => match op {
+            Choose => is_node_scalar(nodes, *a) && is_node_scalar(nodes, *b),
+        },
+    }
+}
+
 pub(crate) fn is_topological_order(nodes: &[Node]) -> bool {
     nodes.iter().enumerate().all(|(i, node)| match node {
         Constant(_) | Symbol(_) => true,
@@ -261,6 +304,12 @@ impl Tree {
     /// Check if the tree is empty.
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
+    }
+
+    /// Check if the tree's output is scalar.
+    pub fn is_scalar(&self) -> bool {
+        self.root_indices()
+            .all(|ri| is_node_scalar(self.nodes(), ri))
     }
 
     /// Get the number of roots in this tree.

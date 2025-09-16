@@ -1140,13 +1140,17 @@ impl Tree {
     pub fn jit_compile_array<'ctx, T>(
         &'ctx self,
         context: &'ctx JitContext,
+        symbols: &str,
     ) -> Result<JitSimdFn<'ctx, T>, Error>
     where
         Wide: SimdVec<T>,
         T: NumberType,
     {
+        if !self.is_scalar() {
+            // Only support scalar output trees.
+            return Err(Error::TypeMismatch);
+        }
         let num_roots = self.num_roots();
-        let symbols = self.symbols();
         let func_name = context.new_func_name::<T, true>();
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
@@ -1196,7 +1200,7 @@ impl Tree {
                             &format!("input_offset_mul_{label}"),
                         )?,
                         i64_type.const_int(
-                            symbols.iter().position(|c| c == label).ok_or(
+                            symbols.chars().position(|c| c == *label).ok_or(
                                 Error::JitCompilationError("Cannot find symbol".to_string()),
                             )? as u64,
                             false,
@@ -1538,8 +1542,9 @@ mod test {
         eps32: f32,
     ) {
         let context = JitContext::default();
-        let eval64 = tree.jit_compile_array::<f64>(&context).unwrap();
-        let eval32 = tree.jit_compile_array::<f32>(&context).unwrap();
+        let params: String = vardata.iter().map(|(c, ..)| *c).collect();
+        let eval64 = tree.jit_compile_array::<f64>(&context, &params).unwrap();
+        let eval32 = tree.jit_compile_array::<f32>(&context, &params).unwrap();
         let mut buf64 = JitSimdBuffers::<f64>::new(tree);
         let mut buf32 = JitSimdBuffers::<f32>::new(tree);
         let mut eval = ValueEvaluator::new(tree);
@@ -1877,7 +1882,7 @@ mod sphere_test {
         }
         let val_jit: Vec<_> = {
             let context = JitContext::default();
-            let eval = tree.jit_compile_array(&context).unwrap();
+            let eval = tree.jit_compile_array(&context, "xyz").unwrap();
             let mut buf = JitSimdBuffers::new(&tree);
             for q in queries {
                 buf.pack(&q).unwrap();

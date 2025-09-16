@@ -130,7 +130,7 @@ where
 pub enum PruningState {
     None,
     Valid(usize, usize),
-    Failure(Error),
+    Failure(PruningError),
 }
 
 /// The pruning evaluator is designed for applications that traverse the
@@ -163,18 +163,19 @@ where
 }
 
 /// Represents things that can go wrong when pruning.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PruningError {
     /// This is returned when the trees (with instructions), or the stack of
     /// intervals is empty when they're expected to not be.
     UnexpectedEmptyState,
     /// Construction of an inari::Interval failed during pruning.
     CannotConstructInterval(inari::IntervalError),
+    Core(Error),
 }
 
-impl From<PruningError> for Error {
-    fn from(value: PruningError) -> Self {
-        Error::Pruning(value)
+impl From<Error> for PruningError {
+    fn from(value: Error) -> Self {
+        Self::Core(value)
     }
 }
 
@@ -306,28 +307,28 @@ where
                     },
                 )
             }
-            None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+            None => return PruningState::Failure(PruningError::UnexpectedEmptyState),
         } {
             Ok(rem_index) => {
                 debug_assert_eq!(rem_index, 0); // Ensure we consumed the
                 // n-dimensional index fully, and that the index was not out of bounds.
             }
-            Err(e) => return PruningState::Failure(e.into()),
+            Err(e) => return PruningState::Failure(e),
         };
         if let Err(e) = fold_for_interval(
             match self.nodes.last_slice() {
                 Some(nodes) => nodes,
-                None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+                None => return PruningState::Failure(PruningError::UnexpectedEmptyState),
             },
             &self.temp_bounds,
             &mut self.temp_nodes,
             &mut self.temp_intervals,
         ) {
-            return PruningState::Failure(e);
+            return PruningState::Failure(e.into());
         }
         match self.compact_temp_nodes() {
             Ok(roots) => roots,
-            Err(e) => return PruningState::Failure(e),
+            Err(e) => return PruningState::Failure(e.into()),
         };
         // Copy the output intervals.
         self.interval_outputs
@@ -338,7 +339,7 @@ where
         self.interval_indices.push(index);
         let nodes = match self.nodes.last_slice() {
             Some(nodes) => nodes,
-            None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+            None => return PruningState::Failure(PruningError::UnexpectedEmptyState),
         };
         let num_regs = compile(
             nodes,
@@ -356,7 +357,7 @@ where
             self.current_depth(),
             match self.interval_indices.last() {
                 Some(last) => *last,
-                None => return PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+                None => return PruningState::Failure(PruningError::UnexpectedEmptyState),
             },
         )
     }
@@ -390,7 +391,7 @@ where
             _ => match self.interval_indices.last() {
                 // Already at the desired depth. Do nothing.
                 Some(i) => PruningState::Valid(self.current_depth(), *i),
-                None => PruningState::Failure(PruningError::UnexpectedEmptyState.into()),
+                None => PruningState::Failure(PruningError::UnexpectedEmptyState),
             },
         }
     }
@@ -460,29 +461,29 @@ where
         self.vars.insert(label, value);
     }
 
-    pub fn sample(&self, norm_val: &[f64], abs_val: &mut [f64]) -> Result<(), Error> {
+    pub fn sample(&self, norm_val: &[f64], abs_val: &mut [f64]) -> Result<(), PruningError> {
         let bounds = self
             .bounds
             .last_slice()
             .ok_or(PruningError::UnexpectedEmptyState)?;
         if norm_val.len() != abs_val.len() {
-            return Err(Error::InputSizeMismatch(norm_val.len(), abs_val.len()));
+            return Err(Error::InputSizeMismatch(norm_val.len(), abs_val.len()).into());
         }
         if norm_val.len() != bounds.len() {
-            return Err(Error::InputSizeMismatch(norm_val.len(), bounds.len()));
+            return Err(Error::InputSizeMismatch(norm_val.len(), bounds.len()).into());
         }
         for (((_label, interval), norm), out) in
             bounds.iter().zip(norm_val.iter()).zip(abs_val.iter_mut())
         {
             match interval {
                 Interval::Scalar(ii) => *out = ii.inf() + norm * ii.wid(),
-                Interval::Bool(_, _) => return Err(Error::TypeMismatch),
+                Interval::Bool(_, _) => return Err(Error::TypeMismatch.into()),
             }
         }
         Ok(())
     }
 
-    pub fn run(&mut self) -> Result<&[T], Error> {
+    pub fn run(&mut self) -> Result<&[T], PruningError> {
         for (node, out) in self
             .ops
             .last_slice()
@@ -492,7 +493,7 @@ where
                 Node::Constant(val) => T::from_value(*val).unwrap(),
                 Node::Symbol(label) => match self.vars.get(label) {
                     Some(&v) => v,
-                    None => return Err(Error::VariableNotFound(*label)),
+                    None => return Err(Error::VariableNotFound(*label).into()),
                 },
                 Node::Unary(op, input) => T::unary_op(*op, self.val_regs[*input])?,
                 Node::Binary(op, lhs, rhs) => {

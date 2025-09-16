@@ -45,12 +45,16 @@ impl Tree {
     pub fn jit_compile<'ctx, T>(
         &'ctx self,
         context: &'ctx JitContext,
+        params: &str,
     ) -> Result<JitFn<'ctx, T>, Error>
     where
         T: NumberType,
     {
+        if !self.is_scalar() {
+            // Only support scalar output trees.
+            return Err(Error::TypeMismatch);
+        }
         let num_roots = self.num_roots();
-        let symbols = self.symbols();
         let func_name = context.new_func_name::<T, false>();
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
@@ -85,7 +89,7 @@ impl Tree {
                             float_type,
                             inputs,
                             &[context.i64_type().const_int(
-                                symbols.iter().position(|c| c == label).ok_or(
+                                params.chars().position(|c| c == *label).ok_or(
                                     Error::JitCompilationError("Cannot find symbol".to_string()),
                                 )? as u64,
                                 false,
@@ -329,7 +333,7 @@ impl Tree {
         let func = unsafe { engine.get_function(&func_name)? };
         Ok(JitFn {
             func,
-            num_inputs: symbols.len(),
+            num_inputs: params.len(),
             num_outputs: num_roots,
             _phantom: PhantomData,
         })
@@ -488,9 +492,10 @@ mod test {
         eps32: f32,
     ) {
         let context = JitContext::default();
+        let params: String = vardata.iter().map(|(c, ..)| *c).collect();
         {
             // f64.
-            let jiteval = tree.jit_compile(&context).unwrap();
+            let jiteval = tree.jit_compile(&context, &params).unwrap();
             check_value_eval(
                 tree.clone(),
                 |inputs: &[f64], outputs: &mut [f64]| {
@@ -503,7 +508,7 @@ mod test {
         }
         {
             // f32
-            let jiteval = tree.jit_compile(&context).unwrap();
+            let jiteval = tree.jit_compile(&context, &params).unwrap();
             let mut inpf32 = Vec::new();
             let mut outf32 = vec![0.; tree.num_roots()];
             let mut outf64 = Vec::new();
@@ -819,7 +824,7 @@ mod sphere_test {
         let mut val_jit: Vec<f64> = Vec::with_capacity(N_QUERIES);
         {
             let context = JitContext::default();
-            let eval = tree.jit_compile(&context).unwrap();
+            let eval = tree.jit_compile(&context, "xyz").unwrap();
             val_jit.extend(queries.iter().map(|coords| {
                 let mut output = [0.];
                 eval.run(coords, &mut output).unwrap();
