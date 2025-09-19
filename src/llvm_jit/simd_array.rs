@@ -1070,10 +1070,10 @@ where
 
     fn num_simd_iters(&self) -> usize {
         (self.num_samples / Self::SIMD_VEC_SIZE)
-            + if self.num_samples % Self::SIMD_VEC_SIZE > 0 {
-                1
-            } else {
+            + if self.num_samples.is_multiple_of(Self::SIMD_VEC_SIZE) {
                 0
+            } else {
+                1
             }
     }
 
