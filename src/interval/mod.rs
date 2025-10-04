@@ -383,7 +383,7 @@ mod test {
 
     #[test]
     fn t_interval_pow() {
-        let tree = deftree!(pow x 2).unwrap();
+        let tree = deftree!(pow 'x 2).unwrap();
         let mut eval = IntervalEvaluator::new(&tree);
         let mut rng = StdRng::seed_from_u64(42);
         const MAX_VAL: f64 = 32.;
@@ -410,7 +410,7 @@ mod test {
     #[test]
     fn t_interval_sum() {
         check_interval_eval(
-            deftree!(+ x y).unwrap(),
+            deftree!(+ 'x 'y).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.)],
             10,
             5,
@@ -420,7 +420,7 @@ mod test {
     #[test]
     fn t_interval_tree_1() {
         check_interval_eval(
-            deftree!(/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.)).unwrap(),
+            deftree!(/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.)).unwrap(),
             &[('x', -2.5, 2.5)],
             100,
             10,
@@ -430,7 +430,7 @@ mod test {
     #[test]
     fn t_interval_distance_to_point() {
         check_interval_eval(
-            deftree!(sqrt (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.))).unwrap(),
+            deftree!(sqrt (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.))).unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.)],
             20,
             5,
@@ -442,9 +442,9 @@ mod test {
         check_interval_eval(
             deftree!(
                 (max (min
-                      (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                      (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-                 (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+                      (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
             )
             .unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
@@ -457,8 +457,8 @@ mod test {
     fn t_interval_trees_concat_0() {
         check_interval_eval(
             deftree!(concat
-                            (log x)
-                            (+ x (pow y 2.)))
+                            (log 'x)
+                            (+ 'x (pow 'y 2.)))
             .unwrap(),
             &[('x', 1., 10.), ('y', 1., 10.)],
             20,
@@ -470,12 +470,12 @@ mod test {
     fn t_interval_trees_concat_1() {
         check_interval_eval(
             deftree!(concat
-                     (/ (pow (log (+ (sin x) 2.)) 3.) (+ (cos x) 2.))
-                     (+ x y)
+                     (/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.))
+                     (+ 'x 'y)
                      ((max (min
-                            (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                            (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-                       (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+                            (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                            (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                       (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
             )).unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
@@ -486,13 +486,13 @@ mod test {
     #[test]
     fn t_interval_choose() {
         check_interval_eval(
-            deftree!(if (> x 0) x (-x)).unwrap(),
+            deftree!(if (> 'x 0) 'x (- 'x)).unwrap(),
             &[('x', -10., 10.)],
             100,
             10,
         );
         check_interval_eval(
-            deftree!(if (< x 0) (- x) x).unwrap(),
+            deftree!(if (< 'x 0) (- 'x) 'x).unwrap(),
             &[('x', -10., 10.)],
             100,
             10,
@@ -502,7 +502,7 @@ mod test {
     #[test]
     fn t_floor() {
         check_interval_eval(
-            deftree!(floor (/ (pow x 2) (+ 2 (sin x)))).unwrap(),
+            deftree!(floor (/ (pow 'x 2) (+ 2 (sin 'x)))).unwrap(),
             &[('x', 1., 5.)],
             100,
             10,
@@ -512,7 +512,7 @@ mod test {
     #[test]
     fn t_remainder() {
         check_interval_eval(
-            deftree!(rem (pow x 2) (+ 2 (sin x))).unwrap(),
+            deftree!(rem (pow 'x 2) (+ 2 (sin 'x))).unwrap(),
             &[('x', 1., 5.)],
             100,
             10,

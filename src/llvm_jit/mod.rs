@@ -14,6 +14,7 @@ use inkwell::{
     values::{BasicValueEnum, FunctionValue},
 };
 use std::{
+    cell::RefCell,
     ops::{Add, AddAssign, Div, DivAssign, MulAssign, Neg, Sub, SubAssign},
     path::Path,
 };
@@ -22,6 +23,7 @@ use std::{
 /// inkwell Context.
 pub struct JitContext {
     inner: Context,
+    numfuncs: RefCell<usize>,
 }
 
 struct JitCompiler<'ctx> {
@@ -34,7 +36,22 @@ impl Default for JitContext {
     fn default() -> Self {
         JitContext {
             inner: Context::create(),
+            numfuncs: Default::default(),
         }
+    }
+}
+
+impl JitContext {
+    fn new_func_name<T: NumberType, const IS_ARRAY: bool>(&self) -> String {
+        let mut nf = self.numfuncs.borrow_mut();
+        let idx = *nf;
+        *nf += 1;
+        format!(
+            "func_{}_{}_{}",
+            idx,
+            T::type_str(),
+            if IS_ARRAY { "array" } else { "" }
+        )
     }
 }
 
@@ -122,6 +139,8 @@ pub trait NumberType:
     fn min(a: Self, b: Self) -> Self;
 
     fn max(a: Self, b: Self) -> Self;
+
+    fn type_str() -> &'static str;
 }
 
 impl NumberType for f32 {
@@ -144,6 +163,10 @@ impl NumberType for f32 {
     fn max(a: Self, b: Self) -> Self {
         f32::max(a, b)
     }
+
+    fn type_str() -> &'static str {
+        "f32"
+    }
 }
 
 impl NumberType for f64 {
@@ -165,6 +188,10 @@ impl NumberType for f64 {
 
     fn max(a: Self, b: Self) -> Self {
         f64::max(a, b)
+    }
+
+    fn type_str() -> &'static str {
+        "f64"
     }
 }
 

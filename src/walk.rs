@@ -277,7 +277,7 @@ mod test {
     fn t_depth_traverse() {
         let mut walker = DepthWalker::default();
         {
-            let tree = deftree!(+ (pow x 2.) (pow y 2.)).unwrap();
+            let tree = deftree!(+ (pow 'x 2.) (pow 'y 2.)).unwrap();
             // Make sure two successive traversal yield the same nodes.
             let a: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
@@ -289,7 +289,7 @@ mod test {
         }
         {
             // Make sure the same DepthWalker can be used on multiple trees.
-            let tree = deftree!(+ (pow x 3.) (pow y 3.)).unwrap();
+            let tree = deftree!(+ (pow 'x 3.) (pow 'y 3.)).unwrap();
             let a: Vec<_> = walker
                 .walk_tree(&tree, true, NodeOrdering::Original)
                 .collect();

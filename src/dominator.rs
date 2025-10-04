@@ -72,12 +72,10 @@ impl DomTable {
 
     fn dominate(&mut self, parent: usize, child: usize, visited: &mut [bool]) {
         let (poff, coff) = (parent * self.n_chunks, child * self.n_chunks);
-        let [parent_bits, child_bits] = unsafe {
-            self.bits.get_disjoint_unchecked_mut([
-                poff..(poff + self.n_chunks),
-                coff..(coff + self.n_chunks),
-            ])
-        };
+        let [parent_bits, child_bits] = self
+            .bits
+            .get_disjoint_mut([poff..(poff + self.n_chunks), coff..(coff + self.n_chunks)])
+            .expect("INTERNAL ERROR: Incorrect disjoint indices. This should never happen");
         if std::mem::replace(&mut visited[child], true) {
             for (p, c) in parent_bits.iter().zip(child_bits.iter_mut()) {
                 *c &= *p;
@@ -291,7 +289,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::DomTable;
-    use crate::{Tree, deftree};
+    use crate::{Tree, deftree, test::compare_trees};
 
     fn check(table: &DomTable, parent: usize, child: usize) -> bool {
         let offset = child * table.n_chunks;
@@ -301,13 +299,12 @@ mod test {
         flags[quot] & (1 << rem) != 0
     }
 
-    fn validate_sorting(tree: Tree) {
-        let (tree, subcounts) = tree.control_dependence_sorted().unwrap();
+    fn validate_sorting(sorted_tree: &Tree, subcounts: &[usize]) {
         {
             // Verify the number of dominating nodes for each node are the same
             // in the table as that in the sorted results.
             let domcounts = {
-                let mut domcounts = vec![0usize; tree.len()];
+                let mut domcounts = vec![0usize; sorted_tree.len()];
                 for (i, count) in subcounts.iter().enumerate() {
                     assert!(
                         *count <= i,
@@ -322,7 +319,7 @@ in the tree."
                 }
                 domcounts
             };
-            let table = DomTable::from_tree(&tree);
+            let table = DomTable::from_tree(sorted_tree);
             for (child, domcount) in domcounts.iter().enumerate() {
                 let offset = child * table.n_chunks;
                 // Compare the computed dominator counts with those expected from the table.
@@ -337,7 +334,7 @@ in the tree."
         }
         // Ensure all the nodes indicated as dominated by the sorted results,
         // are also flagged as such in the table.
-        let table = DomTable::from_tree(&tree);
+        let table = DomTable::from_tree(sorted_tree);
         for (pi, count) in subcounts.iter().enumerate() {
             for ci in (pi - count)..pi {
                 assert!(check(&table, pi, ci));
@@ -347,7 +344,7 @@ in the tree."
 
     #[test]
     fn t_one_chain() {
-        let tree = deftree!(sin (abs (log x))).unwrap();
+        let tree = deftree!(sin (abs (log 'x))).unwrap();
         let table = DomTable::from_tree(&tree);
         assert_eq!(table.immediate_dominator(0), 1);
         assert_eq!(table.immediate_dominator(1), 2);
@@ -356,51 +353,97 @@ in the tree."
         // Check the counts.
         assert_eq!(&table.counts(), &[0usize, 1, 2, 3]);
         // Check sorting.
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        // Check equivalence.
+        compare_trees(&tree, &sorted_tree, &[('x', 0.01, 10.0)], 20, 1e-14);
     }
 
     #[test]
     fn t_muladd_tree() {
-        let tree = deftree!(* (- x 3.) (+ 2. y)).unwrap().compacted().unwrap();
-        validate_sorting(tree);
+        let tree = deftree!(* (- 'x 3.) (+ 2. 'y))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', -10.0, 10.0), ('y', -10.0, 10.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
     fn t_tiny_tree() {
-        let tree = deftree!(+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))
+        let tree = deftree!(+ (pow (- 'x 2.95) 2.) (pow (- 'y 2.05) 2.))
             .unwrap()
             .compacted()
             .unwrap();
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', -5.0, 5.0), ('y', -5.0, 5.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
     fn t_small_tree() {
-        let tree = deftree!(+ (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
+        let tree = deftree!(+ (sqrt (+ (pow (- 'x 2.95) 2.) (pow (- 'y 2.05) 2.))) 3.67)
             .unwrap()
             .compacted()
             .unwrap();
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', -5.0, 5.0), ('y', -5.0, 5.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
     fn t_depth_two_diamond_nodes() {
-        let tree = deftree!(max (+ (+ x 2.) (+ y 2.)) (+ x y))
+        let tree = deftree!(max (+ (+ 'x 2.) (+ 'y 2.)) (+ 'x 'y))
             .unwrap()
             .compacted()
             .unwrap();
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', -5.0, 5.0), ('y', -5.0, 5.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
     fn t_medium_tree() {
         let tree = deftree!(max
-                            (+ (pow x 2.) (pow y 2.))
-                            (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.)))
+                            (+ (pow 'x 2.) (pow 'y 2.))
+                            (+ (pow (- 'x 2.5) 2.) (pow (- 'y 2.5) 2.)))
         .unwrap()
         .compacted()
         .unwrap();
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', -5.0, 5.0), ('y', -5.0, 5.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
@@ -408,132 +451,219 @@ in the tree."
         let tree = deftree!(min
                  (- (log (+
                           (min
-                           (+ (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
+                           (+ (sqrt (+ (pow (- 'x 2.95) 2.) (pow (- 'y 2.05) 2.))) 3.67)
                            (max
-                            (- (sqrt (+ (pow (- x 3.5) 2.) (pow (- y 3.5) 2.))) 2.234)
+                            (- (sqrt (+ (pow (- 'x 3.5) 2.) (pow (- 'y 3.5) 2.))) 2.234)
                             (max
-                             (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
-                             (- (sqrt (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.))) 5.243))))
+                             (- (sqrt (+ (pow 'x 2.) (pow 'y 2.))) 4.24)
+                             (- (sqrt (+ (pow (- 'x 2.5) 2.) (pow (- 'y 2.5) 2.))) 5.243))))
                           (exp (pow (min
-                                     (- (sqrt (+ (pow (- x 2.95) 2.) (pow (- y 2.05) 2.))) 3.67)
+                                     (- (sqrt (+ (pow (- 'x 2.95) 2.) (pow (- 'y 2.05) 2.))) 3.67)
                                      (max
-                                      (- (sqrt (+ (pow (- x 3.5) 2.) (pow (- y 3.5) 2.))) 2.234)
+                                      (- (sqrt (+ (pow (- 'x 3.5) 2.) (pow (- 'y 3.5) 2.))) 2.234)
                                       (max
-                                       (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
-                                       (- (sqrt (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.))) 5.243))))
+                                       (- (sqrt (+ (pow 'x 2.) (pow 'y 2.))) 4.24)
+                                       (- (sqrt (+ (pow (- 'x 2.5) 2.) (pow (- 'y 2.5) 2.))) 5.243))))
                                 2.456))))
                   (min
-                   (/ (+ (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a))
-                   (/ (- (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a))))
+                   (/ (+ (- 'b) (sqrt (- (pow 'b 2.) (* 4 (* 'a 'c))))) (* 2. 'a))
+                   (/ (- (- 'b) (sqrt (- (pow 'b 2.) (* 4 (* 'a 'c))))) (* 2. 'a))))
                  (+ (log (+
                           (max
-                           (- (sqrt (+ (pow (- x 3.95) 2.) (pow (- y 3.05) 2.))) 5.67)
+                           (- (sqrt (+ (pow (- 'x 3.95) 2.) (pow (- 'y 3.05) 2.))) 5.67)
                            (min
-                            (- (sqrt (+ (pow (- x 4.51) 2.) (pow (- y 4.51) 2.))) 2.1234)
+                            (- (sqrt (+ (pow (- 'x 4.51) 2.) (pow (- 'y 4.51) 2.))) 2.1234)
                             (min
-                             (- (sqrt (+ (pow x 2.1) (pow y 2.1))) 4.2432)
-                             (- (sqrt (+ (pow (- x 2.512) 2.) (pow (- y 2.512) 2.1))) 5.1243))))
+                             (- (sqrt (+ (pow 'x 2.1) (pow 'y 2.1))) 4.2432)
+                             (- (sqrt (+ (pow (- 'x 2.512) 2.) (pow (- 'y 2.512) 2.1))) 5.1243))))
                           (exp (pow (max
-                                     (- (sqrt (+ (pow (- x 2.65) 2.) (pow (- y 2.15) 2.))) 3.67)
+                                     (- (sqrt (+ (pow (- 'x 2.65) 2.) (pow (- 'y 2.15) 2.))) 3.67)
                                      (min
-                                      (- (sqrt (+ (pow (- x 3.65) 2.) (pow (- y 3.75) 2.))) 2.234)
+                                      (- (sqrt (+ (pow (- 'x 3.65) 2.) (pow (- 'y 3.75) 2.))) 2.234)
                                       (min
-                                       (- (sqrt (+ (pow x 2.) (pow y 2.))) 4.24)
-                                       (- (sqrt (+ (pow (- x 2.35) 2.) (pow (- y 2.25) 2.))) 5.1243))))
+                                       (- (sqrt (+ (pow 'x 2.) (pow 'y 2.))) 4.24)
+                                       (- (sqrt (+ (pow (- 'x 2.35) 2.) (pow (- 'y 2.25) 2.))) 5.1243))))
                                 2.1456))))
                   (max
-                   (/ (+ (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a))
-                   (/ (- (- b) (sqrt (- (pow b 2.) (* 4 (* a c))))) (* 2. a)))))
+                   (/ (+ (- 'b) (sqrt (- (pow 'b 2.) (* 4 (* 'a 'c))))) (* 2. 'a))
+                   (/ (- (- 'b) (sqrt (- (pow 'b 2.) (* 4 (* 'a 'c))))) (* 2. 'a)))))
         .unwrap()
         .compacted()
             .unwrap();
         // let table = DomTable::from_tree(&tree);
         // println!("{:?}", table.counts());
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        // Skip equivalence test for this complex tree due to numerical instability
         // assert!(false);
     }
 
     // Edge case tests
     #[test]
     fn t_single_node() {
-        let tree = deftree!(x).unwrap();
-        validate_sorting(tree);
+        let tree = deftree!('x).unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(&tree, &sorted_tree, &[('x', -5.0, 5.0)], 15, 1e-14);
     }
 
     #[test]
     fn t_single_constant() {
         let tree = deftree!(42.).unwrap();
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
     }
 
     #[test]
     fn t_all_leaves() {
-        let tree = deftree!(+ x y).unwrap();
-        validate_sorting(tree);
+        let tree = deftree!(+ 'x 'y).unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', -5.0, 5.0), ('y', -5.0, 5.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
     fn t_shared_subtree() {
-        let tree = deftree!(+ (* x y) (* x y)).unwrap().compacted().unwrap();
-        validate_sorting(tree);
+        let tree = deftree!(+ (* 'x 'y) (* 'x 'y))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', -5.0, 5.0), ('y', -5.0, 5.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
     fn t_nested_sharing() {
-        let tree = deftree!(+ (sin (cos x)) (cos (cos x)))
+        let tree = deftree!(+ (sin (cos 'x)) (cos (cos 'x)))
             .unwrap()
             .compacted()
             .unwrap();
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(&tree, &sorted_tree, &[('x', -5.0, 5.0)], 15, 1e-14);
     }
 
     #[test]
     fn t_ternary_nodes() {
-        let tree = deftree!(if (> x 0) x (- x)).unwrap();
-        validate_sorting(tree);
+        let tree = deftree!(if (> 'x 0) 'x (- 'x)).unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(&tree, &sorted_tree, &[('x', -5.0, 5.0)], 15, 1e-14);
     }
 
     #[test]
     fn t_complex_ternary() {
-        let tree = deftree!(if (> x y) (+ x y) (- x y)).unwrap();
-        validate_sorting(tree);
+        let tree = deftree!(if (> 'x 'y) (+ 'x 'y) (- 'x 'y)).unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', -5.0, 5.0), ('y', -5.0, 5.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
     fn t_deep_chain() {
-        let tree = deftree!(sin (cos (tan (log (exp (sqrt (abs x))))))).unwrap();
-        validate_sorting(tree);
+        let tree = deftree!(sin (cos (tan (log (exp (sqrt (abs 'x))))))).unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(&tree, &sorted_tree, &[('x', 0.01, 5.0)], 15, 1e-14);
     }
 
     #[test]
     fn t_wide_tree() {
-        let tree = deftree!(+ (+ (+ (+ x y) z) a) (+ (+ b c) d)).unwrap();
-        validate_sorting(tree);
+        let tree = deftree!(+ (+ (+ (+ 'x 'y) 'z) 'a) (+ (+ 'b 'c) 'd)).unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[
+                ('x', -5.0, 5.0),
+                ('y', -5.0, 5.0),
+                ('z', -5.0, 5.0),
+                ('a', -5.0, 5.0),
+                ('b', -5.0, 5.0),
+                ('c', -5.0, 5.0),
+                ('d', -5.0, 5.0),
+            ],
+            3,
+            1e-14,
+        ); // 3^7 = 2,187 samples
     }
 
     #[test]
     fn t_multiple_shared_nodes() {
-        let tree = deftree!(+ (* (+ x y) (- x y)) (* (+ x y) (+ a b)))
+        let tree = deftree!(+ (* (+ 'x 'y) (- 'x 'y)) (* (+ 'x 'y) (+ 'a 'b)))
             .unwrap()
             .compacted()
             .unwrap();
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[
+                ('x', -5.0, 5.0),
+                ('y', -5.0, 5.0),
+                ('a', -5.0, 5.0),
+                ('b', -5.0, 5.0),
+            ],
+            6,
+            1e-14,
+        ); // 6^4 = 1,296 samples
     }
 
     #[test]
     fn t_deeply_nested_sharing() {
-        let tree = deftree!(+ (pow (+ x y) 2) (sqrt (+ x y)))
+        let tree = deftree!(+ (pow (+ 'x 'y) 2) (sqrt (+ 'x 'y)))
             .unwrap()
             .compacted()
             .unwrap();
-        validate_sorting(tree);
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[('x', 0.01, 5.0), ('y', 0.01, 5.0)],
+            8,
+            1e-14,
+        );
     }
 
     #[test]
     fn t_bit_boundary_64() {
-        // Create a tree with approximately 64 nodes to test bit chunk boundaries
-        // Using single character symbols as required by the macro
-        let tree = deftree!(+ (+ (+ (+ (+ (+ (+ (+ x y) z) a) b) c) d) e) f).unwrap();
-        validate_sorting(tree);
+        // Test with fewer variables to avoid combinatorial explosion in equivalence testing
+        let tree = deftree!(+ (+ (+ 'x 'y) 'z) 'a).unwrap();
+        let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
+        validate_sorting(&sorted_tree, &subcounts);
+        compare_trees(
+            &tree,
+            &sorted_tree,
+            &[
+                ('x', -5.0, 5.0),
+                ('y', -5.0, 5.0),
+                ('z', -5.0, 5.0),
+                ('a', -5.0, 5.0),
+            ],
+            6,
+            1e-14,
+        ); // 6^4 = 1,296 samples
     }
 }

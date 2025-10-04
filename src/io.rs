@@ -108,9 +108,9 @@ mod test {
         let mut pruner = Pruner::new();
         let tree = deftree!(
             (max (min
-                  (- (sqrt (+ (+ (pow (- x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 2.75)
-                  (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (- y 3.) 2.)) (pow (- z 4.) 2.))) 4.))
-             (- (sqrt (+ (+ (pow (+ x 2.) 2.) (pow (+ y 3.) 2.)) (pow (- z 4.) 2.))) 5.25))
+                  (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                  (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+             (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
         )
         .unwrap();
         assert_eq!(
@@ -257,8 +257,8 @@ mod test {
     #[test]
     fn t_concat_string_formatting() {
         let v2 = deftree!(concat
-                          (+ (pow x 2.) (pow y 2.))
-                          (* (pow x 2.) (pow y 2.)))
+                          (+ (pow 'x 2.) (pow 'y 2.))
+                          (* (pow 'x 2.) (pow 'y 2.)))
         .unwrap();
         assert_eq!(
             format!("{v2}").trim(),
