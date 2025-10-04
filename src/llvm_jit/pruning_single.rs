@@ -199,7 +199,6 @@ impl Tree {
             num_signals,
             "The number of prunable nodes should be equal to the number of signals computed via scan."
         );
-        const FUNC_NAME: &str = "eiche_pruning_func";
         todo!("Not Implemented");
     }
 }
