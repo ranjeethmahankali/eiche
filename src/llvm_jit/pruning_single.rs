@@ -1,9 +1,5 @@
-use super::{JitCompiler, JitContext, NumberType, build_constant, build_read_symbol};
-use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
-use inkwell::{
-    AddressSpace,
-    values::{ArrayValue, AsValueRef, BasicValueEnum, PointerValue},
-};
+use super::{JitContext, NumberType};
+use crate::{Error, Tree};
 use std::ffi::c_void;
 
 type UnsafePruningFuncType = unsafe extern "C" fn(
@@ -180,7 +176,7 @@ impl BlockLayout {
 impl Tree {
     pub fn jit_compile_with_pruning<'ctx, T>(
         &'ctx self,
-        context: &'ctx JitContext,
+        _context: &'ctx JitContext,
         prune_threshold: usize,
     ) -> Result<(), Error>
     where
@@ -204,101 +200,6 @@ impl Tree {
             "The number of prunable nodes should be equal to the number of signals computed via scan."
         );
         const FUNC_NAME: &str = "eiche_pruning_func";
-        let symbols = tree.symbols();
-        let context = &context.inner;
-        let compiler = JitCompiler::new(context)?;
-        let builder = &compiler.builder;
-        let float_type = T::jit_type(context);
-        let ptr_type = context.ptr_type(AddressSpace::default());
-        let bool_type = context.bool_type();
-        let fn_type = context
-            .void_type()
-            .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
-        let function = compiler.module.add_function(FUNC_NAME, fn_type, None);
-        // Create the blocks needed.
-        let layout = BlockLayout::from_table(&jtable)?;
-        let blocks: Box<[_]> = (0..layout.num_blocks())
-            .map(|bi| context.append_basic_block(function, &format!("block_{bi}")))
-            .collect();
-        let mut current_block = 0;
-        builder.position_at_end(blocks[current_block]);
-        let block_addresses = {
-            // Create a runtime array with all the block addresses.
-            let block_addresses: Box<[_]> = blocks
-                .iter()
-                .filter_map(|block| unsafe { block.get_address() })
-                .collect();
-            if block_addresses.len() != blocks.len() {
-                return Err(Error::JitCompilationError(
-                    "Unable to acquire addresses of all blocks".into(),
-                ));
-            }
-            ptr_type
-                .array_type(blocks.len() as u32)
-                .const_array(&block_addresses)
-        };
-        let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(tree.len());
-        for (ni, node) in tree.nodes().iter().enumerate() {
-            match &layout.branches[ni] {
-                BranchType::None => {}
-                BranchType::Unconditional => {
-                    let next = current_block + 1;
-                    builder.build_unconditional_branch(blocks[next])?;
-                    builder.position_at_end(blocks[next]);
-                    current_block = next;
-                }
-                BranchType::Indirect(targets) => {
-                    let next = current_block + 1;
-                    let targets_input = function
-                        .get_nth_param(2)
-                        .ok_or(Error::JitCompilationError(
-                            "Cannot read input arguments".into(),
-                        ))?
-                        .into_pointer_value();
-                    // Index of the jump target for this instruction in the array passed in as the input arg.
-                    let ti = layout.jump_target_indices[ni] as u64;
-                    let target_index = context.i64_type().const_int(ti, false);
-                    let address = unsafe {
-                        let block_index = builder
-                            .build_load(
-                                context.i64_type(),
-                                builder.build_gep(
-                                    context.i64_type(),
-                                    targets_input,
-                                    &[target_index],
-                                    &format!("jump_target_address_{}", target_index),
-                                )?,
-                                &format!("block_index_{}", ti),
-                            )?
-                            .into_int_value();
-                        builder
-                            .build_load(
-                                ptr_type,
-                                builder.build_gep(
-                                    ptr_type,
-                                    PointerValue::new(block_addresses.as_value_ref()),
-                                    &[block_index],
-                                    &format!("block_addres_ptr_{}", ti),
-                                )?,
-                                &format!("block_addres_{}", ti),
-                            )?
-                            .into_pointer_value()
-                    };
-                    let destinations: Box<[_]> = targets.iter().map(|i| blocks[*i]).collect();
-                    builder.build_indirect_branch(address, &destinations)?;
-                    // Move on to the next block.
-                    builder.position_at_end(blocks[next]);
-                    current_block = next;
-                }
-            }
-            let reg = match node {
-                Constant(val) => build_constant(val, float_type, bool_type),
-                Symbol(label) => {
-                    build_read_symbol(&symbols, context, builder, float_type, function, label)?
-                }
-                _ => todo!("Not implemented"),
-            };
-        }
         todo!("Not Implemented");
     }
 }
@@ -310,7 +211,7 @@ mod test {
 
     #[test]
     fn t_block_layout_small_tree() {
-        let (tree, counts) = deftree!(max (+ (+ x 2.) (+ y 2.)) (+ x y))
+        let (tree, counts) = deftree!(max (+ (+ 'x 2.) (+ 'y 2.)) (+ 'x 'y))
             .unwrap()
             .compacted()
             .unwrap()
@@ -339,8 +240,8 @@ mod test {
     #[test]
     fn t_block_layout_medium_tree() {
         let (tree, counts) = deftree!(max
-                            (+ (pow x 2.) (pow y 2.))
-                            (+ (pow (- x 2.5) 2.) (pow (- y 2.5) 2.)))
+                            (+ (pow 'x 2.) (pow 'y 2.))
+                            (+ (pow (- 'x 2.5) 2.) (pow (- 'y 2.5) 2.)))
         .unwrap()
         .compacted()
         .unwrap()

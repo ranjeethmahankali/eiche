@@ -1,5 +1,5 @@
-use super::{JitCompiler, JitContext, NumberType, build_constant, build_read_symbol};
-use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*};
+use super::{JitCompiler, JitContext, NumberType};
+use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
     builder::Builder,
@@ -60,7 +60,7 @@ impl Tree {
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
         let float_type = T::jit_type(context);
-        let ptr_type = context.ptr_type(AddressSpace::default());
+        let float_ptr_type = context.ptr_type(AddressSpace::default());
         let bool_type = context.bool_type();
         let fn_type = context
             .void_type()
@@ -70,7 +70,12 @@ impl Tree {
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
-                Constant(val) => build_constant(val, float_type, bool_type),
+                Constant(val) => match val {
+                    Bool(val) => BasicValueEnum::IntValue(
+                        bool_type.const_int(if *val { 1 } else { 0 }, false),
+                    ),
+                    Scalar(val) => BasicValueEnum::FloatValue(float_type.const_float(*val)),
+                },
                 Symbol(label) => {
                     let inputs = function
                         .get_first_param()
