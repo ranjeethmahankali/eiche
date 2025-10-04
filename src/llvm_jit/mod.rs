@@ -1,7 +1,4 @@
-use crate::{
-    Value::{self, *},
-    error::Error,
-};
+use crate::error::Error;
 use inkwell::{
     OptimizationLevel,
     builder::{Builder, BuilderError},
@@ -10,8 +7,7 @@ use inkwell::{
     module::Module,
     passes::PassManager,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
-    types::{FloatType, IntType},
-    values::{BasicValueEnum, FunctionValue},
+    types::FloatType,
 };
 use std::{
     cell::RefCell,
@@ -193,47 +189,6 @@ impl NumberType for f64 {
     fn type_str() -> &'static str {
         "f64"
     }
-}
-
-fn build_constant<'a>(
-    val: &Value,
-    float_type: FloatType<'a>,
-    bool_type: IntType<'a>,
-) -> BasicValueEnum<'a> {
-    match val {
-        Bool(val) => BasicValueEnum::IntValue(bool_type.const_int(if *val { 1 } else { 0 }, false)),
-        Scalar(val) => BasicValueEnum::FloatValue(float_type.const_float(*val)),
-    }
-}
-
-fn build_read_symbol<'a>(
-    symbols: &Vec<char>,
-    context: &'a Context,
-    builder: &Builder<'a>,
-    float_type: FloatType<'a>,
-    function: FunctionValue<'a>,
-    label: &char,
-) -> Result<BasicValueEnum<'a>, Error> {
-    let inputs = function
-        .get_first_param()
-        .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
-        .into_pointer_value();
-    let ptr = unsafe {
-        builder.build_gep(
-            float_type,
-            inputs,
-            &[context.i64_type().const_int(
-                symbols
-                    .iter()
-                    .position(|c| c == label)
-                    .ok_or(Error::JitCompilationError("Cannot find symbol".to_string()))?
-                    as u64,
-                false,
-            )],
-            &format!("arg_{}", *label),
-        )?
-    };
-    Ok(builder.build_load(float_type, ptr, &format!("val_{}", *label))?)
 }
 
 pub mod pruning_single;
