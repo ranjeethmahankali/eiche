@@ -186,7 +186,7 @@ impl Tree {
     /// ranges is returned. i.e. for each node the entry in this vector
     /// indicates the number of nodes it exclusively dominates.
     ///
-    /// I think this concept is referred to as "Control Dependence Graph" in the
+    /// This concept is referred to as "Control Dependence Graph" in the
     /// compiler theory literature.
     pub fn control_dependence_sorted(&self) -> Result<(Tree, Vec<usize>), Error> {
         // Initialize data.
