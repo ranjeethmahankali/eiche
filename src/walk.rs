@@ -1,5 +1,6 @@
 use crate::{
     error::Error,
+    hash::hash_nodes,
     tree::{
         Node::{self, *},
         Tree,
@@ -22,6 +23,7 @@ struct StackElement {
 #[derive(Default)]
 pub struct DepthWalker {
     stack: Vec<StackElement>,
+    hashes: Vec<u64>, // Used for deterministic sorting of operands of commutative ops.
     visited: Vec<bool>, // Whether a node is already visited.
     on_path: Vec<bool>, // Whether a node is present on the path between the current node and the root.
 }
@@ -58,6 +60,7 @@ impl DepthWalker {
         ordering: NodeOrdering,
     ) -> DepthIterator<'a, true> {
         self.init_from_roots(nodes.len(), roots);
+        hash_nodes(nodes, &mut self.hashes);
         // Create the iterator.
         DepthIterator {
             unique,
@@ -79,6 +82,7 @@ impl DepthWalker {
         ordering: NodeOrdering,
     ) -> DepthIterator<'a, false> {
         self.init_from_roots(tree.len(), tree.root_indices());
+        hash_nodes(tree.nodes(), &mut self.hashes);
         // Create the iterator.
         DepthIterator {
             unique,
@@ -96,8 +100,10 @@ impl DepthWalker {
 pub enum NodeOrdering {
     /// Traverse children in the order they appear in the parent.
     Original,
-    /// Sort the children in a deterministic way, irrespective of the
-    /// order they appear in the parent.
+    /// Sort the children in a deterministic way, irrespective of the order they
+    /// appear in the parent. Useful for comparing trees for their mathematical
+    /// equivalence, regardless of the order in which th e expressions are
+    /// written.
     Deterministic,
 }
 
@@ -119,7 +125,6 @@ pub struct DepthIterator<'a, const CHECK_FOR_CYCLES: bool> {
 impl<const CHECK_FOR_CYCLES: bool> DepthIterator<'_, CHECK_FOR_CYCLES> {
     fn sort_children(&self, parent: &Node, children: &mut [usize]) {
         use NodeOrdering::*;
-        use std::cmp::Ordering;
         if children.len() < 2 {
             // Nothing to sort.
             return;
@@ -133,16 +138,7 @@ impl<const CHECK_FOR_CYCLES: bool> DepthIterator<'_, CHECK_FOR_CYCLES> {
                     Deterministic => {
                         if op.is_commutative() {
                             children.sort_by(|a, b| {
-                                match self.nodes[*a].partial_cmp(&self.nodes[*b]) {
-                                    Some(ord) => ord,
-                                    // This is tied to the PartialOrd
-                                    // implementation for Node. Assuming the
-                                    // only time we return None is with two
-                                    // constant nodes with Nan's in them. This
-                                    // seems like a harmless edge case for
-                                    // now.
-                                    None => Ordering::Equal,
-                                }
+                                self.walker.hashes[*a].cmp(&self.walker.hashes[*b])
                             });
                         }
                     }

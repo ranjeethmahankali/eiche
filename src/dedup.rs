@@ -441,8 +441,8 @@ mod test {
     fn t_deep_equivalence_test() {
         // We only expect this to pass if we deterministically sort the operands
         // of commutative ops based on their hashes.
-        let ltree = deftree!(+ (+ 'a 'd) (+ 'b 'c)).unwrap().sort_operands();
-        let rtree = deftree!(+ (+ 'c 'b) (+ 'd 'a)).unwrap().sort_operands();
+        let ltree = deftree!(+ (+ 'a 'd) (+ 'b 'c)).unwrap();
+        let rtree = deftree!(+ (+ 'c 'b) (+ 'd 'a)).unwrap();
         assert!(ltree.equivalent(&rtree));
     }
 }

@@ -1,6 +1,4 @@
-use crate::{
-    dedup::Deduplicater, error::Error, fold::fold, hash::hash_sort_operands, prune::Pruner,
-};
+use crate::{dedup::Deduplicater, error::Error, fold::fold, prune::Pruner};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -250,12 +248,6 @@ impl Tree {
         let (mut nodes, dims) = self.take();
         pruner.run_from_range(&mut nodes, roots)?;
         Tree::from_nodes(nodes, dims)
-    }
-
-    pub fn sort_operands(mut self) -> Tree {
-        let mut hashes = Vec::with_capacity(self.len());
-        hash_sort_operands(&mut self.nodes, &mut hashes);
-        self
     }
 
     /// Create a tree representing a symbol with the given `label`.

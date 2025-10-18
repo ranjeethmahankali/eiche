@@ -68,69 +68,6 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
     }
 }
 
-pub fn hash_sort_operands(nodes: &mut [Node], hashbuf: &mut Vec<u64>) {
-    // Using a boxed slice to avoid accidental resizing later.
-    hashbuf.clear();
-    hashbuf.resize(nodes.len(), 0);
-    for index in 0..nodes.len() {
-        let hash: u64 = match &mut nodes[index] {
-            Constant(value) => match value {
-                Scalar(value) => {
-                    let mut s: DefaultHasher = Default::default();
-                    (0xa30b590b1a66fb7e as u64).hash(&mut s); // Seed.
-                    value.to_bits().hash(&mut s);
-                    s.finish()
-                }
-                Bool(value) => {
-                    let mut s: DefaultHasher = Default::default();
-                    (0xdf699aa96eec7cf5 as u64).hash(&mut s); // Seed.
-                    (*value as u64).hash(&mut s);
-                    s.finish()
-                }
-            },
-            Symbol(label) => {
-                let mut s: DefaultHasher = Default::default();
-                (0xd1b5548d85a554f1 as u64).hash(&mut s); // Seed.
-                label.hash(&mut s);
-                s.finish()
-            }
-            Unary(op, input) => {
-                let mut s: DefaultHasher = Default::default();
-                op.hash(&mut s);
-                hashbuf[*input].hash(&mut s);
-                s.finish()
-            }
-            Binary(op, lhs, rhs) => {
-                let (hash1, hash2) = {
-                    let mut hash1 = hashbuf[*lhs];
-                    let mut hash2 = hashbuf[*rhs];
-                    if op.is_commutative() && hash1 > hash2 {
-                        std::mem::swap(&mut hash1, &mut hash2);
-                        std::mem::swap(lhs, rhs);
-                    }
-                    (hash1, hash2)
-                };
-                let mut s: DefaultHasher = Default::default();
-                op.hash(&mut s);
-                hash1.hash(&mut s);
-                hash2.hash(&mut s);
-                s.finish()
-            }
-            Ternary(op, a, b, c) => {
-                // There are not order agnostic ternary operators at this time.
-                // Reconsider below code in the future if you add order agnostic ternary ops.
-                let mut s: DefaultHasher = Default::default();
-                op.hash(&mut s);
-                hashbuf[*a].hash(&mut s);
-                hashbuf[*b].hash(&mut s);
-                hashbuf[*c].hash(&mut s);
-                s.finish()
-            }
-        };
-        hashbuf[index] = hash;
-    }
-}
-
 impl Tree {
     /// Compute a hash for this tree. `hashbuf` is just memory that is used
     /// for computing the hash. It can be reused to avoid allocations.
