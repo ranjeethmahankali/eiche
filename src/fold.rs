@@ -1,5 +1,4 @@
 use crate::{
-    UnaryOp,
     error::Error,
     eval::ValueType,
     tree::{
@@ -370,6 +369,119 @@ mod test {
                 .prune(&mut pruner)
                 .unwrap()
                 .equivalent(&deftree!(if (> 'x 0) 'x (- 'x)).unwrap()),
+        );
+    }
+
+    #[test]
+    fn t_double_negation() {
+        let mut pruner = Pruner::new();
+        // Simple case: -(-x) = x
+        assert!(
+            deftree!(- (- 'x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!('x).unwrap()),
+        );
+        // Nested case: -(-(x + y)) = x + y
+        assert!(
+            deftree!(- (- (+ 'x 'y)))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(+ 'x 'y).unwrap()),
+        );
+        // Multiple double negations: -(-(x)) + -(-(y)) = x + y
+        assert!(
+            deftree!(+ (- (- 'x)) (- (- 'y)))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(+ 'x 'y).unwrap()),
+        );
+        // Complex expression with double negation
+        assert!(
+            deftree!(pow (+ (- (- (cos 'x))) (/ 1 (sin (- (- 'y))))) (* 2 (+ 'x 'y)))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(pow (+ (cos 'x) (/ 1 (sin 'y))) (* 2 (+ 'x 'y))).unwrap()),
+        );
+    }
+
+    #[test]
+    fn t_negate_subtract() {
+        let mut pruner = Pruner::new();
+        // Simple case: -(a - b) = b - a
+        assert!(
+            deftree!(- (- 'a 'b))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(- 'b 'a).unwrap()),
+        );
+        // With expressions: -(x + y - z) = z - (x + y)
+        assert!(
+            deftree!(- (- (+ 'x 'y) 'z))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(- 'z (+ 'x 'y)).unwrap()),
+        );
+        // Verify numerical equivalence with compare_trees
+        let tree = deftree!(- (- 'x 'y)).unwrap();
+        let expected = deftree!(- 'y 'x).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        compare_trees(
+            &folded,
+            &expected,
+            &[('x', -10., 10.), ('y', -10., 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_combined_negate_rules() {
+        let mut pruner = Pruner::new();
+        assert!(
+            deftree!(- (- (- (- 'a 'b))))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(- 'b 'a).unwrap()),
+        );
+        // Complex expression: -(-(x - y)) + -(z - w) = (x - y) + (w - z)
+        let tree = deftree!(+ (- (- (- 'x 'y))) (- (- 'z 'w))).unwrap();
+        let expected = deftree!(+ (- 'x 'y) (- 'w 'z)).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        compare_trees(
+            &folded,
+            &expected,
+            &[
+                ('x', -5., 5.),
+                ('y', -5., 5.),
+                ('z', -5., 5.),
+                ('w', -5., 5.),
+            ],
+            10,
+            0.,
         );
     }
 }
