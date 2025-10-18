@@ -1,4 +1,5 @@
 use crate::{
+    UnaryOp,
     error::Error,
     eval::ValueType,
     tree::{
@@ -21,13 +22,12 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
         let folded = match nodes[index] {
             Constant(_) => None,
             Symbol(_) => None,
-            Unary(op, input) => {
-                if let Constant(value) = nodes[input] {
-                    Some(Constant(Value::unary_op(op, value)?))
-                } else {
-                    None
-                }
-            }
+            Unary(op, input) => match (op, &nodes[input]) {
+                (_, Constant(value)) => Some(Constant(Value::unary_op(op, *value)?)),
+                (Negate, Unary(Negate, inner)) => Some(nodes[*inner]),
+                (Negate, Binary(Subtract, li, ri)) => Some(Binary(Subtract, *ri, *li)),
+                _ => None,
+            },
             Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
                 // Constant folding.
                 (op, Constant(a), Constant(b)) => Some(Constant(Value::binary_op(op, *a, *b)?)),
