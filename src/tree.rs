@@ -450,14 +450,14 @@ impl Tree {
         Ok(self)
     }
 
-    fn unary_op(mut self, op: UnaryOp) -> Result<Tree, Error> {
+    pub fn unary_op(mut self, op: UnaryOp) -> Result<Tree, Error> {
         for root in self.root_indices() {
             self.nodes.push(Unary(op, root));
         }
         Ok(self)
     }
 
-    fn binary_op(mut self, other: Tree, op: BinaryOp) -> Result<Tree, Error> {
+    pub fn binary_op(mut self, other: Tree, op: BinaryOp) -> Result<Tree, Error> {
         let nroots = self.num_roots();
         let other_nroots = other.num_roots();
         if nroots != 1 && other_nroots != 1 && nroots != other_nroots {
@@ -484,7 +484,7 @@ impl Tree {
         Ok(self)
     }
 
-    fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> Result<Tree, Error> {
+    pub fn ternary_op(mut self, a: Tree, b: Tree, op: TernaryOp) -> Result<Tree, Error> {
         let anroots = a.num_roots();
         let bnroots = b.num_roots();
         if anroots != bnroots {
