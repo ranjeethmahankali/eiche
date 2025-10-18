@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use crate::{
     error::Error,
+    hash::hash_sort_operands,
     tree::Node::{self, *},
 };
 
@@ -22,6 +23,7 @@ pub struct Pruner {
     sorted: Vec<Node>,
     roots: Vec<Node>,
     heights: Vec<usize>,
+    hashes: Vec<u64>,
     visited: Vec<bool>,
     stack: Vec<StackElement>,
     on_path: Vec<bool>,
@@ -41,6 +43,7 @@ impl Pruner {
             sorted: Vec::new(),
             roots: Vec::new(),
             heights: Vec::new(),
+            hashes: Vec::new(),
             visited: Vec::new(),
             stack: Vec::new(),
             on_path: Vec::new(),
@@ -192,6 +195,7 @@ impl Pruner {
                 }
             }
         }
+        hash_sort_operands(&mut self.sorted, &mut self.hashes);
         Ok(())
     }
 

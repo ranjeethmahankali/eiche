@@ -436,4 +436,17 @@ mod test {
                 .equivalent(&deftree!(if (< 'x 0) (log (* 3 'x)) (exp (+ 3 'x))).unwrap())
         );
     }
+
+    #[test]
+    fn t_deep_equivalence_test() {
+        let ltree = deftree!(+ (+ 'a 'd) (+ 'b 'c))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        let rtree = deftree!(+ (+ 'c 'b) (+ 'd 'a))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        assert!(ltree.equivalent(&rtree));
+    }
 }
