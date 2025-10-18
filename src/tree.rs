@@ -6,6 +6,13 @@ pub enum Value {
     Bool(bool),
     Scalar(f64),
 }
+
+impl std::hash::Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+    }
+}
+
 use Value::*;
 
 /// Represents an operation with one input.
@@ -138,7 +145,7 @@ impl TernaryOp {
 use {BinaryOp::*, TernaryOp::*, UnaryOp::*};
 
 /// Represents a node in an abstract syntax `Tree`.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Hash)]
 pub enum Node {
     Constant(Value),
     Symbol(char),
