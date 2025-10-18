@@ -13,10 +13,12 @@ impl std::hash::Hash for Value {
     }
 }
 
+impl std::cmp::Eq for Value {}
+
 use Value::*;
 
 /// Represents an operation with one input.
-#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum UnaryOp {
     // Scalar
     Negate,
@@ -33,7 +35,7 @@ pub enum UnaryOp {
 }
 
 /// Represents an operation with two inputs.
-#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum BinaryOp {
     // Scalar
     Add,
@@ -55,7 +57,7 @@ pub enum BinaryOp {
     Or,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum TernaryOp {
     Choose,
 }
@@ -145,7 +147,7 @@ impl TernaryOp {
 use {BinaryOp::*, TernaryOp::*, UnaryOp::*};
 
 /// Represents a node in an abstract syntax `Tree`.
-#[derive(Debug, PartialEq, Copy, Clone, Hash)]
+#[derive(Debug, PartialEq, Copy, Clone, Hash, Eq)]
 pub enum Node {
     Constant(Value),
     Symbol(char),
