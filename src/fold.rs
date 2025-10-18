@@ -468,7 +468,10 @@ mod test {
         );
         // Complex expression: -(-(x - y)) + -(z - w) = (x - y) + (w - z)
         let tree = deftree!(+ (- (- (- 'x 'y))) (- (- 'z 'w))).unwrap();
-        let expected = deftree!(+ (- 'x 'y) (- 'w 'z)).unwrap();
+        let expected = deftree!(+ (- 'x 'y) (- 'w 'z))
+            .unwrap()
+            .prune(&mut pruner)
+            .unwrap();
         let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
         assert!(folded.equivalent(&expected));
         compare_trees(
