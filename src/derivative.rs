@@ -174,7 +174,6 @@ fn compute_symbolic_deriv(
                     Add => Binary(Add, lderiv, rderiv),
                     Subtract => Binary(Subtract, lderiv, rderiv),
                     Multiply => {
-                        // TODO: Use fma here.
                         let lr = push_node(Binary(Multiply, *lhs, rderiv), dst) + offset;
                         let rl = push_node(Binary(Multiply, *rhs, lderiv), dst) + offset;
                         Binary(Add, lr, rl)
