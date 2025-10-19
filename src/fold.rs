@@ -25,6 +25,7 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
                 (_, Constant(value)) => Some(Constant(Value::unary_op(op, *value)?)),
                 (Negate, Unary(Negate, inner)) => Some(nodes[*inner]),
                 (Negate, Binary(Subtract, li, ri)) => Some(Binary(Subtract, *ri, *li)),
+                (Sqrt, Binary(Multiply, li, ri)) if li == ri => Some(nodes[*li]),
                 _ => None,
             },
             Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
@@ -92,7 +93,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, prune::Pruner, test::compare_trees};
+    use crate::{Deduplicater, deftree, prune::Pruner, test::compare_trees};
 
     #[test]
     fn t_sconstant_folding_0() {
@@ -483,6 +484,66 @@ mod test {
                 ('z', -5., 5.),
                 ('w', -5., 5.),
             ],
+            10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_sqrt_square() {
+        let mut deduper = Deduplicater::new();
+        // Simple case: sqrt(x * x) = x
+        assert!(
+            deftree!(sqrt (* 'x 'x))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!('x).unwrap()),
+        );
+        // Nested expression: sqrt((x + y) * (x + y)) = x + y
+        assert!(
+            deftree!(sqrt (* (+ 'x 'y) (+ 'x 'y)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(+ 'x 'y).unwrap()),
+        );
+        // Complex nested case: sqrt(cos(x) * cos(x)) = cos(x)
+        assert!(
+            deftree!(sqrt (* (cos 'x) (cos 'x)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(cos 'x).unwrap()),
+        );
+        // Combined with other folding: sqrt((x * 1) * (x * 1)) = x
+        assert!(
+            deftree!(sqrt (* (* 'x 1) (* 'x 1)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!('x).unwrap()),
+        );
+        // Verify numerically
+        let tree = deftree!(+ (sqrt (* 'x 'x)) (sqrt (* 'y 'y)))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(+ 'x 'y).unwrap();
+        let folded = tree.fold().unwrap();
+        assert!(folded.equivalent(&expected));
+        compare_trees(
+            &folded,
+            &expected,
+            &[('x', 0.1, 10.), ('y', 0.1, 10.)],
             10,
             0.,
         );
