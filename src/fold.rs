@@ -23,9 +23,12 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
             Symbol(_) => None,
             Unary(op, input) => match (op, &nodes[input]) {
                 (_, Constant(value)) => Some(Constant(Value::unary_op(op, *value)?)),
-                (Negate, Unary(Negate, inner)) => Some(nodes[*inner]),
                 (Negate, Binary(Subtract, li, ri)) => Some(Binary(Subtract, *ri, *li)),
                 (Sqrt, Binary(Multiply, li, ri)) if li == ri => Some(nodes[*li]),
+                (Negate, Unary(Negate, inner)) // Chains of ops that cancel out.
+                | (Log, Unary(Exp, inner))
+                | (Exp, Unary(Log, inner))
+                | (Not, Unary(Not, inner)) => Some(nodes[*inner]),
                 _ => None,
             },
             Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
@@ -545,6 +548,186 @@ mod test {
             &expected,
             &[('x', 0.1, 10.), ('y', 0.1, 10.)],
             10,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_log_exp_cancellation() {
+        let mut deduper = Deduplicater::new();
+        // Simple case: log(exp(x)) = x
+        assert!(
+            deftree!(log (exp 'x))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!('x).unwrap()),
+        );
+        // Nested case: log(exp(x + y)) = x + y
+        assert!(
+            deftree!(log (exp (+ 'x 'y)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(+ 'x 'y).unwrap()),
+        );
+        // Multiple cancellations: log(exp(x)) + log(exp(y)) = x + y
+        assert!(
+            deftree!(+ (log (exp 'x)) (log (exp 'y)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(+ 'x 'y).unwrap()),
+        );
+        // Complex expression with log(exp(...))
+        assert!(
+            deftree!(pow (+ (log (exp (cos 'x))) (/ 1 (sin (log (exp 'y))))) (* 2 (+ 'x 'y)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(pow (+ (cos 'x) (/ 1 (sin 'y))) (* 2 (+ 'x 'y))).unwrap()),
+        );
+    }
+
+    #[test]
+    fn t_exp_log_cancellation() {
+        let mut deduper = Deduplicater::new();
+        // Simple case: exp(log(x)) = x
+        assert!(
+            deftree!(exp (log 'x))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!('x).unwrap()),
+        );
+        // Nested case: exp(log(x + y)) = x + y
+        assert!(
+            deftree!(exp (log (+ 'x 'y)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(+ 'x 'y).unwrap()),
+        );
+        // Multiple cancellations: exp(log(x)) + exp(log(y)) = x + y
+        assert!(
+            deftree!(+ (exp (log 'x)) (exp (log 'y)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(+ 'x 'y).unwrap()),
+        );
+        // Verify numerical equivalence with compare_trees
+        let tree = deftree!(* (exp (log 'x)) (exp (log 'y)))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(* 'x 'y).unwrap();
+        let folded = tree.fold().unwrap();
+        assert!(folded.equivalent(&expected));
+        compare_trees(
+            &folded,
+            &expected,
+            &[('x', 0.1, 10.), ('y', 0.1, 10.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_not_not_cancellation() {
+        let mut deduper = Deduplicater::new();
+        // Simple case: not(not(x)) = x
+        assert!(
+            deftree!(not (not (> 'x 0)))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(> 'x 0).unwrap()),
+        );
+        // Multiple cancellations: not(not(x > 0)) and not(not(y > 0)) = (x > 0) and (y > 0)
+        assert!(
+            deftree!(and (not (not (> 'x 0))) (not (not (> 'y 0))))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(and (> 'x 0) (> 'y 0)).unwrap()),
+        );
+        // Inside conditional: if not(not(x > y)) then x else y
+        assert!(
+            deftree!(if (not (not (> 'x 'y))) 'x 'y)
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(if (> 'x 'y) 'x 'y).unwrap()),
+        );
+        // Complex expression with not(not(...))
+        assert!(
+            deftree!(if (and (not (not (> 'x 0))) (> 'y 0)) (+ 'x 'y) (- 'x 'y))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(if (and (> 'x 0) (> 'y 0)) (+ 'x 'y) (- 'x 'y)).unwrap()),
+        );
+    }
+
+    #[test]
+    fn t_combined_cancellations() {
+        let mut deduper = Deduplicater::new();
+        // Mix log/exp and not/not: log(exp(x)) + (if not(not(x > 0)) then y else 0)
+        assert!(
+            deftree!(+ (log (exp 'x)) (if (not (not (> 'x 0))) 'y 0))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!(+ 'x (if (> 'x 0) 'y 0)).unwrap()),
+        );
+        // Mix exp/log with negation: -(-exp(log(x))) = exp(log(x)) = x
+        assert!(
+            deftree!(- (- (exp (log 'x))))
+                .unwrap()
+                .deduplicate(&mut deduper)
+                .unwrap()
+                .fold()
+                .unwrap()
+                .equivalent(&deftree!('x).unwrap()),
+        );
+        // All three types: log(exp(x)) + -(-y) + (if not(not(z > 0)) then z else 0)
+        let tree = deftree!(+ (+ (log (exp 'x)) (- (- 'y))) (if (not (not (> 'z 0))) 'z 0))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(+ (+ 'x 'y) (if (> 'z 0) 'z 0)).unwrap();
+        let folded = tree.fold().unwrap();
+        assert!(folded.equivalent(&expected));
+        compare_trees(
+            &folded,
+            &expected,
+            &[('x', 0.1, 10.), ('y', 0.1, 10.), ('z', -5., 5.)],
+            100,
             0.,
         );
     }
