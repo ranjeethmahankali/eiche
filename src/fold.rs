@@ -26,9 +26,10 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
                 (Negate, Binary(Subtract, li, ri)) => Some(Binary(Subtract, *ri, *li)),
                 (Sqrt, Binary(Multiply, li, ri)) if li == ri => Some(nodes[*li]),
                 (Negate, Unary(Negate, inner)) // Chains of ops that cancel out.
-                | (Log, Unary(Exp, inner))
-                | (Exp, Unary(Log, inner))
-                | (Not, Unary(Not, inner)) => Some(nodes[*inner]),
+                    | (Log, Unary(Exp, inner))
+                    | (Exp, Unary(Log, inner))
+                    | (Not, Unary(Not, inner)) => Some(nodes[*inner]),
+                (Abs, Unary(Abs, _)) => Some(nodes[input]),
                 _ => None,
             },
             Binary(op, li, ri) => match (op, &nodes[li], &nodes[ri]) {
@@ -727,6 +728,65 @@ mod test {
             &folded,
             &expected,
             &[('x', 0.1, 10.), ('y', 0.1, 10.), ('z', -5., 5.)],
+            100,
+            0.,
+        );
+    }
+
+    #[test]
+    fn t_abs_abs_simplification() {
+        let mut pruner = Pruner::new();
+        // Simple case: abs(abs(x)) = abs(x), NOT x
+        assert!(
+            deftree!(abs (abs 'x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(abs 'x).unwrap()),
+        );
+        // Verify this is NOT equivalent to just x
+        assert!(
+            !deftree!(abs (abs 'x))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!('x).unwrap()),
+        );
+        // Numerical verification: abs(abs(x)) should equal abs(x) for negative values
+        let tree = deftree!(abs (abs 'x)).unwrap();
+        let expected = deftree!(abs 'x).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        compare_trees(
+            &folded,
+            &expected,
+            &[('x', -10., 10.)],
+            100,
+            0.,
+        );
+        // More complex: abs(abs(x + y)) = abs(x + y)
+        assert!(
+            deftree!(abs (abs (+ 'x 'y)))
+                .unwrap()
+                .fold()
+                .unwrap()
+                .prune(&mut pruner)
+                .unwrap()
+                .equivalent(&deftree!(abs (+ 'x 'y)).unwrap()),
+        );
+        // Multiple: abs(abs(x)) + abs(abs(y)) = abs(x) + abs(y)
+        let tree = deftree!(+ (abs (abs 'x)) (abs (abs 'y))).unwrap();
+        let expected = deftree!(+ (abs 'x) (abs 'y)).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        compare_trees(
+            &folded,
+            &expected,
+            &[('x', -10., 10.), ('y', -10., 10.)],
             100,
             0.,
         );
