@@ -53,4 +53,4 @@ pub use tree::{
     extract, floor, geq, greater, l2norm, leq, less, log, matmul, max, min, mul, negate, neq,
     normalize, not, or, pow, rem, reshape, sin, sqrt, sub, tan, transpose,
 };
-pub use walk::{DepthIterator, DepthWalker};
+pub use walk::{DepthIterator, DepthWalker, NodeOrdering};
