@@ -41,7 +41,7 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
                 (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
                 (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
                 (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
-                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
+                (Pow, _base, Constant(val)) if *val == 2. => Some(Binary(Multiply, li, li)),
                 (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
                 (Or, lhs, Constant(rhs)) if *rhs == false => Some(*lhs),
                 (Or, Constant(lhs), rhs) if *lhs == false => Some(*rhs),
@@ -57,6 +57,10 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
                 (Or, Constant(lhs), _rhs) if *lhs == true => Some(Constant(Bool(true))),
                 (And, _lhs, Constant(rhs)) if *rhs == false => Some(Constant(Bool(false))),
                 (And, Constant(lhs), _rhs) if *lhs == false => Some(Constant(Bool(false))),
+                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
+                (Max | Min, lhs, _) if li == ri => Some(*lhs),
+                (Max, _, Unary(Negate, inner)) if *inner == li => Some(Unary(Abs, li)),
+                (Max, Unary(Negate, inner), _) if *inner == ri => Some(Unary(Abs, ri)),
                 _ => None,
             },
             Ternary(op, a, b, c) => match (op, &nodes[a], &nodes[b], &nodes[c]) {
@@ -70,6 +74,7 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
                         Some(*right)
                     }
                 }
+                (Choose, _, _, _) if b == c => Some(nodes[b]),
                 _ => None,
             },
         };
