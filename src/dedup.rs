@@ -105,6 +105,10 @@ impl Deduplicater {
         }
         Ok(modified)
     }
+
+    pub fn mapped_index(&self, index: usize) -> usize {
+        self.indices[index]
+    }
 }
 
 /// Check if the subtrees starting at indices `left` and `right` are
