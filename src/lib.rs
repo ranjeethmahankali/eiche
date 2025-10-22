@@ -46,6 +46,7 @@ pub use derivative::{numerical_deriv, symbolic_deriv};
 pub use dual::{Dual, DualEvaluator};
 pub use error::Error;
 pub use eval::ValueEvaluator;
+pub use fold::fold;
 pub use prune::Pruner;
 pub use reduce::reduce;
 pub use tree::{
