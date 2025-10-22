@@ -238,12 +238,16 @@ impl Tree {
     /// Fold the constants, deduplicate subtrees, prune unused subtrees and
     /// return a topologically sorted compacted equivalent to this tree.
     pub fn compacted(mut self) -> Result<Tree, Error> {
-        fold(&mut self.nodes)?;
+        let mut deduper = Deduplicater::new();
+        loop {
+            if !fold(&mut self.nodes)? && !deduper.run(&mut self.nodes)? {
+                break;
+            }
+        }
         let mut pruner = Pruner::new();
         let roots = self.root_indices();
         let (mut nodes, dims) = self.take();
         let roots = pruner.run_from_range(&mut nodes, roots)?;
-        let mut deduper = Deduplicater::new();
         // We don't need to check because we just ran the pruner on these nodes, which sorts them topologically.
         deduper.run(&mut nodes)?;
         let mut pruner = Pruner::new();

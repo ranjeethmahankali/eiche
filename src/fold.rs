@@ -12,11 +12,12 @@ use crate::{
 };
 
 /**
-Compute the results of operations on constants and fold those into
-constant nodes. The unused nodes after folding are not
-pruned. Use a pruner for that.
+Compute the results of operations on constants and fold those into constant
+nodes. The unused nodes after folding are not pruned. Use a pruner for
+that. Returns true if the nodes were modified, false otherwise.
 */
-pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
+pub fn fold(nodes: &mut [Node]) -> Result<bool, Error> {
+    let mut modified = false;
     for index in 0..nodes.len() {
         let folded = match nodes[index] {
             Constant(_) => None,
@@ -41,7 +42,7 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
                 (Subtract, lhs, Constant(val)) if *val == 0. => Some(*lhs),
                 (Multiply, lhs, Constant(val)) if *val == 1. => Some(*lhs),
                 (Multiply, Constant(val), rhs) if *val == 1. => Some(*rhs),
-                (Pow, _base, Constant(val)) if *val == 2. => Some(Binary(Multiply, li, li)),
+                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
                 (Divide, numerator, Constant(val)) if *val == 1. => Some(*numerator),
                 (Or, lhs, Constant(rhs)) if *rhs == false => Some(*lhs),
                 (Or, Constant(lhs), rhs) if *lhs == false => Some(*rhs),
@@ -57,7 +58,6 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
                 (Or, Constant(lhs), _rhs) if *lhs == true => Some(Constant(Bool(true))),
                 (And, _lhs, Constant(rhs)) if *rhs == false => Some(Constant(Bool(false))),
                 (And, Constant(lhs), _rhs) if *lhs == false => Some(Constant(Bool(false))),
-                (Pow, base, Constant(val)) if *val == 1. => Some(*base),
                 (Max | Min, lhs, _) if li == ri => Some(*lhs),
                 (Max, _, Unary(Negate, inner)) if *inner == li => Some(Unary(Abs, li)),
                 (Max, Unary(Negate, inner), _) if *inner == ri => Some(Unary(Abs, ri)),
@@ -80,9 +80,10 @@ pub fn fold(nodes: &mut [Node]) -> Result<(), Error> {
         };
         if let Some(node) = folded {
             nodes[index] = node;
+            modified = true;
         }
     }
-    Ok(())
+    Ok(modified)
 }
 
 impl Tree {
@@ -766,13 +767,7 @@ mod test {
         let expected = deftree!(abs 'x).unwrap();
         let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
         assert!(folded.equivalent(&expected));
-        compare_trees(
-            &folded,
-            &expected,
-            &[('x', -10., 10.)],
-            100,
-            0.,
-        );
+        compare_trees(&folded, &expected, &[('x', -10., 10.)], 100, 0.);
         // More complex: abs(abs(x + y)) = abs(x + y)
         assert!(
             deftree!(abs (abs (+ 'x 'y)))
@@ -795,5 +790,127 @@ mod test {
             100,
             0.,
         );
+    }
+
+    #[test]
+    fn t_max_min_identical_args() {
+        let mut pruner = Pruner::new();
+        let mut deduper = Deduplicater::new();
+        // Simple case: max(x, x) = x
+        let tree = deftree!(max 'x 'x)
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!('x).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Simple case: min(x, x) = x
+        let tree = deftree!(min 'x 'x)
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!('x).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Expression: max(x + y, x + y) = x + y
+        let tree = deftree!(max (+ 'x 'y) (+ 'x 'y))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(+ 'x 'y).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Expression: min(cos(x), cos(x)) = cos(x)
+        let tree = deftree!(min (cos 'x) (cos 'x))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(cos 'x).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+    }
+
+    #[test]
+    fn t_max_negate_to_abs() {
+        let mut pruner = Pruner::new();
+        let mut deduper = Deduplicater::new();
+        // Simple case: max(x, -x) = abs(x)
+        let tree = deftree!(max 'x (- 'x))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(abs 'x).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Reverse order: max(-x, x) = abs(x)
+        let tree = deftree!(max (- 'x) 'x)
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(abs 'x).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Expression: max(x + y, -(x + y)) = abs(x + y)
+        let tree = deftree!(max (+ 'x 'y) (- (+ 'x 'y)))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(abs (+ 'x 'y)).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Complex: max(cos(x), -cos(x)) = abs(cos(x))
+        let tree = deftree!(max (cos 'x) (- (cos 'x)))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(abs (cos 'x)).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Multiple: max(x, -x) + max(-y, y) = abs(x) + abs(y)
+        let tree = deftree!(+ (max 'x (- 'x)) (max (- 'y) 'y))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(+ (abs 'x) (abs 'y)).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+    }
+
+    #[test]
+    fn t_choose_identical_branches() {
+        let mut pruner = Pruner::new();
+        let mut deduper = Deduplicater::new();
+        // Simple case: choose(cond, x, x) = x
+        let tree = deftree!(if (> 'y 0) 'x 'x)
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!('x).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Expression: choose(x > 0, x + y, x + y) = x + y
+        let tree = deftree!(if (> 'x 0) (+ 'x 'y) (+ 'x 'y))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(+ 'x 'y).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Complex: choose(x > y, cos(z), cos(z)) = cos(z)
+        let tree = deftree!(if (> 'x 'y) (cos 'z) (cos 'z))
+            .unwrap()
+            .deduplicate(&mut deduper)
+            .unwrap();
+        let expected = deftree!(cos 'z).unwrap();
+        let folded = tree.fold().unwrap().prune(&mut pruner).unwrap();
+        assert!(folded.equivalent(&expected));
+        // Nested: choose(a > 0, choose(b > 0, x, x), x) folds inner then outer
+        let tree = deftree!(if (> 'a 0) (if (> 'b 0) 'x 'x) 'x)
+            .unwrap()
+            .compacted()
+            .unwrap();
+        let expected = deftree!('x).unwrap();
+        let folded = tree.fold().unwrap().deduplicate(&mut deduper).unwrap();
+        assert!(folded.equivalent(&expected));
     }
 }
