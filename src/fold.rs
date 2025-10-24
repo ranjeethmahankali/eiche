@@ -25,7 +25,7 @@ pub fn fold(nodes: &mut [Node]) -> Result<bool, Error> {
             Unary(op, input) => match (op, &nodes[input]) {
                 (_, Constant(value)) => Some(Constant(Value::unary_op(op, *value)?)),
                 (Negate, Binary(Subtract, li, ri)) => Some(Binary(Subtract, *ri, *li)),
-                (Sqrt, Binary(Multiply, li, ri)) if li == ri => Some(nodes[*li]),
+                (Sqrt, Binary(Multiply, li, ri)) if li == ri => Some(Unary(Abs, *li)),
                 (Negate, Unary(Negate, inner)) // Chains of ops that cancel out.
                     | (Log, Unary(Exp, inner))
                     | (Exp, Unary(Log, inner))
@@ -510,7 +510,7 @@ mod test {
                 .unwrap()
                 .fold()
                 .unwrap()
-                .equivalent(&deftree!('x).unwrap()),
+                .equivalent(&deftree!(abs 'x).unwrap()),
         );
         // Nested expression: sqrt((x + y) * (x + y)) = x + y
         assert!(
@@ -520,7 +520,7 @@ mod test {
                 .unwrap()
                 .fold()
                 .unwrap()
-                .equivalent(&deftree!(+ 'x 'y).unwrap()),
+                .equivalent(&deftree!(abs (+ 'x 'y)).unwrap()),
         );
         // Complex nested case: sqrt(cos(x) * cos(x)) = cos(x)
         assert!(
@@ -530,7 +530,7 @@ mod test {
                 .unwrap()
                 .fold()
                 .unwrap()
-                .equivalent(&deftree!(cos 'x).unwrap()),
+                .equivalent(&deftree!(abs (cos 'x)).unwrap()),
         );
         // Combined with other folding: sqrt((x * 1) * (x * 1)) = x
         assert!(
@@ -540,14 +540,14 @@ mod test {
                 .unwrap()
                 .fold()
                 .unwrap()
-                .equivalent(&deftree!('x).unwrap()),
+                .equivalent(&deftree!(abs 'x).unwrap()),
         );
         // Verify numerically
         let tree = deftree!(+ (sqrt (* 'x 'x)) (sqrt (* 'y 'y)))
             .unwrap()
             .deduplicate(&mut deduper)
             .unwrap();
-        let expected = deftree!(+ 'x 'y).unwrap();
+        let expected = deftree!(+ (abs 'x) (abs 'y)).unwrap();
         let folded = tree.fold().unwrap();
         assert!(folded.equivalent(&expected));
         compare_trees(
