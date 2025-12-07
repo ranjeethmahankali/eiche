@@ -1,21 +1,34 @@
 use crate::tree::{Node, Node::*, Tree, Value::*};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 /// Compute a hash for the given nodes. `hashbuf` is just memory that is used
 /// for computing the hash. It can be reused to avoid allocations.
 pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
     // Using a boxed slice to avoid accidental resizing later.
     hashbuf.clear();
     hashbuf.resize(nodes.len(), 0);
     for index in 0..nodes.len() {
         let hash: u64 = match nodes[index] {
             Constant(value) => match value {
-                Scalar(value) => value.to_bits(),
-                Bool(value) => value as u64,
+                Scalar(value) => {
+                    let mut s: DefaultHasher = Default::default();
+                    0xa30b590b1a66fb7e_u64.hash(&mut s); // Seed.
+                    value.to_bits().hash(&mut s);
+                    s.finish()
+                }
+                Bool(value) => {
+                    let mut s: DefaultHasher = Default::default();
+                    0xdf699aa96eec7cf5_u64.hash(&mut s); // Seed.
+                    (value as u64).hash(&mut s);
+                    s.finish()
+                }
             },
             Symbol(label) => {
                 let mut s: DefaultHasher = Default::default();
+                0xd1b5548d85a554f1_u64.hash(&mut s); // Seed.
                 label.hash(&mut s);
                 s.finish()
             }

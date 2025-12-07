@@ -1,9 +1,8 @@
-use std::ops::Range;
-
 use crate::{
     error::Error,
     tree::Node::{self, *},
 };
+use std::ops::Range;
 
 struct StackElement {
     index: usize,

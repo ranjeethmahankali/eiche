@@ -24,12 +24,12 @@ jobs:
       uses: KyleMayes/install-llvm-action@v1
       with:
         version: "15.0"
-    - name: Build
-      run: cargo build --verbose --all-features --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run Clippy
       run: cargo clippy --all-targets --all-features -- -D warnings
+    - name: Build
+      run: cargo build --verbose --all-features --all-targets
     - name: Run tests
       run: cargo test --verbose --all-targets --all-features
 
@@ -55,12 +55,14 @@ jobs:
         rustup default stable-x86_64-pc-windows-gnu
         rustup component add rustfmt
         rustup component add clippy
+    - name: Run Clippy
+      run: cargo clippy --all-targets -- -D warnings
+    - name: Check formatting
+      run: cargo fmt -- --check
     - name: Build
       env:
         CC: clang
       run: cargo build --verbose --all-targets
-    - name: Check formatting
-      run: cargo fmt -- --check
     - name: Run tests
       run: cargo test --verbose --all-targets
 
@@ -75,11 +77,11 @@ jobs:
     - name: Update Rust
       run: rustup update stable
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose --all-features --all-targets
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run Clippy
       run: cargo clippy --all-targets --all-features -- -D warnings
+    - name: Build
+      run: cargo build --verbose --all-features --all-targets
     - name: Run tests
       run: cargo test --verbose --all-targets --all-features

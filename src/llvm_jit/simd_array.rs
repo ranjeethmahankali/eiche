@@ -1121,7 +1121,6 @@ where
 
     pub fn unpack_outputs(&self) -> impl Iterator<Item = T> {
         debug_assert_eq!(self.outputs.len() % self.num_outputs, 0);
-        dbg!(self.num_samples);
         self.outputs
             .chunks_exact(self.num_outputs)
             .flat_map(|chunk| {
