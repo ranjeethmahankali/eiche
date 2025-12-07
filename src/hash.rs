@@ -15,20 +15,20 @@ pub fn hash_nodes(nodes: &[Node], hashbuf: &mut Vec<u64>) {
             Constant(value) => match value {
                 Scalar(value) => {
                     let mut s: DefaultHasher = Default::default();
-                    (0xa30b590b1a66fb7e as u64).hash(&mut s); // Seed.
+                    0xa30b590b1a66fb7e_u64.hash(&mut s); // Seed.
                     value.to_bits().hash(&mut s);
                     s.finish()
                 }
                 Bool(value) => {
                     let mut s: DefaultHasher = Default::default();
-                    (0xdf699aa96eec7cf5 as u64).hash(&mut s); // Seed.
+                    0xdf699aa96eec7cf5_u64.hash(&mut s); // Seed.
                     (value as u64).hash(&mut s);
                     s.finish()
                 }
             },
             Symbol(label) => {
                 let mut s: DefaultHasher = Default::default();
-                (0xd1b5548d85a554f1 as u64).hash(&mut s); // Seed.
+                0xd1b5548d85a554f1_u64.hash(&mut s); // Seed.
                 label.hash(&mut s);
                 s.finish()
             }

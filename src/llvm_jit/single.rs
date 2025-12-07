@@ -354,7 +354,7 @@ where
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
         }
         // SAFETY: We just checked above.
-        let _: () = unsafe { self.run_unchecked(inputs, outputs) };
+        unsafe { self.run_unchecked(inputs, outputs) };
         Ok(())
     }
 
