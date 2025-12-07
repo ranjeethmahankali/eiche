@@ -6,10 +6,19 @@ pub enum Value {
     Bool(bool),
     Scalar(f64),
 }
+
+impl std::hash::Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+    }
+}
+
+impl std::cmp::Eq for Value {}
+
 use Value::*;
 
 /// Represents an operation with one input.
-#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum UnaryOp {
     // Scalar
     Negate,
@@ -26,7 +35,7 @@ pub enum UnaryOp {
 }
 
 /// Represents an operation with two inputs.
-#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum BinaryOp {
     // Scalar
     Add,
@@ -48,7 +57,7 @@ pub enum BinaryOp {
     Or,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum TernaryOp {
     Choose,
 }
@@ -138,7 +147,7 @@ impl TernaryOp {
 use {BinaryOp::*, TernaryOp::*, UnaryOp::*};
 
 /// Represents a node in an abstract syntax `Tree`.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Hash, Eq)]
 pub enum Node {
     Constant(Value),
     Symbol(char),
@@ -229,18 +238,23 @@ impl Tree {
     /// Fold the constants, deduplicate subtrees, prune unused subtrees and
     /// return a topologically sorted compacted equivalent to this tree.
     pub fn compacted(mut self) -> Result<Tree, Error> {
-        fold(&mut self.nodes)?;
+        let mut deduper = Deduplicater::new();
+        loop {
+            if !fold(&mut self.nodes)? && !deduper.run(&mut self.nodes)? {
+                break;
+            }
+        }
         let mut pruner = Pruner::new();
         let roots = self.root_indices();
         let (mut nodes, dims) = self.take();
         let roots = pruner.run_from_range(&mut nodes, roots)?;
-        let mut deduper = Deduplicater::new();
         // We don't need to check because we just ran the pruner on these nodes, which sorts them topologically.
         deduper.run(&mut nodes)?;
         let mut pruner = Pruner::new();
         pruner.run_from_range(&mut nodes, roots)?;
         Tree::from_nodes(nodes, dims)
     }
+
     /// Prunes the tree and topologically sorts the nodes.
     pub fn prune(self, pruner: &mut Pruner) -> Result<Tree, Error> {
         let roots = self.root_indices();

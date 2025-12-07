@@ -86,7 +86,7 @@ fn to_latex(node: &Node, nodes: &[Node]) -> String {
                 // Scalar.
                 Add => format!("{{{lx}}} + {{{rx}}}"),
                 Subtract => format!("{{{lx}}} - {{{rx}}}"),
-                Multiply => format!("{{{lx}}}.{{{rx}}}"),
+                Multiply => format!("{{{lx}}}\\cdot{{{rx}}}"),
                 Divide => format!("\\dfrac{{{lx}}}{{{rx}}}"),
                 Pow => format!("{{{lx}}}^{{{rx}}}"),
                 Min => format!("\\min\\left({{{lx}}}, {{{rx}}}\\right)"),
@@ -215,7 +215,7 @@ mod test {
             deftree!(- (abs (+ 'x 'y))).unwrap().to_latex()
         );
         assert_eq!(
-            "-{\\sin\\left({{2}.{x}}\\right)}",
+            "-{\\sin\\left({{2}\\cdot{x}}\\right)}",
             deftree!(- (sin (* 2 'x))).unwrap().to_latex()
         );
         assert_eq!(
@@ -243,7 +243,7 @@ mod test {
             "-{\\left({x} - {y}\\right)}",
             deftree!(- (- 'x 'y)).unwrap().to_latex()
         );
-        assert_eq!("-{{x}.{y}}", deftree!(- (* 'x 'y)).unwrap().to_latex());
+        assert_eq!("-{{x}\\cdot{y}}", deftree!(- (* 'x 'y)).unwrap().to_latex());
         assert_eq!(
             "-{\\dfrac{x}{y}}",
             deftree!(- (/ 'x 'y)).unwrap().to_latex()
@@ -270,7 +270,7 @@ mod test {
             deftree!(sqrt (abs (+ 'x 'y))).unwrap().to_latex()
         );
         assert_eq!(
-            "\\sqrt{\\sin\\left({{2}.{x}}\\right)}",
+            "\\sqrt{\\sin\\left({{2}\\cdot{x}}\\right)}",
             deftree!(sqrt (sin (* 2 'x))).unwrap().to_latex()
         );
         assert_eq!(
@@ -299,7 +299,7 @@ mod test {
             deftree!(sqrt (- 'x 'y)).unwrap().to_latex()
         );
         assert_eq!(
-            "\\sqrt{{x}.{y}}",
+            "\\sqrt{{x}\\cdot{y}}",
             deftree!(sqrt (* 'x 'y)).unwrap().to_latex()
         );
         assert_eq!(
@@ -355,7 +355,7 @@ mod test {
                 .to_latex()
         );
         assert_eq!(
-            "\\begin{bmatrix}{{x} + {y}} & {{x} - {y}} \\\\ {{x}.{y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
+            "\\begin{bmatrix}{{x} + {y}} & {{x} - {y}} \\\\ {{x}\\cdot{y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
             deftree!(concat (+ 'x 'y) (* 'x 'y) (- 'x 'y) (/ 'x 'y))
                 .unwrap()
                 .reshape(2, 2)
@@ -371,7 +371,7 @@ mod test {
             deftree!(concat 'a 'b 'c 'd).unwrap().to_latex()
         );
         assert_eq!(
-            "\\begin{bmatrix}{{x} + {y}} \\\\ {{x}.{y}} \\\\ {{x} - {y}} \\\\ {\\dfrac{x}{y}}\\end{bmatrix}",
+            "\\begin{bmatrix}{{x} + {y}} \\\\ {{x}\\cdot{y}} \\\\ {{x} - {y}} \\\\ {\\dfrac{x}{y}}\\end{bmatrix}",
             deftree!(concat (+ 'x 'y) (* 'x 'y) (- 'x 'y) (/ 'x 'y))
                 .unwrap()
                 .to_latex()
@@ -389,7 +389,7 @@ mod test {
                 .to_latex()
         );
         assert_eq!(
-            "\\begin{bmatrix}{{x} + {y}} & {{x}.{y}} & {{x} - {y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
+            "\\begin{bmatrix}{{x} + {y}} & {{x}\\cdot{y}} & {{x} - {y}} & {\\dfrac{x}{y}}\\end{bmatrix}",
             deftree!(concat (+ 'x 'y) (* 'x 'y) (- 'x 'y) (/ 'x 'y))
                 .unwrap()
                 .reshape(1, 4)

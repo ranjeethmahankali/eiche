@@ -45,12 +45,12 @@ impl Deduplicater {
     /// results. If you suspect the nodes are not topologically sorted, use the
     /// `Pruner` to sort them and remove unsused nodes first.
     ///
-    /// If a subtree appears twice, any node with the second subtree
-    /// as its input will be rewired to the first subtree. That means,
-    /// after deduplication, there can be `dead` nodes remaining, that
-    /// are not connected to the root. Consider pruning the tree
-    /// afterwards.
-    pub fn run(&mut self, nodes: &mut [Node]) -> Result<(), Error> {
+    /// If a subtree appears twice, any node with the second subtree as its
+    /// input will be rewired to the first subtree. That means, after
+    /// deduplication, there can be `dead` nodes remaining, that are not
+    /// connected to the root. Consider pruning the tree afterwards. Returns
+    /// true if the nodes are modified, false otherwise.
+    pub fn run(&mut self, nodes: &mut [Node]) -> Result<bool, Error> {
         // Compute unique indices after deduplication.
         self.indices.clear();
         self.indices.extend(0..nodes.len());
@@ -74,29 +74,40 @@ impl Deduplicater {
             }
         }
         // Update nodes.
+        let mut modified = false;
         for node in nodes.iter_mut() {
             match node {
                 Constant(_) => {}
                 Symbol(_) => {}
                 Unary(_, input) => {
+                    modified |= *input != self.indices[*input];
                     *input = self.indices[*input];
                 }
                 Binary(_, lhs, rhs) => {
                     // Copy to temporary buffer to avoid side effects if lhs and rhs are the same.
                     let mapped = [self.indices[*lhs], self.indices[*rhs]];
+                    modified |= *lhs != self.indices[*lhs];
+                    modified |= *rhs != self.indices[*rhs];
                     *lhs = mapped[0];
                     *rhs = mapped[1];
                 }
                 Ternary(_, a, b, c) => {
                     // Copy to temporary buffer to avoid side effects when a, b, c are not unique.
                     let mapped = [self.indices[*a], self.indices[*b], self.indices[*c]];
+                    modified |= *a != self.indices[*a];
+                    modified |= *b != self.indices[*b];
+                    modified |= *c != self.indices[*c];
                     *a = mapped[0];
                     *b = mapped[1];
                     *c = mapped[2];
                 }
             }
         }
-        Ok(())
+        Ok(modified)
+    }
+
+    pub fn mapped_index(&self, index: usize) -> usize {
+        self.indices[index]
     }
 }
 
@@ -435,5 +446,14 @@ mod test {
                 .unwrap()
                 .equivalent(&deftree!(if (< 'x 0) (log (* 3 'x)) (exp (+ 3 'x))).unwrap())
         );
+    }
+
+    #[test]
+    fn t_deep_equivalence_test() {
+        // We only expect this to pass if we deterministically sort the operands
+        // of commutative ops based on their hashes.
+        let ltree = deftree!(+ (+ 'a 'd) (+ 'b 'c)).unwrap();
+        let rtree = deftree!(+ (+ 'c 'b) (+ 'd 'a)).unwrap();
+        assert!(ltree.equivalent(&rtree));
     }
 }

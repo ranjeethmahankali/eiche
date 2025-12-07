@@ -46,6 +46,7 @@ pub use derivative::{numerical_deriv, symbolic_deriv};
 pub use dual::{Dual, DualEvaluator};
 pub use error::Error;
 pub use eval::ValueEvaluator;
+pub use fold::fold;
 pub use prune::Pruner;
 pub use reduce::reduce;
 pub use tree::{
@@ -53,4 +54,4 @@ pub use tree::{
     extract, floor, geq, greater, l2norm, leq, less, log, matmul, max, min, mul, negate, neq,
     normalize, not, or, pow, rem, reshape, sin, sqrt, sub, tan, transpose,
 };
-pub use walk::{DepthIterator, DepthWalker};
+pub use walk::{DepthIterator, DepthWalker, NodeOrdering};
