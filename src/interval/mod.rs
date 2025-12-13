@@ -8,21 +8,21 @@ use crate::{
         Value,
     },
 };
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::{Add, Div, Mul, Neg, Sub, f64::consts::PI};
 
 pub mod fold;
 pub mod pruning_eval;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Interval {
-    Scalar(inari::Interval),
+    Scalar(f64, f64),
     Bool(bool, bool),
 }
 
 impl Interval {
-    pub fn scalar(&self) -> Result<inari::Interval, Error> {
+    pub fn scalar(&self) -> Result<(f64, f64), Error> {
         match self {
-            Interval::Scalar(it) => Ok(*it),
+            Interval::Scalar(lo, hi) => Ok((*lo, *hi)),
             _ => Err(Error::TypeMismatch),
         }
     }
@@ -43,18 +43,19 @@ impl Interval {
     }
 
     pub fn from_scalar(mut lower: f64, mut upper: f64) -> Result<Interval, Error> {
-        if upper < lower {
-            (lower, upper) = (upper, lower);
+        if (lower.is_nan() || upper.is_nan()) {
+            Err(Error::InvalidInterval)
+        } else if upper < lower {
+            Ok(Interval::Scalar(upper, lower))
+        } else {
+            Ok(Interval::Scalar(lower, upper))
         }
-        Ok(Interval::Scalar(
-            inari::interval!(lower, upper).map_err(|_| Error::InvalidInterval)?,
-        ))
     }
 }
 
 impl Default for Interval {
     fn default() -> Self {
-        Interval::Scalar(inari::Interval::ENTIRE)
+        Interval::Scalar(f64::NEG_INFINITY, f64::INFINITY)
     }
 }
 
@@ -75,19 +76,58 @@ impl ValueType for Interval {
     }
 
     fn unary_op(op: UnaryOp, val: Self) -> Result<Self, Error> {
-        Ok(match val {
-            Interval::Scalar(it) => Interval::Scalar(match op {
-                Negate => it.neg(),
-                Sqrt => it.sqrt(),
-                Abs => it.abs(),
-                Sin => it.sin(),
+        use std::cmp::Ordering::*;
+        match val {
+            Interval::Scalar(lo, hi) => match op {
+                Negate => Ok(Interval::Scalar(-hi, -lo)),
+                Sqrt if hi < 0. => Err(Error::InvalidInterval),
+                Sqrt if lo < 0. => Ok(Interval::Scalar(0.f64, hi.sqrt())),
+                Sqrt => Ok(Interval::Scalar(lo.sqrt(), hi.sqrt())),
+                Abs if hi <= 0. => Ok(Interval::Scalar(-hi, -lo)),
+                Abs if lo >= 0. => Ok(Interval::Scalar(lo, hi)),
+                Abs => Ok(Interval::Scalar(0., lo.abs().max(hi.abs()))),
+                Sin => {
+                    let width = hi - lo;
+                    if width > TAU {
+                        Ok(Interval::Scalar(-1.0, 1.0))
+                    } else {
+                        let lo = lo.rem_euclid(TAU);
+                        let hi = lo + width;
+                        debug_assert!(lo < TAU);
+                        debug_assert!(hi <= TAU + f64::EPSILON);
+                        debug_assert!(lo <= hi);
+                        let (lo, hi) =
+                            match (hi.total_cmp(FRAC_PI_2), lo.total_cmp(3.0 * FRAC_PI_2)) {
+                                (Less, _) | (_, Greater) => (lo.sin(), hi.sin()),
+                                (Equal, _) => (lo.sin(), 1.0),
+                                (_, Equal) => (-1.0, hi.sin()),
+                                (Greater, Less) => {
+                                    match (hi.total_cmp(3.0 * FRAC_PI_2), lo.total_cmp(FRAC_PI_2)) {
+                                        (Less, Less) => (lo.sin().min(hi.sin()), 1.0),
+                                        (Less, Equal) => (hi.sin(), 1.0),
+                                        (Less, Greater) => (hi.sin(), lo.sin()),
+                                        (Greater, Equal)
+                                        | (Greater, Less)
+                                        | (Equal, Less)
+                                        | (Equal, Equal) => (-1.0, 1.0),
+                                        (Equal, Greater) => (-1.0, lo.sin()),
+                                        (Greater, Greater) => (-1.0, lo.sin().max(hi.sin())),
+                                    }
+                                }
+                            };
+                        Ok(Interval::Scalar(
+                            lo.next_down().max(-1.0),
+                            hi.next_up().min(1.0),
+                        ));
+                    }
+                }
                 Cos => it.cos(),
                 Tan => it.tan(),
                 Log => it.ln(),
                 Exp => it.exp(),
                 Floor => it.floor(),
                 Not => return Err(Error::TypeMismatch),
-            }),
+            },
             Interval::Bool(lower, upper) => match op {
                 Not => {
                     let (lower, upper) = match (lower, upper) {
@@ -101,7 +141,7 @@ impl ValueType for Interval {
                     return Err(Error::TypeMismatch);
                 }
             },
-        })
+        }
     }
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
