@@ -191,9 +191,9 @@ impl ValueType for Interval {
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
         use {Interval::*, inari::Overlap::*};
         match (lhs, rhs) {
-            (Scalar(lhs), Scalar(rhs)) => match op {
-                Add => Ok(Interval::Scalar(lhs.add(rhs))),
-                Subtract => Ok(Interval::Scalar(lhs.sub(rhs))),
+            (Scalar(llo, lhi), Scalar(rlo, rhi)) => match op {
+                Add => Ok(Interval::Scalar(llo + rlo, lhi + rhi)),
+                Subtract => Ok(Interval::Scalar(llo - rhi, lhi - rlo)),
                 Multiply => Ok(Interval::Scalar(lhs.mul(rhs))),
                 Divide => Ok(Interval::Scalar(lhs.div(rhs))),
                 Pow => Ok({
