@@ -226,6 +226,14 @@ impl ValueType for Interval {
                     (Equal, Equal, _, _) => Err(Error::InvalidInterval),
                     _ => Ok(Interval::default()), // everything.
                 },
+                Pow if rlo == 2.0 && rhi == 2.0 => {
+                    Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up())
+                }
+                Pow if rlo == 0.0 && rhi == 0.0 => Interval::Scalar(1.0, 1.0),
+                Pow if rlo == rhi && llo >= 0.0 => {
+                    Interval::Scalar(llo.powf(rlo).next_down(), lhi.powf(rlo).next_up())
+                }
+                Pow => {}
                 Pow => Ok({
                     if rhs.is_singleton() && rhs.inf() == 2. {
                         // Special case for squaring to get tighter intervals.
