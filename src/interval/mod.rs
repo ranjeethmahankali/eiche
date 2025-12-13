@@ -183,13 +183,49 @@ impl ValueType for Interval {
     }
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
-        use {Interval::*, inari::Overlap::*};
+        use Interval::*;
+        use std::cmp::Ordering::*;
         match (lhs, rhs) {
             (Scalar(llo, lhi), Scalar(rlo, rhi)) => match op {
-                Add => Ok(Interval::Scalar(llo + rlo, lhi + rhi)),
-                Subtract => Ok(Interval::Scalar(llo - rhi, lhi - rlo)),
-                Multiply => Ok(Interval::Scalar(lhs.mul(rhs))),
-                Divide => Ok(Interval::Scalar(lhs.div(rhs))),
+                Add => Interval::from_scalar(llo + rlo, lhi + rhi),
+                Subtract => Interval::from_scalar(llo - rhi, lhi - rlo),
+                Multiply => {
+                    let (lo, hi) = [llo * rlo, llo * rhi, lhi * rlo, lhi * rhi]
+                        .iter()
+                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
+                            (lo.min(*current), hi.max(*current))
+                        });
+                    Interval::from_scalar(lo, hi)
+                }
+                Divide => match (
+                    rlo.total_cmp(0.0),
+                    rhi.total_cmp(0.0),
+                    llo.total_cmp(0.0),
+                    lhi.total_cmp(0.0),
+                ) {
+                    (Less, Less, _, _) | (Greater, Greater, _, _) => {
+                        let (lo, hi) = [llo / rlo, llo / rhi, lhi / rlo, lhi / rhi]
+                            .iter()
+                            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
+                                (lo.min(*current), hi.max(*current))
+                            });
+                        Interval::from_scalar(lo, hi)
+                    }
+                    (Less, Equal, _, Less | Equal) => {
+                        Interval::from_scalar((llo / rlo).min(lhi / rlo), f64::INFINITY)
+                    }
+                    (Equal, Greater, Equal | Greater, _) => {
+                        Interval::from_scalar((llo / rhi).min(lhi / rhi), f64::INFINITY)
+                    }
+                    (Less, Equal, Equal | Greater, _) => {
+                        Interval::from_scalar(f64::NEG_INFINITY, (llo / rlo).max(lhi / rlo))
+                    }
+                    (Equal, Greater, _, Less) => {
+                        Interval::from_scalar(f64::NEG_INFINITY, (llo / rhi).max(lhi / rhi))
+                    }
+                    (Equal, Equal, _, _) => Err(Error::InvalidInterval),
+                    _ => Ok(Interval::default()), // everything.
+                },
                 Pow => Ok({
                     if rhs.is_singleton() && rhs.inf() == 2. {
                         // Special case for squaring to get tighter intervals.
