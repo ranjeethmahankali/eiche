@@ -8,7 +8,10 @@ use crate::{
         Value,
     },
 };
-use std::ops::{Add, Div, Mul, Neg, Sub, f64::consts::PI};
+use std::ops::{
+    Add, Div, Mul, Neg, Sub,
+    f64::consts::{FRAC_PI_2, PI, TAU},
+};
 
 pub mod fold;
 pub mod pruning_eval;
@@ -88,7 +91,7 @@ impl ValueType for Interval {
                 Abs => Ok(Interval::Scalar(0., lo.abs().max(hi.abs()))),
                 Sin => {
                     let width = hi - lo;
-                    if width > TAU {
+                    if width >= TAU {
                         Ok(Interval::Scalar(-1.0, 1.0))
                     } else {
                         let lo = lo.rem_euclid(TAU);
@@ -118,14 +121,55 @@ impl ValueType for Interval {
                         Ok(Interval::Scalar(
                             lo.next_down().max(-1.0),
                             hi.next_up().min(1.0),
-                        ));
+                        ))
                     }
                 }
-                Cos => it.cos(),
-                Tan => it.tan(),
-                Log => it.ln(),
-                Exp => it.exp(),
-                Floor => it.floor(),
+                Cos => {
+                    let width = hi - lo;
+                    if width >= TAU {
+                        Ok(Interval::Scalar(-1.0, 1.0))
+                    } else {
+                        let lo = lo.rem_euclid(TAU);
+                        let hi = lo + width;
+                        debug_assert!(lo < TAU);
+                        debug_assert!(hi <= TAU + f64::EPSILON);
+                        debug_assert!(lo <= hi);
+                        let (lo, hi) = match (lo.total_cmp(PI), hi.total_cmp(PI)) {
+                            (Less, Less) => (hi.cos(), lo.cos()),
+                            (Less, Equal) => (-1.0, lo.cos()),
+                            (Less, Greater) => (-1.0, lo.cos().max(hi.cos())),
+                            (Equal, Equal) => (-1.0, -1.0),
+                            (Equal, _) => (-1.0, hi.cos()),
+                            (Greater, _) => (lo.cos(), hi.cos()),
+                        };
+                        Ok(Interval::Scalar(
+                            lo.next_down().max(-1.0),
+                            hi.next_up().min(1.0),
+                        ))
+                    }
+                }
+                Tan => {
+                    let width = hi - lo;
+                    if width >= PI {
+                        Ok(Interval::Scalar(f64::NEG_INFINITY, f64::INFINITY))
+                    } else {
+                        let lo = (lo + FRAC_PI_2).rem_euclid(PI) - FRAC_PI_2;
+                        let hi = lo + width;
+                        debug_assert!(lo <= hi);
+                        debug_assert!(lo >= -FRAC_PI_2);
+                        debug_assert!(lo <= FRAC_PI_2);
+                        if hi >= FRAC_PI_2 {
+                            Ok(Interval::Scalar(f64::NEG_INFINITY, f64::INFINITY))
+                        } else {
+                            Ok(Interval::Scalar(f64::tan(lo), f64::tan(hi)))
+                        }
+                    }
+                }
+                Log if hi < 0. => Err(Error::InvalidInterval),
+                Log if lo < 0. => Ok(Interval::Scalar(f64::NEG_INFINITY, hi.ln())),
+                Log => Ok(Interval::Scalar(lo.ln(), hi.ln())),
+                Exp => Ok(Interval::Scalar(lo.exp(), hi.exp())),
+                Floor => Ok(Interval::Scalar(lo.floor(), hi.floor())),
                 Not => return Err(Error::TypeMismatch),
             },
             Interval::Bool(lower, upper) => match op {
