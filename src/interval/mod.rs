@@ -82,17 +82,17 @@ impl ValueType for Interval {
         use std::cmp::Ordering::*;
         match val {
             Interval::Scalar(lo, hi) => match op {
-                Negate => Ok(Interval::Scalar(-hi, -lo)),
+                Negate => Interval::from_scalar(-hi, -lo),
                 Sqrt if hi < 0. => Err(Error::InvalidInterval),
-                Sqrt if lo < 0. => Ok(Interval::Scalar(0.f64, hi.sqrt())),
-                Sqrt => Ok(Interval::Scalar(lo.sqrt(), hi.sqrt())),
-                Abs if hi <= 0. => Ok(Interval::Scalar(-hi, -lo)),
-                Abs if lo >= 0. => Ok(Interval::Scalar(lo, hi)),
-                Abs => Ok(Interval::Scalar(0., lo.abs().max(hi.abs()))),
+                Sqrt if lo < 0. => Interval::from_scalar(0.f64, hi.sqrt()),
+                Sqrt => Interval::from_scalar(lo.sqrt(), hi.sqrt()),
+                Abs if hi <= 0. => Interval::from_scalar(-hi, -lo),
+                Abs if lo >= 0. => Interval::from_scalar(lo, hi),
+                Abs => Interval::from_scalar(0., lo.abs().max(hi.abs())),
                 Sin => {
                     let width = hi - lo;
                     if width >= TAU {
-                        Ok(Interval::Scalar(-1.0, 1.0))
+                        Interval::from_scalar(-1.0, 1.0)
                     } else {
                         let lo = lo.rem_euclid(TAU);
                         let hi = lo + width;
@@ -118,16 +118,13 @@ impl ValueType for Interval {
                                     }
                                 }
                             };
-                        Ok(Interval::Scalar(
-                            lo.next_down().max(-1.0),
-                            hi.next_up().min(1.0),
-                        ))
+                        Interval::from_scalar(lo.next_down().max(-1.0), hi.next_up().min(1.0))
                     }
                 }
                 Cos => {
                     let width = hi - lo;
                     if width >= TAU {
-                        Ok(Interval::Scalar(-1.0, 1.0))
+                        Interval::from_scalar(-1.0, 1.0)
                     } else {
                         let lo = lo.rem_euclid(TAU);
                         let hi = lo + width;
@@ -142,16 +139,13 @@ impl ValueType for Interval {
                             (Equal, _) => (-1.0, hi.cos()),
                             (Greater, _) => (lo.cos(), hi.cos()),
                         };
-                        Ok(Interval::Scalar(
-                            lo.next_down().max(-1.0),
-                            hi.next_up().min(1.0),
-                        ))
+                        Interval::from_scalar(lo.next_down().max(-1.0), hi.next_up().min(1.0))
                     }
                 }
                 Tan => {
                     let width = hi - lo;
                     if width >= PI {
-                        Ok(Interval::Scalar(f64::NEG_INFINITY, f64::INFINITY))
+                        Interval::from_scalar(f64::NEG_INFINITY, f64::INFINITY)
                     } else {
                         let lo = (lo + FRAC_PI_2).rem_euclid(PI) - FRAC_PI_2;
                         let hi = lo + width;
@@ -159,17 +153,17 @@ impl ValueType for Interval {
                         debug_assert!(lo >= -FRAC_PI_2);
                         debug_assert!(lo <= FRAC_PI_2);
                         if hi >= FRAC_PI_2 {
-                            Ok(Interval::Scalar(f64::NEG_INFINITY, f64::INFINITY))
+                            Interval::from_scalar(f64::NEG_INFINITY, f64::INFINITY)
                         } else {
-                            Ok(Interval::Scalar(f64::tan(lo), f64::tan(hi)))
+                            Interval::from_scalar(f64::tan(lo), f64::tan(hi))
                         }
                     }
                 }
                 Log if hi < 0. => Err(Error::InvalidInterval),
-                Log if lo < 0. => Ok(Interval::Scalar(f64::NEG_INFINITY, hi.ln())),
-                Log => Ok(Interval::Scalar(lo.ln(), hi.ln())),
-                Exp => Ok(Interval::Scalar(lo.exp(), hi.exp())),
-                Floor => Ok(Interval::Scalar(lo.floor(), hi.floor())),
+                Log if lo < 0. => Interval::from_scalar(f64::NEG_INFINITY, hi.ln()),
+                Log => Interval::from_scalar(lo.ln(), hi.ln()),
+                Exp => Interval::from_scalar(lo.exp(), hi.exp()),
+                Floor => Interval::from_scalar(lo.floor(), hi.floor()),
                 Not => return Err(Error::TypeMismatch),
             },
             Interval::Bool(lower, upper) => match op {
