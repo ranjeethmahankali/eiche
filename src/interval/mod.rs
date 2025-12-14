@@ -230,20 +230,35 @@ impl ValueType for Interval {
                     Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up())
                 }
                 Pow if rlo == 0.0 && rhi == 0.0 => Interval::Scalar(1.0, 1.0),
-                Pow if rlo == rhi && llo >= 0.0 => {
-                    Interval::Scalar(llo.powf(rlo).next_down(), lhi.powf(rlo).next_up())
+                Pow if rlo.floor() == rlo && rhi.floor() == rhi => {
+                    todo!("Handle pow for integer exponent")
                 }
-                Pow => {}
-                Pow => Ok({
-                    if rhs.is_singleton() && rhs.inf() == 2. {
-                        // Special case for squaring to get tighter intervals.
-                        Interval::Scalar(lhs.sqr())
+                Pow if rhi <= 0.0 => {
+                    if lhi == 0.0 {
+                        Err(Error::InvalidInterval)
+                    } else if lhi < 1.0 {
+                        Interval::from_scalar(lhi.powf(rhi).next_down(), llo.powf(rlo).next_up())
+                    } else if llo > 1.0 {
+                        Interval::from_scalar(lhi.powf(rlo).next_down(), llo.powf(rhi).next_up())
                     } else {
-                        Interval::Scalar(lhs.pow(rhs))
+                        Interval::from_scalar(lhi.powf(rlo).next_down(), llo.powf(rlo).next_up())
                     }
-                }),
-                Min => Ok(Interval::Scalar(lhs.min(rhs))),
-                Max => Ok(Interval::Scalar(lhs.max(rhs))),
+                }
+                Pow if rlo > 0.0 => {
+                    if lhi < 1.0 {
+                        Interval::from_scalar(llo.powf(rhi).next_down(), lhi.powf(rlo).next_up())
+                    } else if llo > 1.0 {
+                        Interval::from_scalar(llo.powf(rlo).next_down(), lhi.powf(rhi).next_up())
+                    } else {
+                        Interval::from_scalar(llo.powf(rhi).next_down(), lhi.powf(rhi).next_up())
+                    }
+                }
+                Pow => Interval::from_scalar(
+                    llo.powf(rhi).min(lhi.powf(rlo)).next_down(),
+                    llo.powf(rlo).max(lhi.powf(rlo)).next_up(),
+                ),
+                Min => Ok(Interval::from_scalar(rlo.min(llo), rhi.min(lhi))),
+                Max => Ok(Interval::from_scalar(rlo.max(llo), rhi.max(lhi))),
                 Remainder => Ok(Interval::Scalar(lhs.sub(lhs.div(rhs).floor().mul(rhs)))),
                 Less => {
                     let (lo, hi) = if lhs.strict_precedes(rhs) {
