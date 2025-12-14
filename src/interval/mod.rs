@@ -532,6 +532,7 @@ mod test {
     }
 
     fn is_subset_of((llo, lhi): &(f64, f64), (rlo, rhi): &(f64, f64)) -> bool {
+        println!("({llo}, {lhi}); ({rlo}, {rhi})"); // TODO: Remove later after debugging
         llo >= rlo && lhi <= rhi
     }
 
@@ -714,6 +715,22 @@ mod test {
             20,
             5,
         );
+    }
+
+    #[test]
+    fn t_interval_pow_2() {
+        check_interval_eval(
+            deftree!(pow 'x 3.).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(pow 'x 3.15).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.)],
+            20,
+            5,
+        )
     }
 
     #[test]
