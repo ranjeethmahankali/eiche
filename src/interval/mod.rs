@@ -22,6 +22,25 @@ pub enum Interval {
     Bool(bool, bool),
 }
 
+enum Overlap {
+    BothEmpty,
+    FirstEmpty,
+    SecondEmpty,
+    Before,
+    Meets,
+    Overlaps,
+    Starts,
+    ContainedBy,
+    Finishes,
+    Equals,
+    FinishedBy,
+    Contains,
+    StartedBy,
+    OverlappedBy,
+    MetBy,
+    After,
+}
+
 impl Interval {
     pub fn scalar(&self) -> Result<(f64, f64), Error> {
         match self {
@@ -54,6 +73,87 @@ impl Interval {
             Ok(Interval::Scalar(lower, upper))
         }
     }
+}
+
+fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
+    use Overlap::*;
+    use std::cmp::Ordering::*;
+    match (b < a, d < c) {
+        (true, true) => BothEmpty,
+        (true, false) => FirstEmpty,
+        (false, true) => SecondEmpty,
+        (false, false) => {
+            //     |  aRc  |  aRd  |  bRc  |  bRd
+            //     | < = > | < = > | < = > | < = >
+            // ----+-------+-------+-------+-------
+            //   B | x     | x     | x     | x
+            //   M | x     | x     |   x   | x
+            //   O | x     | x     |     x | x
+            //   S |   x   | x     |   ? ? | x
+            //  Cb |     x | x     |     x | x
+            //   F |     x | ? ?   |     x |   x
+            //   E |   x   | ? ?   |   ? ? |   x
+            //  Fb | x     | x     |   ? ? |   x
+            //   C | x     | x     |     x |     x
+            //  Sb |   x   | ? ?   |     x |     x
+            //  Ob |     x | x     |     x |     x
+            //  Mb |     x |   x   |     x |     x
+            //   A |     x |     x |     x |     x
+            match (
+                b.total_cmp(&d),
+                a.total_cmp(&c),
+                b.total_cmp(&c),
+                a.total_cmp(&d),
+            ) {
+                (Less, Less, Less, _) => Before,
+                (Less, Less, Equal, _) => Meets,
+                (Less, Less, ..) => Overlaps,
+                (Less, Equal, ..) => Starts,
+                (Less, ..) => ContainedBy,
+                (Equal, Greater, ..) => Finishes,
+                (Equal, Equal, ..) => Equals,
+                (Equal, ..) => FinishedBy,
+                (Greater, Less, ..) => Contains,
+                (Greater, Equal, ..) => StartedBy,
+                (Greater, Greater, _, Less) => OverlappedBy,
+                (Greater, Greater, _, Equals) => MetBy,
+                (Greater, Greater, _, Greater) => After,
+            }
+        }
+    }
+    // if b < d {
+    //     if a < c {
+    //         if b < c {
+    //             Before
+    //         } else if b == c {
+    //             Meets
+    //         } else {
+    //             Overlaps
+    //         }
+    //     } else {
+    //         if a == c { Starts } else { ContainedBy }
+    //     }
+    // } else if b == d {
+    //     if a > c {
+    //         Finishes
+    //     } else if a == c {
+    //         Equals
+    //     } else {
+    //         FinishedBy
+    //     }
+    // } else {
+    //     if a <= c {
+    //         if a < c { Contains } else { StartedBy }
+    //     } else {
+    //         if a < d {
+    //             OverlappedBy
+    //         } else if a == d {
+    //             MetBy
+    //         } else {
+    //             After
+    //         }
+    //     }
+    // }
 }
 
 impl Default for Interval {
@@ -231,7 +331,39 @@ impl ValueType for Interval {
                 }
                 Pow if rlo == 0.0 && rhi == 0.0 => Interval::Scalar(1.0, 1.0),
                 Pow if rlo.floor() == rlo && rhi.floor() == rhi => {
-                    todo!("Handle pow for integer exponent")
+                    let rhs = rhi.floor() as i32;
+                    if rhs < 0 {
+                        if llo == 0.0 && lhi == 0.0 {
+                            Err(Error::InvalidInterval)
+                        } else if rhs % 2 == 0 {
+                            let (lo, hi) = if lhi <= 0. {
+                                (-lhi, -llo)
+                            } else if llo >= 0. {
+                                (llo, lhi)
+                            } else {
+                                (0., llo.abs().max(lhi.abs()))
+                            };
+                            Interval::from_scalar(hi.powi(rhs).next_down(), lo.powi(rhs).next_up())
+                        } else if llo < 0.0 && lhi > 0.0 {
+                            Interval::default()
+                        } else {
+                            Interval::from_scalar(
+                                lhi.powi(rhs).next_down(),
+                                llo.powi(rhs).next_up(),
+                            )
+                        }
+                    } else if rhs % 2 == 0 {
+                        let (lo, hi) = if lhi <= 0. {
+                            (-lhi, -llo)
+                        } else if llo >= 0. {
+                            (llo, lhi)
+                        } else {
+                            (0., llo.abs().max(lhi.abs()))
+                        };
+                        Interval::from_scalar(lo.powi(rhs).next_down(), hi.powi(rhs).next_up())
+                    } else {
+                        Interval::from_scalar(llo.powi(rhs).next_down(), lhi.powi(rhs).next_up())
+                    }
                 }
                 Pow if rhi <= 0.0 => {
                     if lhi == 0.0 {
@@ -255,11 +387,14 @@ impl ValueType for Interval {
                 }
                 Pow => Interval::from_scalar(
                     llo.powf(rhi).min(lhi.powf(rlo)).next_down(),
-                    llo.powf(rlo).max(lhi.powf(rlo)).next_up(),
+                    llo.powf(rlo).max(lhi.powf(rhi)).next_up(),
                 ),
                 Min => Ok(Interval::from_scalar(rlo.min(llo), rhi.min(lhi))),
                 Max => Ok(Interval::from_scalar(rlo.max(llo), rhi.max(lhi))),
-                Remainder => Ok(Interval::Scalar(lhs.sub(lhs.div(rhs).floor().mul(rhs)))),
+                Remainder => {
+                    todo!("Handle remainder op");
+                    // Ok(Interval::Scalar(lhs.sub(lhs.div(rhs).floor().mul(rhs))))
+                }
                 Less => {
                     let (lo, hi) = if lhs.strict_precedes(rhs) {
                         (true, true)
@@ -281,7 +416,8 @@ impl ValueType for Interval {
                     Interval::from_boolean(lo, hi)
                 }
                 Equal => {
-                    let (lo, hi) = match lhs.overlap(rhs) {
+                    use Overlap::*;
+                    let (lo, hi) = match overlap((llo, lhi), (rlo, rhi)) {
                         BothEmpty => (true, true),
                         FirstEmpty | SecondEmpty | Before | After => (false, false),
                         Meets | Overlaps | Starts | ContainedBy | Finishes | StartedBy
@@ -297,7 +433,8 @@ impl ValueType for Interval {
                     Interval::from_boolean(lo, hi)
                 }
                 NotEqual => {
-                    let (lo, hi) = match lhs.overlap(rhs) {
+                    use Overlap::*;
+                    let (lo, hi) = match overlap((llo, lhi), (rlo, rhi)) {
                         BothEmpty => (false, false),
                         FirstEmpty | SecondEmpty | Before | After => (true, true),
                         Meets | Overlaps | Starts | ContainedBy | Finishes | FinishedBy
@@ -366,11 +503,12 @@ impl ValueType for Interval {
             Choose => match a.boolean()? {
                 (true, true) => Ok(b),
                 (true, false) | (false, true) => match (b, c) {
-                    (Scalar(b), Scalar(c)) => Interval::from_scalar(
-                        f64::min(b.inf(), c.inf()),
-                        f64::max(b.sup(), c.sup()),
-                    ),
-                    (Scalar(_), Bool(_, _)) | (Bool(_, _), Scalar(_)) => Err(Error::TypeMismatch),
+                    (Scalar(blo, bhi), Scalar(clo, chi)) => {
+                        Interval::from_scalar(blo.min(clo), bhi.max(chi))
+                    }
+                    (Scalar(_, _), Bool(_, _)) | (Bool(_, _), Scalar(_, _)) => {
+                        Err(Error::TypeMismatch)
+                    }
                     (Bool(blo, bhi), Bool(clo, chi)) => {
                         if blo == bhi && blo == clo && blo == chi {
                             Interval::from_boolean(false, true)
@@ -382,12 +520,6 @@ impl ValueType for Interval {
                 (false, false) => Ok(c),
             },
         }
-    }
-}
-
-impl From<inari::Interval> for Interval {
-    fn from(value: inari::Interval) -> Self {
-        Interval::Scalar(value)
     }
 }
 
