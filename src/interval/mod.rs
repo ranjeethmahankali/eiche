@@ -120,7 +120,16 @@ pub fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
     }
 }
 
-fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<Interval, Error> {
+fn mul((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<(f64, f64), Error> {
+    let (lo, hi) = [llo * rlo, llo * rhi, lhi * rlo, lhi * rhi]
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
+            (lo.min(*current), hi.max(*current))
+        });
+    Ok((lo, hi))
+}
+
+fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<(f64, f64), Error> {
     use std::cmp::Ordering::*;
     match (
         rlo.total_cmp(&0.0),
@@ -134,22 +143,14 @@ fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<Interval, Error
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
                     (lo.min(*current), hi.max(*current))
                 });
-            Interval::from_scalar(lo, hi)
+            Ok((lo, hi))
         }
-        (Less, Equal, _, Less | Equal) => {
-            Interval::from_scalar((llo / rlo).min(lhi / rlo), f64::INFINITY)
-        }
-        (Equal, Greater, Equal | Greater, _) => {
-            Interval::from_scalar((llo / rhi).min(lhi / rhi), f64::INFINITY)
-        }
-        (Less, Equal, Equal | Greater, _) => {
-            Interval::from_scalar(f64::NEG_INFINITY, (llo / rlo).max(lhi / rlo))
-        }
-        (Equal, Greater, _, Less) => {
-            Interval::from_scalar(f64::NEG_INFINITY, (llo / rhi).max(lhi / rhi))
-        }
+        (Less, Equal, _, Less | Equal) => Ok(((llo / rlo).min(lhi / rlo), f64::INFINITY)),
+        (Equal, Greater, Equal | Greater, _) => Ok(((llo / rhi).min(lhi / rhi), f64::INFINITY)),
+        (Less, Equal, Equal | Greater, _) => Ok((f64::NEG_INFINITY, (llo / rlo).max(lhi / rlo))),
+        (Equal, Greater, _, Less) => Ok((f64::NEG_INFINITY, (llo / rhi).max(lhi / rhi))),
         (Equal, Equal, _, _) => Err(Error::InvalidInterval),
-        _ => Ok(Interval::default()), // everything.
+        _ => Ok((f64::NEG_INFINITY, f64::INFINITY)), // everything.
     }
 }
 
@@ -303,15 +304,12 @@ impl ValueType for Interval {
             (Scalar(llo, lhi), Scalar(rlo, rhi)) => match op {
                 Add => Interval::from_scalar(llo + rlo, lhi + rhi),
                 Subtract => Interval::from_scalar(llo - rhi, lhi - rlo),
-                Multiply => {
-                    let (lo, hi) = [llo * rlo, llo * rhi, lhi * rlo, lhi * rhi]
-                        .iter()
-                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
-                            (lo.min(*current), hi.max(*current))
-                        });
-                    Interval::from_scalar(lo, hi)
-                }
-                Divide => div((llo, lhi), (rlo, rhi)),
+                Multiply => mul((llo, lhi), (rlo, rhi))
+                    .map(|(lo, hi)| Interval::from_scalar(lo, hi))
+                    .flatten(),
+                Divide => div((llo, lhi), (rlo, rhi))
+                    .map(|(lo, hi)| Interval::from_scalar(lo, hi))
+                    .flatten(),
                 Pow if rlo == 2.0 && rhi == 2.0 => {
                     Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up())
                 }
@@ -378,8 +376,12 @@ impl ValueType for Interval {
                 Min => Interval::from_scalar(rlo.min(llo), rhi.min(lhi)),
                 Max => Interval::from_scalar(rlo.max(llo), rhi.max(lhi)),
                 Remainder => {
-                    todo!("Handle remainder op");
-                    // Ok(Interval::Scalar(lhs.sub(lhs.div(rhs).floor().mul(rhs))))
+                    let (mut lo, mut hi) = div((llo, lhi), (rlo, rhi))?;
+                    if lo > hi {
+                        std::mem::swap(&mut lo, &mut hi);
+                    }
+                    let (lo, hi) = mul((lo.floor(), hi.floor()), (rlo, rhi))?;
+                    Interval::from_scalar(llo - hi, lhi - lo)
                 }
                 Less => {
                     let (lo, hi) = if strict_precedes((llo, lhi), (rlo, rhi)) {
