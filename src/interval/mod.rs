@@ -8,10 +8,7 @@ use crate::{
         Value,
     },
 };
-use std::ops::{
-    Add, Div, Mul, Neg, Sub,
-    f64::consts::{FRAC_PI_2, PI, TAU},
-};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 pub mod fold;
 pub mod pruning_eval;
@@ -22,7 +19,7 @@ pub enum Interval {
     Bool(bool, bool),
 }
 
-enum Overlap {
+pub enum Overlap {
     BothEmpty,
     FirstEmpty,
     SecondEmpty,
@@ -32,7 +29,7 @@ enum Overlap {
     Starts,
     ContainedBy,
     Finishes,
-    Equals,
+    Matches,
     FinishedBy,
     Contains,
     StartedBy,
@@ -64,8 +61,8 @@ impl Interval {
         })
     }
 
-    pub fn from_scalar(mut lower: f64, mut upper: f64) -> Result<Interval, Error> {
-        if (lower.is_nan() || upper.is_nan()) {
+    pub fn from_scalar(lower: f64, upper: f64) -> Result<Interval, Error> {
+        if lower.is_nan() || upper.is_nan() {
             Err(Error::InvalidInterval)
         } else if upper < lower {
             Ok(Interval::Scalar(upper, lower))
@@ -75,7 +72,7 @@ impl Interval {
     }
 }
 
-fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
+pub fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
     use Overlap::*;
     use std::cmp::Ordering::*;
     match (b < a, d < c) {
@@ -111,16 +108,57 @@ fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
                 (Less, Equal, ..) => Starts,
                 (Less, ..) => ContainedBy,
                 (Equal, Greater, ..) => Finishes,
-                (Equal, Equal, ..) => Equals,
+                (Equal, Equal, ..) => Matches,
                 (Equal, ..) => FinishedBy,
                 (Greater, Less, ..) => Contains,
                 (Greater, Equal, ..) => StartedBy,
                 (Greater, Greater, _, Less) => OverlappedBy,
-                (Greater, Greater, _, Equals) => MetBy,
+                (Greater, Greater, _, Equal) => MetBy,
                 (Greater, Greater, _, Greater) => After,
             }
         }
     }
+}
+
+fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<Interval, Error> {
+    use std::cmp::Ordering::*;
+    match (
+        rlo.total_cmp(&0.0),
+        rhi.total_cmp(&0.0),
+        llo.total_cmp(&0.0),
+        lhi.total_cmp(&0.0),
+    ) {
+        (Less, Less, _, _) | (Greater, Greater, _, _) => {
+            let (lo, hi) = [llo / rlo, llo / rhi, lhi / rlo, lhi / rhi]
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
+                    (lo.min(*current), hi.max(*current))
+                });
+            Interval::from_scalar(lo, hi)
+        }
+        (Less, Equal, _, Less | Equal) => {
+            Interval::from_scalar((llo / rlo).min(lhi / rlo), f64::INFINITY)
+        }
+        (Equal, Greater, Equal | Greater, _) => {
+            Interval::from_scalar((llo / rhi).min(lhi / rhi), f64::INFINITY)
+        }
+        (Less, Equal, Equal | Greater, _) => {
+            Interval::from_scalar(f64::NEG_INFINITY, (llo / rlo).max(lhi / rlo))
+        }
+        (Equal, Greater, _, Less) => {
+            Interval::from_scalar(f64::NEG_INFINITY, (llo / rhi).max(lhi / rhi))
+        }
+        (Equal, Equal, _, _) => Err(Error::InvalidInterval),
+        _ => Ok(Interval::default()), // everything.
+    }
+}
+
+fn precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
+    lhi < llo || rhi < rlo || lhi <= rlo
+}
+
+fn strict_precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
+    lhi < llo || rhi < rlo || lhi < rlo
 }
 
 impl Default for Interval {
@@ -151,7 +189,7 @@ impl ValueType for Interval {
             Interval::Scalar(lo, hi) => match op {
                 Negate => Interval::from_scalar(-hi, -lo),
                 Sqrt if hi < 0. => Err(Error::InvalidInterval),
-                Sqrt if lo < 0. => Interval::from_scalar(0.f64, hi.sqrt()),
+                Sqrt if lo < 0. => Interval::from_scalar(0.0, hi.sqrt()),
                 Sqrt => Interval::from_scalar(lo.sqrt(), hi.sqrt()),
                 Abs if hi <= 0. => Interval::from_scalar(-hi, -lo),
                 Abs if lo >= 0. => Interval::from_scalar(lo, hi),
@@ -167,12 +205,15 @@ impl ValueType for Interval {
                         debug_assert!(hi <= TAU + f64::EPSILON);
                         debug_assert!(lo <= hi);
                         let (lo, hi) =
-                            match (hi.total_cmp(FRAC_PI_2), lo.total_cmp(3.0 * FRAC_PI_2)) {
+                            match (hi.total_cmp(&FRAC_PI_2), lo.total_cmp(&(3.0 * FRAC_PI_2))) {
                                 (Less, _) | (_, Greater) => (lo.sin(), hi.sin()),
                                 (Equal, _) => (lo.sin(), 1.0),
                                 (_, Equal) => (-1.0, hi.sin()),
                                 (Greater, Less) => {
-                                    match (hi.total_cmp(3.0 * FRAC_PI_2), lo.total_cmp(FRAC_PI_2)) {
+                                    match (
+                                        hi.total_cmp(&(3.0 * FRAC_PI_2)),
+                                        lo.total_cmp(&FRAC_PI_2),
+                                    ) {
                                         (Less, Less) => (lo.sin().min(hi.sin()), 1.0),
                                         (Less, Equal) => (hi.sin(), 1.0),
                                         (Less, Greater) => (hi.sin(), lo.sin()),
@@ -198,7 +239,7 @@ impl ValueType for Interval {
                         debug_assert!(lo < TAU);
                         debug_assert!(hi <= TAU + f64::EPSILON);
                         debug_assert!(lo <= hi);
-                        let (lo, hi) = match (lo.total_cmp(PI), hi.total_cmp(PI)) {
+                        let (lo, hi) = match (lo.total_cmp(&PI), hi.total_cmp(&PI)) {
                             (Less, Less) => (hi.cos(), lo.cos()),
                             (Less, Equal) => (-1.0, lo.cos()),
                             (Less, Greater) => (-1.0, lo.cos().max(hi.cos())),
@@ -240,7 +281,7 @@ impl ValueType for Interval {
                         (true, false) | (false, true) => (false, true),
                         (false, false) => (true, true),
                     };
-                    Interval::from_boolean(lower, upper)?
+                    Interval::from_boolean(lower, upper)
                 }
                 Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
                     return Err(Error::TypeMismatch);
@@ -251,7 +292,6 @@ impl ValueType for Interval {
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
         use Interval::*;
-        use std::cmp::Ordering::*;
         match (lhs, rhs) {
             (Scalar(llo, lhi), Scalar(rlo, rhi)) => match op {
                 Add => Interval::from_scalar(llo + rlo, lhi + rhi),
@@ -264,39 +304,11 @@ impl ValueType for Interval {
                         });
                     Interval::from_scalar(lo, hi)
                 }
-                Divide => match (
-                    rlo.total_cmp(0.0),
-                    rhi.total_cmp(0.0),
-                    llo.total_cmp(0.0),
-                    lhi.total_cmp(0.0),
-                ) {
-                    (Less, Less, _, _) | (Greater, Greater, _, _) => {
-                        let (lo, hi) = [llo / rlo, llo / rhi, lhi / rlo, lhi / rhi]
-                            .iter()
-                            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
-                                (lo.min(*current), hi.max(*current))
-                            });
-                        Interval::from_scalar(lo, hi)
-                    }
-                    (Less, Equal, _, Less | Equal) => {
-                        Interval::from_scalar((llo / rlo).min(lhi / rlo), f64::INFINITY)
-                    }
-                    (Equal, Greater, Equal | Greater, _) => {
-                        Interval::from_scalar((llo / rhi).min(lhi / rhi), f64::INFINITY)
-                    }
-                    (Less, Equal, Equal | Greater, _) => {
-                        Interval::from_scalar(f64::NEG_INFINITY, (llo / rlo).max(lhi / rlo))
-                    }
-                    (Equal, Greater, _, Less) => {
-                        Interval::from_scalar(f64::NEG_INFINITY, (llo / rhi).max(lhi / rhi))
-                    }
-                    (Equal, Equal, _, _) => Err(Error::InvalidInterval),
-                    _ => Ok(Interval::default()), // everything.
-                },
+                Divide => div((llo, lhi), (rlo, rhi)),
                 Pow if rlo == 2.0 && rhi == 2.0 => {
                     Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up())
                 }
-                Pow if rlo == 0.0 && rhi == 0.0 => Interval::Scalar(1.0, 1.0),
+                Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rhi.floor() == rhi => {
                     let rhs = rhi.floor() as i32;
                     if rhs < 0 {
@@ -312,7 +324,7 @@ impl ValueType for Interval {
                             };
                             Interval::from_scalar(hi.powi(rhs).next_down(), lo.powi(rhs).next_up())
                         } else if llo < 0.0 && lhi > 0.0 {
-                            Interval::default()
+                            Ok(Interval::default())
                         } else {
                             Interval::from_scalar(
                                 lhi.powi(rhs).next_down(),
@@ -356,16 +368,16 @@ impl ValueType for Interval {
                     llo.powf(rhi).min(lhi.powf(rlo)).next_down(),
                     llo.powf(rlo).max(lhi.powf(rhi)).next_up(),
                 ),
-                Min => Ok(Interval::from_scalar(rlo.min(llo), rhi.min(lhi))),
-                Max => Ok(Interval::from_scalar(rlo.max(llo), rhi.max(lhi))),
+                Min => Interval::from_scalar(rlo.min(llo), rhi.min(lhi)),
+                Max => Interval::from_scalar(rlo.max(llo), rhi.max(lhi)),
                 Remainder => {
                     todo!("Handle remainder op");
                     // Ok(Interval::Scalar(lhs.sub(lhs.div(rhs).floor().mul(rhs))))
                 }
                 Less => {
-                    let (lo, hi) = if lhs.strict_precedes(rhs) {
+                    let (lo, hi) = if strict_precedes((llo, lhi), (rlo, rhi)) {
                         (true, true)
-                    } else if rhs.strict_precedes(lhs) {
+                    } else if strict_precedes((rlo, rhi), (llo, lhi)) {
                         (false, false)
                     } else {
                         (false, true)
@@ -373,9 +385,9 @@ impl ValueType for Interval {
                     Interval::from_boolean(lo, hi)
                 }
                 LessOrEqual => {
-                    let (lo, hi) = if lhs.precedes(rhs) {
+                    let (lo, hi) = if precedes((llo, lhi), (rlo, rhi)) {
                         (true, true)
-                    } else if rhs.strict_precedes(lhs) {
+                    } else if strict_precedes((rlo, rhi), (llo, lhi)) {
                         (false, false)
                     } else {
                         (false, true)
@@ -389,8 +401,8 @@ impl ValueType for Interval {
                         FirstEmpty | SecondEmpty | Before | After => (false, false),
                         Meets | Overlaps | Starts | ContainedBy | Finishes | StartedBy
                         | FinishedBy | OverlappedBy | Contains | MetBy => (false, true),
-                        Equals => {
-                            if lhs.is_singleton() {
+                        Matches => {
+                            if llo == lhi {
                                 (true, true)
                             } else {
                                 (false, true)
@@ -406,8 +418,8 @@ impl ValueType for Interval {
                         FirstEmpty | SecondEmpty | Before | After => (true, true),
                         Meets | Overlaps | Starts | ContainedBy | Finishes | FinishedBy
                         | Contains | StartedBy | OverlappedBy | MetBy => (false, true),
-                        Equals => {
-                            if lhs.is_singleton() {
+                        Matches => {
+                            if llo == lhi {
                                 (false, false)
                             } else {
                                 (false, true)
@@ -417,9 +429,9 @@ impl ValueType for Interval {
                     Interval::from_boolean(lo, hi)
                 }
                 Greater => {
-                    let (lo, hi) = if rhs.strict_precedes(lhs) {
+                    let (lo, hi) = if strict_precedes((rlo, rhi), (llo, lhi)) {
                         (true, true)
-                    } else if lhs.strict_precedes(rhs) {
+                    } else if strict_precedes((llo, lhi), (rlo, rhi)) {
                         (false, false)
                     } else {
                         (false, true)
@@ -427,9 +439,9 @@ impl ValueType for Interval {
                     Interval::from_boolean(lo, hi)
                 }
                 GreaterOrEqual => {
-                    let (lo, hi) = if rhs.precedes(lhs) {
+                    let (lo, hi) = if precedes((rlo, rhi), (llo, lhi)) {
                         (true, true)
-                    } else if lhs.strict_precedes(rhs) {
+                    } else if strict_precedes((llo, lhi), (rlo, rhi)) {
                         (false, false)
                     } else {
                         (false, true)
@@ -498,6 +510,26 @@ mod test {
     use crate::{ValueEvaluator, assert_float_eq, deftree, test::Sampler, tree::Tree};
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
+    fn is_common((lo, hi): &(f64, f64)) -> bool {
+        lo.is_finite() && hi.is_finite() && lo <= hi
+    }
+
+    fn is_empty((lo, hi): &(f64, f64)) -> bool {
+        hi < lo
+    }
+
+    fn is_entire((lo, hi): &(f64, f64)) -> bool {
+        *lo == f64::NEG_INFINITY && *hi == f64::INFINITY
+    }
+
+    fn is_subset_of((llo, lhi): &(f64, f64), (rlo, rhi): &(f64, f64)) -> bool {
+        llo >= rlo && lhi <= rhi
+    }
+
+    fn contains((lo, hi): &(f64, f64), val: f64) -> bool {
+        val >= *lo && val <= *hi
+    }
+
     /**
     Helper function to check interval evaluations by evaluating the given
     tree. `vardata` is expected to contain a list of variables and the lower and
@@ -528,26 +560,28 @@ mod test {
         let mut eval = ValueEvaluator::new(&tree);
         let mut ieval = IntervalEvaluator::new(&tree);
         // Evaluate the full interval and get the range of output values of the tree.
-        let total_range: Vec<inari::Interval> = {
+        let total_range: Vec<(f64, f64)> = {
             for &(label, lower, upper) in vardata {
-                ieval.set_value(label, inari::interval!(lower, upper).unwrap().into());
+                ieval.set_value(label, Interval::from_scalar(lower, upper).unwrap());
             }
             ieval
                 .run()
                 .unwrap()
                 .iter()
                 .map(|val| {
-                    let iout = val.scalar().unwrap();
-                    assert!(iout.is_common_interval());
-                    iout
+                    let (lo, hi) = val.scalar().unwrap();
+                    assert!(is_common(&(lo, hi)));
+                    (lo, hi)
                 })
                 .collect()
         };
         assert_eq!(total_range.len(), num_roots);
         let mut sampler = Sampler::new(vardata, samples_per_var, 42);
         // When we compute a sub-interval, we will cache the results here.
-        let mut computed_intervals =
-            vec![inari::Interval::EMPTY; intervals_per_var.pow(vardata.len() as u32) * num_roots];
+        let mut computed_intervals = vec![
+            (f64::INFINITY, f64::NEG_INFINITY);
+            intervals_per_var.pow(vardata.len() as u32) * num_roots
+        ];
         // Flags for whether or not a sub-interval is already computed and cached.
         let mut computed = vec![false; intervals_per_var.pow(vardata.len() as u32)];
         // Steps that define the sub intervals on a per variable basis.
@@ -576,7 +610,7 @@ mod test {
                     let local_idx = f64::floor((value - lower) / step);
                     idx += (local_idx as usize) * multiplier;
                     let inf = lower + local_idx * step;
-                    intervals.push(inari::interval!(inf, inf + step).unwrap());
+                    intervals.push(Interval::from_scalar(inf, inf + step).unwrap());
                     multiplier *= intervals_per_var;
                     (idx, intervals, multiplier)
                 },
@@ -594,10 +628,10 @@ mod test {
                     assert_eq!(iresults.len(), num_roots);
                     for i in 0..num_roots {
                         let iout = iresults[i].scalar().unwrap();
-                        assert!(!iout.is_empty());
-                        assert!(!iout.is_entire());
-                        assert!(iout.is_common_interval());
-                        assert!(iout.subset(total_range[i]));
+                        assert!(!is_empty(&iout));
+                        assert!(!is_entire(&iout));
+                        assert!(is_common(&iout));
+                        assert!(is_subset_of(&iout, &total_range[i]));
                         computed_intervals[offset + i] = iout;
                     }
                     computed[index] = true;
@@ -612,7 +646,7 @@ mod test {
             assert_eq!(num_roots, results.len());
             assert_eq!(results.len(), expected_range.len());
             for (range, value) in expected_range.iter().zip(results.iter()) {
-                assert!(range.contains(value.scalar().unwrap()));
+                assert!(contains(range, value.scalar().unwrap()));
             }
         }
     }
@@ -638,8 +672,8 @@ mod test {
             let val = eval.run().unwrap();
             assert_eq!(val.len(), 1);
             let val = val[0].scalar().unwrap();
-            assert_float_eq!(val.inf(), outlo, 1e-12);
-            assert_float_eq!(val.sup(), outhi, 1e-12);
+            assert_float_eq!(val.0, outlo, 1e-12);
+            assert_float_eq!(val.1, outhi, 1e-12);
         }
     }
 
