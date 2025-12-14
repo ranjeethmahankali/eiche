@@ -707,6 +707,16 @@ mod test {
     }
 
     #[test]
+    fn t_interval_squaring() {
+        check_interval_eval(
+            deftree!(pow 'x 2.).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
     fn t_interval_distance_to_point() {
         check_interval_eval(
             deftree!(sqrt (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.))).unwrap(),
