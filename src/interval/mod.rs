@@ -121,39 +121,6 @@ fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
             }
         }
     }
-    // if b < d {
-    //     if a < c {
-    //         if b < c {
-    //             Before
-    //         } else if b == c {
-    //             Meets
-    //         } else {
-    //             Overlaps
-    //         }
-    //     } else {
-    //         if a == c { Starts } else { ContainedBy }
-    //     }
-    // } else if b == d {
-    //     if a > c {
-    //         Finishes
-    //     } else if a == c {
-    //         Equals
-    //     } else {
-    //         FinishedBy
-    //     }
-    // } else {
-    //     if a <= c {
-    //         if a < c { Contains } else { StartedBy }
-    //     } else {
-    //         if a < d {
-    //             OverlappedBy
-    //         } else if a == d {
-    //             MetBy
-    //         } else {
-    //             After
-    //         }
-    //     }
-    // }
 }
 
 impl Default for Interval {
