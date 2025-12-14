@@ -8,7 +8,7 @@ use crate::{
         Value,
     },
 };
-use std::f64::consts::{FRAC_PI_2, PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI};
 
 pub mod fold;
 pub mod pruning_eval;
@@ -184,7 +184,6 @@ impl ValueType for Interval {
     }
 
     fn unary_op(op: UnaryOp, val: Self) -> Result<Self, Error> {
-        use std::cmp::Ordering::*;
         match val {
             Interval::Scalar(lo, hi) => match op {
                 Negate => Interval::from_scalar(-hi, -lo),
@@ -195,59 +194,67 @@ impl ValueType for Interval {
                 Abs if lo >= 0. => Interval::from_scalar(lo, hi),
                 Abs => Interval::from_scalar(0., lo.abs().max(hi.abs())),
                 Sin => {
-                    let width = hi - lo;
-                    if width >= TAU {
-                        Interval::from_scalar(-1.0, 1.0)
+                    let (qlo, qhi) = ((lo / FRAC_PI_2).floor(), (hi / FRAC_PI_2).floor());
+                    let n = if lo == hi { 0.0 } else { qhi - qlo };
+                    let q = qlo.rem_euclid(4.0);
+                    if q == 0.0 && n < 1.0 || q == 3.0 && n < 2.0 {
+                        // monotonically increasing
+                        Ok(Interval::Scalar(lo.sin().next_down(), hi.sin().next_up()))
+                    } else if q == 1.0 && n < 2.0 || q == 2.0 && n < 1.0 {
+                        // monotonically decreasing
+                        Ok(Interval::Scalar(hi.sin().next_down(), lo.sin().next_up()))
+                    } else if q == 0.0 && n < 3.0 || q == 3.0 && n < 4.0 {
+                        // increasing, then decreasing
+                        Ok(Interval::Scalar(
+                            lo.sin().next_down().min(hi.sin().next_down()),
+                            1.0,
+                        ))
+                    } else if q == 1.0 && n < 4.0 || q == 2.0 && n < 3.0 {
+                        // decreasing, then increasing
+                        Ok(Interval::Scalar(
+                            -1.0,
+                            lo.sin().next_up().max(hi.sin().next_up()),
+                        ))
                     } else {
-                        let lo = lo.rem_euclid(TAU);
-                        let hi = lo + width;
-                        debug_assert!(lo < TAU);
-                        debug_assert!(hi <= TAU + f64::EPSILON);
-                        debug_assert!(lo <= hi);
-                        let (lo, hi) =
-                            match (hi.total_cmp(&FRAC_PI_2), lo.total_cmp(&(3.0 * FRAC_PI_2))) {
-                                (Less, _) | (_, Greater) => (lo.sin(), hi.sin()),
-                                (Equal, _) => (lo.sin(), 1.0),
-                                (_, Equal) => (-1.0, hi.sin()),
-                                (Greater, Less) => {
-                                    match (
-                                        hi.total_cmp(&(3.0 * FRAC_PI_2)),
-                                        lo.total_cmp(&FRAC_PI_2),
-                                    ) {
-                                        (Less, Less) => (lo.sin().min(hi.sin()), 1.0),
-                                        (Less, Equal) => (hi.sin(), 1.0),
-                                        (Less, Greater) => (hi.sin(), lo.sin()),
-                                        (Greater, Equal)
-                                        | (Greater, Less)
-                                        | (Equal, Less)
-                                        | (Equal, Equal) => (-1.0, 1.0),
-                                        (Equal, Greater) => (-1.0, lo.sin()),
-                                        (Greater, Greater) => (-1.0, lo.sin().max(hi.sin())),
-                                    }
-                                }
-                            };
-                        Interval::from_scalar(lo.next_down().max(-1.0), hi.next_up().min(1.0))
+                        Ok(Interval::Scalar(-1.0, 1.0))
                     }
                 }
                 Cos => {
-                    let width = hi - lo;
-                    if width >= TAU {
-                        Interval::from_scalar(-1.0, 1.0)
+                    if hi < lo {
+                        Ok(Interval::Scalar(lo, hi))
                     } else {
-                        let lo = lo.rem_euclid(TAU);
-                        let hi = lo + width;
-                        debug_assert!(lo < TAU);
-                        debug_assert!(hi <= TAU + f64::EPSILON);
-                        debug_assert!(lo <= hi);
-                        let (lo, hi) = match (lo.total_cmp(&PI), hi.total_cmp(&PI)) {
-                            (Less, Less) => (hi.cos(), lo.cos()),
-                            (Less, Equal) => (-1.0, lo.cos()),
-                            (Less, Greater) => (-1.0, lo.cos().max(hi.cos())),
-                            (Equal, Equal) => (-1.0, -1.0),
-                            (Equal, _) => (-1.0, hi.cos()),
-                            (Greater, _) => (lo.cos(), hi.cos()),
+                        let (qlo, qhi) = ((lo / PI).floor(), (hi / PI).floor());
+                        let n = if lo == hi { 0.0 } else { qhi - qlo };
+                        let q = if 2.0 * (qlo / 2.0).floor() == qlo {
+                            0.0
+                        } else {
+                            1.0
                         };
-                        Interval::from_scalar(lo.next_down().max(-1.0), hi.next_up().min(1.0))
+                        if n == 0.0 {
+                            if q == 0.0 {
+                                // monotonically decreasing
+                                Ok(Interval::Scalar(hi.cos().next_down(), lo.cos().next_up()))
+                            } else {
+                                // monotonically increasing
+                                Ok(Interval::Scalar(lo.cos().next_down(), hi.cos().next_up()))
+                            }
+                        } else if n <= 1.0 {
+                            if q == 0.0 {
+                                // decreasing, then increasing
+                                Ok(Interval::Scalar(
+                                    -1.0,
+                                    lo.cos().next_up().max(hi.cos().next_up()),
+                                ))
+                            } else {
+                                // increasing, then decreasing
+                                Ok(Interval::Scalar(
+                                    lo.cos().next_down().min(hi.cos().next_down()),
+                                    1.0,
+                                ))
+                            }
+                        } else {
+                            Ok(Interval::Scalar(-1.0, 1.0))
+                        }
                     }
                 }
                 Tan => {
