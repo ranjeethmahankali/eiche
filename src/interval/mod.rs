@@ -194,9 +194,9 @@ impl ValueType for Interval {
                 Sqrt if hi < 0. => Err(Error::InvalidInterval),
                 Sqrt if lo < 0. => Interval::from_scalar(0.0, hi.sqrt()),
                 Sqrt => Interval::from_scalar(lo.sqrt(), hi.sqrt()),
-                Abs if hi <= 0. => Interval::from_scalar(-hi, -lo),
-                Abs if lo >= 0. => Interval::from_scalar(lo, hi),
-                Abs => Interval::from_scalar(0., lo.abs().max(hi.abs())),
+                Abs if hi <= 0. => Interval::from_scalar((-hi).next_down(), (-lo).next_up()),
+                Abs if lo >= 0. => Interval::from_scalar(lo.next_down(), hi.next_up()),
+                Abs => Interval::from_scalar(0.0f64.next_down(), lo.abs().max(hi.abs()).next_up()),
                 Sin => {
                     let (qlo, qhi) = ((lo / FRAC_PI_2).floor(), (hi / FRAC_PI_2).floor());
                     let n = if lo == hi { 0.0 } else { qhi - qlo };
@@ -678,6 +678,7 @@ mod test {
                         assert!(!is_empty(&iout));
                         assert!(!is_entire(&iout));
                         assert!(is_common(&iout));
+                        dbg!(iout, total_range[i]);
                         assert!(is_subset_of(&iout, &total_range[i]));
                         computed_intervals[offset + i] = iout;
                     }
@@ -752,6 +753,12 @@ mod test {
             20,
             5,
         );
+        check_interval_eval(
+            deftree!(pow (- 'x 1.) 2.).unwrap(),
+            &[('x', -10., 10.)],
+            20,
+            5,
+        );
     }
 
     #[test]
@@ -767,6 +774,18 @@ mod test {
     #[test]
     fn t_interval_rational_pow() {
         check_interval_eval(deftree!(pow 'x 3.15).unwrap(), &[('x', 0., 10.)], 20, 5);
+        check_interval_eval(
+            deftree!(pow 'x 2.4556634543).unwrap(),
+            &[('x', 2.212, 8.199)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(pow 'x 45.23).unwrap(),
+            &[('x', 2.222222, 11.112342)],
+            20,
+            5,
+        );
     }
 
     #[test]
@@ -774,16 +793,6 @@ mod test {
         check_interval_eval(
             deftree!(sqrt (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.))).unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.)],
-            20,
-            5,
-        );
-    }
-
-    #[test]
-    fn t_interval_repro() {
-        check_interval_eval(
-            deftree!(pow (- 'x 1.) 2.).unwrap(),
-            &[('x', -10., 10.)],
             20,
             5,
         );
@@ -869,5 +878,168 @@ mod test {
             100,
             10,
         );
+    }
+
+    #[test]
+    fn t_integer_exponents_negative() {
+        // Negative even exponent
+        check_interval_eval(deftree!(pow 'x (- 2.)).unwrap(), &[('x', 2., 5.)], 20, 5);
+        // Negative odd exponent
+        check_interval_eval(deftree!(pow 'x (- 3.)).unwrap(), &[('x', 1., 3.)], 20, 5);
+        // Negative exponent with interval entirely below 1
+        check_interval_eval(deftree!(pow 'x (- 2.)).unwrap(), &[('x', 0.2, 0.8)], 20, 5);
+    }
+
+    #[test]
+    fn t_pow_crossing_zero_negative_exp() {
+        // Odd negative exponent crossing 0 should give ENTIRE
+        let tree = deftree!(pow 'x (- 3.)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result));
+        // Even negative exponent crossing 0
+        let tree = deftree!(pow 'x (- 2.)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(-2., 3.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        // Should get valid result, lower bound from max(abs), upper from min(abs) near 0
+        assert!(!is_empty(&result));
+    }
+
+    #[test]
+    fn t_pow_around_one() {
+        // Intervals straddling 1.0 with various exponents
+        check_interval_eval(deftree!(pow 'x 2.5).unwrap(), &[('x', 0.5, 1.5)], 20, 5);
+        check_interval_eval(deftree!(pow 'x (- 2.5)).unwrap(), &[('x', 0.5, 1.5)], 20, 5);
+    }
+
+    #[test]
+    fn t_pow_exponent_crossing_zero() {
+        // Exponent interval straddling 0
+        check_interval_eval(
+            deftree!(pow 'x 'y).unwrap(),
+            &[('x', 2., 3.), ('y', -1., 1.)],
+            15,
+            4,
+        );
+    }
+
+    #[test]
+    fn t_tan() {
+        check_interval_eval(deftree!(tan 'x).unwrap(), &[('x', -1., 1.)], 50, 10);
+        check_interval_eval(deftree!(tan 'x).unwrap(), &[('x', 0., 1.)], 50, 10);
+    }
+
+    #[test]
+    fn t_exp() {
+        check_interval_eval(deftree!(exp 'x).unwrap(), &[('x', -2., 2.)], 50, 10);
+    }
+
+    #[test]
+    fn t_negate() {
+        check_interval_eval(deftree!(- 'x).unwrap(), &[('x', -5., 5.)], 20, 5);
+    }
+
+    #[test]
+    fn t_interval_abs() {
+        check_interval_eval(deftree!(abs 'x).unwrap(), &[('x', -5., 5.)], 20, 5);
+        check_interval_eval(deftree!(abs 'x).unwrap(), &[('x', -3., -1.)], 20, 5);
+    }
+
+    #[test]
+    fn t_min_max_direct() {
+        check_interval_eval(
+            deftree!(min 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -3., 7.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(max 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -3., 7.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_comparisons() {
+        check_interval_eval(
+            deftree!(== 'x 'y).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(!= 'x 'y).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(< 'x 'y).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(<= 'x 'y).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_boolean_ops() {
+        check_interval_eval(
+            deftree!(and (> 'x 0) (< 'y 5)).unwrap(),
+            &[('x', -2., 3.), ('y', 2., 7.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(or (> 'x 5) (< 'y 0)).unwrap(),
+            &[('x', -2., 3.), ('y', 2., 7.)],
+            20,
+            5,
+        );
+        check_interval_eval(deftree!(not (> 'x 0)).unwrap(), &[('x', -5., 5.)], 20, 5);
+    }
+
+    #[test]
+    fn t_error_conditions() {
+        // Sqrt of negative interval
+        let tree = deftree!(sqrt 'x).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(-5., -1.).unwrap());
+        assert!(eval.run().is_err());
+        // Log of negative interval
+        let tree = deftree!(log 'x).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(-5., -1.).unwrap());
+        assert!(eval.run().is_err());
+        // Division by zero interval
+        let tree = deftree!(/ 'x 0.).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        assert!(eval.run().is_err());
+        // 0^(-n) should error
+        let tree = deftree!(pow 0. (- 2.)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        assert!(eval.run().is_err());
+    }
+
+    #[test]
+    fn t_single_point_intervals() {
+        // Single point intervals
+        let tree = deftree!(+ 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(2., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 3.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 5., 1e-12);
+        assert_float_eq!(result.1, 5., 1e-12);
     }
 }
