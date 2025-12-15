@@ -300,6 +300,7 @@ impl ValueType for Interval {
 
     fn binary_op(op: BinaryOp, lhs: Self, rhs: Self) -> Result<Self, Error> {
         use Interval::*;
+        use std::cmp::Ordering;
         match (lhs, rhs) {
             (Scalar(llo, lhi), Scalar(rlo, rhi)) => match op {
                 Add => Interval::from_scalar(llo + rlo, lhi + rhi),
@@ -310,9 +311,22 @@ impl ValueType for Interval {
                 Divide => div((llo, lhi), (rlo, rhi))
                     .map(|(lo, hi)| Interval::from_scalar(lo, hi))
                     .flatten(),
-                Pow if rlo == 2.0 && rhi == 2.0 => {
-                    Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up())
-                }
+                Pow if rlo == 2.0 && rhi == 2.0 => match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0))
+                {
+                    (Ordering::Less, Ordering::Equal)
+                    | (Ordering::Less, Ordering::Less)
+                    | (Ordering::Equal, Ordering::Less)
+                    | (Ordering::Equal, Ordering::Equal)
+                    | (Ordering::Equal, Ordering::Greater)
+                    | (Ordering::Greater, Ordering::Less)
+                    | (Ordering::Greater, Ordering::Equal)
+                    | (Ordering::Greater, Ordering::Greater) => {
+                        Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up())
+                    }
+                    (Ordering::Less, Ordering::Greater) => {
+                        Ok(Interval::Scalar(0.0, (lhi * lhi).next_up()))
+                    }
+                },
                 Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rhi.floor() == rhi => {
                     let rhs = rhi.floor() as i32;
