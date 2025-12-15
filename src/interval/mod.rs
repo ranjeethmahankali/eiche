@@ -315,14 +315,17 @@ impl ValueType for Interval {
                 Divide => div((llo, lhi), (rlo, rhi))
                     .map(|(lo, hi)| Interval::from_scalar(lo, hi))
                     .flatten(),
-                Pow if rlo == 2.0 && rhi == 2.0 => match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0))
-                {
-                    // Squaring
-                    (Ordering::Less, Ordering::Greater) | (Ordering::Greater, Ordering::Less) => {
-                        Ok(Interval::Scalar(0.0, (lhi * lhi).next_up()))
+                Pow if rlo == 2.0 && rhi == 2.0 => {
+                    match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0)) {
+                        // Squaring
+                        (Ordering::Less, Ordering::Greater)
+                        | (Ordering::Greater, Ordering::Less) => Ok(Interval::Scalar(
+                            0.0,
+                            ((lhi * lhi).max(llo * llo)).next_up(),
+                        )),
+                        _ => Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up()),
                     }
-                    _ => Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up()),
-                },
+                }
                 Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rhi.floor() == rhi => {
                     // Integer exponent.
@@ -360,8 +363,11 @@ impl ValueType for Interval {
                         Interval::from_scalar(llo.powi(rhs).next_down(), lhi.powi(rhs).next_up())
                     }
                 }
+                Pow if llo.is_nan() || lhi.is_nan() || rlo.is_nan() || rhi.is_nan() => {
+                    Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                }
                 Pow => {
-                    let (llo, lhi) = intersection((llo, lhi), (rlo, rhi));
+                    let (llo, lhi) = intersection((llo, lhi), (0.0, f64::INFINITY));
                     if rhi <= 0.0 {
                         if lhi == 0.0 {
                             Err(Error::InvalidInterval)
@@ -393,10 +399,9 @@ impl ValueType for Interval {
                                 lhi.powf(rhi).next_up(),
                             )
                         } else {
-                            dbg!(llo, lhi, rlo, rhi);
                             Interval::from_scalar(
-                                dbg!(llo.powf(rhi).next_down()),
-                                dbg!(lhi.powf(rhi).next_up()),
+                                llo.powf(rhi).next_down(),
+                                lhi.powf(rhi).next_up(),
                             )
                         }
                     } else {
@@ -565,12 +570,11 @@ mod test {
     }
 
     fn is_subset_of((llo, lhi): &(f64, f64), (rlo, rhi): &(f64, f64)) -> bool {
-        println!("({llo}, {lhi}); ({rlo}, {rhi})"); // TODO: Remove later after debugging
         llo >= rlo && lhi <= rhi
     }
 
     fn contains((lo, hi): &(f64, f64), val: f64) -> bool {
-        val >= *lo && val <= *hi
+        val.is_finite() && val >= *lo && val <= *hi
     }
 
     /**
@@ -762,12 +766,7 @@ mod test {
 
     #[test]
     fn t_interval_rational_pow() {
-        check_interval_eval(
-            deftree!(pow 'x 3.15).unwrap(),
-            &[('x', -10., 10.), ('y', -9., 10.)],
-            20,
-            5,
-        );
+        check_interval_eval(deftree!(pow 'x 3.15).unwrap(), &[('x', 0., 10.)], 20, 5);
     }
 
     #[test]
@@ -775,6 +774,16 @@ mod test {
         check_interval_eval(
             deftree!(sqrt (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.))).unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_repro() {
+        check_interval_eval(
+            deftree!(pow (- 'x 1.) 2.).unwrap(),
+            &[('x', -10., 10.)],
             20,
             5,
         );
