@@ -329,6 +329,7 @@ impl ValueType for Interval {
                 },
                 Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rhi.floor() == rhi => {
+                    // Integer exponent.
                     let rhs = rhi.floor() as i32;
                     if rhs < 0 {
                         if llo == 0.0 && lhi == 0.0 {
@@ -380,7 +381,11 @@ impl ValueType for Interval {
                     } else if llo > 1.0 {
                         Interval::from_scalar(llo.powf(rlo).next_down(), lhi.powf(rhi).next_up())
                     } else {
-                        Interval::from_scalar(llo.powf(rhi).next_down(), lhi.powf(rhi).next_up())
+                        dbg!(llo, lhi, rlo, rhi);
+                        Interval::from_scalar(
+                            dbg!(llo.powf(rhi).next_down()),
+                            dbg!(lhi.powf(rhi).next_up()),
+                        )
                     }
                 }
                 Pow => Interval::from_scalar(
@@ -732,19 +737,23 @@ mod test {
     }
 
     #[test]
-    fn t_interval_pow_2() {
+    fn t_interval_cube() {
         check_interval_eval(
             deftree!(pow 'x 3.).unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.)],
             20,
             5,
         );
+    }
+
+    #[test]
+    fn t_interval_rational_pow() {
         check_interval_eval(
             deftree!(pow 'x 3.15).unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.)],
             20,
             5,
-        )
+        );
     }
 
     #[test]
