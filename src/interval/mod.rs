@@ -62,12 +62,12 @@ impl Interval {
     }
 
     pub fn from_scalar(lower: f64, upper: f64) -> Result<Interval, Error> {
-        if lower.is_nan() || upper.is_nan() {
-            Err(Error::InvalidInterval)
-        } else if upper < lower {
+        if upper < lower && lower != f64::INFINITY && upper != f64::NEG_INFINITY {
             Ok(Interval::Scalar(upper, lower))
-        } else {
+        } else if upper != f64::INFINITY && lower != f64::NEG_INFINITY {
             Ok(Interval::Scalar(lower, upper))
+        } else {
+            Err(Error::InvalidInterval)
         }
     }
 }
@@ -120,13 +120,12 @@ pub fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
     }
 }
 
-fn mul((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<(f64, f64), Error> {
-    let (lo, hi) = [llo * rlo, llo * rhi, lhi * rlo, lhi * rhi]
+fn mul((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> (f64, f64) {
+    [llo * rlo, llo * rhi, lhi * rlo, lhi * rhi]
         .iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
             (lo.min(*current), hi.max(*current))
-        });
-    Ok((lo, hi))
+        })
 }
 
 fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<(f64, f64), Error> {
@@ -152,6 +151,10 @@ fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<(f64, f64), Err
         (Equal, Equal, _, _) => Err(Error::InvalidInterval),
         _ => Ok((f64::NEG_INFINITY, f64::INFINITY)), // everything.
     }
+}
+
+fn intersection((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> (f64, f64) {
+    (llo.max(rlo), lhi.min(rhi))
 }
 
 fn precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
@@ -305,27 +308,20 @@ impl ValueType for Interval {
             (Scalar(llo, lhi), Scalar(rlo, rhi)) => match op {
                 Add => Interval::from_scalar(llo + rlo, lhi + rhi),
                 Subtract => Interval::from_scalar(llo - rhi, lhi - rlo),
-                Multiply => mul((llo, lhi), (rlo, rhi))
-                    .map(|(lo, hi)| Interval::from_scalar(lo, hi))
-                    .flatten(),
+                Multiply => {
+                    let (lo, hi) = mul((llo, lhi), (rlo, rhi));
+                    Interval::from_scalar(lo, hi)
+                }
                 Divide => div((llo, lhi), (rlo, rhi))
                     .map(|(lo, hi)| Interval::from_scalar(lo, hi))
                     .flatten(),
                 Pow if rlo == 2.0 && rhi == 2.0 => match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0))
                 {
-                    (Ordering::Less, Ordering::Equal)
-                    | (Ordering::Less, Ordering::Less)
-                    | (Ordering::Equal, Ordering::Less)
-                    | (Ordering::Equal, Ordering::Equal)
-                    | (Ordering::Equal, Ordering::Greater)
-                    | (Ordering::Greater, Ordering::Less)
-                    | (Ordering::Greater, Ordering::Equal)
-                    | (Ordering::Greater, Ordering::Greater) => {
-                        Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up())
-                    }
-                    (Ordering::Less, Ordering::Greater) => {
+                    // Squaring
+                    (Ordering::Less, Ordering::Greater) | (Ordering::Greater, Ordering::Less) => {
                         Ok(Interval::Scalar(0.0, (lhi * lhi).next_up()))
                     }
+                    _ => Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up()),
                 },
                 Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rhi.floor() == rhi => {
@@ -364,34 +360,52 @@ impl ValueType for Interval {
                         Interval::from_scalar(llo.powi(rhs).next_down(), lhi.powi(rhs).next_up())
                     }
                 }
-                Pow if rhi <= 0.0 => {
-                    if lhi == 0.0 {
-                        Err(Error::InvalidInterval)
-                    } else if lhi < 1.0 {
-                        Interval::from_scalar(lhi.powf(rhi).next_down(), llo.powf(rlo).next_up())
-                    } else if llo > 1.0 {
-                        Interval::from_scalar(lhi.powf(rlo).next_down(), llo.powf(rhi).next_up())
+                Pow => {
+                    let (llo, lhi) = intersection((llo, lhi), (rlo, rhi));
+                    if rhi <= 0.0 {
+                        if lhi == 0.0 {
+                            Err(Error::InvalidInterval)
+                        } else if lhi < 1.0 {
+                            Interval::from_scalar(
+                                lhi.powf(rhi).next_down(),
+                                llo.powf(rlo).next_up(),
+                            )
+                        } else if llo > 1.0 {
+                            Interval::from_scalar(
+                                lhi.powf(rlo).next_down(),
+                                llo.powf(rhi).next_up(),
+                            )
+                        } else {
+                            Interval::from_scalar(
+                                lhi.powf(rlo).next_down(),
+                                llo.powf(rlo).next_up(),
+                            )
+                        }
+                    } else if rlo > 0.0 {
+                        if lhi < 1.0 {
+                            Interval::from_scalar(
+                                llo.powf(rhi).next_down(),
+                                lhi.powf(rlo).next_up(),
+                            )
+                        } else if llo > 1.0 {
+                            Interval::from_scalar(
+                                llo.powf(rlo).next_down(),
+                                lhi.powf(rhi).next_up(),
+                            )
+                        } else {
+                            dbg!(llo, lhi, rlo, rhi);
+                            Interval::from_scalar(
+                                dbg!(llo.powf(rhi).next_down()),
+                                dbg!(lhi.powf(rhi).next_up()),
+                            )
+                        }
                     } else {
-                        Interval::from_scalar(lhi.powf(rlo).next_down(), llo.powf(rlo).next_up())
-                    }
-                }
-                Pow if rlo > 0.0 => {
-                    if lhi < 1.0 {
-                        Interval::from_scalar(llo.powf(rhi).next_down(), lhi.powf(rlo).next_up())
-                    } else if llo > 1.0 {
-                        Interval::from_scalar(llo.powf(rlo).next_down(), lhi.powf(rhi).next_up())
-                    } else {
-                        dbg!(llo, lhi, rlo, rhi);
                         Interval::from_scalar(
-                            dbg!(llo.powf(rhi).next_down()),
-                            dbg!(lhi.powf(rhi).next_up()),
+                            llo.powf(rhi).min(lhi.powf(rlo)).next_down(),
+                            llo.powf(rlo).max(lhi.powf(rhi)).next_up(),
                         )
                     }
                 }
-                Pow => Interval::from_scalar(
-                    llo.powf(rhi).min(lhi.powf(rlo)).next_down(),
-                    llo.powf(rlo).max(lhi.powf(rhi)).next_up(),
-                ),
                 Min => Interval::from_scalar(rlo.min(llo), rhi.min(lhi)),
                 Max => Interval::from_scalar(rlo.max(llo), rhi.max(lhi)),
                 Remainder => {
@@ -399,7 +413,7 @@ impl ValueType for Interval {
                     if lo > hi {
                         std::mem::swap(&mut lo, &mut hi);
                     }
-                    let (lo, hi) = mul((lo.floor(), hi.floor()), (rlo, rhi))?;
+                    let (lo, hi) = mul((lo.floor(), hi.floor()), (rlo, rhi));
                     Interval::from_scalar(llo - hi, lhi - lo)
                 }
                 Less => {
