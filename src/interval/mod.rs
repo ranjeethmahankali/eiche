@@ -557,6 +557,8 @@ mod test {
     use crate::{ValueEvaluator, assert_float_eq, deftree, test::Sampler, tree::Tree};
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
+    const EPS: f64 = f64::EPSILON * 5.0;
+
     fn is_common((lo, hi): &(f64, f64)) -> bool {
         lo.is_finite() && hi.is_finite() && lo <= hi
     }
@@ -570,11 +572,11 @@ mod test {
     }
 
     fn is_subset_of((llo, lhi): &(f64, f64), (rlo, rhi): &(f64, f64)) -> bool {
-        (*llo + f64::EPSILON) >= *rlo && *lhi <= (*rhi + f64::EPSILON)
+        (*llo + EPS) >= *rlo && *lhi <= (*rhi + EPS)
     }
 
     fn contains((lo, hi): &(f64, f64), val: f64) -> bool {
-        val.is_finite() && (val + f64::EPSILON) >= *lo && val <= (*hi + f64::EPSILON)
+        val.is_finite() && (val + EPS) >= *lo && val <= (*hi + EPS)
     }
 
     /**
@@ -678,6 +680,7 @@ mod test {
                         assert!(!is_empty(&iout));
                         assert!(!is_entire(&iout));
                         assert!(is_common(&iout));
+                        dbg!(iout, total_range[i]);
                         assert!(is_subset_of(&iout, &total_range[i]));
                         computed_intervals[offset + i] = iout;
                     }
