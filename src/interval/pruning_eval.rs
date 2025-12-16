@@ -168,20 +168,12 @@ pub enum PruningError {
     /// This is returned when the trees (with instructions), or the stack of
     /// intervals is empty when they're expected to not be.
     UnexpectedEmptyState,
-    /// Construction of an inari::Interval failed during pruning.
-    CannotConstructInterval(inari::IntervalError),
     Core(Error),
 }
 
 impl From<Error> for PruningError {
     fn from(value: Error) -> Self {
         Self::Core(value)
-    }
-}
-
-impl From<inari::IntervalError> for PruningError {
-    fn from(value: inari::IntervalError) -> Self {
-        PruningError::CannotConstructInterval(value)
     }
 }
 
@@ -287,16 +279,11 @@ where
                         self.temp_bounds.push((
                             *label,
                             match val {
-                                Interval::Scalar(ii) => {
-                                    let span = ii.wid() / (*div as f64);
-                                    let lo = ii.inf() + (span * icurr as f64);
+                                Interval::Scalar(lo, hi) => {
+                                    let span = (hi - lo).max(0.0) / (*div as f64);
+                                    let lo = lo + (span * icurr as f64);
                                     let hi = lo + span;
-                                    match inari::Interval::try_from((lo, hi)) {
-                                        Ok(iout) => Interval::Scalar(iout),
-                                        Err(e) => {
-                                            return Err(PruningError::CannotConstructInterval(e));
-                                        }
-                                    }
+                                    Interval::from_scalar(lo, hi)?
                                 }
                                 Interval::Bool(true, true) => Interval::Bool(true, true),
                                 Interval::Bool(false, false) => Interval::Bool(false, false),
@@ -476,7 +463,7 @@ where
             bounds.iter().zip(norm_val.iter()).zip(abs_val.iter_mut())
         {
             match interval {
-                Interval::Scalar(ii) => *out = ii.inf() + norm * ii.wid(),
+                Interval::Scalar(lo, hi) => *out = lo + norm * (hi - lo).max(0.0),
                 Interval::Bool(_, _) => return Err(Error::TypeMismatch.into()),
             }
         }

@@ -1,10 +1,8 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use eiche::{Deduplicater, Error, Pruner, Tree, Value, ValueEvaluator, deftree, min};
+use eiche::{Interval, PruningState, ValuePruningEvaluator};
 use rand::{SeedableRng, rngs::StdRng};
 use std::hint::black_box;
-
-#[cfg(feature = "intervals")]
-use eiche::{Interval, PruningState, ValuePruningEvaluator};
 
 fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
     use rand::Rng;
@@ -369,7 +367,6 @@ mod circles {
         }
     }
 
-    #[cfg(feature = "intervals")]
     /// Uses the pruning evaluator.
     fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
         let mut eval = ValuePruningEvaluator::new(
@@ -507,7 +504,6 @@ mod circles {
         });
     }
 
-    #[cfg(feature = "intervals")]
     fn b_pruned_eval(c: &mut Criterion) {
         let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
@@ -516,18 +512,10 @@ mod circles {
         });
     }
 
-    #[cfg(feature = "intervals")]
     criterion_group! {
         name = bench;
         config = Criterion::default().sample_size(10);
         targets = b_with_compile, b_no_compile, b_pruned_eval
-    }
-
-    #[cfg(not(feature = "intervals"))]
-    criterion_group! {
-        name = bench;
-        config = Criterion::default().sample_size(10);
-        targets = b_with_compile, b_no_compile
     }
 }
 
