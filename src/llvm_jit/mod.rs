@@ -4,10 +4,12 @@ use inkwell::{
     builder::{Builder, BuilderError},
     context::Context,
     execution_engine::FunctionLookupError,
+    intrinsics::Intrinsic,
     module::Module,
     passes::PassManager,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
-    types::FloatType,
+    types::{BasicTypeEnum, FloatType},
+    values::{BasicMetadataValueEnum, BasicValueEnum, VectorValue},
 };
 use std::{
     cell::RefCell,
@@ -184,6 +186,29 @@ impl NumberType for f64 {
     fn type_str() -> &'static str {
         "f64"
     }
+}
+
+fn build_vec_unary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &str,
+    input: VectorValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(module, &[BasicTypeEnum::VectorType(input.get_type())])
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[BasicMetadataValueEnum::VectorValue(input)],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
 pub mod single;

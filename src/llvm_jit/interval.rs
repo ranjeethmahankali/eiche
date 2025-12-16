@@ -1,15 +1,10 @@
-use super::{JitContext, NumberType};
+use super::{JitContext, NumberType, build_vec_unary_intrinsic};
 use crate::{
     BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, llvm_jit::JitCompiler,
 };
 use inkwell::{
-    AddressSpace, FloatPredicate, OptimizationLevel,
-    builder::Builder,
-    execution_engine::JitFunction,
-    intrinsics::Intrinsic,
-    module::Module,
-    types::{BasicTypeEnum, VectorType},
-    values::{BasicMetadataValueEnum, BasicValueEnum, VectorValue},
+    AddressSpace, FloatPredicate, OptimizationLevel, execution_engine::JitFunction,
+    types::VectorType, values::BasicValueEnum,
 };
 use std::{ffi::c_void, marker::PhantomData};
 
@@ -138,7 +133,7 @@ impl Tree {
                         let ireg = regs[*input].into_vector_value();
                         builder.build_select(
                             // Check each lane for NaN, then reduce to check if this interval is empty.
-                            build_unary_intrinsic(
+                            build_vec_unary_intrinsic(
                                 builder,
                                 &compiler.module,
                                 "llvm.vector.reduce.mul.*",
@@ -166,7 +161,7 @@ impl Tree {
                                     ]),
                                     &format!("lt_zero_{ni}"),
                                 )?;
-                                let sqrt = build_unary_intrinsic(
+                                let sqrt = build_vec_unary_intrinsic(
                                     builder,
                                     &compiler.module,
                                     "llvm.sqrt.*",
@@ -385,5 +380,19 @@ mod test {
             eval.run(&[[-5.245, -3.123]], &mut outputs),
             Err(Error::OutputSizeMismatch(2, 1))
         );
+    }
+
+    #[test]
+    fn t_jit_interval_sqrt() {
+        let tree = deftree!(sqrt 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        eval.run(&[[f64::NAN, f64::NAN]], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert!(outputs[0].iter().all(|v| v.is_nan()));
+        eval.run(&[[2.0, 3.0]], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert_eq!(outputs[0], [-7.19, 7.19]);
     }
 }

@@ -1,4 +1,4 @@
-use super::{JitCompiler, JitContext, NumberType};
+use super::{JitCompiler, JitContext, NumberType, build_vec_unary_intrinsic};
 use crate::{
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
@@ -1223,54 +1223,48 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?)
                     }
-                    Sqrt => build_unary_intrinsic(
+                    Sqrt => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.sqrt.*",
                         "sqrt_call",
-                        regs[*input],
-                        fvec_type,
+                        regs[*input].into_vector_value(),
                     )?,
-                    Abs => build_unary_intrinsic(
+                    Abs => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.fabs.*",
                         "abs_call",
-                        regs[*input],
-                        fvec_type,
+                        regs[*input].into_vector_value(),
                     )?,
-                    Sin => build_unary_intrinsic(
+                    Sin => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.sin.*",
                         "sin_call",
-                        regs[*input],
-                        fvec_type,
+                        regs[*input].into_vector_value(),
                     )?,
-                    Cos => build_unary_intrinsic(
+                    Cos => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.cos.*",
                         "cos_call",
-                        regs[*input],
-                        fvec_type,
+                        regs[*input].into_vector_value(),
                     )?,
                     Tan => {
-                        let sin = build_unary_intrinsic(
+                        let sin = build_vec_unary_intrinsic(
                             builder,
                             &compiler.module,
                             "llvm.sin.*",
                             "sin_call",
-                            regs[*input],
-                            fvec_type,
+                            regs[*input].into_vector_value(),
                         )?;
-                        let cos = build_unary_intrinsic(
+                        let cos = build_vec_unary_intrinsic(
                             builder,
                             &compiler.module,
                             "llvm.cos.*",
                             "cos_call",
-                            regs[*input],
-                            fvec_type,
+                            regs[*input].into_vector_value(),
                         )?;
                         BasicValueEnum::VectorValue(builder.build_float_div(
                             sin.into_vector_value(),
@@ -1278,29 +1272,26 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?)
                     }
-                    Log => build_unary_intrinsic(
+                    Log => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.log.*",
                         "log_call",
-                        regs[*input],
-                        fvec_type,
+                        regs[*input].into_vector_value(),
                     )?,
-                    Exp => build_unary_intrinsic(
+                    Exp => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.exp.*",
                         "exp_call",
-                        regs[*input],
-                        fvec_type,
+                        regs[*input].into_vector_value(),
                     )?,
-                    Floor => build_unary_intrinsic(
+                    Floor => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.floor.*",
                         "floor_call",
-                        regs[*input],
-                        fvec_type,
+                        regs[*input].into_vector_value(),
                     )?,
                     Not => BasicValueEnum::VectorValue(
                         builder
@@ -1328,7 +1319,7 @@ impl Tree {
                         regs[*rhs].into_vector_value(),
                         &format!("reg_{ni}"),
                     )?),
-                    Pow => build_binary_intrinsic(
+                    Pow => build_vec_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.pow.*",
@@ -1337,7 +1328,7 @@ impl Tree {
                         regs[*rhs],
                         fvec_type,
                     )?,
-                    Min => build_binary_intrinsic(
+                    Min => build_vec_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.minnum.*",
@@ -1346,7 +1337,7 @@ impl Tree {
                         regs[*rhs],
                         fvec_type,
                     )?,
-                    Max => build_binary_intrinsic(
+                    Max => build_vec_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.maxnum.*",
@@ -1467,33 +1458,7 @@ impl Tree {
     }
 }
 
-fn build_unary_intrinsic<'ctx>(
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    name: &'static str,
-    call_name: &'static str,
-    input: BasicValueEnum<'ctx>,
-    vec_type: VectorType<'ctx>,
-) -> Result<BasicValueEnum<'ctx>, Error> {
-    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
-    let intrinsic_fn = intrinsic
-        .get_declaration(module, &[BasicTypeEnum::VectorType(vec_type)])
-        .ok_or(Error::CannotCompileIntrinsic(name))?;
-    builder
-        .build_call(
-            intrinsic_fn,
-            &[BasicMetadataValueEnum::VectorValue(
-                input.into_vector_value(),
-            )],
-            call_name,
-        )
-        .map_err(|_| Error::CannotCompileIntrinsic(name))?
-        .try_as_basic_value()
-        .left()
-        .ok_or(Error::CannotCompileIntrinsic(name))
-}
-
-fn build_binary_intrinsic<'ctx>(
+fn build_vec_binary_intrinsic<'ctx>(
     builder: &'ctx Builder,
     module: &'ctx Module,
     name: &'static str,
