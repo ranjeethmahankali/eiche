@@ -22,28 +22,40 @@ type IntervalType32 = float32x2_t;
 
 pub type NativeIntervalFunc = unsafe extern "C" fn(*const c_void, *mut c_void);
 
+trait IntervalNumType: NumberType {
+    type IntervalT;
+}
+
+impl IntervalNumType for f32 {
+    type IntervalT = IntervalType32;
+}
+
+impl IntervalNumType for f64 {
+    type IntervalT = IntervalType64;
+}
+
 #[derive(Clone)]
 pub struct JitIntervalFn<'ctx, T>
 where
-    T: NumberType,
+    T: IntervalNumType,
 {
     func: JitFunction<'ctx, NativeIntervalFunc>,
-    num_inputs: usize,
-    num_outputs: usize,
+    inputs: Box<[T::IntervalT]>,
+    outputs: Box<[T::IntervalT]>,
     _phantom: PhantomData<T>,
 }
 
 pub struct JitIntervalFnSync<'ctx, T>
 where
-    T: NumberType,
+    T: IntervalNumType,
 {
     func: NativeIntervalFunc,
-    num_inputs: usize,
-    num_outputs: usize,
+    inputs: Box<[T::IntervalT]>,
+    outputs: Box<[T::IntervalT]>,
     _phantom: PhantomData<&'ctx JitIntervalFn<'ctx, T>>,
 }
 
-unsafe impl<'ctx, T> Sync for JitIntervalFnSync<'ctx, T> where T: NumberType {}
+unsafe impl<'ctx, T> Sync for JitIntervalFnSync<'ctx, T> where T: IntervalNumType {}
 
 impl Tree {
     /// JIT compile the tree for interval evaluations.
@@ -51,9 +63,9 @@ impl Tree {
         &'ctx self,
         context: &'ctx JitContext,
         params: &str,
-    ) -> Result<JitIntervalFnSync<'ctx, T>, Error>
+    ) -> Result<JitIntervalFn<'ctx, T>, Error>
     where
-        T: NumberType,
+        T: IntervalNumType,
     {
         if !self.is_scalar() {
             // Only support scalar output trees.
