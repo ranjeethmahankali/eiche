@@ -329,10 +329,33 @@ impl ValueType for Interval {
                 Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rlo == rhi => {
                     // Singleton integer exponent.
-                    let rhs = rhi.floor() as i32;
-                    if rhs < 0 {
-                        if llo == 0.0 && lhi == 0.0 {
-                            Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                    if llo.is_nan() && lhi.is_nan() {
+                        Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                    } else {
+                        let rhs = rhi.floor() as i32;
+                        if rhs < 0 {
+                            if llo == 0.0 && lhi == 0.0 {
+                                Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                            } else if rhs % 2 == 0 {
+                                let (lo, hi) = if lhi <= 0. {
+                                    (-lhi, -llo)
+                                } else if llo >= 0. {
+                                    (llo, lhi)
+                                } else {
+                                    (0., llo.abs().max(lhi.abs()).next_up())
+                                };
+                                Interval::from_scalar(
+                                    hi.powi(rhs).next_down(),
+                                    lo.powi(rhs).next_up(),
+                                )
+                            } else if llo < 0.0 && lhi > 0.0 {
+                                Ok(Interval::default())
+                            } else {
+                                Interval::from_scalar(
+                                    lhi.powi(rhs).next_down(),
+                                    llo.powi(rhs).next_up(),
+                                )
+                            }
                         } else if rhs % 2 == 0 {
                             let (lo, hi) = if lhi <= 0. {
                                 (-lhi, -llo)
@@ -341,26 +364,13 @@ impl ValueType for Interval {
                             } else {
                                 (0., llo.abs().max(lhi.abs()))
                             };
-                            Interval::from_scalar(hi.powi(rhs).next_down(), lo.powi(rhs).next_up())
-                        } else if llo < 0.0 && lhi > 0.0 {
-                            Ok(Interval::default())
+                            Interval::from_scalar(lo.powi(rhs).next_down(), hi.powi(rhs).next_up())
                         } else {
                             Interval::from_scalar(
-                                lhi.powi(rhs).next_down(),
-                                llo.powi(rhs).next_up(),
+                                llo.powi(rhs).next_down(),
+                                lhi.powi(rhs).next_up(),
                             )
                         }
-                    } else if rhs % 2 == 0 {
-                        let (lo, hi) = if lhi <= 0. {
-                            (-lhi, -llo)
-                        } else if llo >= 0. {
-                            (llo, lhi)
-                        } else {
-                            (0., llo.abs().max(lhi.abs()))
-                        };
-                        Interval::from_scalar(lo.powi(rhs).next_down(), hi.powi(rhs).next_up())
-                    } else {
-                        Interval::from_scalar(llo.powi(rhs).next_down(), lhi.powi(rhs).next_up())
                     }
                 }
                 Pow if llo.is_nan() || lhi.is_nan() || rlo.is_nan() || rhi.is_nan() => {
@@ -557,7 +567,7 @@ mod test {
     use crate::{ValueEvaluator, assert_float_eq, deftree, test::Sampler, tree::Tree};
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
-    const EPS: f64 = f64::EPSILON * 5.0;
+    const EPS: f64 = f64::EPSILON * 2.0;
 
     fn is_common((lo, hi): &(f64, f64)) -> bool {
         lo.is_finite() && hi.is_finite() && lo <= hi
@@ -680,7 +690,6 @@ mod test {
                         assert!(!is_empty(&iout));
                         assert!(!is_entire(&iout));
                         assert!(is_common(&iout));
-                        dbg!(iout, total_range[i]);
                         assert!(is_subset_of(&iout, &total_range[i]));
                         computed_intervals[offset + i] = iout;
                     }
