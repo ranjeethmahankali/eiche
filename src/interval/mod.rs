@@ -153,6 +153,16 @@ fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<(f64, f64), Err
     }
 }
 
+fn abs((llo, lhi): (f64, f64)) -> (f64, f64) {
+    if lhi <= 0. {
+        (-lhi, -llo)
+    } else if llo >= 0. {
+        (llo, lhi)
+    } else {
+        (0., llo.abs().max(lhi.abs()).next_up())
+    }
+}
+
 fn intersection((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> (f64, f64) {
     (llo.max(rlo), lhi.min(rhi))
 }
@@ -337,13 +347,7 @@ impl ValueType for Interval {
                             if llo == 0.0 && lhi == 0.0 {
                                 Ok(Interval::Scalar(f64::NAN, f64::NAN))
                             } else if rhs % 2 == 0 {
-                                let (lo, hi) = if lhi <= 0. {
-                                    (-lhi, -llo)
-                                } else if llo >= 0. {
-                                    (llo, lhi)
-                                } else {
-                                    (0., llo.abs().max(lhi.abs()).next_up())
-                                };
+                                let (lo, hi) = abs((llo, lhi));
                                 Interval::from_scalar(
                                     hi.powi(rhs).next_down(),
                                     lo.powi(rhs).next_up(),
@@ -357,13 +361,7 @@ impl ValueType for Interval {
                                 )
                             }
                         } else if rhs % 2 == 0 {
-                            let (lo, hi) = if lhi <= 0. {
-                                (-lhi, -llo)
-                            } else if llo >= 0. {
-                                (llo, lhi)
-                            } else {
-                                (0., llo.abs().max(lhi.abs()))
-                            };
+                            let (lo, hi) = abs((llo, lhi));
                             Interval::from_scalar(lo.powi(rhs).next_down(), hi.powi(rhs).next_up())
                         } else {
                             Interval::from_scalar(
