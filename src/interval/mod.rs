@@ -283,7 +283,7 @@ impl ValueType for Interval {
                 Log => Interval::from_scalar(lo.ln(), hi.ln()),
                 Exp => Interval::from_scalar(lo.exp(), hi.exp()),
                 Floor => Interval::from_scalar(lo.floor(), hi.floor()),
-                Not => return Err(Error::TypeMismatch),
+                Not => Err(Error::TypeMismatch),
             },
             Interval::Bool(lower, upper) => match op {
                 Not => {
@@ -295,7 +295,7 @@ impl ValueType for Interval {
                     Interval::from_boolean(lower, upper)
                 }
                 Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
-                    return Err(Error::TypeMismatch);
+                    Err(Error::TypeMismatch)
                 }
             },
         }
@@ -313,8 +313,7 @@ impl ValueType for Interval {
                     Interval::from_scalar(lo, hi)
                 }
                 Divide => div((llo, lhi), (rlo, rhi))
-                    .map(|(lo, hi)| Interval::from_scalar(lo, hi))
-                    .flatten(),
+                    .and_then(|(lo, hi)| Interval::from_scalar(lo, hi)),
                 Pow if rlo == 2.0 && rhi == 2.0 => {
                     match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0)) {
                         // Squaring
@@ -681,7 +680,7 @@ mod test {
                 if !computed[index] {
                     // Evaluate the interval and cache it.
                     for (&label, &ivalue) in symbols.iter().zip(isample.iter()) {
-                        ieval.set_value(label, ivalue.into());
+                        ieval.set_value(label, ivalue);
                     }
                     let iresults = ieval.run().unwrap();
                     assert_eq!(iresults.len(), num_roots);
