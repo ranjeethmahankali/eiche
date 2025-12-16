@@ -3,8 +3,13 @@ use crate::{
     BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, llvm_jit::JitCompiler,
 };
 use inkwell::{
-    AddressSpace, OptimizationLevel, execution_engine::JitFunction, types::VectorType,
-    values::BasicValueEnum,
+    AddressSpace, FloatPredicate, OptimizationLevel,
+    builder::Builder,
+    execution_engine::JitFunction,
+    intrinsics::Intrinsic,
+    module::Module,
+    types::{BasicTypeEnum, VectorType},
+    values::{BasicMetadataValueEnum, BasicValueEnum, VectorValue},
 };
 use std::{ffi::c_void, marker::PhantomData};
 
@@ -97,9 +102,9 @@ impl Tree {
                             interval_type,
                             inputs,
                             &[context.i64_type().const_int(
-                                dbg!(params.chars().position(|c| c == *label).ok_or(
+                                params.chars().position(|c| c == *label).ok_or(
                                     Error::JitCompilationError("Cannot find symbol".to_string()),
-                                )? as u64),
+                                )? as u64,
                                 false,
                             )],
                             &format!("arg_ptr_{}", *label),
@@ -129,7 +134,88 @@ impl Tree {
                         ]),
                         &format!("reg_{ni}"),
                     )?),
-                    Sqrt => todo!(),
+                    Sqrt => {
+                        let ireg = regs[*input].into_vector_value();
+                        builder.build_select(
+                            // Check each lane for NaN, then reduce to check if this interval is empty.
+                            build_unary_intrinsic(
+                                builder,
+                                &compiler.module,
+                                "llvm.vector.reduce.mul.*",
+                                &format!("reduce_call_{ni}"),
+                                builder.build_float_compare(
+                                    FloatPredicate::UNO,
+                                    ireg,
+                                    ireg,
+                                    &format!("check_empty_{ni}"),
+                                )?,
+                            )?
+                            .into_int_value(),
+                            // The interval is empty, so return an emtpy (NaN) interval.
+                            BasicValueEnum::VectorValue(VectorType::const_vector(&[
+                                float_type.const_float(f64::NAN),
+                                float_type.const_float(f64::NAN),
+                            ])),
+                            {
+                                let lt_zero = builder.build_float_compare(
+                                    FloatPredicate::ULT,
+                                    ireg,
+                                    VectorType::const_vector(&[
+                                        float_type.const_float(0.),
+                                        float_type.const_float(0.),
+                                    ]),
+                                    &format!("lt_zero_{ni}"),
+                                )?;
+                                let sqrt = build_unary_intrinsic(
+                                    builder,
+                                    &compiler.module,
+                                    "llvm.sqrt.*",
+                                    &format!("sqrt_call_{ni}"),
+                                    ireg,
+                                )?
+                                .into_vector_value();
+                                /* This a nested if. First we check the sign of
+                                 * the lower bound, then we check the sign of
+                                 * the upper bound in the nested select
+                                 * statement. Then we return different things.
+                                 */
+                                builder.build_select(
+                                    builder
+                                        .build_extract_element(
+                                            lt_zero,
+                                            context.i32_type().const_int(0, false),
+                                            &format!("first_lt_zero_{ni}"),
+                                        )?
+                                        .into_int_value(),
+                                    builder.build_select(
+                                        builder
+                                            .build_extract_element(
+                                                lt_zero,
+                                                context.i32_type().const_int(1, false),
+                                                &format!("second_lt_zero_{ni}"),
+                                            )?
+                                            .into_int_value(),
+                                        builder.build_float_mul(
+                                            sqrt,
+                                            VectorType::const_vector(&[
+                                                float_type.const_float(0.0),
+                                                float_type.const_float(1.0),
+                                            ]),
+                                            &format!("sqrt_domain_clipping_{ni}"),
+                                        )?,
+                                        VectorType::const_vector(&[
+                                            float_type.const_float(f64::NAN),
+                                            float_type.const_float(f64::NAN),
+                                        ]),
+                                        &format!("sqrt_edge_case_{ni}"),
+                                    )?,
+                                    BasicValueEnum::VectorValue(sqrt),
+                                    &format!("sqrt_branching_{ni}"),
+                                )?
+                            },
+                            &format!("reg_{ni}"),
+                        )?
+                    }
                     Abs => todo!(),
                     Sin => todo!(),
                     Cos => todo!(),
@@ -175,7 +261,7 @@ impl Tree {
                 builder.build_gep(
                     interval_type,
                     outputs,
-                    &[context.i64_type().const_int(dbg!(i as u64), false)],
+                    &[context.i64_type().const_int(i as u64, false)],
                     &format!("output_ptr_{i}"),
                 )?
             };
