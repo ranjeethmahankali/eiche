@@ -203,8 +203,8 @@ impl ValueType for Interval {
                 Negate => Interval::from_scalar(-hi, -lo),
                 Sqrt if lo.is_nan() && hi.is_nan() => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
                 Sqrt if hi < 0. => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
-                Sqrt if lo < 0. => Interval::from_scalar(0.0, hi.sqrt()),
-                Sqrt => Interval::from_scalar(lo.sqrt(), hi.sqrt()),
+                Sqrt if lo < 0. => Interval::from_scalar(0.0, hi.sqrt().next_up()),
+                Sqrt => Interval::from_scalar(lo.sqrt().next_down(), hi.sqrt().next_up()),
                 Abs if hi <= 0. => Interval::from_scalar((-hi).next_down(), (-lo).next_up()),
                 Abs if lo >= 0. => Interval::from_scalar(lo.next_down(), hi.next_up()),
                 Abs => Interval::from_scalar(0.0f64.next_down(), lo.abs().max(hi.abs()).next_up()),
@@ -1029,7 +1029,10 @@ mod test {
         let tree = deftree!(sqrt 'x).unwrap();
         let mut eval = IntervalEvaluator::new(&tree);
         eval.set_value('x', Interval::from_scalar(-5., -1.).unwrap());
-        assert!(eval.run().is_err());
+        assert!(match eval.run().unwrap()[0] {
+            Interval::Scalar(lo, hi) => is_empty(&(lo, hi)),
+            Interval::Bool(_, _) => false,
+        });
         // Log of negative interval
         let tree = deftree!(log 'x).unwrap();
         let mut eval = IntervalEvaluator::new(&tree);
