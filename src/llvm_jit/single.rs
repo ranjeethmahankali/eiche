@@ -55,7 +55,7 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let num_roots = self.num_roots();
-        let func_name = context.new_func_name::<T, false>();
+        let func_name = context.new_func_name::<T>(None);
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;

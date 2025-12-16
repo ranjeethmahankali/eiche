@@ -38,16 +38,11 @@ impl Default for JitContext {
 }
 
 impl JitContext {
-    fn new_func_name<T: NumberType, const IS_ARRAY: bool>(&self) -> String {
+    fn new_func_name<T: NumberType>(&self, suffix: Option<&str>) -> String {
         let mut nf = self.numfuncs.borrow_mut();
         let idx = *nf;
         *nf += 1;
-        format!(
-            "func_{}_{}_{}",
-            idx,
-            T::type_str(),
-            if IS_ARRAY { "array" } else { "" }
-        )
+        format!("func_{}_{}_{}", idx, T::type_str(), suffix.unwrap_or(""))
     }
 }
 
@@ -195,3 +190,5 @@ pub mod single;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 pub mod simd_array;
+
+pub mod interval;

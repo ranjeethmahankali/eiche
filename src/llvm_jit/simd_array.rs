@@ -1,3 +1,8 @@
+use super::{JitCompiler, JitContext, NumberType};
+use crate::{
+    error::Error,
+    tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
+};
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
     builder::Builder,
@@ -8,6 +13,7 @@ use inkwell::{
     types::{BasicTypeEnum, FloatType, VectorType},
     values::{BasicMetadataValueEnum, BasicValueEnum},
 };
+use std::{ffi::c_void, marker::PhantomData, mem::size_of};
 
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
@@ -15,13 +21,6 @@ use std::arch::aarch64::*;
 use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
-
-use super::{JitCompiler, JitContext, NumberType};
-use crate::{
-    error::Error,
-    tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
-};
-use std::{ffi::c_void, marker::PhantomData, mem::size_of};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub type SimdType64 = __m256d;
@@ -1150,7 +1149,7 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let num_roots = self.num_roots();
-        let func_name = context.new_func_name::<T, true>();
+        let func_name = context.new_func_name::<T>(Some("array"));
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
