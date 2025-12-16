@@ -312,8 +312,9 @@ impl ValueType for Interval {
                     let (lo, hi) = mul((llo, lhi), (rlo, rhi));
                     Interval::from_scalar(lo, hi)
                 }
-                Divide => div((llo, lhi), (rlo, rhi))
-                    .and_then(|(lo, hi)| Interval::from_scalar(lo, hi)),
+                Divide => {
+                    div((llo, lhi), (rlo, rhi)).and_then(|(lo, hi)| Interval::from_scalar(lo, hi))
+                }
                 Pow if rlo == 2.0 && rhi == 2.0 => {
                     match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0)) {
                         // Squaring
