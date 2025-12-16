@@ -64,7 +64,7 @@ impl Interval {
     pub fn from_scalar(lower: f64, upper: f64) -> Result<Interval, Error> {
         if upper < lower && lower != f64::INFINITY && upper != f64::NEG_INFINITY {
             Ok(Interval::Scalar(upper, lower))
-        } else if upper != f64::INFINITY && lower != f64::NEG_INFINITY {
+        } else if lower != f64::INFINITY && upper != f64::NEG_INFINITY {
             Ok(Interval::Scalar(lower, upper))
         } else {
             Err(Error::InvalidInterval)
@@ -332,7 +332,7 @@ impl ValueType for Interval {
                     let rhs = rhi.floor() as i32;
                     if rhs < 0 {
                         if llo == 0.0 && lhi == 0.0 {
-                            Err(Error::InvalidInterval)
+                            Ok(Interval::Scalar(f64::NAN, f64::NAN))
                         } else if rhs % 2 == 0 {
                             let (lo, hi) = if lhi <= 0. {
                                 (-lhi, -llo)
@@ -370,7 +370,7 @@ impl ValueType for Interval {
                     let (llo, lhi) = intersection((llo, lhi), (0.0, f64::INFINITY));
                     if rhi <= 0.0 {
                         if lhi == 0.0 {
-                            Err(Error::InvalidInterval)
+                            Ok(Interval::Scalar(f64::NAN, f64::NAN))
                         } else if lhi < 1.0 {
                             Interval::from_scalar(
                                 lhi.powf(rhi).next_down(),
@@ -564,7 +564,7 @@ mod test {
     }
 
     fn is_empty((lo, hi): &(f64, f64)) -> bool {
-        hi < lo
+        lo.is_nan() && hi.is_nan()
     }
 
     fn is_entire((lo, hi): &(f64, f64)) -> bool {
@@ -1035,7 +1035,10 @@ mod test {
         // 0^(-n) should error
         let tree = deftree!(pow 0. (- 2.)).unwrap();
         let mut eval = IntervalEvaluator::new(&tree);
-        assert!(eval.run().is_err());
+        assert!(match eval.run().unwrap()[0] {
+            Interval::Scalar(lo, hi) => is_empty(&(lo, hi)),
+            Interval::Bool(_, _) => false,
+        });
     }
 
     #[test]
