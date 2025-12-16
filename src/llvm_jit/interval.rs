@@ -391,8 +391,9 @@ mod test {
         eval.run(&[[f64::NAN, f64::NAN]], &mut outputs)
             .expect("Failed to run the jit function");
         assert!(outputs[0].iter().all(|v| v.is_nan()));
-        eval.run(&[[2.0, 3.0]], &mut outputs)
+        let interval = [2.0, 3.0];
+        eval.run(&[interval], &mut outputs)
             .expect("Failed to run the jit function");
-        assert_eq!(outputs[0], [-7.19, 7.19]);
+        assert_eq!(outputs[0], interval.map(|v| v.sqrt()));
     }
 }
