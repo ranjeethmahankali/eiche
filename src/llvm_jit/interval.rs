@@ -3,7 +3,8 @@ use crate::{
     BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, llvm_jit::JitCompiler,
 };
 use inkwell::{
-    AddressSpace, execution_engine::JitFunction, types::VectorType, values::BasicValueEnum,
+    AddressSpace, OptimizationLevel, execution_engine::JitFunction, types::VectorType,
+    values::BasicValueEnum,
 };
 use std::{ffi::c_void, marker::PhantomData};
 
@@ -26,40 +27,28 @@ type IntervalType32 = float32x2_t;
 
 pub type NativeIntervalFunc = unsafe extern "C" fn(*const c_void, *mut c_void);
 
-trait IntervalNumType: NumberType {
-    type IntervalT;
-}
-
-impl IntervalNumType for f32 {
-    type IntervalT = IntervalType32;
-}
-
-impl IntervalNumType for f64 {
-    type IntervalT = IntervalType64;
-}
-
 #[derive(Clone)]
 pub struct JitIntervalFn<'ctx, T>
 where
-    T: IntervalNumType,
+    T: NumberType,
 {
     func: JitFunction<'ctx, NativeIntervalFunc>,
-    inputs: Box<[T::IntervalT]>,
-    outputs: Box<[T::IntervalT]>,
+    inputs: Box<[[T; 2]]>,
+    outputs: Box<[[T; 2]]>,
     _phantom: PhantomData<T>,
 }
 
 pub struct JitIntervalFnSync<'ctx, T>
 where
-    T: IntervalNumType,
+    T: NumberType,
 {
     func: NativeIntervalFunc,
-    inputs: Box<[T::IntervalT]>,
-    outputs: Box<[T::IntervalT]>,
+    inputs: Box<[[T; 2]]>,
+    outputs: Box<[[T; 2]]>,
     _phantom: PhantomData<&'ctx JitIntervalFn<'ctx, T>>,
 }
 
-unsafe impl<'ctx, T> Sync for JitIntervalFnSync<'ctx, T> where T: IntervalNumType {}
+unsafe impl<'ctx, T> Sync for JitIntervalFnSync<'ctx, T> where T: NumberType {}
 
 impl Tree {
     /// JIT compile the tree for interval evaluations.
@@ -69,7 +58,7 @@ impl Tree {
         params: &str,
     ) -> Result<JitIntervalFn<'ctx, T>, Error>
     where
-        T: IntervalNumType,
+        T: NumberType,
     {
         if !self.is_scalar() {
             // Only support scalar output trees.
@@ -95,9 +84,12 @@ impl Tree {
                     Value::Bool(flag) => BasicValueEnum::VectorValue(VectorType::const_vector(
                         &[bool_type.const_int(if *flag { 1 } else { 0 }, false); 2],
                     )),
-                    Value::Scalar(value) => BasicValueEnum::VectorValue(VectorType::const_vector(
-                        &[float_type.const_float(*value); 2],
-                    )),
+                    Value::Scalar(value) => {
+                        BasicValueEnum::VectorValue(VectorType::const_vector(&[
+                            float_type.const_float(-value),
+                            float_type.const_float(*value),
+                        ]))
+                    }
                 },
                 Symbol(label) => {
                     let inputs = function
@@ -114,10 +106,21 @@ impl Tree {
                                 )? as u64,
                                 false,
                             )],
-                            &format!("arg_{}", *label),
+                            &format!("arg_ptr_{}", *label),
                         )?
                     };
-                    builder.build_load(interval_type, ptr, &format!("val_{}", *label))?
+                    BasicValueEnum::VectorValue(
+                        builder.build_float_mul(
+                            VectorType::const_vector(&[
+                                float_type.const_float(-1.0),
+                                float_type.const_float(1.0),
+                            ]),
+                            builder
+                                .build_load(interval_type, ptr, &format!("val_{}", *label))?
+                                .into_vector_value(),
+                            &format!("arg_{}", *label),
+                        )?,
+                    )
                 }
                 Unary(op, input) => match op {
                     // For negate all we need to do is swap the vector lanes.
@@ -130,41 +133,84 @@ impl Tree {
                         ]),
                         &format!("reg_{ni}"),
                     )?),
-                    Sqrt => todo!(),
-                    Abs => todo!(),
-                    Sin => todo!(),
-                    Cos => todo!(),
-                    Tan => todo!(),
-                    Log => todo!(),
-                    Exp => todo!(),
-                    Floor => todo!(),
-                    Not => todo!(),
+                    Sqrt => regs[*input],
+                    Abs => regs[*input],
+                    Sin => regs[*input],
+                    Cos => regs[*input],
+                    Tan => regs[*input],
+                    Log => regs[*input],
+                    Exp => regs[*input],
+                    Floor => regs[*input],
+                    Not => regs[*input],
                 },
                 Binary(op, lhs, rhs) => match op {
-                    Add => todo!(),
-                    Subtract => todo!(),
-                    Multiply => todo!(),
-                    Divide => todo!(),
-                    Pow => todo!(),
-                    Min => todo!(),
-                    Max => todo!(),
-                    Remainder => todo!(),
-                    Less => todo!(),
-                    LessOrEqual => todo!(),
-                    Equal => todo!(),
-                    NotEqual => todo!(),
-                    Greater => todo!(),
-                    GreaterOrEqual => todo!(),
-                    And => todo!(),
-                    Or => todo!(),
+                    Add => regs[*lhs],
+                    Subtract => regs[*lhs],
+                    Multiply => regs[*lhs],
+                    Divide => regs[*rhs],
+                    Pow => regs[*rhs],
+                    Min => regs[*rhs],
+                    Max => regs[*rhs],
+                    Remainder => regs[*rhs],
+                    Less => regs[*lhs],
+                    LessOrEqual => regs[*lhs],
+                    Equal => regs[*lhs],
+                    NotEqual => regs[*rhs],
+                    Greater => regs[*rhs],
+                    GreaterOrEqual => regs[*rhs],
+                    And => regs[*lhs],
+                    Or => regs[*lhs],
                 },
                 Ternary(op, a, b, c) => match op {
-                    Choose => todo!(),
+                    Choose => regs[*a],
                 },
             };
             regs.push(reg);
         }
         // Compile instructions to copy the outputs to the out argument.
-        todo!("Not Implemented");
+        let outputs = function
+            .get_nth_param(1)
+            .ok_or(Error::JitCompilationError(
+                "Cannot read output address".to_string(),
+            ))?
+            .into_pointer_value();
+        for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
+            let dst = unsafe {
+                builder.build_gep(
+                    interval_type,
+                    outputs,
+                    &[context.i64_type().const_int(i as u64, false)],
+                    &format!("output_ptr_{i}"),
+                )?
+            };
+            builder.build_store(
+                dst,
+                builder.build_float_mul(
+                    VectorType::const_vector(&[
+                        float_type.const_float(-1.0),
+                        float_type.const_float(1.0),
+                    ]),
+                    reg.into_vector_value(),
+                    &format!("output_value_{i}"),
+                )?,
+            )?;
+        }
+        builder.build_return(None)?;
+        compiler.run_passes();
+        let engine = compiler
+            .module
+            .create_jit_execution_engine(OptimizationLevel::Aggressive)
+            .map_err(|_| Error::CannotCreateJitModule)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
+        let func = unsafe { engine.get_function(&func_name)? };
+        Ok(JitIntervalFn {
+            func,
+            inputs: vec![[T::nan(); 2]; params.len()].into_boxed_slice(),
+            outputs: vec![[T::nan(); 2]; num_roots].into_boxed_slice(),
+            _phantom: PhantomData,
+        })
     }
 }
