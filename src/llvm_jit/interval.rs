@@ -120,7 +120,16 @@ impl Tree {
                     builder.build_load(interval_type, ptr, &format!("val_{}", *label))?
                 }
                 Unary(op, input) => match op {
-                    Negate => todo!(),
+                    // For negate all we need to do is swap the vector lanes.
+                    Negate => BasicValueEnum::VectorValue(builder.build_shuffle_vector(
+                        regs[*input].into_vector_value(),
+                        interval_type.get_undef(),
+                        VectorType::const_vector(&[
+                            context.i32_type().const_int(1, false),
+                            context.i32_type().const_int(0, false),
+                        ]),
+                        &format!("reg_{ni}"),
+                    )?),
                     Sqrt => todo!(),
                     Abs => todo!(),
                     Sin => todo!(),
