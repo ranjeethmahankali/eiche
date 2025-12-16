@@ -327,8 +327,8 @@ impl ValueType for Interval {
                     }
                 }
                 Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
-                Pow if rlo.floor() == rlo && rhi.floor() == rhi => {
-                    // Integer exponent.
+                Pow if rlo.floor() == rlo && rlo == rhi => {
+                    // Singleton integer exponent.
                     let rhs = rhi.floor() as i32;
                     if rhs < 0 {
                         if llo == 0.0 && lhi == 0.0 {
