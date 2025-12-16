@@ -152,6 +152,11 @@ impl Tree {
                                 float_type.const_float(f64::NAN),
                             ])),
                             {
+                                // Interval is not empty.
+                                let sign_flip = VectorType::const_vector(&[
+                                    float_type.const_float(-1.0),
+                                    float_type.const_float(1.0),
+                                ]);
                                 let lt_zero = builder.build_float_compare(
                                     FloatPredicate::ULT,
                                     ireg,
@@ -161,20 +166,29 @@ impl Tree {
                                     ]),
                                     &format!("lt_zero_{ni}"),
                                 )?;
-                                let sqrt = build_vec_unary_intrinsic(
-                                    builder,
-                                    &compiler.module,
-                                    "llvm.sqrt.*",
-                                    &format!("sqrt_call_{ni}"),
-                                    ireg,
-                                )?
-                                .into_vector_value();
+                                let sqrt = builder.build_float_mul(
+                                    build_vec_unary_intrinsic(
+                                        builder,
+                                        &compiler.module,
+                                        "llvm.sqrt.*",
+                                        &format!("sqrt_call_{ni}"),
+                                        builder.build_float_mul(
+                                            ireg,
+                                            sign_flip,
+                                            &format!("sqrt_correction_{ni}"),
+                                        )?,
+                                    )?
+                                    .into_vector_value(),
+                                    sign_flip,
+                                    &format!("sqrt_revert_sign_{ni}"),
+                                )?;
                                 /* This a nested if. First we check the sign of
                                  * the lower bound, then we check the sign of
                                  * the upper bound in the nested select
                                  * statement. Then we return different things.
                                  */
                                 builder.build_select(
+                                    // Check first element of vec.
                                     builder
                                         .build_extract_element(
                                             lt_zero,
@@ -182,7 +196,9 @@ impl Tree {
                                             &format!("first_lt_zero_{ni}"),
                                         )?
                                         .into_int_value(),
+                                    BasicValueEnum::VectorValue(sqrt),
                                     builder.build_select(
+                                        // Check second element of vec.
                                         builder
                                             .build_extract_element(
                                                 lt_zero,
@@ -190,6 +206,10 @@ impl Tree {
                                                 &format!("second_lt_zero_{ni}"),
                                             )?
                                             .into_int_value(),
+                                        VectorType::const_vector(&[
+                                            float_type.const_float(f64::NAN),
+                                            float_type.const_float(f64::NAN),
+                                        ]),
                                         builder.build_float_mul(
                                             sqrt,
                                             VectorType::const_vector(&[
@@ -198,13 +218,8 @@ impl Tree {
                                             ]),
                                             &format!("sqrt_domain_clipping_{ni}"),
                                         )?,
-                                        VectorType::const_vector(&[
-                                            float_type.const_float(f64::NAN),
-                                            float_type.const_float(f64::NAN),
-                                        ]),
                                         &format!("sqrt_edge_case_{ni}"),
                                     )?,
-                                    BasicValueEnum::VectorValue(sqrt),
                                     &format!("sqrt_branching_{ni}"),
                                 )?
                             },
