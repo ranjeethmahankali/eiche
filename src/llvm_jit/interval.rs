@@ -20,11 +20,6 @@ pub type IntervalType64 = __m128d;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub type IntervalType32 = __m128;
 
-#[cfg(target_arch = "aarch64")]
-type IntervalType64 = float64x2_t;
-#[cfg(target_arch = "aarch64")]
-type IntervalType32 = float32x2_t;
-
 pub type NativeIntervalFunc = unsafe extern "C" fn(*const c_void, *mut c_void);
 
 #[derive(Clone)]
