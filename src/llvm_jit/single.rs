@@ -365,8 +365,10 @@ where
     /// order as returned by calling `tree.symbols()` which was compiled to
     /// produce this evaluator.
     pub fn run(&self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
-        if (inputs.len() != self.num_inputs) || (outputs.len() != self.num_outputs) {
+        if inputs.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        } else if outputs.len() != self.num_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.num_outputs));
         }
         // SAFETY: We just checked above.
         unsafe { self.run_unchecked(inputs, outputs) };

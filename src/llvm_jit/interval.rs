@@ -77,6 +77,7 @@ impl Tree {
             .void_type()
             .fn_type(&[iptr_type.into(), iptr_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
+        builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
@@ -212,5 +213,60 @@ impl Tree {
             outputs: vec![[T::nan(); 2]; num_roots].into_boxed_slice(),
             _phantom: PhantomData,
         })
+    }
+}
+
+impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
+    pub fn run(&self, inputs: &[(f32, f32)], outputs: &mut [(f32, f32)]) -> Result<(), Error> {
+        if inputs.len() != self.inputs.len() {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.inputs.len()));
+        } else if outputs.len() != self.outputs.len() {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.outputs.len()));
+        }
+        // SAFETY: We just checked the size of the slices above.
+        unsafe { self.run_unchecked(inputs, outputs) };
+        Ok(())
+    }
+
+    pub unsafe fn run_unchecked(&self, inputs: &[(f32, f32)], outputs: &mut [(f32, f32)]) {
+        unsafe {
+            self.func
+                .call(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast())
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{Error, JitContext, deftree};
+
+    #[test]
+    fn t_jit_interval_negate() {
+        let tree = deftree!(- 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f32>(&context, "x").unwrap();
+        // All positive.
+        let mut outputs = [(f32::NAN, f32::NAN)];
+        eval.run(&[(2.0, 3.0)], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert_eq!(outputs[0], (-3.0, -2.0));
+        // All negative.
+        eval.run(&[(-5.245, -3.123)], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert_eq!(outputs[0], (3.123, 5.245));
+        // Spanning across zero.
+        eval.run(&[(-2.3345, 5.23445)], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert_eq!(outputs[0], (-5.23445, 2.3345));
+        // Wrong number of inputs / outputs.
+        matches!(
+            eval.run(&[(-5.245, -3.123), (-2.3345, 5.23445)], &mut outputs),
+            Err(Error::InputSizeMismatch(2, 1))
+        );
+        let mut outputs = [(f32::NAN, f32::NAN), (f32::NAN, f32::NAN)];
+        matches!(
+            eval.run(&[(-5.245, -3.123)], &mut outputs),
+            Err(Error::OutputSizeMismatch(2, 1))
+        );
     }
 }
