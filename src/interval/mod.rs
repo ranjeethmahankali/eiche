@@ -201,7 +201,8 @@ impl ValueType for Interval {
         match val {
             Interval::Scalar(lo, hi) => match op {
                 Negate => Interval::from_scalar(-hi, -lo),
-                Sqrt if hi < 0. => Err(Error::InvalidInterval),
+                Sqrt if lo.is_nan() && hi.is_nan() => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
+                Sqrt if hi < 0. => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
                 Sqrt if lo < 0. => Interval::from_scalar(0.0, hi.sqrt()),
                 Sqrt => Interval::from_scalar(lo.sqrt(), hi.sqrt()),
                 Abs if hi <= 0. => Interval::from_scalar((-hi).next_down(), (-lo).next_up()),
