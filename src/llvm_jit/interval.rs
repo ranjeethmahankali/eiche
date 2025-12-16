@@ -153,10 +153,6 @@ impl Tree {
                             ])),
                             {
                                 // Interval is not empty.
-                                let sign_flip = VectorType::const_vector(&[
-                                    float_type.const_float(-1.0),
-                                    float_type.const_float(1.0),
-                                ]);
                                 let lt_zero = builder.build_float_compare(
                                     FloatPredicate::ULT,
                                     ireg,
@@ -166,22 +162,21 @@ impl Tree {
                                     ]),
                                     &format!("lt_zero_{ni}"),
                                 )?;
-                                let sqrt = builder.build_float_mul(
+                                let sqrt = build_vec_unary_intrinsic(
+                                    builder,
+                                    &compiler.module,
+                                    "llvm.sqrt.*",
+                                    &format!("sqrt_call_{ni}"),
                                     build_vec_unary_intrinsic(
                                         builder,
                                         &compiler.module,
-                                        "llvm.sqrt.*",
-                                        &format!("sqrt_call_{ni}"),
-                                        builder.build_float_mul(
-                                            ireg,
-                                            sign_flip,
-                                            &format!("sqrt_correction_{ni}"),
-                                        )?,
+                                        "llvm.fabs.*",
+                                        &format!("fabs_call_{ni}"),
+                                        ireg,
                                     )?
                                     .into_vector_value(),
-                                    sign_flip,
-                                    &format!("sqrt_revert_sign_{ni}"),
-                                )?;
+                                )?
+                                .into_vector_value();
                                 /* This a nested if. First we check the sign of
                                  * the lower bound, then we check the sign of
                                  * the upper bound in the nested select
@@ -196,7 +191,14 @@ impl Tree {
                                             &format!("first_lt_zero_{ni}"),
                                         )?
                                         .into_int_value(),
-                                    BasicValueEnum::VectorValue(sqrt),
+                                    BasicValueEnum::VectorValue(builder.build_float_mul(
+                                        sqrt,
+                                        VectorType::const_vector(&[
+                                            float_type.const_float(-1.0),
+                                            float_type.const_float(1.0),
+                                        ]),
+                                        &format!("sqrt_sign_correction_{ni}"),
+                                    )?),
                                     builder.build_select(
                                         // Check second element of vec.
                                         builder
@@ -406,9 +408,23 @@ mod test {
         eval.run(&[[f64::NAN, f64::NAN]], &mut outputs)
             .expect("Failed to run the jit function");
         assert!(outputs[0].iter().all(|v| v.is_nan()));
-        let interval = [2.0, 3.0];
-        eval.run(&[interval], &mut outputs)
-            .expect("Failed to run the jit function");
-        assert_eq!(outputs[0], interval.map(|v| v.sqrt()));
+        {
+            let interval = [2.0, 3.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], interval.map(|v| v.sqrt()));
+        }
+        {
+            let interval = [-2.0, 3.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], [0.0, 3.0f64.sqrt()]);
+        }
+        {
+            let interval = [-3.0, -2.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert!(outputs[0].iter().all(|v| v.is_nan()));
+        }
     }
 }
