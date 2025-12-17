@@ -455,7 +455,36 @@ mod test {
     }
 
     #[test]
-    fn t_jit_interval_sqrt() {
+    fn t_jit_interval_sqrt_f32() {
+        let tree = deftree!(sqrt 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f32>(&context, "x").unwrap();
+        let mut outputs = [[f32::NAN, f32::NAN]];
+        eval.run(&[[f32::NAN, f32::NAN]], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert!(outputs[0].iter().all(|v| v.is_nan()));
+        {
+            let interval = [2.0, 3.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], interval.map(|v| v.sqrt()));
+        }
+        {
+            let interval = [-2.0, 3.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], [0.0, 3.0f32.sqrt()]);
+        }
+        {
+            let interval = [-3.0, -2.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert!(outputs[0].iter().all(|v| v.is_nan()));
+        }
+    }
+
+    #[test]
+    fn t_jit_interval_sqrt_f64() {
         let tree = deftree!(sqrt 'x).unwrap();
         let context = JitContext::default();
         let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
@@ -480,6 +509,64 @@ mod test {
             eval.run(&[interval], &mut outputs)
                 .expect("Failed to run the jit function");
             assert!(outputs[0].iter().all(|v| v.is_nan()));
+        }
+    }
+
+    #[test]
+    fn t_jit_interval_abs_f32() {
+        let tree = deftree!(abs 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f32>(&context, "x").unwrap();
+        let mut outputs = [[f32::NAN, f32::NAN]];
+        eval.run(&[[f32::NAN, f32::NAN]], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert!(outputs[0].iter().all(|v| v.is_nan()));
+        {
+            let interval = [2.0, 3.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], interval);
+        }
+        {
+            let interval = [-2.0, 3.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], [0.0, 3.0]);
+        }
+        {
+            let interval = [-3.0, -2.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], [2.0, 3.0]);
+        }
+    }
+
+    #[test]
+    fn t_jit_interval_abs_f64() {
+        let tree = deftree!(abs 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        eval.run(&[[f64::NAN, f64::NAN]], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert!(outputs[0].iter().all(|v| v.is_nan()));
+        {
+            let interval = [2.0, 3.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], interval);
+        }
+        {
+            let interval = [-2.0, 3.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], [0.0, 3.0]);
+        }
+        {
+            let interval = [-3.0, -2.0];
+            eval.run(&[interval], &mut outputs)
+                .expect("Failed to run the jit function");
+            assert_eq!(outputs[0], [2.0, 3.0]);
         }
     }
 }
