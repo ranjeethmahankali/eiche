@@ -37,6 +37,22 @@ where
     _phantom: PhantomData<T>,
 }
 
+/**
+`JitIntervalFn` is not thread safe, because it contains the executable memory
+where the JIT machine code resides, somewhere inside the Execution Engine. LLVM
+doesn't implement the `Send` trait for this block of memory, because it doesn't
+know what's in the JIT machine code, it doesn't know if that code itself is
+thread safe, or has side effects. This `JitIntervalFnSync` can be pulled out of
+a `JitIntervalFn`, via the `.as_async()` function, and is thread safe. It
+implements the `Send` trait. This is OK, because we know the machine code
+represents a mathematical expression without any side effects. So we pull out
+the function pointer and wrap it in this struct, that can be shared across
+threads. Still the execution engine held inside the original `JitSmdFn` needs to
+outlive this sync wrapper, because it owns the block of executable memory. To
+guarantee that, this structs pseudo borrows (via a phantom) from the
+`JitIntervalFn`. It has to be done via a phantom othwerwise we can't implement
+The Sync trait on this.
+*/
 pub struct JitIntervalFnSync<'ctx, T>
 where
     T: NumberType,
@@ -379,7 +395,7 @@ impl Tree {
                         // plain interval implementation. Go through the pairs
                         // in reverse and accumulate a nested ternary
                         // expression.
-                        let QN_COND_PAIRS: [[(f64, f64); 2]; 4] = [
+                        const QN_COND_PAIRS: [[(f64, f64); 2]; 4] = [
                             [(0.0, 1.0), (3.0, 2.0)],
                             [(1.0, 2.0), (2.0, 1.0)],
                             [(0.0, 3.0), (3.0, 4.0)],
@@ -587,10 +603,42 @@ impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
     }
 
     pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]]) {
+        // SAFETY: we told the caller it is their responsiblity.
         unsafe {
             self.func
                 .call(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast())
         }
+    }
+
+    pub fn as_sync(&'ctx self) -> JitIntervalFnSync<'ctx, T> {
+        JitIntervalFnSync {
+            // SAFETY: Accessing the raw function pointer. This is ok, because
+            // this borrows from Self, which owns an Rc reference to the
+            // execution engine that owns the block of executable memory to
+            // which the function pointer points.
+            func: unsafe { self.func.as_raw() },
+            num_inputs: self.num_inputs,
+            num_outputs: self.num_outputs,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'ctx, T: NumberType> JitIntervalFnSync<'ctx, T> {
+    pub fn run(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]]) -> Result<(), Error> {
+        if inputs.len() != self.num_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        } else if outputs.len() != self.num_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.num_outputs));
+        }
+        // SAFETY: We just checked the size of the slices above.
+        unsafe { self.run_unchecked(inputs, outputs) };
+        Ok(())
+    }
+
+    pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]]) {
+        // SAFETY: we told the caller it is their responsiblity.
+        unsafe { (self.func)(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast()) }
     }
 }
 
