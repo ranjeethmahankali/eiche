@@ -424,7 +424,7 @@ impl Tree {
                                                 &format!("q_compare_{q}_{ni}"),
                                             )?,
                                             builder.build_float_compare(
-                                                FloatPredicate::UEQ,
+                                                FloatPredicate::ULT,
                                                 nval,
                                                 float_type.const_float(*n),
                                                 &format!("n_compare_{n}_{ni}"),
