@@ -850,9 +850,9 @@ mod test {
             "Interval crossing 3π/2 (min) failed"
         );
 
-        // Test 9: Interval spanning both max and min (more than π)
+        // Test 9: Interval spanning both max and min
         // Should return [-1.0, 1.0]
-        let interval = [0.0, PI + 0.5];
+        let interval = [0.0, 3.0 * FRAC_PI_2 + 0.1]; // Goes past 3π/2 to hit both extrema
         eval.run(&[interval], &mut outputs).unwrap();
         assert_eq!(
             outputs[0],
