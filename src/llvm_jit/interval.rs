@@ -308,56 +308,6 @@ impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
     }
 }
 
-fn build_widen_interval<'ctx, T: NumberType>(
-    input: VectorValue<'ctx>,
-    context: &'ctx Context,
-    builder: &'ctx Builder,
-    index: usize,
-) -> Result<VectorValue<'ctx>, Error> {
-    let itype = T::jit_int_type(context);
-    let ftype = T::jit_type(context);
-    let bits = builder
-        .build_bit_cast(
-            input,
-            itype.vec_type(2),
-            &format!("float_to_int_cast_{index}"),
-        )?
-        .into_vector_value();
-    let shifted = builder.build_int_add(
-        bits,
-        VectorType::const_vector(&[itype.const_int(u64::MAX, true), itype.const_int(1, false)]),
-        &format!("shifted_bits_{index}"),
-    )?;
-    // NaN or +inf check
-    let keep = builder.build_or(
-        builder.build_float_compare(
-            FloatPredicate::UNO,
-            input,
-            input,
-            &format!("is_nan_{index}"),
-        )?,
-        builder.build_float_compare(
-            FloatPredicate::OEQ,
-            input,
-            VectorType::const_vector(&[
-                ftype.const_float(f64::INFINITY),
-                ftype.const_float(f64::INFINITY),
-            ]),
-            &format!("is_inf_{index}"),
-        )?,
-        &format!("bit_shift_mask_{index}"),
-    )?;
-    Ok(builder
-        .build_bit_cast(
-            builder
-                .build_select(keep, bits, shifted, "final_bits")?
-                .into_vector_value(),
-            ftype.vec_type(2),
-            "rounded",
-        )?
-        .into_vector_value())
-}
-
 #[cfg(test)]
 mod test {
     use crate::{Error, JitContext, deftree};
