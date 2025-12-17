@@ -1025,4 +1025,13 @@ mod test {
         assert_float_eq!(result.0, 5., 1e-12);
         assert_float_eq!(result.1, 5., 1e-12);
     }
+
+    #[test]
+    fn t_interval_sin() {
+        let tree = deftree!(sin 'x).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        let result = eval.run().unwrap()[0];
+        assert!(matches!(result, Interval::Scalar(0.0, 0.0)));
+    }
 }
