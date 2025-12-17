@@ -4,12 +4,9 @@ use crate::{
 };
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
-    builder::Builder,
-    context::Context,
     execution_engine::JitFunction,
-    module::Module,
-    types::{IntType, VectorType},
-    values::{BasicValueEnum, VectorValue},
+    types::VectorType,
+    values::BasicValueEnum,
 };
 use std::{ffi::c_void, marker::PhantomData};
 
@@ -226,7 +223,7 @@ impl Tree {
                     Floor => todo!(),
                     Not => todo!(),
                 },
-                Binary(op, lhs, rhs) => match op {
+                Binary(op, _lhs, _rhs) => match op {
                     Add => todo!(),
                     Subtract => todo!(),
                     Multiply => todo!(),
@@ -244,7 +241,7 @@ impl Tree {
                     And => todo!(),
                     Or => todo!(),
                 },
-                Ternary(op, a, b, c) => match op {
+                Ternary(op, _a, _b, _c) => match op {
                     Choose => todo!(),
                 },
             };

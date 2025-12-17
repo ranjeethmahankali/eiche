@@ -159,7 +159,7 @@ fn abs((llo, lhi): (f64, f64)) -> (f64, f64) {
     } else if llo >= 0. {
         (llo, lhi)
     } else {
-        (0., llo.abs().max(lhi.abs()).next_up())
+        (0., llo.abs().max(lhi.abs()))
     }
 }
 
@@ -203,33 +203,27 @@ impl ValueType for Interval {
                 Negate => Interval::from_scalar(-hi, -lo),
                 Sqrt if lo.is_nan() && hi.is_nan() => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
                 Sqrt if hi < 0. => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
-                Sqrt if lo < 0. => Interval::from_scalar(0.0, hi.sqrt().next_up()),
-                Sqrt => Interval::from_scalar(lo.sqrt().next_down(), hi.sqrt().next_up()),
-                Abs if hi <= 0. => Interval::from_scalar((-hi).next_down(), (-lo).next_up()),
-                Abs if lo >= 0. => Interval::from_scalar(lo.next_down(), hi.next_up()),
-                Abs => Interval::from_scalar(0.0f64.next_down(), lo.abs().max(hi.abs()).next_up()),
+                Sqrt if lo < 0. => Interval::from_scalar(0.0, hi.sqrt()),
+                Sqrt => Interval::from_scalar(lo.sqrt(), hi.sqrt()),
+                Abs if hi <= 0. => Interval::from_scalar(-hi, -lo),
+                Abs if lo >= 0. => Interval::from_scalar(lo, hi),
+                Abs => Interval::from_scalar(0.0f64, lo.abs().max(hi.abs())),
                 Sin => {
                     let (qlo, qhi) = ((lo / FRAC_PI_2).floor(), (hi / FRAC_PI_2).floor());
                     let n = if lo == hi { 0.0 } else { qhi - qlo };
                     let q = qlo.rem_euclid(4.0);
                     if q == 0.0 && n < 1.0 || q == 3.0 && n < 2.0 {
                         // monotonically increasing
-                        Ok(Interval::Scalar(lo.sin().next_down(), hi.sin().next_up()))
+                        Ok(Interval::Scalar(lo.sin(), hi.sin()))
                     } else if q == 1.0 && n < 2.0 || q == 2.0 && n < 1.0 {
                         // monotonically decreasing
-                        Ok(Interval::Scalar(hi.sin().next_down(), lo.sin().next_up()))
+                        Ok(Interval::Scalar(hi.sin(), lo.sin()))
                     } else if q == 0.0 && n < 3.0 || q == 3.0 && n < 4.0 {
                         // increasing, then decreasing
-                        Ok(Interval::Scalar(
-                            lo.sin().next_down().min(hi.sin().next_down()),
-                            1.0,
-                        ))
+                        Ok(Interval::Scalar(lo.sin().min(hi.sin()), 1.0))
                     } else if q == 1.0 && n < 4.0 || q == 2.0 && n < 3.0 {
                         // decreasing, then increasing
-                        Ok(Interval::Scalar(
-                            -1.0,
-                            lo.sin().next_up().max(hi.sin().next_up()),
-                        ))
+                        Ok(Interval::Scalar(-1.0, lo.sin().max(hi.sin())))
                     } else {
                         Ok(Interval::Scalar(-1.0, 1.0))
                     }
@@ -248,24 +242,18 @@ impl ValueType for Interval {
                         if n == 0.0 {
                             if q == 0.0 {
                                 // monotonically decreasing
-                                Ok(Interval::Scalar(hi.cos().next_down(), lo.cos().next_up()))
+                                Ok(Interval::Scalar(hi.cos(), lo.cos()))
                             } else {
                                 // monotonically increasing
-                                Ok(Interval::Scalar(lo.cos().next_down(), hi.cos().next_up()))
+                                Ok(Interval::Scalar(lo.cos(), hi.cos()))
                             }
                         } else if n <= 1.0 {
                             if q == 0.0 {
                                 // decreasing, then increasing
-                                Ok(Interval::Scalar(
-                                    -1.0,
-                                    lo.cos().next_up().max(hi.cos().next_up()),
-                                ))
+                                Ok(Interval::Scalar(-1.0, lo.cos().max(hi.cos())))
                             } else {
                                 // increasing, then decreasing
-                                Ok(Interval::Scalar(
-                                    lo.cos().next_down().min(hi.cos().next_down()),
-                                    1.0,
-                                ))
+                                Ok(Interval::Scalar(lo.cos().min(hi.cos()), 1.0))
                             }
                         } else {
                             Ok(Interval::Scalar(-1.0, 1.0))
@@ -330,11 +318,10 @@ impl ValueType for Interval {
                     match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0)) {
                         // Squaring
                         (Ordering::Less, Ordering::Greater)
-                        | (Ordering::Greater, Ordering::Less) => Ok(Interval::Scalar(
-                            0.0,
-                            ((lhi * lhi).max(llo * llo)).next_up(),
-                        )),
-                        _ => Interval::from_scalar((llo * llo).next_down(), (lhi * lhi).next_up()),
+                        | (Ordering::Greater, Ordering::Less) => {
+                            Ok(Interval::Scalar(0.0, (lhi * lhi).max(llo * llo)))
+                        }
+                        _ => Interval::from_scalar(llo * llo, lhi * lhi),
                     }
                 }
                 Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
@@ -349,26 +336,17 @@ impl ValueType for Interval {
                                 Ok(Interval::Scalar(f64::NAN, f64::NAN))
                             } else if rhs % 2 == 0 {
                                 let (lo, hi) = abs((llo, lhi));
-                                Interval::from_scalar(
-                                    hi.powi(rhs).next_down(),
-                                    lo.powi(rhs).next_up(),
-                                )
+                                Interval::from_scalar(hi.powi(rhs), lo.powi(rhs))
                             } else if llo < 0.0 && lhi > 0.0 {
                                 Ok(Interval::default())
                             } else {
-                                Interval::from_scalar(
-                                    lhi.powi(rhs).next_down(),
-                                    llo.powi(rhs).next_up(),
-                                )
+                                Interval::from_scalar(lhi.powi(rhs), llo.powi(rhs))
                             }
                         } else if rhs % 2 == 0 {
                             let (lo, hi) = abs((llo, lhi));
-                            Interval::from_scalar(lo.powi(rhs).next_down(), hi.powi(rhs).next_up())
+                            Interval::from_scalar(lo.powi(rhs), hi.powi(rhs))
                         } else {
-                            Interval::from_scalar(
-                                llo.powi(rhs).next_down(),
-                                lhi.powi(rhs).next_up(),
-                            )
+                            Interval::from_scalar(llo.powi(rhs), lhi.powi(rhs))
                         }
                     }
                 }
@@ -381,42 +359,24 @@ impl ValueType for Interval {
                         if lhi == 0.0 {
                             Ok(Interval::Scalar(f64::NAN, f64::NAN))
                         } else if lhi < 1.0 {
-                            Interval::from_scalar(
-                                lhi.powf(rhi).next_down(),
-                                llo.powf(rlo).next_up(),
-                            )
+                            Interval::from_scalar(lhi.powf(rhi), llo.powf(rlo))
                         } else if llo > 1.0 {
-                            Interval::from_scalar(
-                                lhi.powf(rlo).next_down(),
-                                llo.powf(rhi).next_up(),
-                            )
+                            Interval::from_scalar(lhi.powf(rlo), llo.powf(rhi))
                         } else {
-                            Interval::from_scalar(
-                                lhi.powf(rlo).next_down(),
-                                llo.powf(rlo).next_up(),
-                            )
+                            Interval::from_scalar(lhi.powf(rlo), llo.powf(rlo))
                         }
                     } else if rlo > 0.0 {
                         if lhi < 1.0 {
-                            Interval::from_scalar(
-                                llo.powf(rhi).next_down(),
-                                lhi.powf(rlo).next_up(),
-                            )
+                            Interval::from_scalar(llo.powf(rhi), lhi.powf(rlo))
                         } else if llo > 1.0 {
-                            Interval::from_scalar(
-                                llo.powf(rlo).next_down(),
-                                lhi.powf(rhi).next_up(),
-                            )
+                            Interval::from_scalar(llo.powf(rlo), lhi.powf(rhi))
                         } else {
-                            Interval::from_scalar(
-                                llo.powf(rhi).next_down(),
-                                lhi.powf(rhi).next_up(),
-                            )
+                            Interval::from_scalar(llo.powf(rhi), lhi.powf(rhi))
                         }
                     } else {
                         Interval::from_scalar(
-                            llo.powf(rhi).min(lhi.powf(rlo)).next_down(),
-                            llo.powf(rlo).max(lhi.powf(rhi)).next_up(),
+                            llo.powf(rhi).min(lhi.powf(rlo)),
+                            llo.powf(rlo).max(lhi.powf(rhi)),
                         )
                     }
                 }
