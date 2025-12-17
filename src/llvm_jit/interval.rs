@@ -81,15 +81,15 @@ impl Tree {
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
                 Constant(value) => match value {
-                    Value::Bool(flag) => BasicValueEnum::VectorValue(VectorType::const_vector(
+                    Value::Bool(flag) => VectorType::const_vector(
                         &[bool_type.const_int(if *flag { 1 } else { 0 }, false); 2],
-                    )),
-                    Value::Scalar(value) => {
-                        BasicValueEnum::VectorValue(VectorType::const_vector(&[
-                            float_type.const_float(*value),
-                            float_type.const_float(*value),
-                        ]))
-                    }
+                    )
+                    .as_basic_value_enum(),
+                    Value::Scalar(value) => VectorType::const_vector(&[
+                        float_type.const_float(*value),
+                        float_type.const_float(*value),
+                    ])
+                    .as_basic_value_enum(),
                 },
                 Symbol(label) => {
                     let inputs = function
@@ -113,13 +113,14 @@ impl Tree {
                 }
                 Unary(op, input) => match op {
                     // For negate all we need to do is swap the vector lanes.
-                    Negate => BasicValueEnum::VectorValue(build_interval_negate(
+                    Negate => build_interval_negate(
                         regs[*input].into_vector_value(),
                         context,
                         builder,
                         ni,
                         &format!("reg_{ni}"),
-                    )?),
+                    )?
+                    .as_basic_value_enum(),
                     Sqrt => {
                         let ireg = regs[*input].into_vector_value();
                         builder.build_select(
@@ -138,10 +139,11 @@ impl Tree {
                             )?
                             .into_int_value(),
                             // The interval is empty, so return an emtpy (NaN) interval.
-                            BasicValueEnum::VectorValue(VectorType::const_vector(&[
+                            VectorType::const_vector(&[
                                 float_type.const_float(f64::NAN),
                                 float_type.const_float(f64::NAN),
-                            ])),
+                            ])
+                            .as_basic_value_enum(),
                             {
                                 // Interval is not empty.
                                 let lt_zero = builder.build_float_compare(
@@ -204,7 +206,7 @@ impl Tree {
                                         )?,
                                         &format!("sqrt_edge_case_{ni}"),
                                     )?,
-                                    BasicValueEnum::VectorValue(sqrt),
+                                    sqrt.as_basic_value_enum(),
                                     &format!("sqrt_branching_{ni}"),
                                 )?
                             },
