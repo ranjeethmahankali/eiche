@@ -11,7 +11,7 @@ use inkwell::{
     intrinsics::Intrinsic,
     module::Module,
     types::{BasicTypeEnum, FloatType, VectorType},
-    values::{BasicMetadataValueEnum, BasicValueEnum},
+    values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum},
 };
 use std::{ffi::c_void, marker::PhantomData, mem::size_of};
 
@@ -1217,12 +1217,9 @@ impl Tree {
                     )?
                 }
                 Unary(op, input) => match op {
-                    Negate => {
-                        BasicValueEnum::VectorValue(builder.build_float_neg(
-                            regs[*input].into_vector_value(),
-                            &format!("reg_{ni}"),
-                        )?)
-                    }
+                    Negate => builder
+                        .build_float_neg(regs[*input].into_vector_value(), &format!("reg_{ni}"))?
+                        .as_basic_value_enum(),
                     Sqrt => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
@@ -1266,11 +1263,13 @@ impl Tree {
                             "cos_call",
                             regs[*input].into_vector_value(),
                         )?;
-                        BasicValueEnum::VectorValue(builder.build_float_div(
-                            sin.into_vector_value(),
-                            cos.into_vector_value(),
-                            &format!("reg_{ni}"),
-                        )?)
+                        builder
+                            .build_float_div(
+                                sin.into_vector_value(),
+                                cos.into_vector_value(),
+                                &format!("reg_{ni}"),
+                            )?
+                            .as_basic_value_enum()
                     }
                     Log => build_vec_unary_intrinsic(
                         builder,
@@ -1293,32 +1292,39 @@ impl Tree {
                         "floor_call",
                         regs[*input].into_vector_value(),
                     )?,
-                    Not => BasicValueEnum::VectorValue(
-                        builder
-                            .build_not(regs[*input].into_vector_value(), &format!("reg_{ni}"))?,
-                    ),
+                    Not => builder
+                        .build_not(regs[*input].into_vector_value(), &format!("reg_{ni}"))?
+                        .as_basic_value_enum(),
                 },
                 Binary(op, lhs, rhs) => match op {
-                    Add => BasicValueEnum::VectorValue(builder.build_float_add(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    Subtract => BasicValueEnum::VectorValue(builder.build_float_sub(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    Multiply => BasicValueEnum::VectorValue(builder.build_float_mul(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    Divide => BasicValueEnum::VectorValue(builder.build_float_div(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
+                    Add => builder
+                        .build_float_add(
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Subtract => builder
+                        .build_float_sub(
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Multiply => builder
+                        .build_float_mul(
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Divide => builder
+                        .build_float_div(
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
                     Pow => build_vec_binary_intrinsic(
                         builder,
                         &compiler.module,
@@ -1346,57 +1352,75 @@ impl Tree {
                         regs[*rhs],
                         fvec_type,
                     )?,
-                    Remainder => BasicValueEnum::VectorValue(builder.build_float_rem(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    Less => BasicValueEnum::VectorValue(builder.build_float_compare(
-                        FloatPredicate::ULT,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    LessOrEqual => BasicValueEnum::VectorValue(builder.build_float_compare(
-                        FloatPredicate::ULE,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    Equal => BasicValueEnum::VectorValue(builder.build_float_compare(
-                        FloatPredicate::UEQ,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    NotEqual => BasicValueEnum::VectorValue(builder.build_float_compare(
-                        FloatPredicate::UNE,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    Greater => BasicValueEnum::VectorValue(builder.build_float_compare(
-                        FloatPredicate::UGT,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    GreaterOrEqual => BasicValueEnum::VectorValue(builder.build_float_compare(
-                        FloatPredicate::UGE,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    And => BasicValueEnum::VectorValue(builder.build_and(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
-                    Or => BasicValueEnum::VectorValue(builder.build_or(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?),
+                    Remainder => builder
+                        .build_float_rem(
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Less => builder
+                        .build_float_compare(
+                            FloatPredicate::ULT,
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    LessOrEqual => builder
+                        .build_float_compare(
+                            FloatPredicate::ULE,
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Equal => builder
+                        .build_float_compare(
+                            FloatPredicate::UEQ,
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    NotEqual => builder
+                        .build_float_compare(
+                            FloatPredicate::UNE,
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Greater => builder
+                        .build_float_compare(
+                            FloatPredicate::UGT,
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    GreaterOrEqual => builder
+                        .build_float_compare(
+                            FloatPredicate::UGE,
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    And => builder
+                        .build_and(
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Or => builder
+                        .build_or(
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
                 },
                 Ternary(op, a, b, c) => match op {
                     Choose => builder.build_select(
