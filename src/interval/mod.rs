@@ -213,16 +213,16 @@ impl ValueType for Interval {
                     let (qlo, qhi) = ((lo / FRAC_PI_2).floor(), (hi / FRAC_PI_2).floor());
                     let n = if lo == hi { 0.0 } else { qhi - qlo };
                     let q = qlo.rem_euclid(4.0);
-                    if q == 0.0 && n < 1.0 || q == 3.0 && n < 2.0 {
+                    if (q == 0.0 && n < 1.0) || (q == 3.0 && n < 2.0) {
                         // monotonically increasing
                         Ok(Interval::Scalar(lo.sin(), hi.sin()))
-                    } else if q == 1.0 && n < 2.0 || q == 2.0 && n < 1.0 {
+                    } else if (q == 1.0 && n < 2.0) || (q == 2.0 && n < 1.0) {
                         // monotonically decreasing
                         Ok(Interval::Scalar(hi.sin(), lo.sin()))
-                    } else if q == 0.0 && n < 3.0 || q == 3.0 && n < 4.0 {
+                    } else if (q == 0.0 && n < 3.0) || (q == 3.0 && n < 4.0) {
                         // increasing, then decreasing
                         Ok(Interval::Scalar(lo.sin().min(hi.sin()), 1.0))
-                    } else if q == 1.0 && n < 4.0 || q == 2.0 && n < 3.0 {
+                    } else if (q == 1.0 && n < 4.0) || (q == 2.0 && n < 3.0) {
                         // decreasing, then increasing
                         Ok(Interval::Scalar(-1.0, lo.sin().max(hi.sin())))
                     } else {
