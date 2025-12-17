@@ -209,6 +209,7 @@ impl ValueType for Interval {
                     let (lo, hi) = abs((lo, hi));
                     Interval::from_scalar(lo, hi)
                 }
+                Sin if lo.is_nan() && hi.is_nan() => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
                 Sin => {
                     let (qlo, qhi) = ((lo / FRAC_PI_2).floor(), (hi / FRAC_PI_2).floor());
                     let n = if lo == hi { 0.0 } else { qhi - qlo };

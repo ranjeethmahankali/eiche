@@ -128,7 +128,7 @@ impl Tree {
                             build_vec_unary_intrinsic(
                                 builder,
                                 &compiler.module,
-                                "llvm.vector.reduce.mul.*",
+                                "llvm.vector.reduce.and.*",
                                 &format!("reduce_call_{ni}"),
                                 builder.build_float_compare(
                                     FloatPredicate::UNO,
@@ -406,7 +406,7 @@ impl Tree {
                                 &format!("out_val_case_3_{ni}"),
                             )?,
                         ];
-                        QN_COND_PAIRS
+                        let out = QN_COND_PAIRS
                             .iter()
                             .zip(out_vals.iter())
                             .enumerate()
@@ -445,7 +445,29 @@ impl Tree {
                                     Ok(out.into_vector_value())
                                 },
                             )?
-                            .as_basic_value_enum()
+                            .as_basic_value_enum();
+                        builder.build_select(
+                            build_vec_unary_intrinsic(
+                                builder,
+                                &compiler.module,
+                                "llvm.vector.reduce.and.*",
+                                &format!("reduce_call_{ni}"),
+                                builder.build_float_compare(
+                                    FloatPredicate::UNO,
+                                    ireg,
+                                    ireg,
+                                    &format!("check_empty_{ni}"),
+                                )?,
+                            )?
+                            .into_int_value(),
+                            VectorType::const_vector(&[
+                                float_type.const_float(f64::NAN),
+                                float_type.const_float(f64::NAN),
+                            ])
+                            .as_basic_value_enum(),
+                            out,
+                            &format!("reg_{ni}"),
+                        )?
                     }
                     Cos => todo!(),
                     Tan => todo!(),
@@ -738,5 +760,216 @@ mod test {
                 .expect("Failed to run the jit function");
             assert_eq!(outputs[0], [2.0, 3.0]);
         }
+    }
+
+    #[test]
+    fn t_jit_interval_sin_f64() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+
+        let tree = deftree!(sin 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+
+        // Test 1: NaN interval should return NaN
+        eval.run(&[[f64::NAN, f64::NAN]], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert!(
+            outputs[0][0].is_nan() && outputs[0][1].is_nan(),
+            "NaN test failed"
+        );
+
+        // Test 2: Point interval (lo == hi)
+        eval.run(&[[0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 0.0], "Point at 0 failed");
+
+        eval.run(&[[FRAC_PI_2, FRAC_PI_2]], &mut outputs).unwrap();
+        let expected = FRAC_PI_2.sin();
+        assert!(
+            (outputs[0][0] - expected).abs() < 1e-10 && (outputs[0][1] - expected).abs() < 1e-10,
+            "Point at π/2 failed"
+        );
+
+        // Test 3: Small interval in Q0 [0, π/2) - monotonically increasing
+        // sin is increasing here, so result should be [sin(lo), sin(hi)]
+        let interval = [0.1, 0.4];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[0].sin(), interval[1].sin()],
+            "Q0 monotonic increasing failed"
+        );
+
+        // Test 4: Small interval in Q1 [π/2, π) - monotonically decreasing
+        // sin is decreasing here, so result should be [sin(hi), sin(lo)]
+        let interval = [FRAC_PI_2 + 0.1, FRAC_PI_2 + 0.4];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[1].sin(), interval[0].sin()],
+            "Q1 monotonic decreasing failed"
+        );
+
+        // Test 5: Small interval in Q2 [π, 3π/2) - monotonically decreasing
+        let interval = [PI + 0.1, PI + 0.4];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[1].sin(), interval[0].sin()],
+            "Q2 monotonic decreasing failed"
+        );
+
+        // Test 6: Small interval in Q3 [3π/2, 2π) - monotonically increasing
+        let interval = [3.0 * FRAC_PI_2 + 0.1, 3.0 * FRAC_PI_2 + 0.4];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[0].sin(), interval[1].sin()],
+            "Q3 monotonic increasing failed"
+        );
+
+        // Test 7: Interval crossing π/2 (includes maximum)
+        // Should return [min(sin(lo), sin(hi)), 1.0]
+        let interval = [0.5, 2.0]; // crosses π/2 ≈ 1.57
+        eval.run(&[interval], &mut outputs).unwrap();
+        let min_endpoint = interval[0].sin().min(interval[1].sin());
+        assert_eq!(
+            outputs[0],
+            [min_endpoint, 1.0],
+            "Interval crossing π/2 (max) failed"
+        );
+
+        // Test 8: Interval crossing 3π/2 (includes minimum)
+        // Should return [-1.0, max(sin(lo), sin(hi))]
+        let interval = [4.0, 5.5]; // crosses 3π/2 ≈ 4.71
+        eval.run(&[interval], &mut outputs).unwrap();
+        let max_endpoint = interval[0].sin().max(interval[1].sin());
+        assert_eq!(
+            outputs[0],
+            [-1.0, max_endpoint],
+            "Interval crossing 3π/2 (min) failed"
+        );
+
+        // Test 9: Interval spanning both max and min (more than π)
+        // Should return [-1.0, 1.0]
+        let interval = [0.0, PI + 0.5];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [-1.0, 1.0],
+            "Interval spanning both extrema failed"
+        );
+
+        // Test 10: Interval spanning full period or more
+        let interval = [0.0, 2.0 * PI];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [-1.0, 1.0], "Full period interval failed");
+
+        let interval = [0.0, 3.0 * PI];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [-1.0, 1.0], "Multiple period interval failed");
+
+        // Test 11: Negative intervals - small interval in negative Q0
+        let interval = [-0.5, -0.1];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[0].sin(), interval[1].sin()],
+            "Negative Q0 failed"
+        );
+
+        // Test 12: Negative interval crossing -π/2 (includes minimum at -π/2)
+        let interval = [-2.0, -1.0]; // crosses -π/2 ≈ -1.57
+        eval.run(&[interval], &mut outputs).unwrap();
+        let max_endpoint = interval[0].sin().max(interval[1].sin());
+        assert_eq!(
+            outputs[0],
+            [-1.0, max_endpoint],
+            "Negative interval crossing -π/2 failed"
+        );
+
+        // Test 13: Symmetric interval around zero
+        let interval = [-0.5, 0.5];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[0].sin(), interval[1].sin()],
+            "Symmetric around zero failed"
+        );
+
+        // Test 14: Large positive values
+        let interval = [100.0, 100.5];
+        eval.run(&[interval], &mut outputs).unwrap();
+        // The exact result depends on quadrant, just check it's valid
+        assert!(
+            outputs[0][0] >= -1.0 && outputs[0][0] <= 1.0,
+            "Large positive lo out of range"
+        );
+        assert!(
+            outputs[0][1] >= -1.0 && outputs[0][1] <= 1.0,
+            "Large positive hi out of range"
+        );
+        assert!(
+            outputs[0][0] <= outputs[0][1],
+            "Large positive interval not ordered"
+        );
+
+        // Test 15: Large negative values
+        let interval = [-100.5, -100.0];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert!(
+            outputs[0][0] >= -1.0 && outputs[0][0] <= 1.0,
+            "Large negative lo out of range"
+        );
+        assert!(
+            outputs[0][1] >= -1.0 && outputs[0][1] <= 1.0,
+            "Large negative hi out of range"
+        );
+        assert!(
+            outputs[0][0] <= outputs[0][1],
+            "Large negative interval not ordered"
+        );
+
+        // Test 16: Interval exactly [0, π/2]
+        let interval = [0.0, FRAC_PI_2];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 1.0], "Exact [0, π/2] failed");
+
+        // Test 17: Interval exactly [π/2, π]
+        let interval = [FRAC_PI_2, PI];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert!(
+            (outputs[0][0] - 0.0).abs() < 1e-10,
+            "Exact [π/2, π] lower bound failed"
+        );
+        assert!(
+            (outputs[0][1] - 1.0).abs() < 1e-10,
+            "Exact [π/2, π] upper bound failed"
+        );
+
+        // Test 18: Very small interval (numerical precision test)
+        let interval = [1.0, 1.0 + 1e-10];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert!(
+            outputs[0][0] <= outputs[0][1],
+            "Very small interval not ordered"
+        );
+        assert!(
+            (outputs[0][1] - outputs[0][0]).abs() < 1e-9,
+            "Very small interval too wide"
+        );
+
+        // Test 19: Infinity inputs (should handle gracefully)
+        eval.run(&[[f64::INFINITY, f64::INFINITY]], &mut outputs)
+            .unwrap();
+        // Behavior with infinity is implementation-defined, just check no crash
+
+        eval.run(&[[f64::NEG_INFINITY, f64::NEG_INFINITY]], &mut outputs)
+            .unwrap();
+        // Behavior with infinity is implementation-defined, just check no crash
+
+        // Test 20: Mixed finite and special values
+        eval.run(&[[0.0, f64::INFINITY]], &mut outputs).unwrap();
+        // Should likely return [-1, 1] as it spans everything
     }
 }
