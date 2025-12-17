@@ -154,12 +154,12 @@ fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<(f64, f64), Err
 }
 
 fn abs((llo, lhi): (f64, f64)) -> (f64, f64) {
-    if lhi <= 0. {
+    if lhi < 0. {
         (-lhi, -llo)
-    } else if llo >= 0. {
-        (llo, lhi)
-    } else {
+    } else if llo < 0. {
         (0., llo.abs().max(lhi.abs()))
+    } else {
+        (llo, lhi)
     }
 }
 
@@ -205,9 +205,10 @@ impl ValueType for Interval {
                 Sqrt if hi < 0. => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
                 Sqrt if lo < 0. => Interval::from_scalar(0.0, hi.sqrt()),
                 Sqrt => Interval::from_scalar(lo.sqrt(), hi.sqrt()),
-                Abs if hi <= 0. => Interval::from_scalar(-hi, -lo),
-                Abs if lo >= 0. => Interval::from_scalar(lo, hi),
-                Abs => Interval::from_scalar(0.0f64, lo.abs().max(hi.abs())),
+                Abs => {
+                    let (lo, hi) = abs((lo, hi));
+                    Interval::from_scalar(lo, hi)
+                }
                 Sin => {
                     let (qlo, qhi) = ((lo / FRAC_PI_2).floor(), (hi / FRAC_PI_2).floor());
                     let n = if lo == hi { 0.0 } else { qhi - qlo };
