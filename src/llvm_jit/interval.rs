@@ -432,17 +432,18 @@ impl Tree {
                                             &format!("and_q_n_{ni}"),
                                         )?;
                                     }
-                                    let out = builder.build_select(
-                                        builder.build_or(
-                                            conds[0],
-                                            conds[1],
-                                            &format!("and_q_n_cond_{ni}"),
-                                        )?,
-                                        *out,
-                                        acc,
-                                        &format!("case_compare_{i}_{ni}"),
-                                    )?;
-                                    Ok(out.into_vector_value())
+                                    Ok(builder
+                                        .build_select(
+                                            builder.build_or(
+                                                conds[0],
+                                                conds[1],
+                                                &format!("and_q_n_cond_{ni}"),
+                                            )?,
+                                            *out,
+                                            acc,
+                                            &format!("case_compare_{i}_{ni}"),
+                                        )?
+                                        .into_vector_value())
                                 },
                             )?
                             .as_basic_value_enum();
@@ -870,6 +871,10 @@ mod test {
         assert_eq!(outputs[0], [-1.0, 1.0], "Multiple period interval failed");
 
         // Test 11: Negative intervals - small interval in negative Q0
+        /*
+        [src/interval/mod.rs:217:21] n = 0.0
+        [src/interval/mod.rs:217:21] q = 3.0
+        */
         let interval = [-0.5, -0.1];
         eval.run(&[interval], &mut outputs).unwrap();
         assert_eq!(
