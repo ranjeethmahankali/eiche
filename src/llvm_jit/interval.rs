@@ -8,9 +8,9 @@ use inkwell::{
     context::Context,
     execution_engine::JitFunction,
     types::VectorType,
-    values::{BasicValueEnum, VectorValue},
+    values::{BasicValue, BasicValueEnum, VectorValue},
 };
-use std::{ffi::c_void, marker::PhantomData};
+use std::{f64::consts::FRAC_PI_2, ffi::c_void, marker::PhantomData};
 
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
@@ -276,7 +276,175 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?
                     }
-                    Sin => todo!(),
+                    Sin => {
+                        let ireg = regs[*input].into_vector_value();
+                        let qinterval = build_vec_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.floor.*",
+                            &format!("intermediate_floor_{ni}"),
+                            builder.build_float_div(
+                                ireg,
+                                VectorType::const_vector(&[
+                                    float_type.const_float(FRAC_PI_2),
+                                    float_type.const_float(FRAC_PI_2),
+                                ]),
+                                &format!("div_pi_{ni}"),
+                            )?,
+                        )?
+                        .into_vector_value();
+                        let (lo, hi) = (
+                            builder
+                                .build_extract_element(
+                                    ireg,
+                                    context.i32_type().const_int(0, false),
+                                    &format!("extract_lo_{ni}"),
+                                )?
+                                .into_float_value(),
+                            builder
+                                .build_extract_element(
+                                    ireg,
+                                    context.i32_type().const_int(1, false),
+                                    &format!("extract_lo_{ni}"),
+                                )?
+                                .into_float_value(),
+                        );
+                        let qlo = builder
+                            .build_extract_element(
+                                qinterval,
+                                context.i32_type().const_int(0, false),
+                                &format!("q_extract_1_{ni}"),
+                            )?
+                            .into_float_value();
+                        let nval = builder
+                            .build_select(
+                                builder.build_float_compare(
+                                    FloatPredicate::UEQ,
+                                    lo,
+                                    hi,
+                                    &format!("lo_hi_compare_{ni}"),
+                                )?,
+                                float_type.const_float(0.0),
+                                builder.build_float_sub(
+                                    builder
+                                        .build_extract_element(
+                                            qinterval,
+                                            context.i32_type().const_int(1, false),
+                                            &format!("q_extract_0_{ni}"),
+                                        )?
+                                        .into_float_value(),
+                                    qlo,
+                                    &format!("nval_sub_{ni}"),
+                                )?,
+                                &format!("nval_{ni}"),
+                            )?
+                            .into_float_value();
+                        let qval = builder.build_float_rem(
+                            qlo,
+                            float_type.const_float(4.0),
+                            &format!("q_rem_val_{ni}"),
+                        )?;
+                        let sin_base = build_vec_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.sin.*",
+                            &format!("sin_base_{ni}"),
+                            ireg,
+                        )?
+                        .into_vector_value();
+                        let full_range = VectorType::const_vector(&[
+                            float_type.const_float(-1.0),
+                            float_type.const_float(1.0),
+                        ]);
+                        // Below part matches the long if/else chain in the
+                        // plain interval implementation. Go through the pairs
+                        // in reverse and accumulate a nested ternary
+                        // expression.
+                        let QN_COND_PAIRS: [[(f64, f64); 2]; 4] = [
+                            [(0.0, 1.0), (3.0, 2.0)],
+                            [(1.0, 2.0), (2.0, 1.0)],
+                            [(0.0, 3.0), (3.0, 4.0)],
+                            [(1.0, 4.0), (2.0, 3.0)],
+                        ];
+                        let out_vals = [
+                            sin_base,
+                            builder.build_shuffle_vector(
+                                sin_base,
+                                sin_base.get_type().get_undef(),
+                                VectorType::const_vector(&[
+                                    context.i32_type().const_int(1, false),
+                                    context.i32_type().const_int(0, false),
+                                ]),
+                                &format!("out_val_case_2_{ni}"),
+                            )?,
+                            builder.build_insert_element(
+                                full_range,
+                                build_vec_unary_intrinsic(
+                                    builder,
+                                    &compiler.module,
+                                    "llvm.vector.reduce.fmin.*",
+                                    &format!("case_3_min_reduce_{ni}"),
+                                    sin_base,
+                                )?
+                                .into_float_value(),
+                                context.i32_type().const_int(0, false),
+                                &format!("out_val_case_3_{ni}"),
+                            )?,
+                            builder.build_insert_element(
+                                full_range,
+                                build_vec_unary_intrinsic(
+                                    builder,
+                                    &compiler.module,
+                                    "llvm.vector.reduce.fmax.*",
+                                    &format!("case_3_min_reduce_{ni}"),
+                                    sin_base,
+                                )?
+                                .into_float_value(),
+                                context.i32_type().const_int(1, false),
+                                &format!("out_val_case_3_{ni}"),
+                            )?,
+                        ];
+                        QN_COND_PAIRS
+                            .iter()
+                            .zip(out_vals.iter())
+                            .enumerate()
+                            .try_rfold(
+                                full_range,
+                                |acc, (i, (pairs, out))| -> Result<VectorValue<'_>, Error> {
+                                    let mut conds =
+                                        [bool_type.get_poison(), bool_type.get_poison()];
+                                    for ((q, n), dst) in pairs.iter().zip(conds.iter_mut()) {
+                                        *dst = builder.build_and(
+                                            builder.build_float_compare(
+                                                FloatPredicate::UEQ,
+                                                qval,
+                                                float_type.const_float(*q),
+                                                &format!("q_compare_{q}_{ni}"),
+                                            )?,
+                                            builder.build_float_compare(
+                                                FloatPredicate::UEQ,
+                                                nval,
+                                                float_type.const_float(*n),
+                                                &format!("n_compare_{n}_{ni}"),
+                                            )?,
+                                            &format!("and_q_n_{ni}"),
+                                        )?;
+                                    }
+                                    let out = builder.build_select(
+                                        builder.build_or(
+                                            conds[0],
+                                            conds[1],
+                                            &format!("and_q_n_cond_{ni}"),
+                                        )?,
+                                        *out,
+                                        acc,
+                                        &format!("case_compare_{i}_{ni}"),
+                                    )?;
+                                    Ok(out.into_vector_value())
+                                },
+                            )?
+                            .as_basic_value_enum()
+                    }
                     Cos => todo!(),
                     Tan => todo!(),
                     Log => todo!(),
