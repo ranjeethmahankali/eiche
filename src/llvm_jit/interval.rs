@@ -87,7 +87,7 @@ impl Tree {
                     )),
                     Value::Scalar(value) => {
                         BasicValueEnum::VectorValue(VectorType::const_vector(&[
-                            float_type.const_float(-value),
+                            float_type.const_float(*value),
                             float_type.const_float(*value),
                         ]))
                     }
@@ -110,23 +110,15 @@ impl Tree {
                             &format!("arg_ptr_{}", *label),
                         )?
                     };
-                    BasicValueEnum::VectorValue(
-                        builder.build_float_mul(
-                            VectorType::const_vector(&[
-                                float_type.const_float(-1.0),
-                                float_type.const_float(1.0),
-                            ]),
-                            builder
-                                .build_load(interval_type, ptr, &format!("val_{}", *label))?
-                                .into_vector_value(),
-                            &format!("arg_{}", *label),
-                        )?,
-                    )
+                    builder.build_load(interval_type, ptr, &format!("arg_{}", *label))?
                 }
                 Unary(op, input) => match op {
                     // For negate all we need to do is swap the vector lanes.
                     Negate => BasicValueEnum::VectorValue(builder.build_shuffle_vector(
-                        regs[*input].into_vector_value(),
+                        builder.build_float_neg(
+                            regs[*input].into_vector_value(),
+                            &format!("negate_{ni}"),
+                        )?,
                         interval_type.get_undef(),
                         VectorType::const_vector(&[
                             context.i32_type().const_int(1, false),
@@ -167,26 +159,21 @@ impl Tree {
                                     ]),
                                     &format!("lt_zero_{ni}"),
                                 )?;
-                                let sqrt = build_widen_interval::<T>(
+                                let sqrt = build_vec_unary_intrinsic(
+                                    builder,
+                                    &compiler.module,
+                                    "llvm.sqrt.*",
+                                    &format!("sqrt_call_{ni}"),
                                     build_vec_unary_intrinsic(
                                         builder,
                                         &compiler.module,
-                                        "llvm.sqrt.*",
-                                        &format!("sqrt_call_{ni}"),
-                                        build_vec_unary_intrinsic(
-                                            builder,
-                                            &compiler.module,
-                                            "llvm.fabs.*",
-                                            &format!("fabs_call_{ni}"),
-                                            ireg,
-                                        )?
-                                        .into_vector_value(),
+                                        "llvm.fabs.*",
+                                        &format!("fabs_call_{ni}"),
+                                        ireg,
                                     )?
                                     .into_vector_value(),
-                                    context,
-                                    builder,
-                                    ni,
-                                )?;
+                                )?
+                                .into_vector_value();
                                 /* This a nested if. First we check the sign of
                                  * the lower bound, then we check the sign of
                                  * the upper bound in the nested select
@@ -201,16 +188,7 @@ impl Tree {
                                             &format!("first_lt_zero_{ni}"),
                                         )?
                                         .into_int_value(),
-                                    BasicValueEnum::VectorValue(builder.build_float_mul(
-                                        sqrt,
-                                        VectorType::const_vector(&[
-                                            float_type.const_float(-1.0),
-                                            float_type.const_float(1.0),
-                                        ]),
-                                        &format!("sqrt_sign_correction_{ni}"),
-                                    )?),
                                     builder.build_select(
-                                        // Check second element of vec.
                                         builder
                                             .build_extract_element(
                                                 lt_zero,
@@ -232,6 +210,7 @@ impl Tree {
                                         )?,
                                         &format!("sqrt_edge_case_{ni}"),
                                     )?,
+                                    BasicValueEnum::VectorValue(sqrt),
                                     &format!("sqrt_branching_{ni}"),
                                 )?
                             },
@@ -287,17 +266,7 @@ impl Tree {
                     &format!("output_ptr_{i}"),
                 )?
             };
-            builder.build_store(
-                dst,
-                builder.build_float_mul(
-                    VectorType::const_vector(&[
-                        float_type.const_float(-1.0),
-                        float_type.const_float(1.0),
-                    ]),
-                    reg.into_vector_value(),
-                    &format!("output_value_{i}"),
-                )?,
-            )?;
+            builder.build_store(dst, reg.into_vector_value())?;
         }
         builder.build_return(None)?;
         compiler.run_passes();
