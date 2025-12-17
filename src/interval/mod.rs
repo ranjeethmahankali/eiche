@@ -1033,5 +1033,11 @@ mod test {
         eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
         let result = eval.run().unwrap()[0];
         assert!(matches!(result, Interval::Scalar(0.0, 0.0)));
+        eval.set_value('x', Interval::from_scalar(-0.5, -0.1).unwrap());
+        let result = eval.run().unwrap()[0];
+        assert!(matches!(
+            result,
+            Interval::Scalar(-0.479425538604203, -0.09983341664682815)
+        ));
     }
 }
