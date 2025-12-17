@@ -3,8 +3,13 @@ use crate::{
     BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, llvm_jit::JitCompiler,
 };
 use inkwell::{
-    AddressSpace, FloatPredicate, OptimizationLevel, execution_engine::JitFunction,
-    types::VectorType, values::BasicValueEnum,
+    AddressSpace, FloatPredicate, OptimizationLevel,
+    builder::Builder,
+    context::Context,
+    execution_engine::JitFunction,
+    module::Module,
+    types::{IntType, VectorType},
+    values::{BasicValueEnum, VectorValue},
 };
 use std::{ffi::c_void, marker::PhantomData};
 
@@ -162,21 +167,26 @@ impl Tree {
                                     ]),
                                     &format!("lt_zero_{ni}"),
                                 )?;
-                                let sqrt = build_vec_unary_intrinsic(
-                                    builder,
-                                    &compiler.module,
-                                    "llvm.sqrt.*",
-                                    &format!("sqrt_call_{ni}"),
+                                let sqrt = build_widen_interval::<T>(
                                     build_vec_unary_intrinsic(
                                         builder,
                                         &compiler.module,
-                                        "llvm.fabs.*",
-                                        &format!("fabs_call_{ni}"),
-                                        ireg,
+                                        "llvm.sqrt.*",
+                                        &format!("sqrt_call_{ni}"),
+                                        build_vec_unary_intrinsic(
+                                            builder,
+                                            &compiler.module,
+                                            "llvm.fabs.*",
+                                            &format!("fabs_call_{ni}"),
+                                            ireg,
+                                        )?
+                                        .into_vector_value(),
                                     )?
                                     .into_vector_value(),
-                                )?
-                                .into_vector_value();
+                                    context,
+                                    builder,
+                                    ni,
+                                )?;
                                 /* This a nested if. First we check the sign of
                                  * the lower bound, then we check the sign of
                                  * the upper bound in the nested select
@@ -327,6 +337,56 @@ impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
                 .call(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast())
         }
     }
+}
+
+fn build_widen_interval<'ctx, T: NumberType>(
+    input: VectorValue<'ctx>,
+    context: &'ctx Context,
+    builder: &'ctx Builder,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let itype = T::jit_int_type(context);
+    let ftype = T::jit_type(context);
+    let bits = builder
+        .build_bit_cast(
+            input,
+            itype.vec_type(2),
+            &format!("float_to_int_cast_{index}"),
+        )?
+        .into_vector_value();
+    let shifted = builder.build_int_add(
+        bits,
+        VectorType::const_vector(&[itype.const_int(u64::MAX, true), itype.const_int(1, false)]),
+        &format!("shifted_bits_{index}"),
+    )?;
+    // NaN or +inf check
+    let keep = builder.build_or(
+        builder.build_float_compare(
+            FloatPredicate::UNO,
+            input,
+            input,
+            &format!("is_nan_{index}"),
+        )?,
+        builder.build_float_compare(
+            FloatPredicate::OEQ,
+            input,
+            VectorType::const_vector(&[
+                ftype.const_float(f64::INFINITY),
+                ftype.const_float(f64::INFINITY),
+            ]),
+            &format!("is_inf_{index}"),
+        )?,
+        &format!("bit_shift_mask_{index}"),
+    )?;
+    Ok(builder
+        .build_bit_cast(
+            builder
+                .build_select(keep, bits, shifted, "final_bits")?
+                .into_vector_value(),
+            ftype.vec_type(2),
+            "rounded",
+        )?
+        .into_vector_value())
 }
 
 #[cfg(test)]

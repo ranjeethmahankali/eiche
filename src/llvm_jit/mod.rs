@@ -8,7 +8,7 @@ use inkwell::{
     module::Module,
     passes::PassManager,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
-    types::{BasicTypeEnum, FloatType},
+    types::{BasicTypeEnum, FloatType, IntType},
     values::{BasicMetadataValueEnum, BasicValueEnum, VectorValue},
 };
 use std::{
@@ -127,6 +127,8 @@ pub trait NumberType:
 
     fn jit_type(context: &Context) -> FloatType<'_>;
 
+    fn jit_int_type(context: &Context) -> IntType<'_>;
+
     fn from_f64(val: f64) -> Self;
 
     fn min(a: Self, b: Self) -> Self;
@@ -160,6 +162,10 @@ impl NumberType for f32 {
     fn type_str() -> &'static str {
         "f32"
     }
+
+    fn jit_int_type(context: &Context) -> IntType<'_> {
+        context.i32_type()
+    }
 }
 
 impl NumberType for f64 {
@@ -185,6 +191,10 @@ impl NumberType for f64 {
 
     fn type_str() -> &'static str {
         "f64"
+    }
+
+    fn jit_int_type(context: &Context) -> IntType<'_> {
+        context.i64_type()
     }
 }
 
