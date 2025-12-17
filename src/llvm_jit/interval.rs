@@ -4,9 +4,11 @@ use crate::{
 };
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
+    builder::Builder,
+    context::Context,
     execution_engine::JitFunction,
     types::VectorType,
-    values::BasicValueEnum,
+    values::{BasicValueEnum, VectorValue},
 };
 use std::{ffi::c_void, marker::PhantomData};
 
@@ -111,16 +113,11 @@ impl Tree {
                 }
                 Unary(op, input) => match op {
                     // For negate all we need to do is swap the vector lanes.
-                    Negate => BasicValueEnum::VectorValue(builder.build_shuffle_vector(
-                        builder.build_float_neg(
-                            regs[*input].into_vector_value(),
-                            &format!("negate_{ni}"),
-                        )?,
-                        interval_type.get_undef(),
-                        VectorType::const_vector(&[
-                            context.i32_type().const_int(1, false),
-                            context.i32_type().const_int(0, false),
-                        ]),
+                    Negate => BasicValueEnum::VectorValue(build_interval_negate(
+                        regs[*input].into_vector_value(),
+                        context,
+                        builder,
+                        ni,
                         &format!("reg_{ni}"),
                     )?),
                     Sqrt => {
@@ -214,7 +211,71 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?
                     }
-                    Abs => todo!(),
+                    Abs => {
+                        let ireg = regs[*input].into_vector_value();
+                        let lt_zero = builder.build_float_compare(
+                            FloatPredicate::ULT,
+                            ireg,
+                            VectorType::const_vector(&[
+                                float_type.const_float(0.),
+                                float_type.const_float(0.),
+                            ]),
+                            &format!("lt_zero_{ni}"),
+                        )?;
+                        builder.build_select(
+                            builder
+                                .build_extract_element(
+                                    lt_zero,
+                                    context.i32_type().const_int(1, false),
+                                    &format!("first_lt_zero_{ni}"),
+                                )?
+                                .into_int_value(),
+                            // (-hi, -lo)
+                            build_interval_negate(
+                                ireg,
+                                context,
+                                builder,
+                                ni,
+                                &format!("intermediate_1_{ni}"),
+                            )?,
+                            builder
+                                .build_select(
+                                    builder
+                                        .build_extract_element(
+                                            lt_zero,
+                                            context.i32_type().const_int(0, false),
+                                            &format!("first_lt_zero_{ni}"),
+                                        )?
+                                        .into_int_value(),
+                                    // (0.0, max(abs(lo), abs(hi)))
+                                    builder.build_insert_element(
+                                        interval_type.const_zero(),
+                                        build_vec_unary_intrinsic(
+                                            builder,
+                                            &compiler.module,
+                                            "llvm.vector.reduce.fmax.*",
+                                            &format!("fmax_reduce_call_{ni}"),
+                                            build_vec_unary_intrinsic(
+                                                builder,
+                                                &compiler.module,
+                                                "llvm.fabs.*",
+                                                &format!("abs_call_{ni}"),
+                                                ireg,
+                                            )?
+                                            .into_vector_value(),
+                                        )?
+                                        .into_float_value(),
+                                        context.i32_type().const_int(1, false),
+                                        &format!("intermediate_2_{ni}"),
+                                    )?,
+                                    // (lo, hi),
+                                    ireg,
+                                    &format!("intermediate_3_{ni}"),
+                                )?
+                                .into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                    }
                     Sin => todo!(),
                     Cos => todo!(),
                     Tan => todo!(),
@@ -283,6 +344,24 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_negate<'ctx>(
+    input: VectorValue<'ctx>,
+    context: &'ctx Context,
+    builder: &'ctx Builder,
+    index: usize,
+    name: &str,
+) -> Result<VectorValue<'ctx>, Error> {
+    Ok(builder.build_shuffle_vector(
+        builder.build_float_neg(input, &format!("negate_{index}"))?,
+        input.get_type().get_undef(),
+        VectorType::const_vector(&[
+            context.i32_type().const_int(1, false),
+            context.i32_type().const_int(0, false),
+        ]),
+        name,
+    )?)
 }
 
 impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
