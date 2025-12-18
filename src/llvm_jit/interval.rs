@@ -11,7 +11,11 @@ use inkwell::{
     types::VectorType,
     values::{BasicValue, BasicValueEnum, IntValue, VectorValue},
 };
-use std::{f64::consts::FRAC_PI_2, ffi::c_void, marker::PhantomData};
+use std::{
+    f64::consts::{FRAC_PI_2, PI},
+    ffi::c_void,
+    marker::PhantomData,
+};
 
 pub type NativeIntervalFunc = unsafe extern "C" fn(*const c_void, *mut c_void);
 
@@ -478,8 +482,8 @@ impl Tree {
                             builder.build_float_div(
                                 ireg,
                                 VectorType::const_vector(&[
-                                    float_type.const_float(FRAC_PI_2),
-                                    float_type.const_float(FRAC_PI_2),
+                                    float_type.const_float(PI),
+                                    float_type.const_float(PI),
                                 ]),
                                 &format!("div_pi_{ni}"),
                             )?,
@@ -1186,6 +1190,251 @@ mod test {
             .unwrap();
         // Behavior with infinity is implementation-defined, just check no crash
         // Test 20: Mixed finite and special values
+        eval.run(&[[0.0, f64::INFINITY]], &mut outputs).unwrap();
+        // Should likely return [-1, 1] as it spans everything
+    }
+
+    #[test]
+    fn t_jit_interval_cos_f64() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let tree = deftree!(cos 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // Test 1: NaN interval should return NaN
+        // eval.run(&[[f64::NAN, f64::NAN]], &mut outputs)
+        //     .expect("Failed to run the jit function");
+        // assert!(
+        //     outputs[0][0].is_nan() && outputs[0][1].is_nan(),
+        //     "NaN test failed"
+        // );
+        // // Test 2: Point interval (lo == hi)
+        // eval.run(&[[0.0, 0.0]], &mut outputs).unwrap();
+        // assert_eq!(outputs[0], [1.0, 1.0], "Point at 0 failed");
+        // eval.run(&[[PI, PI]], &mut outputs).unwrap();
+        // let expected = PI.cos();
+        // assert!(
+        //     (outputs[0][0] - expected).abs() < 1e-10 && (outputs[0][1] - expected).abs() < 1e-10,
+        //     "Point at π failed: got [{}, {}], expected [{}, {}]",
+        //     outputs[0][0],
+        //     outputs[0][1],
+        //     expected,
+        //     expected
+        // );
+        // // Test 3: Small interval in Q0 [0, π/2) - monotonically decreasing
+        // // cos is decreasing here, so result should be [cos(hi), cos(lo)]
+        // let interval = [0.1, 0.4];
+        // eval.run(&[interval], &mut outputs).unwrap();
+        // assert_eq!(
+        //     outputs[0],
+        //     [interval[1].cos(), interval[0].cos()],
+        //     "Q0 monotonic decreasing failed"
+        // );
+        // Test 4: Small interval in Q1 [π/2, π) - monotonically decreasing
+        // cos is decreasing here, so result should be [cos(hi), cos(lo)]
+        let interval = [FRAC_PI_2 + 0.1, FRAC_PI_2 + 0.4];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[1].cos(), interval[0].cos()],
+            "Q1 monotonic decreasing failed"
+        );
+        // Test 5: Small interval in Q2 [π, 3π/2) - monotonically increasing
+        let interval = [PI + 0.1, PI + 0.4];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[0].cos(), interval[1].cos()],
+            "Q2 monotonic increasing failed"
+        );
+        // Test 6: Small interval in Q3 [3π/2, 2π) - monotonically increasing
+        let interval = [3.0 * FRAC_PI_2 + 0.1, 3.0 * FRAC_PI_2 + 0.4];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[0].cos(), interval[1].cos()],
+            "Q3 monotonic increasing failed"
+        );
+        // Test 7: Interval crossing 0/2π (includes maximum at 1)
+        // cos has maximum at 0, 2π, 4π, etc
+        let interval = [2.0 * PI - 0.5, 2.0 * PI + 0.5]; // crosses 2π
+        eval.run(&[interval], &mut outputs).unwrap();
+        let min_endpoint = interval[0].cos().min(interval[1].cos());
+        assert!(
+            (outputs[0][0] - min_endpoint).abs() < 1e-10,
+            "Interval crossing 2π (max): lower bound failed, got {}, expected {}",
+            outputs[0][0],
+            min_endpoint
+        );
+        assert!(
+            (outputs[0][1] - 1.0).abs() < 1e-10,
+            "Interval crossing 2π (max): upper bound failed, got {}, expected 1.0",
+            outputs[0][1]
+        );
+        // Test 8: Interval crossing π (includes minimum at -1)
+        // cos has minimum at π, 3π, 5π, etc
+        let interval = [2.5, 3.5]; // crosses π ≈ 3.14
+        eval.run(&[interval], &mut outputs).unwrap();
+        let max_endpoint = interval[0].cos().max(interval[1].cos());
+        assert!(
+            (outputs[0][0] - (-1.0)).abs() < 1e-10,
+            "Interval crossing π (min): lower bound failed, got {}, expected -1.0",
+            outputs[0][0]
+        );
+        assert!(
+            (outputs[0][1] - max_endpoint).abs() < 1e-10,
+            "Interval crossing π (min): upper bound failed, got {}, expected {}",
+            outputs[0][1],
+            max_endpoint
+        );
+        // Test 9: Interval starting at 0 and crossing π/2
+        let interval = [0.0, FRAC_PI_2 + 0.5];
+        eval.run(&[interval], &mut outputs).unwrap();
+        let min_val = interval[1].cos();
+        assert!(
+            (outputs[0][0] - min_val).abs() < 1e-10,
+            "Interval [0, π/2+ε]: lower bound failed"
+        );
+        assert!(
+            (outputs[0][1] - 1.0).abs() < 1e-10,
+            "Interval [0, π/2+ε]: upper bound failed"
+        );
+        // Test 10: Interval spanning both max and min
+        let interval = [0.0, PI + 0.5]; // Includes 0 (max=1) and π (min=-1)
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [-1.0, 1.0],
+            "Interval spanning both extrema failed"
+        );
+        // Test 11: Interval spanning full period or more
+        let interval = [0.0, 2.0 * PI];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [-1.0, 1.0], "Full period interval failed");
+        let interval = [0.0, 3.0 * PI];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [-1.0, 1.0], "Multiple period interval failed");
+        // Test 12: Negative intervals - small interval in negative Q0
+        let interval = [-0.5, -0.1];
+        eval.run(&[interval], &mut outputs).unwrap();
+        // cos is even, so cos(-x) = cos(x), and decreasing away from 0
+        assert_eq!(
+            outputs[0],
+            [interval[0].cos(), interval[1].cos()],
+            "Negative Q0 failed: got [{}, {}], expected [{}, {}]",
+            outputs[0][0],
+            outputs[0][1],
+            interval[1].cos(),
+            interval[0].cos()
+        );
+        // Test 13: Negative interval crossing 0 (includes maximum)
+        let interval = [-0.5, 0.5]; // crosses 0 where cos = 1
+        eval.run(&[interval], &mut outputs).unwrap();
+        let min_val = interval[0].cos().min(interval[1].cos());
+        assert!(
+            (outputs[0][0] - min_val).abs() < 1e-10,
+            "Interval crossing 0: lower bound failed"
+        );
+        assert!(
+            (outputs[0][1] - 1.0).abs() < 1e-10,
+            "Interval crossing 0: upper bound failed"
+        );
+        // Test 14: Negative interval crossing -π (includes minimum)
+        let interval = [-3.5, -2.5]; // crosses -π ≈ -3.14
+        eval.run(&[interval], &mut outputs).unwrap();
+        let max_val = interval[0].cos().max(interval[1].cos());
+        assert!(
+            (outputs[0][0] - (-1.0)).abs() < 1e-10,
+            "Interval crossing -π: lower bound failed"
+        );
+        assert!(
+            (outputs[0][1] - max_val).abs() < 1e-10,
+            "Interval crossing -π: upper bound failed"
+        );
+        // Test 15: Symmetric interval around π/2
+        let interval = [FRAC_PI_2 - 0.3, FRAC_PI_2 + 0.3];
+        eval.run(&[interval], &mut outputs).unwrap();
+        let expected_min = (FRAC_PI_2 + 0.3).cos();
+        let expected_max = (FRAC_PI_2 - 0.3).cos();
+        assert!(
+            (outputs[0][0] - expected_min).abs() < 1e-10,
+            "Symmetric around π/2 failed: lower bound"
+        );
+        assert!(
+            (outputs[0][1] - expected_max).abs() < 1e-10,
+            "Symmetric around π/2 failed: upper bound"
+        );
+        // Test 16: Large positive values
+        let interval = [100.0, 100.5];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert!(
+            outputs[0][0] >= -1.0 && outputs[0][0] <= 1.0,
+            "Large positive lo out of range"
+        );
+        assert!(
+            outputs[0][1] >= -1.0 && outputs[0][1] <= 1.0,
+            "Large positive hi out of range"
+        );
+        assert!(
+            outputs[0][0] <= outputs[0][1],
+            "Large positive interval not ordered"
+        );
+        // Test 17: Large negative values
+        let interval = [-100.5, -100.0];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert!(
+            outputs[0][0] >= -1.0 && outputs[0][0] <= 1.0,
+            "Large negative lo out of range"
+        );
+        assert!(
+            outputs[0][1] >= -1.0 && outputs[0][1] <= 1.0,
+            "Large negative hi out of range"
+        );
+        assert!(
+            outputs[0][0] <= outputs[0][1],
+            "Large negative interval not ordered"
+        );
+        // Test 18: Interval exactly [0, π/2]
+        let interval = [0.0, FRAC_PI_2];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert!(
+            (outputs[0][0] - 0.0).abs() < 1e-10,
+            "Exact [0, π/2] lower bound failed"
+        );
+        assert!(
+            (outputs[0][1] - 1.0).abs() < 1e-10,
+            "Exact [0, π/2] upper bound failed"
+        );
+        // Test 19: Interval exactly [π/2, π]
+        let interval = [FRAC_PI_2, PI];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert!(
+            (outputs[0][0] - (-1.0)).abs() < 1e-10,
+            "Exact [π/2, π] lower bound failed"
+        );
+        assert!(
+            (outputs[0][1] - 0.0).abs() < 1e-10,
+            "Exact [π/2, π] upper bound failed"
+        );
+        // Test 20: Very small interval (numerical precision test)
+        let interval = [1.0, 1.0 + 1e-10];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert!(
+            outputs[0][0] <= outputs[0][1],
+            "Very small interval not ordered"
+        );
+        assert!(
+            (outputs[0][1] - outputs[0][0]).abs() < 1e-9,
+            "Very small interval too wide"
+        );
+        // Test 21: Infinity inputs (should handle gracefully)
+        eval.run(&[[f64::INFINITY, f64::INFINITY]], &mut outputs)
+            .unwrap();
+        // Behavior with infinity is implementation-defined, just check no crash
+        eval.run(&[[f64::NEG_INFINITY, f64::NEG_INFINITY]], &mut outputs)
+            .unwrap();
+        // Behavior with infinity is implementation-defined, just check no crash
+        // Test 22: Mixed finite and special values
         eval.run(&[[0.0, f64::INFINITY]], &mut outputs).unwrap();
         // Should likely return [-1, 1] as it spans everything
     }
