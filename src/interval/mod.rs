@@ -1037,4 +1037,139 @@ mod test {
             Interval::Scalar(-0.479425538604203, -0.09983341664682815)
         ));
     }
+
+    #[test]
+    fn t_interval_cos() {
+        let tree = deftree!(cos 'x).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Test 1: Point interval at 0
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        let result = eval.run().unwrap()[0];
+        assert!(
+            matches!(result, Interval::Scalar(1.0, 1.0)),
+            "Point at 0 failed"
+        );
+        // Test 2: Point interval at π
+        eval.set_value('x', Interval::from_scalar(PI, PI).unwrap());
+        let result = eval.run().unwrap()[0];
+        let expected = PI.cos();
+        if let Interval::Scalar(lo, hi) = result {
+            assert!(
+                (lo - expected).abs() < 1e-10 && (hi - expected).abs() < 1e-10,
+                "Point at π failed"
+            );
+        }
+        // Test 3: Small interval in Q0 [0, π/2) - monotonically decreasing
+        eval.set_value('x', Interval::from_scalar(0.1, 0.4).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 0.4f64.cos(), 1e-10);
+        assert_float_eq!(result.1, 0.1f64.cos(), 1e-10);
+        // Test 4: Small interval in Q1 [π/2, π) - monotonically decreasing
+        eval.set_value(
+            'x',
+            Interval::from_scalar(FRAC_PI_2 + 0.1, FRAC_PI_2 + 0.4).unwrap(),
+        );
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (FRAC_PI_2 + 0.4).cos(), 1e-10);
+        assert_float_eq!(result.1, (FRAC_PI_2 + 0.1).cos(), 1e-10);
+        // Test 5: Small interval in Q2 [π, 3π/2) - monotonically increasing
+        eval.set_value('x', Interval::from_scalar(PI + 0.1, PI + 0.4).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (PI + 0.1).cos(), 1e-10);
+        assert_float_eq!(result.1, (PI + 0.4).cos(), 1e-10);
+        // Test 6: Small interval in Q3 [3π/2, 2π) - monotonically increasing
+        eval.set_value(
+            'x',
+            Interval::from_scalar(3.0 * FRAC_PI_2 + 0.1, 3.0 * FRAC_PI_2 + 0.4).unwrap(),
+        );
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (3.0 * FRAC_PI_2 + 0.1).cos(), 1e-10);
+        assert_float_eq!(result.1, (3.0 * FRAC_PI_2 + 0.4).cos(), 1e-10);
+        // Test 7: Interval crossing 0/2π (includes maximum at 1)
+        eval.set_value(
+            'x',
+            Interval::from_scalar(2.0 * PI - 0.5, 2.0 * PI + 0.5).unwrap(),
+        );
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        let min_endpoint = (2.0 * PI - 0.5).cos().min((2.0 * PI + 0.5).cos());
+        assert_float_eq!(result.0, min_endpoint, 1e-10);
+        assert_float_eq!(result.1, 1.0, 1e-10);
+        // Test 8: Interval crossing π (includes minimum at -1)
+        eval.set_value('x', Interval::from_scalar(2.5, 3.5).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        let max_endpoint = 2.5f64.cos().max(3.5f64.cos());
+        assert_float_eq!(result.0, -1.0, 1e-10);
+        assert_float_eq!(result.1, max_endpoint, 1e-10);
+        // Test 9: Interval starting at 0 and crossing π/2
+        eval.set_value('x', Interval::from_scalar(0.0, FRAC_PI_2 + 0.5).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        let min_val = (FRAC_PI_2 + 0.5).cos();
+        assert_float_eq!(result.0, min_val, 1e-10);
+        assert_float_eq!(result.1, 1.0, 1e-10);
+        // Test 10: Interval spanning both max and min
+        eval.set_value('x', Interval::from_scalar(0.0, PI + 0.5).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, -1.0, 1e-10);
+        assert_float_eq!(result.1, 1.0, 1e-10);
+        // Test 11: Full period
+        eval.set_value('x', Interval::from_scalar(0.0, 2.0 * PI).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, -1.0, 1e-10);
+        assert_float_eq!(result.1, 1.0, 1e-10);
+        // Test 12: Multiple periods
+        eval.set_value('x', Interval::from_scalar(0.0, 3.0 * PI).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, -1.0, 1e-10);
+        assert_float_eq!(result.1, 1.0, 1e-10);
+        // Test 13: Negative intervals - small interval in negative Q0
+        eval.set_value('x', Interval::from_scalar(-0.5, -0.1).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        // cos is even, so cos(-x) = cos(x), and decreasing away from 0
+        assert_float_eq!(result.1, (-0.1f64).cos(), 1e-10);
+        assert_float_eq!(result.0, (-0.5f64).cos(), 1e-10);
+        // Test 14: Negative interval crossing 0 (includes maximum)
+        eval.set_value('x', Interval::from_scalar(-0.5, 0.5).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        let min_val = (-0.5f64).cos().min(0.5f64.cos());
+        assert_float_eq!(result.0, min_val, 1e-10);
+        assert_float_eq!(result.1, 1.0, 1e-10);
+        // Test 15: Negative interval crossing -π (includes minimum)
+        eval.set_value('x', Interval::from_scalar(-3.5, -2.5).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        let max_val = (-3.5f64).cos().max((-2.5f64).cos());
+        assert_float_eq!(result.0, -1.0, 1e-10);
+        assert_float_eq!(result.1, max_val, 1e-10);
+        // Test 16: Symmetric interval around π/2
+        eval.set_value(
+            'x',
+            Interval::from_scalar(FRAC_PI_2 - 0.3, FRAC_PI_2 + 0.3).unwrap(),
+        );
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        let expected_min = (FRAC_PI_2 + 0.3).cos();
+        let expected_max = (FRAC_PI_2 - 0.3).cos();
+        assert_float_eq!(result.0, expected_min, 1e-10);
+        assert_float_eq!(result.1, expected_max, 1e-10);
+        // Test 17: Interval exactly [0, π/2]
+        eval.set_value('x', Interval::from_scalar(0.0, FRAC_PI_2).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 0.0, 1e-10);
+        assert_float_eq!(result.1, 1.0, 1e-10);
+        // Test 18: Interval exactly [π/2, π]
+        eval.set_value('x', Interval::from_scalar(FRAC_PI_2, PI).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, -1.0, 1e-10);
+        assert_float_eq!(result.1, 0.0, 1e-10);
+        // Test 19: Very small interval (numerical precision)
+        eval.set_value('x', Interval::from_scalar(1.0, 1.0 + 1e-10).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(result.0 <= result.1, "Very small interval not ordered");
+        assert!(
+            (result.1 - result.0).abs() < 1e-9,
+            "Very small interval too wide"
+        );
+        // Test 20: NaN interval
+        eval.set_value('x', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(result.0.is_nan() && result.1.is_nan(), "NaN test failed");
+    }
 }
