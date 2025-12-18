@@ -1,10 +1,10 @@
-use super::{JitContext, NumberType, build_vec_unary_intrinsic};
+use super::{JitContext, NumberType, build_float_unary_intrinsic, build_vec_unary_intrinsic};
 use crate::{
     BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, llvm_jit::JitCompiler,
 };
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
-    builder::{Builder, BuilderError},
+    builder::Builder,
     context::Context,
     execution_engine::JitFunction,
     module::Module,
@@ -12,18 +12,6 @@ use inkwell::{
     values::{BasicValue, BasicValueEnum, IntValue, VectorValue},
 };
 use std::{f64::consts::FRAC_PI_2, ffi::c_void, marker::PhantomData};
-
-#[cfg(target_arch = "aarch64")]
-use std::arch::aarch64::*;
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub type IntervalType64 = __m128d;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub type IntervalType32 = __m128;
 
 pub type NativeIntervalFunc = unsafe extern "C" fn(*const c_void, *mut c_void);
 
@@ -420,7 +408,7 @@ impl Tree {
                                     builder,
                                     &compiler.module,
                                     "llvm.vector.reduce.fmax.*",
-                                    &format!("case_3_min_reduce_{ni}"),
+                                    &format!("case_3_max_reduce_{ni}"),
                                     sin_base,
                                 )?
                                 .into_float_value(),
@@ -480,7 +468,195 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?
                     }
-                    Cos => todo!(),
+                    Cos => {
+                        let ireg = regs[*input].into_vector_value();
+                        let qinterval = build_vec_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.floor.*",
+                            &format!("intermediate_floor_{ni}"),
+                            builder.build_float_div(
+                                ireg,
+                                VectorType::const_vector(&[
+                                    float_type.const_float(FRAC_PI_2),
+                                    float_type.const_float(FRAC_PI_2),
+                                ]),
+                                &format!("div_pi_{ni}"),
+                            )?,
+                        )?
+                        .into_vector_value();
+                        let (lo, hi) = (
+                            builder
+                                .build_extract_element(
+                                    ireg,
+                                    context.i32_type().const_int(0, false),
+                                    &format!("extract_lo_{ni}"),
+                                )?
+                                .into_float_value(),
+                            builder
+                                .build_extract_element(
+                                    ireg,
+                                    context.i32_type().const_int(1, false),
+                                    &format!("extract_lo_{ni}"),
+                                )?
+                                .into_float_value(),
+                        );
+                        let qlo = builder
+                            .build_extract_element(
+                                qinterval,
+                                context.i32_type().const_int(0, false),
+                                &format!("q_extract_1_{ni}"),
+                            )?
+                            .into_float_value();
+                        let nval = builder
+                            .build_select(
+                                builder.build_float_compare(
+                                    FloatPredicate::UEQ,
+                                    lo,
+                                    hi,
+                                    &format!("lo_hi_compare_{ni}"),
+                                )?,
+                                float_type.const_float(0.0),
+                                builder.build_float_sub(
+                                    builder
+                                        .build_extract_element(
+                                            qinterval,
+                                            context.i32_type().const_int(1, false),
+                                            &format!("q_extract_0_{ni}"),
+                                        )?
+                                        .into_float_value(),
+                                    qlo,
+                                    &format!("nval_sub_{ni}"),
+                                )?,
+                                &format!("nval_{ni}"),
+                            )?
+                            .into_float_value();
+                        let qval = builder
+                            .build_select(
+                                builder.build_float_compare(
+                                    FloatPredicate::UEQ,
+                                    qlo,
+                                    builder.build_float_mul(
+                                        float_type.const_float(2.0),
+                                        build_float_unary_intrinsic(
+                                            builder,
+                                            &compiler.module,
+                                            "llvm.floor.*",
+                                            &format!("intermediate_qval_floor_{ni}"),
+                                            builder.build_float_mul(
+                                                qlo,
+                                                float_type.const_float(0.5),
+                                                &format!("qval_half_mul_{ni}"),
+                                            )?,
+                                        )?
+                                        .into_float_value(),
+                                        &format!("qval_doubling_{ni}"),
+                                    )?,
+                                    &format!("qval_comparison_{ni}"),
+                                )?,
+                                float_type.const_float(0.0),
+                                float_type.const_float(1.0),
+                                &format!("qval_{ni}"),
+                            )?
+                            .into_float_value();
+                        let q_zero = builder.build_float_compare(
+                            FloatPredicate::UEQ,
+                            qval,
+                            float_type.const_float(0.0),
+                            &format!("qval_is_zero_{ni}"),
+                        )?;
+                        let full_range = VectorType::const_vector(&[
+                            float_type.const_float(-1.0),
+                            float_type.const_float(1.0),
+                        ]);
+                        let cos_base = build_vec_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.cos.*",
+                            &format!("sin_base_{ni}"),
+                            ireg,
+                        )?
+                        .into_vector_value();
+                        let out = builder.build_select(
+                            builder.build_float_compare(
+                                FloatPredicate::UEQ,
+                                nval,
+                                float_type.const_float(0.0),
+                                &format!("nval_zero_compare_{ni}"),
+                            )?,
+                            builder
+                                .build_select(
+                                    q_zero,
+                                    builder.build_shuffle_vector(
+                                        cos_base,
+                                        cos_base.get_type().get_undef(),
+                                        VectorType::const_vector(&[
+                                            context.i32_type().const_int(1, false),
+                                            context.i32_type().const_int(0, false),
+                                        ]),
+                                        &format!("out_val_case_2_{ni}"),
+                                    )?,
+                                    cos_base,
+                                    &format!("edge_case_1_{ni}"),
+                                )?
+                                .into_vector_value(),
+                            builder
+                                .build_select(
+                                    builder.build_float_compare(
+                                        FloatPredicate::ULE,
+                                        nval,
+                                        float_type.const_float(1.0),
+                                        &format!("nval_one_compare_{ni}"),
+                                    )?,
+                                    builder
+                                        .build_select(
+                                            q_zero,
+                                            builder.build_insert_element(
+                                                full_range,
+                                                build_vec_unary_intrinsic(
+                                                    builder,
+                                                    &compiler.module,
+                                                    "llvm.vector.reduce.fmax.*",
+                                                    &format!("case_3_max_reduce_{ni}"),
+                                                    cos_base,
+                                                )?
+                                                .into_float_value(),
+                                                context.i32_type().const_int(1, false),
+                                                &format!("out_val_case_2_{ni}"),
+                                            )?,
+                                            builder.build_insert_element(
+                                                full_range,
+                                                build_vec_unary_intrinsic(
+                                                    builder,
+                                                    &compiler.module,
+                                                    "llvm.vector.reduce.fmin.*",
+                                                    &format!("case_3_min_reduce_{ni}"),
+                                                    cos_base,
+                                                )?
+                                                .into_float_value(),
+                                                context.i32_type().const_int(0, false),
+                                                &format!("out_val_case_3_{ni}"),
+                                            )?,
+                                            &format!("nval_cases_{ni}"),
+                                        )?
+                                        .into_vector_value(),
+                                    full_range,
+                                    &format!("out_val_edge_case_0_{ni}"),
+                                )?
+                                .into_vector_value(),
+                            &format!("out_val_{ni}"),
+                        )?;
+                        builder.build_select(
+                            build_check_interval_empty(ireg, builder, &compiler.module, ni)?,
+                            VectorType::const_vector(&[
+                                float_type.const_float(f64::NAN),
+                                float_type.const_float(f64::NAN),
+                            ])
+                            .as_basic_value_enum(),
+                            out,
+                            &format!("reg_{ni}"),
+                        )?
+                    }
                     Tan => todo!(),
                     Log => todo!(),
                     Exp => todo!(),
