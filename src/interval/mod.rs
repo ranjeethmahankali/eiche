@@ -231,8 +231,8 @@ impl ValueType for Interval {
                     }
                 }
                 Cos => {
-                    if hi < lo {
-                        Ok(Interval::Scalar(lo, hi))
+                    if hi.is_nan() && lo.is_nan() {
+                        Ok(Interval::Scalar(f64::NAN, f64::NAN))
                     } else {
                         let (qlo, qhi) = ((lo / PI).floor(), (hi / PI).floor());
                         let n = if lo == hi { 0.0 } else { qhi - qlo };
