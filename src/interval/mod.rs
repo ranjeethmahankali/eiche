@@ -234,7 +234,7 @@ impl ValueType for Interval {
                 Cos => {
                     let (qlo, qhi) = ((lo / PI).floor(), (hi / PI).floor());
                     let n = if lo == hi { 0.0 } else { qhi - qlo };
-                    let q = if 2.0 * (qlo / 2.0).floor() == qlo {
+                    let q = if 2.0 * (qlo * 0.5).floor() == qlo {
                         0.0
                     } else {
                         1.0
