@@ -9,7 +9,7 @@ use inkwell::{
     passes::PassManager,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
     types::{BasicTypeEnum, FloatType, IntType},
-    values::{BasicMetadataValueEnum, BasicValueEnum, VectorValue},
+    values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, VectorValue},
 };
 use std::{
     cell::RefCell,
@@ -213,6 +213,63 @@ fn build_vec_unary_intrinsic<'ctx>(
         .build_call(
             intrinsic_fn,
             &[BasicMetadataValueEnum::VectorValue(input)],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+fn build_float_unary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &str,
+    input: FloatValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(module, &[BasicTypeEnum::FloatType(input.get_type())])
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[BasicMetadataValueEnum::FloatValue(input)],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+fn build_float_binary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &str,
+    lhs: BasicValueEnum<'ctx>,
+    rhs: BasicValueEnum<'ctx>,
+    float_type: FloatType<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(
+            module,
+            &[
+                BasicTypeEnum::FloatType(float_type),
+                BasicTypeEnum::FloatType(float_type),
+            ],
+        )
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[
+                BasicMetadataValueEnum::FloatValue(lhs.into_float_value()),
+                BasicMetadataValueEnum::FloatValue(rhs.into_float_value()),
+            ],
             call_name,
         )
         .map_err(|_| Error::CannotCompileIntrinsic(name))?

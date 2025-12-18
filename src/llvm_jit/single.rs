@@ -1,13 +1,11 @@
-use super::{JitCompiler, JitContext, NumberType};
+use super::{
+    JitCompiler, JitContext, NumberType, build_float_binary_intrinsic, build_float_unary_intrinsic,
+};
 use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
-    builder::Builder,
     execution_engine::JitFunction,
-    intrinsics::Intrinsic,
-    module::Module,
-    types::{BasicTypeEnum, FloatType},
-    values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum},
+    values::{BasicValue, BasicValueEnum},
 };
 use std::{ffi::c_void, marker::PhantomData};
 
@@ -123,32 +121,28 @@ impl Tree {
                         &compiler.module,
                         "llvm.sqrt.*",
                         "sqrt_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Abs => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.fabs.*",
                         "abs_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Sin => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.sin.*",
                         "sin_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Cos => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.cos.*",
                         "cos_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Tan => {
                         let sin = build_float_unary_intrinsic(
@@ -156,16 +150,14 @@ impl Tree {
                             &compiler.module,
                             "llvm.sin.*",
                             "sin_call",
-                            regs[*input],
-                            float_type,
+                            regs[*input].into_float_value(),
                         )?;
                         let cos = build_float_unary_intrinsic(
                             builder,
                             &compiler.module,
                             "llvm.cos.*",
                             "cos_call",
-                            regs[*input],
-                            float_type,
+                            regs[*input].into_float_value(),
                         )?;
                         builder
                             .build_float_div(
@@ -180,24 +172,21 @@ impl Tree {
                         &compiler.module,
                         "llvm.log.*",
                         "log_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Exp => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.exp.*",
                         "exp_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Floor => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.floor.*",
                         "floor_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Not => builder
                         .build_not(regs[*input].into_int_value(), &format!("val_{ni}"))?
@@ -461,64 +450,6 @@ where
             (self.func)(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast());
         }
     }
-}
-
-fn build_float_unary_intrinsic<'ctx>(
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    name: &'static str,
-    call_name: &'static str,
-    input: BasicValueEnum<'ctx>,
-    float_type: FloatType<'ctx>,
-) -> Result<BasicValueEnum<'ctx>, Error> {
-    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
-    let intrinsic_fn = intrinsic
-        .get_declaration(module, &[BasicTypeEnum::FloatType(float_type)])
-        .ok_or(Error::CannotCompileIntrinsic(name))?;
-    builder
-        .build_call(
-            intrinsic_fn,
-            &[BasicMetadataValueEnum::FloatValue(input.into_float_value())],
-            call_name,
-        )
-        .map_err(|_| Error::CannotCompileIntrinsic(name))?
-        .try_as_basic_value()
-        .left()
-        .ok_or(Error::CannotCompileIntrinsic(name))
-}
-
-fn build_float_binary_intrinsic<'ctx>(
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    name: &'static str,
-    call_name: &'static str,
-    lhs: BasicValueEnum<'ctx>,
-    rhs: BasicValueEnum<'ctx>,
-    float_type: FloatType<'ctx>,
-) -> Result<BasicValueEnum<'ctx>, Error> {
-    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
-    let intrinsic_fn = intrinsic
-        .get_declaration(
-            module,
-            &[
-                BasicTypeEnum::FloatType(float_type),
-                BasicTypeEnum::FloatType(float_type),
-            ],
-        )
-        .ok_or(Error::CannotCompileIntrinsic(name))?;
-    builder
-        .build_call(
-            intrinsic_fn,
-            &[
-                BasicMetadataValueEnum::FloatValue(lhs.into_float_value()),
-                BasicMetadataValueEnum::FloatValue(rhs.into_float_value()),
-            ],
-            call_name,
-        )
-        .map_err(|_| Error::CannotCompileIntrinsic(name))?
-        .try_as_basic_value()
-        .left()
-        .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
 #[cfg(test)]
