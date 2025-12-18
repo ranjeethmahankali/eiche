@@ -4,11 +4,12 @@ use crate::{
 };
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
-    builder::Builder,
+    builder::{Builder, BuilderError},
     context::Context,
     execution_engine::JitFunction,
+    module::Module,
     types::VectorType,
-    values::{BasicValue, BasicValueEnum, VectorValue},
+    values::{BasicValue, BasicValueEnum, IntValue, VectorValue},
 };
 use std::{f64::consts::FRAC_PI_2, ffi::c_void, marker::PhantomData};
 
@@ -141,19 +142,7 @@ impl Tree {
                         let ireg = regs[*input].into_vector_value();
                         builder.build_select(
                             // Check each lane for NaN, then reduce to check if this interval is empty.
-                            build_vec_unary_intrinsic(
-                                builder,
-                                &compiler.module,
-                                "llvm.vector.reduce.and.*",
-                                &format!("reduce_call_{ni}"),
-                                builder.build_float_compare(
-                                    FloatPredicate::UNO,
-                                    ireg,
-                                    ireg,
-                                    &format!("check_empty_{ni}"),
-                                )?,
-                            )?
-                            .into_int_value(),
+                            build_check_interval_empty(ireg, builder, &compiler.module, ni)?,
                             // The interval is empty, so return an emtpy (NaN) interval.
                             VectorType::const_vector(&[
                                 float_type.const_float(f64::NAN),
@@ -481,19 +470,7 @@ impl Tree {
                             )?
                             .as_basic_value_enum();
                         builder.build_select(
-                            build_vec_unary_intrinsic(
-                                builder,
-                                &compiler.module,
-                                "llvm.vector.reduce.and.*",
-                                &format!("reduce_call_{ni}"),
-                                builder.build_float_compare(
-                                    FloatPredicate::UNO,
-                                    ireg,
-                                    ireg,
-                                    &format!("check_empty_{ni}"),
-                                )?,
-                            )?
-                            .into_int_value(),
+                            build_check_interval_empty(ireg, builder, &compiler.module, ni)?,
                             VectorType::const_vector(&[
                                 float_type.const_float(f64::NAN),
                                 float_type.const_float(f64::NAN),
@@ -588,6 +565,27 @@ fn build_interval_negate<'ctx>(
         ]),
         name,
     )?)
+}
+
+fn build_check_interval_empty<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    index: usize,
+) -> Result<IntValue<'ctx>, Error> {
+    Ok(build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("reduce_call_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UNO,
+            input,
+            input,
+            &format!("check_empty_{index}"),
+        )?,
+    )?
+    .into_int_value())
 }
 
 impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
