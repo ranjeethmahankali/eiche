@@ -230,36 +230,33 @@ impl ValueType for Interval {
                         Ok(Interval::Scalar(-1.0, 1.0))
                     }
                 }
+                Cos if hi.is_nan() && lo.is_nan() => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
                 Cos => {
-                    if hi.is_nan() && lo.is_nan() {
-                        Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                    let (qlo, qhi) = ((lo / PI).floor(), (hi / PI).floor());
+                    let n = if lo == hi { 0.0 } else { qhi - qlo };
+                    let q = if 2.0 * (qlo / 2.0).floor() == qlo {
+                        0.0
                     } else {
-                        let (qlo, qhi) = ((lo / PI).floor(), (hi / PI).floor());
-                        let n = if lo == hi { 0.0 } else { qhi - qlo };
-                        let q = if 2.0 * (qlo / 2.0).floor() == qlo {
-                            0.0
+                        1.0
+                    };
+                    if n == 0.0 {
+                        if q == 0.0 {
+                            // monotonically decreasing
+                            Ok(Interval::Scalar(hi.cos(), lo.cos()))
                         } else {
-                            1.0
-                        };
-                        if n == 0.0 {
-                            if q == 0.0 {
-                                // monotonically decreasing
-                                Ok(Interval::Scalar(hi.cos(), lo.cos()))
-                            } else {
-                                // monotonically increasing
-                                Ok(Interval::Scalar(lo.cos(), hi.cos()))
-                            }
-                        } else if n <= 1.0 {
-                            if q == 0.0 {
-                                // decreasing, then increasing
-                                Ok(Interval::Scalar(-1.0, lo.cos().max(hi.cos())))
-                            } else {
-                                // increasing, then decreasing
-                                Ok(Interval::Scalar(lo.cos().min(hi.cos()), 1.0))
-                            }
-                        } else {
-                            Ok(Interval::Scalar(-1.0, 1.0))
+                            // monotonically increasing
+                            Ok(Interval::Scalar(lo.cos(), hi.cos()))
                         }
+                    } else if n <= 1.0 {
+                        if q == 0.0 {
+                            // decreasing, then increasing
+                            Ok(Interval::Scalar(-1.0, lo.cos().max(hi.cos())))
+                        } else {
+                            // increasing, then decreasing
+                            Ok(Interval::Scalar(lo.cos().min(hi.cos()), 1.0))
+                        }
+                    } else {
+                        Ok(Interval::Scalar(-1.0, 1.0))
                     }
                 }
                 Tan => {
