@@ -747,9 +747,70 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?
                     }
-                    Log => todo!(),
-                    Exp => todo!(),
-                    Floor => todo!(),
+                    Log => {
+                        let ireg = regs[*input].into_vector_value();
+                        let is_neg = builder.build_float_compare(
+                            FloatPredicate::ULE,
+                            ireg,
+                            interval_type.const_zero(),
+                            &format!("log_neg_compare_{ni}"),
+                        )?;
+                        let log_base = build_vec_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.log.*",
+                            "log_call",
+                            regs[*input].into_vector_value(),
+                        )?
+                        .into_vector_value();
+                        builder.build_select(
+                            builder
+                                .build_extract_element(
+                                    is_neg,
+                                    context.i32_type().const_int(1, false),
+                                    &format!("log_hi_neg_check_{ni}"),
+                                )?
+                                .into_int_value(),
+                            VectorType::const_vector(&[
+                                float_type.const_float(f64::NAN),
+                                float_type.const_float(f64::NAN),
+                            ]),
+                            builder
+                                .build_select(
+                                    builder
+                                        .build_extract_element(
+                                            is_neg,
+                                            context.i32_type().const_int(0, false),
+                                            &format!("log_hi_neg_check_{ni}"),
+                                        )?
+                                        .into_int_value(),
+                                    builder.build_insert_element(
+                                        log_base,
+                                        float_type.const_float(f64::NEG_INFINITY),
+                                        context.i32_type().const_int(0, false),
+                                        &format!("log_range_across_zero_{ni}"),
+                                    )?,
+                                    log_base,
+                                    &format!("log_simple_case_{ni}"),
+                                )?
+                                .into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                    }
+                    Exp => build_vec_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.exp.*",
+                        &format!("exp_call_{ni}"),
+                        regs[*input].into_vector_value(),
+                    )?,
+                    Floor => build_vec_unary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.floor.*",
+                        &format!("floor_call_{ni}"),
+                        regs[*input].into_vector_value(),
+                    )?,
                     Not => todo!(),
                 },
                 Binary(op, _lhs, _rhs) => match op {
@@ -1630,5 +1691,64 @@ mod test {
             .unwrap();
         eval.run(&[[f64::NEG_INFINITY, f64::NEG_INFINITY]], &mut outputs)
             .unwrap();
+    }
+
+    #[test]
+    fn t_jit_interval_log_f64() {
+        let tree = deftree!(log 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // NaN interval
+        eval.run(&[[f64::NAN, f64::NAN]], &mut outputs).unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        // Both bounds negative (should return NaN)
+        for interval in [[-5.0, -1.0], [-10.0, -0.001]] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        }
+        // Upper bound at or below 0 (should return NaN)
+        for interval in [[1.0, 0.0], [1.0, -1.0], [0.0, 0.0]] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        }
+        // Lower bound negative/zero, upper positive (should return [NEG_INFINITY, ln(hi)])
+        for (interval, expected_hi) in [
+            ([-2.0, 3.0], 3.0f64.ln()),
+            ([-0.5, 2.0], 2.0f64.ln()),
+            ([0.0, 5.0], 5.0f64.ln()),
+        ] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert_eq!(outputs[0][0], f64::NEG_INFINITY);
+            assert!((outputs[0][1] - expected_hi).abs() < 1e-10);
+        }
+        // Both bounds positive (normal case)
+        for interval in [[0.5, 2.0], [1.0, 10.0], [2.0, 8.0], [0.001, 0.1]] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert!((outputs[0][0] - interval[0].ln()).abs() < 1e-10);
+            assert!((outputs[0][1] - interval[1].ln()).abs() < 1e-10);
+        }
+        // Point intervals
+        eval.run(&[[1.0, 1.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 0.0]);
+        eval.run(&[[std::f64::consts::E, std::f64::consts::E]], &mut outputs)
+            .unwrap();
+        assert!((outputs[0][0] - 1.0).abs() < 1e-10);
+        // Interval containing 1 (ln(1) = 0)
+        eval.run(&[[0.5, 2.0]], &mut outputs).unwrap();
+        assert!(outputs[0][0] < 0.0 && outputs[0][1] > 0.0);
+        // Very small positive values (large negative results)
+        eval.run(&[[1e-10, 1e-8]], &mut outputs).unwrap();
+        assert!(outputs[0][0] < -18.0 && outputs[0][1] < -16.0);
+        // Very large positive values
+        eval.run(&[[1e8, 1e10]], &mut outputs).unwrap();
+        assert!(outputs[0][0] > 18.0 && outputs[0][1] > 23.0);
+        // Interval very close to 0
+        eval.run(&[[1e-100, 1e-50]], &mut outputs).unwrap();
+        assert!(outputs[0][0] < -230.0 && outputs[0][1] < -115.0);
+        // Infinity upper bound
+        eval.run(&[[1.0, f64::INFINITY]], &mut outputs).unwrap();
+        assert_eq!(outputs[0][0], 0.0);
+        assert_eq!(outputs[0][1], f64::INFINITY);
     }
 }

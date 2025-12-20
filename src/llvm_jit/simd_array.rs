@@ -1282,14 +1282,14 @@ impl Tree {
                         builder,
                         &compiler.module,
                         "llvm.exp.*",
-                        "exp_call",
+                        &format!("exp_call_{ni}"),
                         regs[*input].into_vector_value(),
                     )?,
                     Floor => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.floor.*",
-                        "floor_call",
+                        &format!("floor_call_{ni}"),
                         regs[*input].into_vector_value(),
                     )?,
                     Not => builder
