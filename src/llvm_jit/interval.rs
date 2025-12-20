@@ -8,7 +8,7 @@ use inkwell::{
     context::Context,
     execution_engine::JitFunction,
     module::Module,
-    types::VectorType,
+    types::{IntType, VectorType},
     values::{BasicValue, BasicValueEnum, FloatValue, IntValue, VectorValue},
 };
 use std::{
@@ -836,7 +836,15 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?
                         .as_basic_value_enum(),
-                    Multiply => todo!(),
+                    Multiply => build_interval_mul(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        context.i32_type(),
+                        ni,
+                    )?
+                    .as_basic_value_enum(),
                     Divide => todo!(),
                     Pow => todo!(),
                     Min => todo!(),
@@ -893,6 +901,63 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_mul<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let straight = builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?;
+    let cross = builder.build_float_mul(
+        lhs,
+        builder.build_shuffle_vector(
+            rhs,
+            rhs.get_type().get_undef(),
+            VectorType::const_vector(&[i32_type.const_int(1, false), i32_type.const_int(0, false)]),
+            &format!("mul_rhs_shuffled_{index}"),
+        )?,
+        &format!("mul_cross_{index}"),
+    )?;
+    let concat = builder.build_shuffle_vector(
+        straight,
+        cross,
+        VectorType::const_vector(&[
+            i32_type.const_int(0, false),
+            i32_type.const_int(1, false),
+            i32_type.const_int(2, false),
+            i32_type.const_int(3, false),
+        ]),
+        &format!("mul_concat_candidates_{index}"),
+    )?;
+    Ok(builder.build_insert_element(
+        builder.build_insert_element(
+            lhs.get_type().const_zero(),
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmax.*",
+                &format!("mul_fmax_reduce_call_{index}"),
+                concat,
+            )?
+            .into_float_value(),
+            i32_type.const_int(1, false),
+            &format!("mul_insert_max_{index}"),
+        )?,
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.fmin.*",
+            &format!("mul_fmin_reduce_call_{index}"),
+            concat,
+        )?
+        .into_float_value(),
+        i32_type.const_int(0, false),
+        &format!("mul_insert_min_{index}"),
+    )?)
 }
 
 fn build_interval_negate<'ctx>(
@@ -1898,5 +1963,79 @@ mod test {
         )
         .unwrap();
         assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+    }
+
+    #[test]
+    fn t_jit_interval_multiply_f64() {
+        let tree = deftree!(* 'x 'y).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "xy").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // Helper to compute expected result
+        let mul = |x: [f64; 2], y: [f64; 2]| -> [f64; 2] {
+            let products = [x[0] * y[0], x[0] * y[1], x[1] * y[0], x[1] * y[1]];
+            [
+                products.iter().copied().fold(f64::INFINITY, f64::min),
+                products.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            ]
+        };
+        // NaN intervals
+        eval.run(&[[f64::NAN, f64::NAN], [1.0, 2.0]], &mut outputs)
+            .unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        eval.run(&[[1.0, 2.0], [f64::NAN, f64::NAN]], &mut outputs)
+            .unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        // Both positive, both negative, and mixed signs
+        for (x, y) in [
+            ([2.0, 3.0], [4.0, 5.0]),
+            ([0.5, 1.5], [2.0, 3.0]),
+            ([-3.0, -2.0], [-5.0, -4.0]),
+            ([2.0, 3.0], [-5.0, -4.0]),
+            ([-3.0, -2.0], [4.0, 5.0]),
+        ] {
+            eval.run(&[x, y], &mut outputs).unwrap();
+            assert_eq!(outputs[0], mul(x, y));
+        }
+        // Intervals containing zero
+        for (x, y) in [
+            ([-2.0, 3.0], [4.0, 5.0]),
+            ([2.0, 3.0], [-5.0, 4.0]),
+            ([-2.0, 3.0], [-5.0, 4.0]),
+            ([0.0, 3.0], [2.0, 5.0]),
+            ([-3.0, 0.0], [2.0, 5.0]),
+        ] {
+            eval.run(&[x, y], &mut outputs).unwrap();
+            assert_eq!(outputs[0], mul(x, y));
+        }
+        // Zero intervals
+        eval.run(&[[0.0, 0.0], [0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 0.0]);
+        eval.run(&[[0.0, 0.0], [5.0, 10.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 0.0]);
+        eval.run(&[[5.0, 10.0], [0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 0.0]);
+        // With infinities
+        eval.run(
+            &[[f64::NEG_INFINITY, f64::INFINITY], [2.0, 3.0]],
+            &mut outputs,
+        )
+        .unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+        eval.run(
+            &[[2.0, 3.0], [f64::NEG_INFINITY, f64::INFINITY]],
+            &mut outputs,
+        )
+        .unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+        eval.run(&[[f64::INFINITY, f64::INFINITY], [2.0, 3.0]], &mut outputs)
+            .unwrap();
+        assert_eq!(outputs[0], [f64::INFINITY, f64::INFINITY]);
+        eval.run(
+            &[[f64::NEG_INFINITY, f64::NEG_INFINITY], [2.0, 3.0]],
+            &mut outputs,
+        )
+        .unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::NEG_INFINITY]);
     }
 }
