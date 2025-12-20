@@ -259,11 +259,13 @@ impl ValueType for Interval {
                         Ok(Interval::Scalar(-1.0, 1.0))
                     }
                 }
+                Tan if lo.is_nan() && hi.is_nan() => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
                 Tan => {
                     let width = hi - lo;
                     if width >= PI {
                         Interval::from_scalar(f64::NEG_INFINITY, f64::INFINITY)
                     } else {
+                        // Shift lo to an equivalent value in -pi/2 to pi/2.
                         let lo = (lo + FRAC_PI_2).rem_euclid(PI) - FRAC_PI_2;
                         let hi = lo + width;
                         debug_assert!(lo <= hi);
@@ -895,9 +897,134 @@ mod test {
     }
 
     #[test]
-    fn t_tan() {
+    fn t_interval_tan_comprehensive() {
         check_interval_eval(deftree!(tan 'x).unwrap(), &[('x', -1., 1.)], 50, 10);
         check_interval_eval(deftree!(tan 'x).unwrap(), &[('x', 0., 1.)], 50, 10);
+        // AI generated edge cases.
+        let tree = deftree!(tan 'x).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Test 1: Point interval at 0
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 0.0, 1e-10);
+        assert_float_eq!(result.1, 0.0, 1e-10);
+        // Test 2: Small monotonic interval (doesn't cross discontinuity)
+        eval.set_value('x', Interval::from_scalar(0.1, 0.4).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 0.1f64.tan(), 1e-10);
+        assert_float_eq!(result.1, 0.4f64.tan(), 1e-10);
+        // Test 3: Small monotonic interval in negative range
+        eval.set_value('x', Interval::from_scalar(-0.4, -0.1).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (-0.4f64).tan(), 1e-10);
+        assert_float_eq!(result.1, (-0.1f64).tan(), 1e-10);
+        // Test 4: Interval crossing π/2 discontinuity (should give ENTIRE)
+        eval.set_value('x', Interval::from_scalar(1.0, 2.0).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result), "Crossing π/2 should give ENTIRE");
+        // Test 5: Interval crossing -π/2 discontinuity (should give ENTIRE)
+        eval.set_value('x', Interval::from_scalar(-2.0, -1.0).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result), "Crossing -π/2 should give ENTIRE");
+        // Test 6: Interval with width >= π (should give ENTIRE)
+        eval.set_value('x', Interval::from_scalar(0.0, PI).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result), "Width >= π should give ENTIRE");
+        // Test 7: Interval with width > π (should give ENTIRE)
+        eval.set_value('x', Interval::from_scalar(-2.0, 2.0).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result), "Width > π should give ENTIRE");
+        // Test 8: Interval just before π/2 discontinuity
+        eval.set_value('x', Interval::from_scalar(1.0, FRAC_PI_2 - 0.01).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 1.0f64.tan(), 1e-10);
+        assert_float_eq!(result.1, (FRAC_PI_2 - 0.01).tan(), 1e-9);
+        // Test 9: Interval just after -π/2 discontinuity
+        eval.set_value('x', Interval::from_scalar(-FRAC_PI_2 + 0.01, -1.0).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (-FRAC_PI_2 + 0.01).tan(), 1e-9);
+        assert_float_eq!(result.1, (-1.0f64).tan(), 1e-10);
+        // Test 10: Interval around 0 (symmetric)
+        eval.set_value('x', Interval::from_scalar(-0.5, 0.5).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (-0.5f64).tan(), 1e-10);
+        assert_float_eq!(result.1, 0.5f64.tan(), 1e-10);
+        // Test 11: Interval in different period (π to 3π/2)
+        eval.set_value('x', Interval::from_scalar(PI + 0.1, PI + 0.4).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (PI + 0.1).tan(), 1e-10);
+        assert_float_eq!(result.1, (PI + 0.4).tan(), 1e-10);
+        // Test 12: Interval in negative period (-π to -π/2)
+        eval.set_value('x', Interval::from_scalar(-PI + 0.1, -PI + 0.4).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (-PI + 0.1).tan(), 1e-10);
+        assert_float_eq!(result.1, (-PI + 0.4).tan(), 1e-10);
+        // Test 13: Very small interval (numerical precision)
+        eval.set_value('x', Interval::from_scalar(0.5, 0.5 + 1e-10).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(result.0 <= result.1, "Very small interval not ordered");
+        assert!(
+            (result.1 - result.0).abs() < 1e-8,
+            "Very small interval too wide"
+        );
+        // Test 14: Interval at exactly [-π/2 + ε, π/2 - ε]
+        let eps = 0.001;
+        eval.set_value(
+            'x',
+            Interval::from_scalar(-FRAC_PI_2 + eps, FRAC_PI_2 - eps).unwrap(),
+        );
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (-FRAC_PI_2 + eps).tan(), 1e-9);
+        assert_float_eq!(result.1, (FRAC_PI_2 - eps).tan(), 1e-9);
+        // Test 15: Interval crossing 3π/2 discontinuity
+        eval.set_value('x', Interval::from_scalar(4.0, 5.0).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result), "Crossing 3π/2 should give ENTIRE");
+        // Test 16: Point interval at π
+        eval.set_value('x', Interval::from_scalar(PI, PI).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        let expected = PI.tan();
+        assert!((result.0 - expected).abs() < 1e-10, "Point at π failed");
+        assert!((result.1 - expected).abs() < 1e-10, "Point at π failed");
+        // Test 17: NaN interval
+        eval.set_value('x', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(result.0.is_nan() && result.1.is_nan(), "NaN test failed");
+        // Test 18: Interval with width exactly π
+        eval.set_value('x', Interval::from_scalar(0.0, PI).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result), "Width exactly π should give ENTIRE");
+        // Test 19: Large positive interval crossing multiple periods
+        eval.set_value('x', Interval::from_scalar(0.0, 10.0).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result), "Large interval should give ENTIRE");
+        // Test 20: Large negative interval crossing multiple periods
+        eval.set_value('x', Interval::from_scalar(-10.0, 0.0).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(
+            is_entire(&result),
+            "Large negative interval should give ENTIRE"
+        );
+        // Test 21: Interval in higher period (2π to 2π + π/4)
+        eval.set_value(
+            'x',
+            Interval::from_scalar(2.0 * PI, 2.0 * PI + FRAC_PI_2 / 2.0).unwrap(),
+        );
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, (2.0 * PI).tan(), 1e-9);
+        assert_float_eq!(result.1, (2.0 * PI + FRAC_PI_2 / 2.0).tan(), 1e-10);
+        // Test 22: Interval just touching discontinuity boundary from below
+        eval.set_value('x', Interval::from_scalar(0.0, FRAC_PI_2 - 1e-8).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 0.0, 1e-10);
+        assert!(result.1 > 1e6, "Should be very large near discontinuity");
+        // Test 23: Interval crossing discontinuity by small amount
+        eval.set_value(
+            'x',
+            Interval::from_scalar(FRAC_PI_2 - 0.01, FRAC_PI_2 + 0.01).unwrap(),
+        );
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result), "Small crossing should give ENTIRE");
     }
 
     #[test]
