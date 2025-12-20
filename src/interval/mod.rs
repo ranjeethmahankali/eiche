@@ -278,8 +278,8 @@ impl ValueType for Interval {
                         }
                     }
                 }
-                Log if hi < 0. => Err(Error::InvalidInterval),
-                Log if lo < 0. => Interval::from_scalar(f64::NEG_INFINITY, hi.ln()),
+                Log if hi <= 0. => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
+                Log if lo <= 0. => Interval::from_scalar(f64::NEG_INFINITY, hi.ln()),
                 Log => Interval::from_scalar(lo.ln(), hi.ln()),
                 Exp => Interval::from_scalar(lo.exp(), hi.exp()),
                 Floor => Interval::from_scalar(lo.floor(), hi.floor()),
