@@ -670,7 +670,7 @@ impl Tree {
                             float_type.const_float(f64::NEG_INFINITY),
                             float_type.const_float(f64::INFINITY),
                         ]);
-                        builder.build_select(
+                        let out = builder.build_select(
                             builder.build_float_compare(
                                 FloatPredicate::UGE,
                                 width,
@@ -734,6 +734,16 @@ impl Tree {
                                     )?
                                     .into_vector_value()
                             },
+                            &format!("reg_{ni}"),
+                        )?;
+                        builder.build_select(
+                            build_check_interval_empty(ireg, builder, &compiler.module, ni)?,
+                            VectorType::const_vector(&[
+                                float_type.const_float(f64::NAN),
+                                float_type.const_float(f64::NAN),
+                            ])
+                            .as_basic_value_enum(),
+                            out,
                             &format!("reg_{ni}"),
                         )?
                     }
@@ -1539,5 +1549,86 @@ mod test {
         // Test 22: Mixed finite and special values
         eval.run(&[[0.0, f64::INFINITY]], &mut outputs).unwrap();
         // Should likely return [-1, 1] as it spans everything
+    }
+
+    #[test]
+    fn t_jit_interval_tan_f64() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let tree = deftree!(tan 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // NaN interval
+        eval.run(&[[f64::NAN, f64::NAN]], &mut outputs).unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        // Point intervals
+        eval.run(&[[0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 0.0]);
+        eval.run(&[[PI, PI]], &mut outputs).unwrap();
+        assert!((outputs[0][0] - PI.tan()).abs() < 1e-10);
+        // Small monotonic intervals (no discontinuity crossing)
+        for interval in [[0.1, 0.4], [-0.4, -0.1], [-0.5, 0.5]] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert!((outputs[0][0] - interval[0].tan()).abs() < 1e-10);
+            assert!((outputs[0][1] - interval[1].tan()).abs() < 1e-10);
+        }
+        // Intervals crossing π/2 discontinuities (should return ENTIRE)
+        for interval in [
+            [1.0, 2.0],                           // crossing π/2
+            [-2.0, -1.0],                         // crossing -π/2
+            [4.0, 5.0],                           // crossing 3π/2
+            [FRAC_PI_2 - 0.01, FRAC_PI_2 + 0.01], // small crossing
+        ] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+        }
+        // Intervals with width >= π (should return ENTIRE)
+        for interval in [
+            [0.0, PI],
+            [-2.0, 2.0],
+            [0.0, 10.0],
+            [-10.0, 0.0],
+            [0.0, f64::INFINITY],
+        ] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+        }
+        // Intervals just before discontinuity
+        eval.run(&[[1.0, FRAC_PI_2 - 0.01]], &mut outputs).unwrap();
+        assert!((outputs[0][0] - 1.0f64.tan()).abs() < 1e-10);
+        assert!((outputs[0][1] - (FRAC_PI_2 - 0.01).tan()).abs() < 1e-9);
+        eval.run(&[[-FRAC_PI_2 + 0.01, -1.0]], &mut outputs)
+            .unwrap();
+        assert!((outputs[0][0] - (-FRAC_PI_2 + 0.01).tan()).abs() < 1e-9);
+        assert!((outputs[0][1] - (-1.0f64).tan()).abs() < 1e-10);
+        // Different periods
+        for interval in [
+            [PI + 0.1, PI + 0.4],
+            [-PI + 0.1, -PI + 0.4],
+            [2.0 * PI, 2.0 * PI + FRAC_PI_2 / 2.0],
+        ] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert!((outputs[0][0] - interval[0].tan()).abs() < 1e-9);
+            assert!((outputs[0][1] - interval[1].tan()).abs() < 1e-9);
+        }
+        // Maximal interval without discontinuity
+        let eps = 0.001;
+        eval.run(&[[-FRAC_PI_2 + eps, FRAC_PI_2 - eps]], &mut outputs)
+            .unwrap();
+        assert!((outputs[0][0] - (-FRAC_PI_2 + eps).tan()).abs() < 1e-9);
+        assert!((outputs[0][1] - (FRAC_PI_2 - eps).tan()).abs() < 1e-9);
+        // Very large value near discontinuity
+        eval.run(&[[0.0, FRAC_PI_2 - 1e-8]], &mut outputs).unwrap();
+        assert!((outputs[0][0] - 0.0).abs() < 1e-10);
+        assert!(outputs[0][1] > 1e6);
+        // Very small interval (numerical precision)
+        eval.run(&[[0.5, 0.5 + 1e-10]], &mut outputs).unwrap();
+        assert!(outputs[0][0] <= outputs[0][1]);
+        assert!((outputs[0][1] - outputs[0][0]).abs() < 1e-8);
+        // Infinity inputs (should not crash)
+        eval.run(&[[f64::INFINITY, f64::INFINITY]], &mut outputs)
+            .unwrap();
+        eval.run(&[[f64::NEG_INFINITY, f64::NEG_INFINITY]], &mut outputs)
+            .unwrap();
     }
 }
