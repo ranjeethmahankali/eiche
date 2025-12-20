@@ -1202,34 +1202,34 @@ mod test {
         let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
         let mut outputs = [[f64::NAN, f64::NAN]];
         // Test 1: NaN interval should return NaN
-        // eval.run(&[[f64::NAN, f64::NAN]], &mut outputs)
-        //     .expect("Failed to run the jit function");
-        // assert!(
-        //     outputs[0][0].is_nan() && outputs[0][1].is_nan(),
-        //     "NaN test failed"
-        // );
-        // // Test 2: Point interval (lo == hi)
-        // eval.run(&[[0.0, 0.0]], &mut outputs).unwrap();
-        // assert_eq!(outputs[0], [1.0, 1.0], "Point at 0 failed");
-        // eval.run(&[[PI, PI]], &mut outputs).unwrap();
-        // let expected = PI.cos();
-        // assert!(
-        //     (outputs[0][0] - expected).abs() < 1e-10 && (outputs[0][1] - expected).abs() < 1e-10,
-        //     "Point at π failed: got [{}, {}], expected [{}, {}]",
-        //     outputs[0][0],
-        //     outputs[0][1],
-        //     expected,
-        //     expected
-        // );
-        // // Test 3: Small interval in Q0 [0, π/2) - monotonically decreasing
-        // // cos is decreasing here, so result should be [cos(hi), cos(lo)]
-        // let interval = [0.1, 0.4];
-        // eval.run(&[interval], &mut outputs).unwrap();
-        // assert_eq!(
-        //     outputs[0],
-        //     [interval[1].cos(), interval[0].cos()],
-        //     "Q0 monotonic decreasing failed"
-        // );
+        eval.run(&[[f64::NAN, f64::NAN]], &mut outputs)
+            .expect("Failed to run the jit function");
+        assert!(
+            outputs[0][0].is_nan() && outputs[0][1].is_nan(),
+            "NaN test failed"
+        );
+        // Test 2: Point interval (lo == hi)
+        eval.run(&[[0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [1.0, 1.0], "Point at 0 failed");
+        eval.run(&[[PI, PI]], &mut outputs).unwrap();
+        let expected = PI.cos();
+        assert!(
+            (outputs[0][0] - expected).abs() < 1e-10 && (outputs[0][1] - expected).abs() < 1e-10,
+            "Point at π failed: got [{}, {}], expected [{}, {}]",
+            outputs[0][0],
+            outputs[0][1],
+            expected,
+            expected
+        );
+        // Test 3: Small interval in Q0 [0, π/2) - monotonically decreasing
+        // cos is decreasing here, so result should be [cos(hi), cos(lo)]
+        let interval = [0.1, 0.4];
+        eval.run(&[interval], &mut outputs).unwrap();
+        assert_eq!(
+            outputs[0],
+            [interval[1].cos(), interval[0].cos()],
+            "Q0 monotonic decreasing failed"
+        );
         // Test 4: Small interval in Q1 [π/2, π) - monotonically decreasing
         // cos is decreasing here, so result should be [cos(hi), cos(lo)]
         let interval = [FRAC_PI_2 + 0.1, FRAC_PI_2 + 0.4];
