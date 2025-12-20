@@ -1123,7 +1123,13 @@ mod test {
         let tree = deftree!(log 'x).unwrap();
         let mut eval = IntervalEvaluator::new(&tree);
         eval.set_value('x', Interval::from_scalar(-5., -1.).unwrap());
-        assert!(eval.run().is_err());
+        let result = eval.run().unwrap();
+        assert_eq!(result.len(), 1);
+        if let Interval::Scalar(lo, hi) = result[0] {
+            assert!(is_empty(&(lo, hi)));
+        } else {
+            panic!("Expecting a scalar interval");
+        }
         // Division by zero interval
         let tree = deftree!(/ 'x 0.).unwrap();
         let mut eval = IntervalEvaluator::new(&tree);
