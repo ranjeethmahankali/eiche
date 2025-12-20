@@ -9,7 +9,7 @@ use inkwell::{
     execution_engine::JitFunction,
     module::Module,
     types::VectorType,
-    values::{BasicValue, BasicValueEnum, IntValue, VectorValue},
+    values::{BasicValue, BasicValueEnum, FloatValue, IntValue, VectorValue},
 };
 use std::{
     f64::consts::{FRAC_PI_2, PI},
@@ -338,28 +338,13 @@ impl Tree {
                                 &format!("nval_{ni}"),
                             )?
                             .into_float_value();
-                        let qval = builder.build_float_rem(
+                        let qval = build_float_rem_euclid(
                             qlo,
                             float_type.const_float(4.0),
-                            &format!("q_rem_val_{ni}"),
+                            builder,
+                            &format!("q_rem_euclid_val_{ni}"),
+                            ni,
                         )?;
-                        let qval = builder
-                            .build_select(
-                                builder.build_float_compare(
-                                    FloatPredicate::ULT,
-                                    qval,
-                                    float_type.const_zero(),
-                                    &format!("rem_euclid_compare_{ni}"),
-                                )?,
-                                builder.build_float_add(
-                                    qval,
-                                    float_type.const_float(4.0),
-                                    &format!("rem_euclid_correction_{ni}"),
-                                )?,
-                                qval,
-                                &format!("q_rem_euclid_val_{ni}"),
-                            )?
-                            .into_float_value();
                         let sin_base = build_vec_unary_intrinsic(
                             builder,
                             &compiler.module,
@@ -661,7 +646,97 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?
                     }
-                    Tan => todo!(),
+                    Tan => {
+                        let ireg = regs[*input].into_vector_value();
+                        let lo = builder
+                            .build_extract_element(
+                                ireg,
+                                context.i32_type().const_int(0, false),
+                                &format!("tan_width_rhs_{ni}"),
+                            )?
+                            .into_float_value();
+                        let width = builder.build_float_sub(
+                            builder
+                                .build_extract_element(
+                                    ireg,
+                                    context.i32_type().const_int(1, false),
+                                    &format!("tan_width_lhs_{ni}"),
+                                )?
+                                .into_float_value(),
+                            lo,
+                            &format!("tan_width_{ni}"),
+                        )?;
+                        let everything = VectorType::const_vector(&[
+                            float_type.const_float(f64::NEG_INFINITY),
+                            float_type.const_float(f64::INFINITY),
+                        ]);
+                        builder.build_select(
+                            builder.build_float_compare(
+                                FloatPredicate::UGE,
+                                width,
+                                float_type.const_float(PI),
+                                &format!("tan_pi_compare_{ni}"),
+                            )?,
+                            everything,
+                            {
+                                // Shift lo to an equivalent value in -pi/2 to pi/2.
+                                let lo = builder.build_float_sub(
+                                    build_float_rem_euclid(
+                                        builder.build_float_add(
+                                            lo,
+                                            float_type.const_float(FRAC_PI_2),
+                                            &format!("tan_pi_shift_add_{ni}"),
+                                        )?,
+                                        float_type.const_float(PI),
+                                        builder,
+                                        &format!("tan_rem_euclid_{ni}"),
+                                        ni,
+                                    )?,
+                                    float_type.const_float(FRAC_PI_2),
+                                    &format!("tan_shifted_lo_{ni}"),
+                                )?;
+                                let hi = builder.build_float_add(
+                                    lo,
+                                    width,
+                                    &format!("tan_shifted_hi_{ni}"),
+                                )?;
+                                builder
+                                    .build_select(
+                                        builder.build_float_compare(
+                                            FloatPredicate::UGE,
+                                            hi,
+                                            float_type.const_float(FRAC_PI_2),
+                                            &format!("tan_second_compare_{ni}"),
+                                        )?,
+                                        everything,
+                                        {
+                                            let sin = build_vec_unary_intrinsic(
+                                                builder,
+                                                &compiler.module,
+                                                "llvm.sin.*",
+                                                "sin_call",
+                                                regs[*input].into_vector_value(),
+                                            )?;
+                                            let cos = build_vec_unary_intrinsic(
+                                                builder,
+                                                &compiler.module,
+                                                "llvm.cos.*",
+                                                "cos_call",
+                                                regs[*input].into_vector_value(),
+                                            )?;
+                                            builder.build_float_div(
+                                                sin.into_vector_value(),
+                                                cos.into_vector_value(),
+                                                &format!("reg_{ni}"),
+                                            )?
+                                        },
+                                        &format!("tan_regular_tan_{ni}"),
+                                    )?
+                                    .into_vector_value()
+                            },
+                            &format!("reg_{ni}"),
+                        )?
+                    }
                     Log => todo!(),
                     Exp => todo!(),
                     Floor => todo!(),
@@ -766,6 +841,33 @@ fn build_check_interval_empty<'ctx>(
         )?,
     )?
     .into_int_value())
+}
+
+fn build_float_rem_euclid<'ctx>(
+    lhs: FloatValue<'ctx>,
+    rhs: FloatValue<'ctx>,
+    builder: &Builder<'ctx>,
+    name: &str,
+    index: usize,
+) -> Result<FloatValue<'ctx>, Error> {
+    let qval = builder.build_float_rem(lhs, rhs, &format!("q_rem_val_{index}"))?;
+    Ok(builder
+        .build_select(
+            builder.build_float_compare(
+                FloatPredicate::ULT,
+                qval,
+                lhs.get_type().const_zero(),
+                &format!("rem_euclid_compare_{index}"),
+            )?,
+            builder.build_float_add(
+                qval,
+                lhs.get_type().const_float(4.0),
+                &format!("rem_euclid_correction_{index}"),
+            )?,
+            qval,
+            name,
+        )?
+        .into_float_value())
 }
 
 impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
