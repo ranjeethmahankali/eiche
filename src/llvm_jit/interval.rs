@@ -811,7 +811,7 @@ impl Tree {
                         &format!("floor_call_{ni}"),
                         regs[*input].into_vector_value(),
                     )?,
-                    Not => todo!(),
+                    Not => return Err(Error::TypeMismatch),
                 },
                 Binary(op, _lhs, _rhs) => match op {
                     Add => todo!(),
