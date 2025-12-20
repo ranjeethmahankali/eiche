@@ -813,9 +813,29 @@ impl Tree {
                     )?,
                     Not => return Err(Error::TypeMismatch),
                 },
-                Binary(op, _lhs, _rhs) => match op {
-                    Add => todo!(),
-                    Subtract => todo!(),
+                Binary(op, lhs, rhs) => match op {
+                    Add => builder
+                        .build_float_add(
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Subtract => builder
+                        .build_float_sub(
+                            regs[*lhs].into_vector_value(),
+                            builder.build_shuffle_vector(
+                                regs[*rhs].into_vector_value(),
+                                interval_type.get_undef(),
+                                VectorType::const_vector(&[
+                                    context.i32_type().const_int(1, false),
+                                    context.i32_type().const_int(0, false),
+                                ]),
+                                &format!("sub_shuffle_{ni}"),
+                            )?,
+                            &format!("reg_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
                     Multiply => todo!(),
                     Divide => todo!(),
                     Pow => todo!(),
