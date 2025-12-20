@@ -1771,4 +1771,132 @@ mod test {
         assert_eq!(outputs[0][0], 0.0);
         assert_eq!(outputs[0][1], f64::INFINITY);
     }
+
+    #[test]
+    fn t_jit_interval_floor_f64() {
+        let tree = deftree!(floor 'x).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // NaN interval
+        eval.run(&[[f64::NAN, f64::NAN]], &mut outputs).unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        // Positive, negative, and spanning zero intervals
+        for interval in [
+            [0.1, 0.9],
+            [1.5, 3.7],
+            [5.0, 5.0],
+            [-0.9, -0.1],
+            [-3.7, -1.5],
+            [-2.5, 3.7],
+            [-0.5, 0.5],
+        ] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert_eq!(outputs[0], [interval[0].floor(), interval[1].floor()]);
+        }
+        // Already integer values
+        for interval in [[1.0, 5.0], [-3.0, 2.0], [0.0, 0.0]] {
+            eval.run(&[interval], &mut outputs).unwrap();
+            assert_eq!(outputs[0], [interval[0], interval[1]]);
+        }
+        // Infinities
+        eval.run(&[[f64::NEG_INFINITY, f64::INFINITY]], &mut outputs)
+            .unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+        eval.run(&[[f64::NEG_INFINITY, 5.5]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, 5.0]);
+        eval.run(&[[5.5, f64::INFINITY]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [5.0, f64::INFINITY]);
+    }
+
+    #[test]
+    fn t_jit_interval_add_f64() {
+        let tree = deftree!(+ 'x 'y).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "xy").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // NaN intervals
+        eval.run(&[[f64::NAN, f64::NAN], [1.0, 2.0]], &mut outputs)
+            .unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        eval.run(&[[1.0, 2.0], [f64::NAN, f64::NAN]], &mut outputs)
+            .unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        // Both positive, both negative, and mixed signs
+        for (x, y) in [
+            ([1.0, 2.0], [3.0, 4.0]),
+            ([-2.0, -1.0], [-4.0, -3.0]),
+            ([-2.0, 3.0], [-1.0, 4.0]),
+            ([-5.0, -1.0], [2.0, 6.0]),
+            ([1.0, 5.0], [-3.0, -1.0]),
+        ] {
+            eval.run(&[x, y], &mut outputs).unwrap();
+            assert_eq!(outputs[0], [x[0] + y[0], x[1] + y[1]]);
+        }
+        // With zeros
+        eval.run(&[[0.0, 0.0], [0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 0.0]);
+        eval.run(&[[-5.0, 5.0], [0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [-5.0, 5.0]);
+        // With infinities
+        eval.run(
+            &[[f64::NEG_INFINITY, f64::INFINITY], [1.0, 2.0]],
+            &mut outputs,
+        )
+        .unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+        eval.run(
+            &[[1.0, 2.0], [f64::NEG_INFINITY, f64::INFINITY]],
+            &mut outputs,
+        )
+        .unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+    }
+
+    #[test]
+    fn t_jit_interval_subtract_f64() {
+        let tree = deftree!(- 'x 'y).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "xy").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // NaN intervals
+        eval.run(&[[f64::NAN, f64::NAN], [1.0, 2.0]], &mut outputs)
+            .unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        eval.run(&[[1.0, 2.0], [f64::NAN, f64::NAN]], &mut outputs)
+            .unwrap();
+        assert!(outputs[0][0].is_nan() && outputs[0][1].is_nan());
+        // Both positive, both negative, and mixed signs
+        for (x, y) in [
+            ([5.0, 7.0], [1.0, 2.0]),
+            ([1.0, 2.0], [5.0, 7.0]),
+            ([-2.0, -1.0], [-5.0, -3.0]),
+            ([-2.0, 3.0], [-1.0, 4.0]),
+            ([-5.0, -1.0], [2.0, 6.0]),
+            ([1.0, 5.0], [-3.0, -1.0]),
+        ] {
+            eval.run(&[x, y], &mut outputs).unwrap();
+            assert_eq!(outputs[0], [x[0] - y[1], x[1] - y[0]]);
+        }
+        // With zeros
+        eval.run(&[[0.0, 0.0], [0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, 0.0]);
+        eval.run(&[[5.0, 10.0], [0.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [5.0, 10.0]);
+        eval.run(&[[0.0, 0.0], [5.0, 10.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [-10.0, -5.0]);
+        // With infinities
+        eval.run(
+            &[[f64::NEG_INFINITY, f64::INFINITY], [1.0, 2.0]],
+            &mut outputs,
+        )
+        .unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+        eval.run(
+            &[[1.0, 2.0], [f64::NEG_INFINITY, f64::INFINITY]],
+            &mut outputs,
+        )
+        .unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+    }
 }
