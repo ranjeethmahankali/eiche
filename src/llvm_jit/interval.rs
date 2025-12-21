@@ -1,9 +1,10 @@
 use super::{JitContext, NumberType, build_float_unary_intrinsic, build_vec_unary_intrinsic};
 use crate::{
-    BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, llvm_jit::JitCompiler,
+    BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, interval::IntervalClass,
+    llvm_jit::JitCompiler,
 };
 use inkwell::{
-    AddressSpace, FloatPredicate, OptimizationLevel,
+    AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
     builder::Builder,
     context::Context,
     execution_engine::JitFunction,
@@ -901,6 +902,144 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_div<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+    name: &str,
+) -> Result<VectorValue<'ctx>, Error> {
+    use crate::interval::IntervalClass::*;
+    let (lclass, rclass) = (
+        build_interval_classify(lhs, builder, module, i32_type, index)?,
+        build_interval_classify(rhs, builder, module, i32_type, index)?,
+    );
+    let class_empty = i32_type.const_zero();
+    let class_negative = i32_type.const_int(1, false);
+    let class_negative_zero = i32_type.const_int(2, false);
+    let class_singleton_zero = i32_type.const_int(3, false);
+    let class_spanning = i32_type.const_int(4, false);
+    let class_zero_positive = i32_type.const_int(5, false);
+    let class_positive = i32_type.const_int(6, false);
+    let mask = builder.build_int_add(
+        builder.build_int_mul(
+            lclass,
+            i32_type.const_int(7, false),
+            &format!("interval_div_mask_imul_{index}"),
+        )?,
+        rclass,
+        &format!("interval_div_mask_{index}"),
+    )?;
+    const CASES: [&[(IntervalClass, IntervalClass)]; 12] = [
+        &[
+            (Spanning, Spanning),
+            (Spanning, NegativeZero),
+            (Spanning, ZeroPositive),
+            (NegativeZero, Spanning),
+            (Negative, Spanning),
+            (ZeroPositive, Spanning),
+            (Positive, Spanning),
+        ],
+        &[
+            (SingletonZero, Spanning),
+            (SingletonZero, NegativeZero),
+            (SingletonZero, Negative),
+            (SingletonZero, ZeroPositive),
+            (SingletonZero, Positive),
+        ],
+        &[(Spanning, Negative)],
+        &[(Spanning, Positive)],
+        &[(NegativeZero, NegativeZero), (Negative, NegativeZero)],
+        &[(NegativeZero, Negative), (Negative, Negative)],
+        &[(NegativeZero, ZeroPositive), (Negative, ZeroPositive)],
+        &[(NegativeZero, Positive), (Negative, Positive)],
+        &[(ZeroPositive, NegativeZero), (Positive, NegativeZero)],
+        &[(ZeroPositive, Negative), (Positive, Negative)],
+        &[(ZeroPositive, ZeroPositive), (Positive, ZeroPositive)],
+        &[(ZeroPositive, Positive), (Positive, Positive)],
+    ];
+    let outputs: [VectorValue<'ctx>; 12] = [
+        VectorType::const_vector(&[
+            flt_type.const_float(f64::NEG_INFINITY),
+            flt_type.const_float(f64::INFINITY),
+        ]),
+        lhs.get_type().const_zero(),
+    ];
+    let handle_rest = builder
+        .build_select(
+            [
+                (Spanning, Spanning),
+                (Spanning, NegativeZero),
+                (Spanning, ZeroPositive),
+                (NegativeZero, Spanning),
+                (Negative, Spanning),
+                (ZeroPositive, Spanning),
+                (Positive, Spanning),
+            ]
+            .map(|(l, r)| {
+                builder.build_int_compare(
+                    IntPredicate::EQ,
+                    mask,
+                    i32_type.const_int(((l as u8) * 7 + (r as u8)) as u64, false),
+                    &format!("interval_div_case_{rhs}_{index}"),
+                )
+            })
+            .into_iter()
+            .reduce(|acc, cond| match (acc, cond) {
+                (Ok(acc), Ok(cond)) => {
+                    match builder.build_or(acc, cond, &format!("interval_div_case_combine_{index}"))
+                    {
+                        Ok(acc) => Ok(acc),
+                        Err(e) => Err(e),
+                    }
+                }
+                (Ok(_), Err(e)) | (Err(e), Ok(_)) | (Err(e), Err(_)) => Err(e),
+            })
+            .expect("Unable to reduce the cases at compile time")?,
+            todo!("everything"),
+            todo!("handle the rest"),
+            &format!("interval_div_everything_cases_{index}"),
+        )?
+        .into_vector_value();
+    Ok(builder
+        .build_select(
+            builder.build_or(
+                builder.build_or(
+                    builder.build_int_compare(
+                        IntPredicate::EQ,
+                        lclass,
+                        class_empty,
+                        &format!("interval_div_left_empty_check_{index}"),
+                    )?,
+                    builder.build_int_compare(
+                        IntPredicate::EQ,
+                        rclass,
+                        class_empty,
+                        &format!("interval_div_right_empty_check_{index}"),
+                    )?,
+                    &format!("interval_div_empty_check_{index}"),
+                )?,
+                builder.build_int_compare(
+                    IntPredicate::EQ,
+                    rclass,
+                    class_singleton_zero,
+                    &format!("interval_div_right_zero_check_{index}"),
+                )?,
+                &format!("interval_div_all_empty_cases_{index}"),
+            )?,
+            VectorType::const_vector(&[
+                flt_type.const_float(f64::NAN),
+                flt_type.const_float(f64::NAN),
+            ]),
+            handle_rest,
+            name,
+        )?
+        .into_vector_value())
 }
 
 /**

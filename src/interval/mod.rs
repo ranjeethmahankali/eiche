@@ -38,14 +38,14 @@ pub enum Overlap {
     After,
 }
 
-enum IntervalClass {
-    Empty,
-    Negative,
-    NegativeZero,
-    SingletonZero,
-    Spanning,
-    ZeroPositive,
-    Positive,
+pub enum IntervalClass {
+    Empty = 0,
+    Negative = 1,
+    NegativeZero = 2,
+    SingletonZero = 3,
+    Spanning = 4,
+    ZeroPositive = 5,
+    Positive = 6,
 }
 
 impl Interval {
