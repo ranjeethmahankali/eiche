@@ -1145,6 +1145,71 @@ mod test {
     }
 
     #[test]
+    fn t_interval_div() {
+        let tree = deftree!(/ 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Divisor entirely positive
+        eval.set_value('x', Interval::from_scalar(4., 12.).unwrap());
+        eval.set_value('y', Interval::from_scalar(2., 3.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 4. / 3., 1e-12);
+        assert_float_eq!(result.1, 12. / 2., 1e-12);
+        // Divisor entirely negative
+        eval.set_value('x', Interval::from_scalar(4., 12.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-3., -2.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 12. / -2., 1e-12);
+        assert_float_eq!(result.1, 4. / -3., 1e-12);
+        // Dividend negative, divisor positive
+        eval.set_value('x', Interval::from_scalar(-12., -4.).unwrap());
+        eval.set_value('y', Interval::from_scalar(2., 3.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, -12. / 2., 1e-12);
+        assert_float_eq!(result.1, -4. / 3., 1e-12);
+        // Dividend crossing zero, divisor positive
+        eval.set_value('x', Interval::from_scalar(-4., 12.).unwrap());
+        eval.set_value('y', Interval::from_scalar(2., 3.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, -4. / 2., 1e-12);
+        assert_float_eq!(result.1, 12. / 2., 1e-12);
+        // Divisor is [negative, 0], dividend non-positive
+        eval.set_value('x', Interval::from_scalar(-6., 0.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-3., 0.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 0. / -3., 1e-12);
+        assert!(result.1 == f64::INFINITY);
+        // Divisor is [0, positive], dividend non-negative
+        eval.set_value('x', Interval::from_scalar(0., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(0., 3.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 0. / 3., 1e-12);
+        assert!(result.1 == f64::INFINITY);
+        // Divisor is [negative, 0], dividend non-negative
+        eval.set_value('x', Interval::from_scalar(0., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-3., 0.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(result.0 == f64::NEG_INFINITY);
+        assert_float_eq!(result.1, 0., 1e-12);
+        // Divisor is [0, positive], dividend has negative part
+        eval.set_value('x', Interval::from_scalar(-6., 0.).unwrap());
+        eval.set_value('y', Interval::from_scalar(0., 3.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(result.0 == f64::NEG_INFINITY);
+        assert_float_eq!(result.1, 0., 1e-12);
+        // Divisor crossing zero strictly - should give ENTIRE
+        eval.set_value('x', Interval::from_scalar(2., 4.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-1., 1.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert!(is_entire(&result));
+        // Point interval division
+        eval.set_value('x', Interval::from_scalar(6., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(2., 2.).unwrap());
+        let result = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(result.0, 3., 1e-12);
+        assert_float_eq!(result.1, 3., 1e-12);
+    }
+
+    #[test]
     fn t_single_point_intervals() {
         // Single point intervals
         let tree = deftree!(+ 'x 'y).unwrap();
