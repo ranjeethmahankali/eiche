@@ -48,23 +48,6 @@ enum IntervalClass {
     Positive,
 }
 
-fn classify(lo: f64, hi: f64) -> IntervalClass {
-    use IntervalClass::*;
-    use std::cmp::Ordering::*;
-    if lo.is_nan() && hi.is_nan() {
-        Empty
-    } else {
-        match (lo.total_cmp(&0.0), hi.total_cmp(&0.0)) {
-            (Less, Less) => Negative,
-            (Less, Equal) => NegativeZero,
-            (Less, Greater) => Spanning,
-            (Equal, Equal) => SingletonZero,
-            (Equal, _) => ZeroPositive,
-            (Greater, _) => Positive,
-        }
-    }
-}
-
 impl Interval {
     pub fn scalar(&self) -> Result<(f64, f64), Error> {
         match self {
@@ -95,6 +78,23 @@ impl Interval {
             Ok(Interval::Scalar(lower, upper))
         } else {
             Err(Error::InvalidInterval)
+        }
+    }
+}
+
+fn classify(lo: f64, hi: f64) -> IntervalClass {
+    use IntervalClass::*;
+    use std::cmp::Ordering::*;
+    if lo.is_nan() && hi.is_nan() {
+        Empty
+    } else {
+        match (lo.total_cmp(&0.0), hi.total_cmp(&0.0)) {
+            (Less, Less) => Negative,
+            (Less, Equal) => NegativeZero,
+            (Less, Greater) => Spanning,
+            (Equal, Equal) => SingletonZero,
+            (Equal, _) => ZeroPositive,
+            (Greater, _) => Positive,
         }
     }
 }
