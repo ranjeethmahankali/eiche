@@ -8,7 +8,7 @@ use inkwell::{
     context::Context,
     execution_engine::JitFunction,
     module::Module,
-    types::{IntType, VectorType},
+    types::{FloatType, IntType, VectorType},
     values::{BasicValue, BasicValueEnum, FloatValue, IntValue, VectorValue},
 };
 use std::{
@@ -901,6 +901,114 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+/**
+Classify an interval based on it's relation ship to zero:
+
+Empty = 0,
+Negative = 1,
+NegativeZero = 2,
+SingletonZero = 3,
+Spanning = 4,
+ZeroPositive = 5,
+Positive = 6,
+ */
+fn build_interval_classify<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    index: usize,
+) -> Result<IntValue<'ctx>, Error> {
+    let (is_empty, is_neg, is_eq) = (
+        build_check_interval_empty(input, builder, module, index)?,
+        builder.build_float_compare(
+            FloatPredicate::ULT,
+            input,
+            input.get_type().const_zero(),
+            &format!("interval_classify_neg_check_{index}"),
+        )?,
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            input,
+            input.get_type().const_zero(),
+            &format!("interval_classify_zero_check_{index}"),
+        )?,
+    );
+    let (lneg, rneg, leq, req) = (
+        builder
+            .build_extract_element(
+                is_neg,
+                i32_type.const_int(0, false),
+                &format!("interval_classify_left_neg_{index}"),
+            )?
+            .into_int_value(),
+        builder
+            .build_extract_element(
+                is_neg,
+                i32_type.const_int(1, false),
+                &format!("interval_classify_right_neg_{index}"),
+            )?
+            .into_int_value(),
+        builder
+            .build_extract_element(
+                is_eq,
+                i32_type.const_int(0, false),
+                &format!("interval_classify_left_eq_{index}"),
+            )?
+            .into_int_value(),
+        builder
+            .build_extract_element(
+                is_eq,
+                i32_type.const_int(1, false),
+                &format!("interval_classify_right_eq_{index}"),
+            )?
+            .into_int_value(),
+    );
+    Ok(builder
+        .build_select(
+            is_empty,
+            i32_type.const_zero(),
+            builder
+                .build_select(
+                    lneg,
+                    builder
+                        .build_select(
+                            rneg,
+                            i32_type.const_int(1, false),
+                            builder
+                                .build_select(
+                                    req,
+                                    i32_type.const_int(2, false),
+                                    i32_type.const_int(4, false),
+                                    &format!("interval_classify_lneg_not_rneg_cases_{index}"),
+                                )?
+                                .into_int_value(),
+                            &format!("interval_classify_lneg_cases_{index}"),
+                        )?
+                        .into_int_value(),
+                    builder
+                        .build_select(
+                            leq,
+                            builder
+                                .build_select(
+                                    req,
+                                    i32_type.const_int(3, false),
+                                    i32_type.const_int(5, false),
+                                    &format!("interval_classify_leq_req_cases_{index}"),
+                                )?
+                                .into_int_value(),
+                            i32_type.const_int(6, false),
+                            &format!("interval_classify_leq_cases_{index}"),
+                        )?
+                        .into_int_value(),
+                    &format!("interval_classify_non_empty_cases_{index}"),
+                )?
+                .into_int_value(),
+            &format!("interval_classify_{index}"),
+        )?
+        .into_int_value())
 }
 
 fn build_interval_mul<'ctx>(
