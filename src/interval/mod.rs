@@ -38,6 +38,33 @@ pub enum Overlap {
     After,
 }
 
+enum IntervalClass {
+    Empty,
+    Negative,
+    NegativeZero,
+    SingletonZero,
+    Spanning,
+    ZeroPositive,
+    Positive,
+}
+
+fn classify(lo: f64, hi: f64) -> IntervalClass {
+    use IntervalClass::*;
+    use std::cmp::Ordering::*;
+    if lo.is_nan() && hi.is_nan() {
+        Empty
+    } else {
+        match (lo.total_cmp(&0.0), hi.total_cmp(&0.0)) {
+            (Less, Less) => Negative,
+            (Less, Equal) => NegativeZero,
+            (Less, Greater) => Spanning,
+            (Equal, Equal) => SingletonZero,
+            (Equal, _) => ZeroPositive,
+            (Greater, _) => Positive,
+        }
+    }
+}
+
 impl Interval {
     pub fn scalar(&self) -> Result<(f64, f64), Error> {
         match self {
@@ -129,27 +156,35 @@ fn mul((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> (f64, f64) {
 }
 
 fn div((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> Result<(f64, f64), Error> {
-    use std::cmp::Ordering::*;
-    match (
-        rlo.total_cmp(&0.0),
-        rhi.total_cmp(&0.0),
-        llo.total_cmp(&0.0),
-        lhi.total_cmp(&0.0),
-    ) {
-        (Less, Less, _, _) | (Greater, Greater, _, _) => {
-            let (lo, hi) = [llo / rlo, llo / rhi, lhi / rlo, lhi / rhi]
-                .iter()
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), current| {
-                    (lo.min(*current), hi.max(*current))
-                });
-            Ok((lo, hi))
+    use IntervalClass::*;
+    match (classify(llo, lhi), classify(rlo, rhi)) {
+        (Empty, _) | (_, Empty) | (_, SingletonZero) => Ok((f64::NAN, f64::NAN)),
+        (Spanning, Spanning)
+        | (Spanning, NegativeZero)
+        | (Spanning, ZeroPositive)
+        | (NegativeZero, Spanning)
+        | (Negative, Spanning)
+        | (ZeroPositive, Spanning)
+        | (Positive, Spanning) => Ok((f64::NEG_INFINITY, f64::INFINITY)),
+        (SingletonZero, Spanning)
+        | (SingletonZero, NegativeZero)
+        | (SingletonZero, Negative)
+        | (SingletonZero, ZeroPositive)
+        | (SingletonZero, Positive) => Ok((0.0, 0.0)),
+        (Spanning, Negative) => Ok((lhi / rhi, llo / rhi)),
+        (Spanning, Positive) => Ok((llo / rlo, lhi / rlo)),
+        (NegativeZero, NegativeZero) | (Negative, NegativeZero) => Ok((lhi / rlo, f64::INFINITY)),
+        (NegativeZero, Negative) | (Negative, Negative) => Ok((lhi / rlo, llo / rhi)),
+        (NegativeZero, ZeroPositive) | (Negative, ZeroPositive) => {
+            Ok((f64::NEG_INFINITY, lhi / rhi))
         }
-        (Less, Equal, _, Less | Equal) => Ok(((llo / rlo).min(lhi / rlo), f64::INFINITY)),
-        (Equal, Greater, Equal | Greater, _) => Ok(((llo / rhi).min(lhi / rhi), f64::INFINITY)),
-        (Less, Equal, Equal | Greater, _) => Ok((f64::NEG_INFINITY, (llo / rlo).max(lhi / rlo))),
-        (Equal, Greater, _, Less) => Ok((f64::NEG_INFINITY, (llo / rhi).max(lhi / rhi))),
-        (Equal, Equal, _, _) => Err(Error::InvalidInterval),
-        _ => Ok((f64::NEG_INFINITY, f64::INFINITY)), // everything.
+        (NegativeZero, Positive) | (Negative, Positive) => Ok((llo / rlo, lhi / rhi)),
+        (ZeroPositive, NegativeZero) | (Positive, NegativeZero) => {
+            Ok((f64::NEG_INFINITY, llo / rlo))
+        }
+        (ZeroPositive, Negative) | (Positive, Negative) => Ok((lhi / rhi, llo / rlo)),
+        (ZeroPositive, ZeroPositive) | (Positive, ZeroPositive) => Ok((llo / rhi, f64::INFINITY)),
+        (ZeroPositive, Positive) | (Positive, Positive) => Ok((llo / rhi, lhi / rlo)),
     }
 }
 
