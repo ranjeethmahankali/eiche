@@ -939,17 +939,13 @@ fn build_interval_div<'ctx>(
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     use crate::interval::IntervalClass::*;
-    let (lclass, rclass) = (
-        build_interval_classify(lhs, builder, module, i32_type, index)?,
-        build_interval_classify(rhs, builder, module, i32_type, index)?,
-    );
     let mask = builder.build_int_add(
         builder.build_int_mul(
-            lclass,
+            build_interval_classify(lhs, builder, module, i32_type, index)?,
             i32_type.const_int(7, false),
             &format!("interval_div_mask_imul_{index}"),
         )?,
-        rclass,
+        build_interval_classify(rhs, builder, module, i32_type, index)?,
         &format!("interval_div_mask_{index}"),
     )?;
     let straight = builder.build_float_div(lhs, rhs, &format!("interval_div_straight_{index}"))?;
@@ -1099,19 +1095,10 @@ fn build_interval_div<'ctx>(
                         .iter()
                         .enumerate()
                         .map(|(j, (lcase, rcase))| -> Result<IntValue<'ctx>, Error> {
-                            Ok(builder.build_and(
-                                builder.build_int_compare(
-                                    IntPredicate::EQ,
-                                    lclass,
-                                    i32_type.const_int(*lcase as u64, false),
-                                    &format!("interval_div_case_{i}_subcase_{j}_left_{index}"),
-                                )?,
-                                builder.build_int_compare(
-                                    IntPredicate::EQ,
-                                    rclass,
-                                    i32_type.const_int(*rcase as u64, false),
-                                    &format!("interval_div_case_{i}_subcase_{j}_right_{index}"),
-                                )?,
+                            Ok(builder.build_int_compare(
+                                IntPredicate::EQ,
+                                mask,
+                                i32_type.const_int((*lcase as u64) * 7 + (*rcase as u64), false),
                                 &format!("interval_div_case_{i}_subcase_{j}_{index}"),
                             )?)
                         })
