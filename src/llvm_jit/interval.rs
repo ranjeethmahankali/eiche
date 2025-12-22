@@ -370,15 +370,7 @@ impl Tree {
                         ];
                         let out_vals = [
                             sin_base,
-                            builder.build_shuffle_vector(
-                                sin_base,
-                                sin_base.get_type().get_undef(),
-                                VectorType::const_vector(&[
-                                    context.i32_type().const_int(1, false),
-                                    context.i32_type().const_int(0, false),
-                                ]),
-                                &format!("out_val_case_2_{ni}"),
-                            )?,
+                            build_interval_flip(sin_base, builder, context.i32_type(), ni)?,
                             builder.build_insert_element(
                                 full_range,
                                 build_vec_unary_intrinsic(
@@ -577,15 +569,7 @@ impl Tree {
                             builder
                                 .build_select(
                                     q_zero,
-                                    builder.build_shuffle_vector(
-                                        cos_base,
-                                        cos_base.get_type().get_undef(),
-                                        VectorType::const_vector(&[
-                                            context.i32_type().const_int(1, false),
-                                            context.i32_type().const_int(0, false),
-                                        ]),
-                                        &format!("out_val_case_2_{ni}"),
-                                    )?,
+                                    build_interval_flip(cos_base, builder, context.i32_type(), ni)?,
                                     cos_base,
                                     &format!("edge_case_1_{ni}"),
                                 )?
@@ -825,14 +809,11 @@ impl Tree {
                     Subtract => builder
                         .build_float_sub(
                             regs[*lhs].into_vector_value(),
-                            builder.build_shuffle_vector(
+                            build_interval_flip(
                                 regs[*rhs].into_vector_value(),
-                                interval_type.get_undef(),
-                                VectorType::const_vector(&[
-                                    context.i32_type().const_int(1, false),
-                                    context.i32_type().const_int(0, false),
-                                ]),
-                                &format!("sub_shuffle_{ni}"),
+                                builder,
+                                context.i32_type(),
+                                ni,
                             )?,
                             &format!("reg_{ni}"),
                         )?
@@ -902,6 +883,41 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_flip<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    i32_type: IntType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    Ok(builder.build_shuffle_vector(
+        input,
+        input.get_type().get_undef(),
+        VectorType::const_vector(&[i32_type.const_int(1, false), i32_type.const_int(0, false)]),
+        &format!("out_val_case_2_{index}"),
+    )?)
+}
+
+fn build_interval_compose<'ctx>(
+    lo: FloatValue<'ctx>,
+    hi: FloatValue<'ctx>,
+    builder: &'ctx Builder,
+    i32_type: IntType<'ctx>,
+    suffix: &str,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    Ok(builder.build_insert_element(
+        builder.build_insert_element(
+            lo.get_type().vec_type(2).const_zero(),
+            lo,
+            i32_type.const_int(0, false),
+            &format!("interval_compose_{suffix}_lo_{index}"),
+        )?,
+        hi,
+        i32_type.const_int(0, false),
+        &format!("interval_compose_{suffix}_hi_{index}"),
+    )?)
 }
 
 fn build_interval_div<'ctx>(
