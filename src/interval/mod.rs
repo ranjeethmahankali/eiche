@@ -38,6 +38,7 @@ pub enum Overlap {
     After,
 }
 
+#[derive(Copy, Clone)]
 pub enum IntervalClass {
     Empty = 0,
     Negative = 1,

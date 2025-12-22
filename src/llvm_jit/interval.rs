@@ -827,7 +827,16 @@ impl Tree {
                         ni,
                     )?
                     .as_basic_value_enum(),
-                    Divide => todo!(),
+                    Divide => build_interval_div(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        context.i32_type(),
+                        float_type,
+                        ni,
+                    )?
+                    .as_basic_value_enum(),
                     Pow => todo!(),
                     Min => todo!(),
                     Max => todo!(),
@@ -928,7 +937,6 @@ fn build_interval_div<'ctx>(
     i32_type: IntType<'ctx>,
     flt_type: FloatType<'ctx>,
     index: usize,
-    name: &str,
 ) -> Result<VectorValue<'ctx>, Error> {
     use crate::interval::IntervalClass::*;
     let (lclass, rclass) = (
@@ -2364,5 +2372,45 @@ mod test {
         )
         .unwrap();
         assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::NEG_INFINITY]);
+    }
+
+    #[test]
+    fn t_jit_interval_div_f64() {
+        let tree = deftree!(/ 'x 'y).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "xy").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // Divisor entirely positive
+        eval.run(&[[4.0, 12.0], [2.0, 3.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [4.0 / 3.0, 12.0 / 2.0]);
+        // Divisor entirely negative
+        eval.run(&[[4.0, 12.0], [-3.0, -2.0]], &mut outputs)
+            .unwrap();
+        assert_eq!(outputs[0], [12.0 / -2.0, 4.0 / -3.0]);
+        // Dividend negative, divisor positive
+        eval.run(&[[-12.0, -4.0], [2.0, 3.0]], &mut outputs)
+            .unwrap();
+        assert_eq!(outputs[0], [-12.0 / 2.0, -4.0 / 3.0]);
+        // Dividend crossing zero, divisor positive
+        eval.run(&[[-4.0, 12.0], [2.0, 3.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [-4.0 / 2.0, 12.0 / 2.0]);
+        // Divisor [negative, 0], dividend non-positive
+        eval.run(&[[-6.0, 0.0], [-3.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, f64::INFINITY]);
+        // Divisor [0, positive], dividend non-negative
+        eval.run(&[[0.0, 6.0], [0.0, 3.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [0.0, f64::INFINITY]);
+        // Divisor [negative, 0], dividend non-negative
+        eval.run(&[[0.0, 6.0], [-3.0, 0.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, 0.0]);
+        // Divisor [0, positive], dividend has negative part
+        eval.run(&[[-6.0, 0.0], [0.0, 3.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, 0.0]);
+        // Divisor crossing zero strictly - ENTIRE
+        eval.run(&[[2.0, 4.0], [-1.0, 1.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
+        // Point interval division
+        eval.run(&[[6.0, 6.0], [2.0, 2.0]], &mut outputs).unwrap();
+        assert_eq!(outputs[0], [3.0, 3.0]);
     }
 }
