@@ -935,13 +935,6 @@ fn build_interval_div<'ctx>(
         build_interval_classify(lhs, builder, module, i32_type, index)?,
         build_interval_classify(rhs, builder, module, i32_type, index)?,
     );
-    let class_empty = i32_type.const_zero();
-    let class_negative = i32_type.const_int(1, false);
-    let class_negative_zero = i32_type.const_int(2, false);
-    let class_singleton_zero = i32_type.const_int(3, false);
-    let class_spanning = i32_type.const_int(4, false);
-    let class_zero_positive = i32_type.const_int(5, false);
-    let class_positive = i32_type.const_int(6, false);
     let mask = builder.build_int_add(
         builder.build_int_mul(
             lclass,
@@ -951,7 +944,25 @@ fn build_interval_div<'ctx>(
         rclass,
         &format!("interval_div_mask_{index}"),
     )?;
+    let straight = builder.build_float_div(lhs, rhs, &format!("interval_div_straight_{index}"))?;
+    let cross = builder.build_float_div(
+        lhs,
+        build_interval_flip(rhs, builder, i32_type, index)?,
+        &format!("interval_div_cross_{index}"),
+    )?;
+    let combos = builder.build_shuffle_vector(
+        straight,
+        cross,
+        VectorType::const_vector(&[
+            i32_type.const_int(0, false),
+            i32_type.const_int(1, false),
+            i32_type.const_int(2, false),
+            i32_type.const_int(3, false),
+        ]),
+        &format!("interval_div_concat_cases_{index}"),
+    )?;
     const CASES: [&[(IntervalClass, IntervalClass)]; 12] = [
+        // Spanning zero, so output includes everything.
         &[
             (Spanning, Spanning),
             (Spanning, NegativeZero),
@@ -961,6 +972,7 @@ fn build_interval_div<'ctx>(
             (ZeroPositive, Spanning),
             (Positive, Spanning),
         ],
+        // Just zero no matter what.
         &[
             (SingletonZero, Spanning),
             (SingletonZero, NegativeZero),
@@ -985,77 +997,137 @@ fn build_interval_div<'ctx>(
             flt_type.const_float(f64::INFINITY),
         ]),
         lhs.get_type().const_zero(),
+        builder.build_shuffle_vector(
+            combos,
+            combos.get_type().get_undef(),
+            VectorType::const_vector(&[i32_type.const_int(1, false), i32_type.const_int(2, false)]),
+            &format!("interval_div_case_spanning_negative_{index}"),
+        )?,
+        builder.build_shuffle_vector(
+            combos,
+            combos.get_type().get_undef(),
+            VectorType::const_vector(&[i32_type.const_int(0, false), i32_type.const_int(3, false)]),
+            &format!("interval_div_case_spanning_positive_{index}"),
+        )?,
+        build_interval_compose(
+            builder
+                .build_extract_element(
+                    combos,
+                    i32_type.const_int(3, false),
+                    &format!("interval_div_case_neg_neg_zero_intermediate_0_{index}"),
+                )?
+                .into_float_value(),
+            flt_type.const_float(f64::INFINITY),
+            builder,
+            i32_type,
+            "case_neg_neg_zero",
+            index,
+        )?,
+        builder.build_shuffle_vector(
+            combos,
+            combos.get_type().get_undef(),
+            VectorType::const_vector(&[i32_type.const_int(3, false), i32_type.const_int(2, false)]),
+            &format!("interval_div_case_neg_zero_neg_{index}"),
+        )?,
+        build_interval_compose(
+            flt_type.const_float(f64::NEG_INFINITY),
+            builder
+                .build_extract_element(
+                    combos,
+                    i32_type.const_int(1, false),
+                    &format!("interval_div_case_neg_zero_positive_upper_{index}"),
+                )?
+                .into_float_value(),
+            builder,
+            i32_type,
+            "interval_div_case_neg_zero_positive",
+            index,
+        )?,
+        straight,
+        build_interval_compose(
+            flt_type.const_float(f64::NEG_INFINITY),
+            builder
+                .build_extract_element(
+                    combos,
+                    i32_type.const_int(0, false),
+                    &format!("interval_div_case_zero_positive_neg_{index}"),
+                )?
+                .into_float_value(),
+            builder,
+            i32_type,
+            "interval_div_case_zero_positive_neg",
+            index,
+        )?,
+        build_interval_flip(straight, builder, i32_type, index)?,
+        build_interval_compose(
+            builder
+                .build_extract_element(
+                    combos,
+                    i32_type.const_int(2, false),
+                    &format!("interval_div_case_zero_positive_extract_{index}"),
+                )?
+                .into_float_value(),
+            flt_type.const_float(f64::INFINITY),
+            builder,
+            i32_type,
+            "interval_div_case_zero_positive",
+            index,
+        )?,
+        cross,
     ];
-    let handle_rest = builder
-        .build_select(
-            [
-                (Spanning, Spanning),
-                (Spanning, NegativeZero),
-                (Spanning, ZeroPositive),
-                (NegativeZero, Spanning),
-                (Negative, Spanning),
-                (ZeroPositive, Spanning),
-                (Positive, Spanning),
-            ]
-            .map(|(l, r)| {
-                builder.build_int_compare(
-                    IntPredicate::EQ,
-                    mask,
-                    i32_type.const_int(((l as u8) * 7 + (r as u8)) as u64, false),
-                    &format!("interval_div_case_{rhs}_{index}"),
-                )
-            })
-            .into_iter()
-            .reduce(|acc, cond| match (acc, cond) {
-                (Ok(acc), Ok(cond)) => {
-                    match builder.build_or(acc, cond, &format!("interval_div_case_combine_{index}"))
-                    {
-                        Ok(acc) => Ok(acc),
-                        Err(e) => Err(e),
-                    }
+    CASES
+        .iter()
+        .rev()
+        .zip(outputs.into_iter().rev())
+        .enumerate()
+        .fold(
+            Ok(VectorType::const_vector(&[
+                flt_type.const_float(f64::NAN),
+                flt_type.const_float(f64::NAN),
+            ])),
+            |acc, (i, (cases, out))| match acc {
+                Ok(acc) => {
+                    let (_, cond) = cases
+                        .iter()
+                        .enumerate()
+                        .map(|(j, (lcase, rcase))| -> Result<IntValue<'ctx>, Error> {
+                            Ok(builder.build_and(
+                                builder.build_int_compare(
+                                    IntPredicate::EQ,
+                                    lclass,
+                                    i32_type.const_int(*lcase as u64, false),
+                                    &format!("interval_div_case_{i}_subcase_{j}_left_{index}"),
+                                )?,
+                                builder.build_int_compare(
+                                    IntPredicate::EQ,
+                                    rclass,
+                                    i32_type.const_int(*rcase as u64, false),
+                                    &format!("interval_div_case_{i}_subcase_{j}_right_{index}"),
+                                )?,
+                                &format!("interval_div_case_{i}_subcase_{j}_{index}"),
+                            )?)
+                        })
+                        .enumerate()
+                        .reduce(|(_, acc), (j, current)| match (acc, current) {
+                            (Ok(acc), Ok(current)) => match builder.build_or(
+                                acc,
+                                current,
+                                &format!("interval_div_case_{i}_combine_{j}_{index}"),
+                            ) {
+                                Ok(result) => (j, Ok(result)),
+                                Err(e) => (j, Err(e.into())),
+                            },
+                            (Ok(_), Err(e)) | (Err(e), Ok(_)) | (Err(e), Err(_)) => (j, Err(e)),
+                        })
+                        .expect("Unable to combine all the cases when compiling interval division");
+                    let cond = cond?;
+                    Ok(builder
+                        .build_select(cond, out, acc, &format!("interval_div_case_{i}_choice"))?
+                        .into_vector_value())
                 }
-                (Ok(_), Err(e)) | (Err(e), Ok(_)) | (Err(e), Err(_)) => Err(e),
-            })
-            .expect("Unable to reduce the cases at compile time")?,
-            todo!("everything"),
-            todo!("handle the rest"),
-            &format!("interval_div_everything_cases_{index}"),
-        )?
-        .into_vector_value();
-    Ok(builder
-        .build_select(
-            builder.build_or(
-                builder.build_or(
-                    builder.build_int_compare(
-                        IntPredicate::EQ,
-                        lclass,
-                        class_empty,
-                        &format!("interval_div_left_empty_check_{index}"),
-                    )?,
-                    builder.build_int_compare(
-                        IntPredicate::EQ,
-                        rclass,
-                        class_empty,
-                        &format!("interval_div_right_empty_check_{index}"),
-                    )?,
-                    &format!("interval_div_empty_check_{index}"),
-                )?,
-                builder.build_int_compare(
-                    IntPredicate::EQ,
-                    rclass,
-                    class_singleton_zero,
-                    &format!("interval_div_right_zero_check_{index}"),
-                )?,
-                &format!("interval_div_all_empty_cases_{index}"),
-            )?,
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::NAN),
-                flt_type.const_float(f64::NAN),
-            ]),
-            handle_rest,
-            name,
-        )?
-        .into_vector_value())
+                Err(e) => Err(e),
+            },
+        )
 }
 
 /**
@@ -1177,12 +1249,7 @@ fn build_interval_mul<'ctx>(
     let straight = builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?;
     let cross = builder.build_float_mul(
         lhs,
-        builder.build_shuffle_vector(
-            rhs,
-            rhs.get_type().get_undef(),
-            VectorType::const_vector(&[i32_type.const_int(1, false), i32_type.const_int(0, false)]),
-            &format!("mul_rhs_shuffled_{index}"),
-        )?,
+        build_interval_flip(rhs, builder, i32_type, index)?,
         &format!("mul_cross_{index}"),
     )?;
     let concat = builder.build_shuffle_vector(
@@ -1196,20 +1263,7 @@ fn build_interval_mul<'ctx>(
         ]),
         &format!("mul_concat_candidates_{index}"),
     )?;
-    Ok(builder.build_insert_element(
-        builder.build_insert_element(
-            lhs.get_type().const_zero(),
-            build_vec_unary_intrinsic(
-                builder,
-                module,
-                "llvm.vector.reduce.fmax.*",
-                &format!("mul_fmax_reduce_call_{index}"),
-                concat,
-            )?
-            .into_float_value(),
-            i32_type.const_int(1, false),
-            &format!("mul_insert_max_{index}"),
-        )?,
+    Ok(build_interval_compose(
         build_vec_unary_intrinsic(
             builder,
             module,
@@ -1218,8 +1272,18 @@ fn build_interval_mul<'ctx>(
             concat,
         )?
         .into_float_value(),
-        i32_type.const_int(0, false),
-        &format!("mul_insert_min_{index}"),
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.fmax.*",
+            &format!("mul_fmax_reduce_call_{index}"),
+            concat,
+        )?
+        .into_float_value(),
+        builder,
+        i32_type,
+        "interval_mul_compose",
+        index,
     )?)
 }
 
