@@ -924,7 +924,7 @@ fn build_interval_compose<'ctx>(
             &format!("interval_compose_{suffix}_lo_{index}"),
         )?,
         hi,
-        i32_type.const_int(0, false),
+        i32_type.const_int(1, false),
         &format!("interval_compose_{suffix}_hi_{index}"),
     )?)
 }
