@@ -2367,37 +2367,27 @@ mod test {
         let context = JitContext::default();
         let eval = tree.jit_compile_interval::<f64>(&context, "xy").unwrap();
         let mut outputs = [[f64::NAN, f64::NAN]];
-        // Divisor entirely positive
-        eval.run(&[[4.0, 12.0], [2.0, 3.0]], &mut outputs).unwrap();
+        eval.run(&[[4.0, 12.0], [2.0, 3.0]], &mut outputs).unwrap(); // Divisor entirely positive
         assert_eq!(outputs[0], [4.0 / 3.0, 12.0 / 2.0]);
-        // Divisor entirely negative
-        eval.run(&[[4.0, 12.0], [-3.0, -2.0]], &mut outputs)
+        eval.run(&[[4.0, 12.0], [-3.0, -2.0]], &mut outputs) // Divisor entirely negative
             .unwrap();
         assert_eq!(outputs[0], [12.0 / -2.0, 4.0 / -3.0]);
-        // Dividend negative, divisor positive
-        eval.run(&[[-12.0, -4.0], [2.0, 3.0]], &mut outputs)
+        eval.run(&[[-12.0, -4.0], [2.0, 3.0]], &mut outputs) // Dividend negative, divisor positive
             .unwrap();
         assert_eq!(outputs[0], [-12.0 / 2.0, -4.0 / 3.0]);
-        // Dividend crossing zero, divisor positive
-        eval.run(&[[-4.0, 12.0], [2.0, 3.0]], &mut outputs).unwrap();
+        eval.run(&[[-4.0, 12.0], [2.0, 3.0]], &mut outputs).unwrap(); // Dividend crossing zero, divisor positive
         assert_eq!(outputs[0], [-4.0 / 2.0, 12.0 / 2.0]);
-        // Divisor [negative, 0], dividend non-positive
-        eval.run(&[[-6.0, 0.0], [-3.0, 0.0]], &mut outputs).unwrap();
+        eval.run(&[[-6.0, 0.0], [-3.0, 0.0]], &mut outputs).unwrap(); // Divisor [negative, 0], dividend non-positive
         assert_eq!(outputs[0], [0.0, f64::INFINITY]);
-        // Divisor [0, positive], dividend non-negative
-        eval.run(&[[0.0, 6.0], [0.0, 3.0]], &mut outputs).unwrap();
+        eval.run(&[[0.0, 6.0], [0.0, 3.0]], &mut outputs).unwrap(); // Divisor [0, positive], dividend non-negative
         assert_eq!(outputs[0], [0.0, f64::INFINITY]);
-        // Divisor [negative, 0], dividend non-negative
-        eval.run(&[[0.0, 6.0], [-3.0, 0.0]], &mut outputs).unwrap();
+        eval.run(&[[0.0, 6.0], [-3.0, 0.0]], &mut outputs).unwrap(); // Divisor [negative, 0], dividend non-negative
         assert_eq!(outputs[0], [f64::NEG_INFINITY, 0.0]);
-        // Divisor [0, positive], dividend has negative part
-        eval.run(&[[-6.0, 0.0], [0.0, 3.0]], &mut outputs).unwrap();
+        eval.run(&[[-6.0, 0.0], [0.0, 3.0]], &mut outputs).unwrap(); // Divisor [0, positive], dividend has negative part
         assert_eq!(outputs[0], [f64::NEG_INFINITY, 0.0]);
-        // Divisor crossing zero strictly - ENTIRE
-        eval.run(&[[2.0, 4.0], [-1.0, 1.0]], &mut outputs).unwrap();
+        eval.run(&[[2.0, 4.0], [-1.0, 1.0]], &mut outputs).unwrap(); // Divisor crossing zero strictly - ENTIRE
         assert_eq!(outputs[0], [f64::NEG_INFINITY, f64::INFINITY]);
-        // Point interval division
-        eval.run(&[[6.0, 6.0], [2.0, 2.0]], &mut outputs).unwrap();
+        eval.run(&[[6.0, 6.0], [2.0, 2.0]], &mut outputs).unwrap(); // Point interval division
         assert_eq!(outputs[0], [3.0, 3.0]);
     }
 }
