@@ -420,10 +420,7 @@ impl ValueType for Interval {
                 Min => Interval::from_scalar(rlo.min(llo), rhi.min(lhi)),
                 Max => Interval::from_scalar(rlo.max(llo), rhi.max(lhi)),
                 Remainder => {
-                    let (mut lo, mut hi) = div((llo, lhi), (rlo, rhi))?;
-                    if lo > hi {
-                        std::mem::swap(&mut lo, &mut hi);
-                    }
+                    let (lo, hi) = div((llo, lhi), (rlo, rhi))?;
                     let (lo, hi) = mul((lo.floor(), hi.floor()), (rlo, rhi));
                     Interval::from_scalar(llo - hi, lhi - lo)
                 }
