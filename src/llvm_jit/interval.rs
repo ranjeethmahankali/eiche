@@ -960,10 +960,10 @@ fn build_interval_pow<'ctx>(
     let integer_bb =
         context.append_basic_block(function, &format!("pow_singleton_integer_exponent_{index}"));
     let general_bb = context.append_basic_block(function, &format!("pow_general_exponent_{index}"));
-    let integer_merge_bb =
+    let integer_rational_merge_bb =
         context.append_basic_block(function, &format!("pow_outer_merge_{index}"));
     builder.build_conditional_branch(is_exponent_singleton_integer, integer_bb, general_bb)?;
-    let integer_case: VectorValue<'ctx> = {
+    let (integer_case, odd_even_merge_bb) = {
         builder.position_at_end(integer_bb);
         let exponent = builder.build_float_to_signed_int(
             builder
@@ -976,12 +976,15 @@ fn build_interval_pow<'ctx>(
             i32_type,
             &format!("pow_exponent_to_integer_convert_{index}"),
         )?;
-        let is_even = builder.build_not(
-            builder.build_and(
-                exponent,
-                i32_type.const_int(1, false),
-                &format!("pow_integer_exp_odd_check_{index}"),
-            )?,
+        let is_odd = builder.build_and(
+            exponent,
+            i32_type.const_int(1, false),
+            &format!("pow_integer_exp_odd_check_{index}"),
+        )?;
+        let is_even = builder.build_int_compare(
+            IntPredicate::EQ,
+            is_odd,
+            i32_type.const_zero(),
             &format!("pow_integer_even_check_{index}"),
         )?;
         let is_neg = builder.build_int_compare(
@@ -1098,8 +1101,8 @@ fn build_interval_pow<'ctx>(
         builder.position_at_end(even_merge_bb);
         let phi = builder.build_phi(lhs.get_type(), &format!("pow_integer_case_output_{index}"))?;
         phi.add_incoming(&[(&even_case, even_bb), (&else_case, else_bb)]);
-        builder.build_unconditional_branch(integer_merge_bb)?;
-        phi.as_basic_value().into_vector_value()
+        builder.build_unconditional_branch(integer_rational_merge_bb)?;
+        (phi.as_basic_value().into_vector_value(), even_merge_bb)
     };
     let general_case: VectorValue<'ctx> = {
         builder.position_at_end(general_bb);
@@ -1348,12 +1351,15 @@ fn build_interval_pow<'ctx>(
                 &format!("pow_general_mask_choice_rhi_is_neg_{index}"),
             )?
             .into_vector_value();
-        builder.build_unconditional_branch(integer_merge_bb)?;
+        builder.build_unconditional_branch(integer_rational_merge_bb)?;
         out
     };
-    builder.position_at_end(integer_merge_bb);
+    builder.position_at_end(integer_rational_merge_bb);
     let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
-    phi.add_incoming(&[(&integer_case, integer_bb), (&general_case, general_bb)]);
+    phi.add_incoming(&[
+        (&integer_case, odd_even_merge_bb),
+        (&general_case, general_bb),
+    ]);
     let sqbase = builder.build_float_mul(lhs, lhs, &format!("pow_lhs_square_base_{index}"))?;
     Ok(builder
         .build_select(
