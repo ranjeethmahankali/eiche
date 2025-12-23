@@ -351,6 +351,9 @@ impl ValueType for Interval {
                 Divide => {
                     div((llo, lhi), (rlo, rhi)).and_then(|(lo, hi)| Interval::from_scalar(lo, hi))
                 }
+                Pow if llo.is_nan() || lhi.is_nan() || rlo.is_nan() || rhi.is_nan() => {
+                    Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                }
                 Pow if rlo == 2.0 && rhi == 2.0 => {
                     match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0)) {
                         // Squaring
@@ -363,32 +366,24 @@ impl ValueType for Interval {
                 }
                 Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rlo == rhi => {
-                    // Singleton integer exponent.
-                    if llo.is_nan() && lhi.is_nan() {
-                        Ok(Interval::Scalar(f64::NAN, f64::NAN))
-                    } else {
-                        let rhs = rhi.floor() as i32;
-                        if rhs < 0 {
-                            if llo == 0.0 && lhi == 0.0 {
-                                Ok(Interval::Scalar(f64::NAN, f64::NAN))
-                            } else if rhs % 2 == 0 {
-                                let (lo, hi) = abs((llo, lhi));
-                                Interval::from_scalar(hi.powi(rhs), lo.powi(rhs))
-                            } else if llo < 0.0 && lhi > 0.0 {
-                                Ok(Interval::default())
-                            } else {
-                                Interval::from_scalar(lhi.powi(rhs), llo.powi(rhs))
-                            }
+                    let rhs = rhi.floor() as i32;
+                    if rhs < 0 {
+                        if llo == 0.0 && lhi == 0.0 {
+                            Ok(Interval::Scalar(f64::NAN, f64::NAN))
                         } else if rhs % 2 == 0 {
                             let (lo, hi) = abs((llo, lhi));
-                            Interval::from_scalar(lo.powi(rhs), hi.powi(rhs))
+                            Interval::from_scalar(hi.powi(rhs), lo.powi(rhs))
+                        } else if llo < 0.0 && lhi > 0.0 {
+                            Ok(Interval::default())
                         } else {
-                            Interval::from_scalar(llo.powi(rhs), lhi.powi(rhs))
+                            Interval::from_scalar(lhi.powi(rhs), llo.powi(rhs))
                         }
+                    } else if rhs % 2 == 0 {
+                        let (lo, hi) = abs((llo, lhi));
+                        Interval::from_scalar(lo.powi(rhs), hi.powi(rhs))
+                    } else {
+                        Interval::from_scalar(llo.powi(rhs), lhi.powi(rhs))
                     }
-                }
-                Pow if llo.is_nan() || lhi.is_nan() || rlo.is_nan() || rhi.is_nan() => {
-                    Ok(Interval::Scalar(f64::NAN, f64::NAN))
                 }
                 Pow => {
                     let (llo, lhi) = intersection((llo, lhi), (0.0, f64::INFINITY));
