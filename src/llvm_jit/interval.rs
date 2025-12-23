@@ -1157,6 +1157,7 @@ fn build_interval_pow<'ctx>(
                     flt_type.const_float(f64::NAN),
                     flt_type.const_float(f64::NAN),
                     flt_type.const_float(f64::NAN),
+                    flt_type.const_float(f64::NAN),
                 ]),
                 build_vec_unary_intrinsic(
                     builder,
@@ -1239,7 +1240,7 @@ fn build_interval_pow<'ctx>(
                         lhi_is_zero,
                         VectorType::const_vector(&[
                             i32_type.const_int(6, false),
-                            i32_type.const_int(6, false),
+                            i32_type.const_int(7, false),
                         ]),
                         builder
                             .build_select(
@@ -1305,12 +1306,14 @@ fn build_interval_pow<'ctx>(
                 &format!("pow_general_mask_choice_rhi_is_neg_{index}"),
             )?
             .into_vector_value();
+        dbg!("before");
         let out = builder.build_shuffle_vector(
             pow_base,
             other_vals,
             mask,
             &format!("pow_general_case_final_shuffle_{index}"),
         )?;
+        dbg!("after");
         builder.build_unconditional_branch(integer_merge_bb)?;
         out
     };
