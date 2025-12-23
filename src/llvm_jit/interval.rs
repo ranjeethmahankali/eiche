@@ -718,7 +718,18 @@ impl Tree {
                         ni,
                     )?
                     .as_basic_value_enum(),
-                    Pow => todo!(),
+                    Pow => build_interval_pow(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        float_type,
+                        ni,
+                        function,
+                        context,
+                    )?
+                    .as_basic_value_enum(),
                     Min => build_vec_binary_intrinsic(
                         builder,
                         &compiler.module,
@@ -1085,8 +1096,217 @@ fn build_interval_pow<'ctx>(
     };
     let general_case: VectorValue<'ctx> = {
         builder.position_at_end(general_bb);
-        todo!();
+        let lhs = build_vec_binary_intrinsic(
+            builder,
+            module,
+            "llvm.minnum.*",
+            &format!("pow_general_domain_adjust_min_call_{index}"),
+            build_vec_binary_intrinsic(
+                builder,
+                module,
+                "llvm.maxnum.*",
+                &format!("pow_general_domain_adjust_max_call_{index}"),
+                lhs,
+                lhs.get_type().const_zero(),
+            )?
+            .into_vector_value(),
+            VectorType::const_vector(&[
+                flt_type.const_float(f64::INFINITY),
+                flt_type.const_float(f64::INFINITY),
+            ]),
+        )?
+        .into_vector_value();
+        let pow_base = build_vec_binary_intrinsic(
+            builder,
+            module,
+            "llvm.pow.*",
+            &format!("pow_general_case_base_call_{index}"),
+            builder.build_shuffle_vector(
+                lhs,
+                lhs,
+                VectorType::const_vector(&[
+                    i32_type.const_int(0, false),
+                    i32_type.const_int(1, false),
+                    i32_type.const_int(2, false),
+                    i32_type.const_int(3, false),
+                ]),
+                &format!("pow_general_exp_base_val_lhs_{index}"),
+            )?,
+            builder.build_shuffle_vector(
+                rhs,
+                rhs,
+                VectorType::const_vector(&[
+                    i32_type.const_int(0, false),
+                    i32_type.const_int(1, false),
+                    i32_type.const_int(3, false),
+                    i32_type.const_int(2, false),
+                ]),
+                &format!("pow_general_exp_base_val_rhs_{index}"),
+            )?,
+        )?
+        .into_vector_value();
+        let other_vals = builder.build_insert_element(
+            builder.build_insert_element(
+                VectorType::const_vector(&[
+                    flt_type.const_float(f64::NAN),
+                    flt_type.const_float(f64::NAN),
+                    flt_type.const_float(f64::NAN),
+                ]),
+                build_vec_unary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.vector.reduce.fmin.*",
+                    &format!("pow_general_min_of_2_and_3_{index}"),
+                    builder.build_shuffle_vector(
+                        pow_base,
+                        pow_base.get_type().get_undef(),
+                        VectorType::const_vector(&[
+                            i32_type.const_int(2, false),
+                            i32_type.const_int(3, false),
+                        ]),
+                        &format!("pow_general_extract_2_and_3_{index}"),
+                    )?,
+                )?
+                .into_vector_value(),
+                i32_type.const_int(0, false),
+                &format!("pow_general_other_vals_compose_0_{index}"),
+            )?,
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmax.*",
+                &format!("pow_general_max_of_0_and_1_{index}"),
+                builder.build_shuffle_vector(
+                    pow_base,
+                    pow_base.get_type().get_undef(),
+                    VectorType::const_vector(&[
+                        i32_type.const_int(0, false),
+                        i32_type.const_int(1, false),
+                    ]),
+                    &format!("pow_general_extract_0_and_1_{index}"),
+                )?,
+            )?
+            .into_vector_value(),
+            i32_type.const_int(1, false),
+            &format!("pow_general_other_vals_compose_1_{index}"),
+        )?;
+        // Extract values from vector for ergonomic use later.
+        let (llo, lhi) =
+            build_interval_unpack(lhs, builder, i32_type, "pow_general_case_lhs", index)?;
+        let (rlo, rhi) =
+            build_interval_unpack(rhs, builder, i32_type, "pow_general_case_rhs", index)?;
+        let rhi_is_neg = builder.build_float_compare(
+            FloatPredicate::ULE,
+            rhi,
+            rhi.get_type().const_zero(),
+            &format!("pow_general_rhi_neg_check_{index}"),
+        )?;
+        let lhi_is_zero = builder.build_float_compare(
+            FloatPredicate::UEQ,
+            lhi,
+            lhi.get_type().const_zero(),
+            &format!("pow_general_lhi_zero_check_{index}"),
+        )?;
+        let lhi_lt_one = builder.build_float_compare(
+            FloatPredicate::ULT,
+            lhi,
+            flt_type.const_float(1.0),
+            &format!("pow_general_lhi_lt_one_check_{index}"),
+        )?;
+        let llo_gt_one = builder.build_float_compare(
+            FloatPredicate::UGT,
+            llo,
+            flt_type.const_float(1.0),
+            &format!("pow_general_llo_gt_one_check_{index}"),
+        )?;
+        let rlo_gt_zero = builder.build_float_compare(
+            FloatPredicate::UGT,
+            rlo,
+            flt_type.const_zero(),
+            &format!("pow_general_rlo_gt_zero_{index}"),
+        )?;
+        let mask = builder
+            .build_select(
+                rhi_is_neg,
+                builder
+                    .build_select(
+                        lhi_is_zero,
+                        VectorType::const_vector(&[
+                            i32_type.const_int(6, false),
+                            i32_type.const_int(6, false),
+                        ]),
+                        builder
+                            .build_select(
+                                lhi_lt_one,
+                                VectorType::const_vector(&[
+                                    i32_type.const_int(1, false),
+                                    i32_type.const_int(0, false),
+                                ]),
+                                builder
+                                    .build_select(
+                                        llo_gt_one,
+                                        VectorType::const_vector(&[
+                                            i32_type.const_int(3, false),
+                                            i32_type.const_int(2, false),
+                                        ]),
+                                        VectorType::const_vector(&[
+                                            i32_type.const_int(3, false),
+                                            i32_type.const_int(0, false),
+                                        ]),
+                                        &format!("pow_general_mask_choice_llo_gt_one_{index}"),
+                                    )?
+                                    .into_vector_value(),
+                                &format!("pow_general_mask_choice_lhi_lt_one_{index}"),
+                            )?
+                            .into_vector_value(),
+                        &format!("pow_general_mask_choice_lhi_is_zero_{index}"),
+                    )?
+                    .into_vector_value(),
+                builder
+                    .build_select(
+                        rlo_gt_zero,
+                        builder
+                            .build_select(
+                                lhi_lt_one,
+                                VectorType::const_vector(&[
+                                    i32_type.const_int(2, false),
+                                    i32_type.const_int(3, false),
+                                ]),
+                                builder
+                                    .build_select(
+                                        llo_gt_one,
+                                        VectorType::const_vector(&[
+                                            i32_type.const_int(0, false),
+                                            i32_type.const_int(1, false),
+                                        ]),
+                                        VectorType::const_vector(&[
+                                            i32_type.const_int(2, false),
+                                            i32_type.const_int(1, false),
+                                        ]),
+                                        &format!("pow_general_mask_choice_llo_gt_one_{index}"),
+                                    )?
+                                    .into_vector_value(),
+                                &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
+                            )?
+                            .into_vector_value(),
+                        VectorType::const_vector(&[
+                            i32_type.const_int(4, false),
+                            i32_type.const_int(5, false),
+                        ]),
+                        &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
+                    )?
+                    .into_vector_value(),
+                &format!("pow_general_mask_choice_rhi_is_neg_{index}"),
+            )?
+            .into_vector_value();
+        let out = builder.build_shuffle_vector(
+            pow_base,
+            other_vals,
+            mask,
+            &format!("pow_general_case_final_shuffle_{index}"),
+        )?;
         builder.build_unconditional_branch(integer_merge_bb)?;
+        out
     };
     builder.position_at_end(integer_merge_bb);
     let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
@@ -1334,6 +1554,30 @@ fn build_interval_compose<'ctx>(
         i32_type.const_int(1, false),
         &format!("interval_compose_{suffix}_hi_{index}"),
     )?)
+}
+
+fn build_interval_unpack<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    i32_type: IntType<'ctx>,
+    prefix: &str,
+    index: usize,
+) -> Result<(FloatValue<'ctx>, FloatValue<'ctx>), Error> {
+    let lo = builder
+        .build_extract_element(
+            input,
+            i32_type.const_zero(),
+            &format!("{prefix}_interval_unpack_left_{index}"),
+        )?
+        .into_float_value();
+    let hi = builder
+        .build_extract_element(
+            input,
+            i32_type.const_int(1, false),
+            &format!("{prefix}_interval_unpack_right_{index}"),
+        )?
+        .into_float_value();
+    Ok((lo, hi))
 }
 
 fn build_interval_div<'ctx>(
