@@ -138,6 +138,8 @@ pub trait NumberType:
     fn max(a: Self, b: Self) -> Self;
 
     fn type_str() -> &'static str;
+
+    fn is_nan(&self) -> bool;
 }
 
 impl NumberType for f32 {
@@ -168,6 +170,10 @@ impl NumberType for f32 {
     fn jit_int_type(context: &Context) -> IntType<'_> {
         context.i32_type()
     }
+
+    fn is_nan(&self) -> bool {
+        f32::is_nan(*self)
+    }
 }
 
 impl NumberType for f64 {
@@ -197,6 +203,10 @@ impl NumberType for f64 {
 
     fn jit_int_type(context: &Context) -> IntType<'_> {
         context.i64_type()
+    }
+
+    fn is_nan(&self) -> bool {
+        f64::is_nan(*self)
     }
 }
 
