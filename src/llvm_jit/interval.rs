@@ -788,7 +788,6 @@ impl Tree {
 fn build_check_interval_spanning_zero<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
-    module: &'ctx Module,
     i32_type: IntType<'ctx>,
     prefix: &str,
     index: usize,
@@ -799,19 +798,24 @@ fn build_check_interval_spanning_zero<'ctx>(
         input.get_type().const_zero(),
         &format!("{prefix}_zero_spanning_check_{index}"),
     )?;
-    Ok(build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.and.*",
-        &format!("{prefix}_zero_spanning_reduce_{index}"),
-        builder.build_int_compare(
-            IntPredicate::NE,
-            is_neg,
-            build_interval_flip(is_neg, builder, i32_type, index)?,
-            &format!("{prefix}_zero_spanning_flip_comparison_{index}"),
-        )?,
-    )?
-    .into_int_value())
+    Ok(builder.build_int_compare(
+        IntPredicate::NE,
+        builder
+            .build_extract_element(
+                is_neg,
+                i32_type.const_zero(),
+                &format!("{prefix}_zero_spanning_left_{index}"),
+            )?
+            .into_int_value(),
+        builder
+            .build_extract_element(
+                is_neg,
+                i32_type.const_int(1, false),
+                &format!("{prefix}_zero_spanning_right_{index}"),
+            )?
+            .into_int_value(),
+        &format!("{prefix}_zero_spanning_check_{index}"),
+    )?)
 }
 
 fn build_interval_pow<'ctx>(
@@ -963,7 +967,6 @@ fn build_interval_pow<'ctx>(
                                         build_check_interval_spanning_zero(
                                             lhs,
                                             builder,
-                                            module,
                                             i32_type,
                                             "pow_square_case",
                                             index,
@@ -1001,18 +1004,18 @@ fn build_interval_pow<'ctx>(
 }
 
 fn build_interval_abs<'ctx>(
-    ireg: VectorValue<'ctx>,
+    input: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    float_type: FloatType<'ctx>,
+    flt_type: FloatType<'ctx>,
     i32_type: IntType<'ctx>,
-    ni: usize,
+    index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     let lt_zero = builder.build_float_compare(
         FloatPredicate::ULT,
-        ireg,
-        VectorType::const_vector(&[float_type.const_float(0.), float_type.const_float(0.)]),
-        &format!("lt_zero_{ni}"),
+        input,
+        VectorType::const_vector(&[flt_type.const_float(0.), flt_type.const_float(0.)]),
+        &format!("lt_zero_{index}"),
     )?;
     Ok(builder
         .build_select(
@@ -1020,47 +1023,53 @@ fn build_interval_abs<'ctx>(
                 .build_extract_element(
                     lt_zero,
                     i32_type.const_int(1, false),
-                    &format!("first_lt_zero_{ni}"),
+                    &format!("first_lt_zero_{index}"),
                 )?
                 .into_int_value(),
             // (-hi, -lo)
-            build_interval_negate(ireg, builder, i32_type, ni, &format!("intermediate_1_{ni}"))?,
+            build_interval_negate(
+                input,
+                builder,
+                i32_type,
+                index,
+                &format!("intermediate_1_{index}"),
+            )?,
             builder
                 .build_select(
                     builder
                         .build_extract_element(
                             lt_zero,
                             i32_type.const_int(0, false),
-                            &format!("first_lt_zero_{ni}"),
+                            &format!("first_lt_zero_{index}"),
                         )?
                         .into_int_value(),
                     // (0.0, max(abs(lo), abs(hi)))
                     builder.build_insert_element(
-                        ireg.get_type().const_zero(),
+                        input.get_type().const_zero(),
                         build_vec_unary_intrinsic(
                             builder,
                             module,
                             "llvm.vector.reduce.fmax.*",
-                            &format!("fmax_reduce_call_{ni}"),
+                            &format!("fmax_reduce_call_{index}"),
                             build_vec_unary_intrinsic(
                                 builder,
                                 module,
                                 "llvm.fabs.*",
-                                &format!("abs_call_{ni}"),
-                                ireg,
+                                &format!("abs_call_{index}"),
+                                input,
                             )?
                             .into_vector_value(),
                         )?
                         .into_float_value(),
                         i32_type.const_int(1, false),
-                        &format!("intermediate_2_{ni}"),
+                        &format!("intermediate_2_{index}"),
                     )?,
                     // (lo, hi),
-                    ireg,
-                    &format!("intermediate_3_{ni}"),
+                    input,
+                    &format!("intermediate_3_{index}"),
                 )?
                 .into_vector_value(),
-            &format!("reg_{ni}"),
+            &format!("reg_{index}"),
         )?
         .into_vector_value())
 }
