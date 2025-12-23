@@ -2189,7 +2189,410 @@ impl<'ctx, T: NumberType> JitIntervalFnSync<'ctx, T> {
 
 #[cfg(test)]
 mod test {
-    use crate::{Error, JitContext, assert_float_eq, deftree, llvm_jit::NumberType};
+    use crate::{
+        Error, JitContext, Tree, assert_float_eq, deftree, llvm_jit::NumberType, test::Sampler,
+    };
+
+    const EPS: f64 = f64::EPSILON * 2.0;
+
+    fn is_common(lo: f64, hi: f64) -> bool {
+        lo.is_finite() && hi.is_finite() && lo <= hi
+    }
+
+    fn is_empty(lo: f64, hi: f64) -> bool {
+        lo.is_nan() && hi.is_nan()
+    }
+
+    fn is_entire(lo: f64, hi: f64) -> bool {
+        lo == f64::NEG_INFINITY && hi == f64::INFINITY
+    }
+
+    fn is_subset_of(a: &[f64; 2], b: &[f64; 2]) -> bool {
+        (a[0] + EPS) >= b[0] && a[1] <= (b[1] + EPS)
+    }
+
+    fn contains((lo, hi): &(f64, f64), val: f64) -> bool {
+        val.is_finite() && (val + EPS) >= *lo && val <= (*hi + EPS)
+    }
+
+    /**
+    Helper function to check interval evaluations by evaluating the given
+    tree. `vardata` is expected to contain a list of variables and the lower and
+    upper bounds defining the range in which those variables can be sampled during
+    testing. In essence, `vardata` defines one large interval in which to sample the
+    tree.
+
+    This function will sample many sub intervals within this large interval and
+    ensure that the output intervals of the sub-intervals are subsets of the output
+    interval of the large interval. This function samples many values in this
+    interval and ensure the values are contained in the output interval of the
+    sub-interval that contains the sample. All this is just to ensure the accuracy
+    of the interval evaluations.
+
+    `samples_per_var` defines the number of values to be sampled per variable. So
+    the tree will be evaluated a total of `pow(samples_per_var, vardata.len())`
+    times. `intervals_per_var` defines the number of sub intervals to sample per
+    variable. So the treee will be evaluated for a total of `pow(intervals_per_var,
+    vardata.len())` number of sub intervals.
+    */
+    pub fn check_interval_eval(
+        tree: Tree,
+        vardata: &[(char, f64, f64)],
+        samples_per_var: usize,
+        intervals_per_var: usize,
+    ) {
+        let num_roots = tree.num_roots();
+        let context = JitContext::default();
+        let params: String = vardata.iter().map(|(c, _, _)| *c).collect();
+        let eval = tree.jit_compile::<f64>(&context, &params).unwrap();
+        let ieval = tree.jit_compile_interval(&context, &params).unwrap();
+        // Evaluate the full interval and get the range of output values of the tree.
+        let total_range: Box<[[f64; 2]]> = {
+            let inputs: Box<[_]> = vardata
+                .iter()
+                .map(|(_, lower, upper)| [*lower, *upper])
+                .collect();
+            let mut outputs = vec![[f64::NAN, f64::NAN]; num_roots].into_boxed_slice();
+            ieval.run(&inputs, &mut outputs).unwrap();
+            for [lo, hi] in outputs.iter() {
+                assert!(is_common(*lo, *hi));
+            }
+            outputs
+        };
+        assert_eq!(total_range.len(), num_roots);
+        let mut sampler = Sampler::new(vardata, samples_per_var, 42);
+        // When we compute a sub-interval, we will cache the results here.
+        let mut computed_intervals = vec![
+            (f64::INFINITY, f64::NEG_INFINITY);
+            intervals_per_var.pow(vardata.len() as u32) * num_roots
+        ];
+        // Flags for whether or not a sub-interval is already computed and cached.
+        let mut computed = vec![false; intervals_per_var.pow(vardata.len() as u32)];
+        // Steps that define the sub intervals on a per variable basis.
+        let steps: Vec<_> = vardata
+            .iter()
+            .map(|(_label, lower, upper)| (upper - lower) / intervals_per_var as f64)
+            .collect();
+        /*
+        Sample values, evaluate them and ensure they're within the output
+        interval of the sub-interval that contains the sample.
+        */
+        while let Some(sample) = sampler.next() {
+            assert_eq!(sample.len(), vardata.len());
+            /*
+            Find the index of the interval that the sample belongs in, and also get
+            the sub-interval that contains the sample. The index here is a flattened
+            index, similar to `x + y * X_SIZE + z * X_SIZE * Y_SIZE`, but
+            generalized for arbitrary dimensions. The dimensions are equal to the
+            number of variables.
+            */
+            let (index, isample, _) = sample.iter().zip(vardata.iter()).zip(steps.iter()).fold(
+                (0usize, Vec::new(), 1usize),
+                |(mut idx, mut intervals, mut multiplier),
+                 ((value, (_label, lower, _upper)), step)| {
+                    let local_idx = f64::floor((value - lower) / step);
+                    idx += (local_idx as usize) * multiplier;
+                    let inf = lower + local_idx * step;
+                    intervals.push((inf, inf + step));
+                    multiplier *= intervals_per_var;
+                    (idx, intervals, multiplier)
+                },
+            );
+            assert!(index < computed.len());
+            // Get the interval that is expected to contain the values output by this sample.
+            let expected_range = {
+                let offset = index * num_roots;
+                if !computed[index] {
+                    // Evaluate the interval and cache it.
+                    let inputs: Box<[_]> = isample.iter().map(|(lo, hi)| [*lo, *hi]).collect();
+                    let mut iresults = vec![[f64::NAN, f64::NAN]; num_roots].into_boxed_slice();
+                    ieval.run(&inputs, &mut iresults).unwrap();
+                    for (i, [lo, hi]) in iresults.iter().enumerate() {
+                        assert!(!is_empty(*lo, *hi));
+                        assert!(!is_entire(*lo, *hi));
+                        assert!(is_common(*lo, *hi));
+                        assert!(is_subset_of(&[*lo, *hi], &total_range[i]));
+                        computed_intervals[offset + i] = (*lo, *hi);
+                    }
+                    computed[index] = true;
+                }
+                &computed_intervals[offset..(offset + num_roots)]
+            };
+            // Evaluate the sample and ensure the output is within the interval.
+            let mut results = vec![f64::NAN; num_roots].into_boxed_slice();
+            eval.run(sample, &mut results).unwrap();
+            assert_eq!(num_roots, results.len());
+            assert_eq!(results.len(), expected_range.len());
+            for (range, value) in expected_range.iter().zip(results.iter()) {
+                assert!(contains(range, *value));
+            }
+        }
+    }
+
+    #[test]
+    fn t_interval_sum() {
+        check_interval_eval(
+            deftree!(+ 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -5., 5.)],
+            10,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_tree_1() {
+        check_interval_eval(
+            deftree!(/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.)).unwrap(),
+            &[('x', -2.5, 2.5)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
+    fn t_interval_squaring() {
+        check_interval_eval(
+            deftree!(pow 'x 2.).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(pow (- 'x 1.) 2.).unwrap(),
+            &[('x', -10., 10.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_cube() {
+        check_interval_eval(
+            deftree!(pow 'x 3.).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_rational_pow() {
+        check_interval_eval(deftree!(pow 'x 3.15).unwrap(), &[('x', 0., 10.)], 20, 5);
+        check_interval_eval(
+            deftree!(pow 'x 2.4556634543).unwrap(),
+            &[('x', 2.212, 8.199)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(pow 'x 45.23).unwrap(),
+            &[('x', 2.222222, 11.112342)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_distance_to_point() {
+        check_interval_eval(
+            deftree!(sqrt (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.))).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_tree_2() {
+        check_interval_eval(
+            deftree!(
+                (max (min
+                      (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
+            )
+            .unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_trees_concat_0() {
+        check_interval_eval(
+            deftree!(concat
+                            (log 'x)
+                            (+ 'x (pow 'y 2.)))
+            .unwrap(),
+            &[('x', 1., 10.), ('y', 1., 10.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_trees_concat_1() {
+        check_interval_eval(
+            deftree!(concat
+                     (/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.))
+                     (+ 'x 'y)
+                     ((max (min
+                            (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                            (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                       (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
+            )).unwrap(),
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            20,
+            5
+        );
+    }
+
+    #[test]
+    fn t_interval_choose() {
+        check_interval_eval(
+            deftree!(if (> 'x 0) 'x (- 'x)).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            10,
+        );
+        check_interval_eval(
+            deftree!(if (< 'x 0) (- 'x) 'x).unwrap(),
+            &[('x', -10., 10.)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
+    fn t_floor() {
+        check_interval_eval(
+            deftree!(floor (/ (pow 'x 2) (+ 2 (sin 'x)))).unwrap(),
+            &[('x', 1., 5.)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
+    fn t_remainder() {
+        check_interval_eval(
+            deftree!(rem (pow 'x 2) (+ 2 (sin 'x))).unwrap(),
+            &[('x', 1., 5.)],
+            100,
+            10,
+        );
+    }
+
+    #[test]
+    fn t_integer_exponents_negative() {
+        // Negative even exponent
+        check_interval_eval(deftree!(pow 'x (- 2.)).unwrap(), &[('x', 2., 5.)], 20, 5);
+        // Negative odd exponent
+        check_interval_eval(deftree!(pow 'x (- 3.)).unwrap(), &[('x', 1., 3.)], 20, 5);
+        // Negative exponent with interval entirely below 1
+        check_interval_eval(deftree!(pow 'x (- 2.)).unwrap(), &[('x', 0.2, 0.8)], 20, 5);
+    }
+
+    #[test]
+    fn t_pow_around_one() {
+        // Intervals straddling 1.0 with various exponents
+        check_interval_eval(deftree!(pow 'x 2.5).unwrap(), &[('x', 0.5, 1.5)], 20, 5);
+        check_interval_eval(deftree!(pow 'x (- 2.5)).unwrap(), &[('x', 0.5, 1.5)], 20, 5);
+    }
+
+    #[test]
+    fn t_pow_exponent_crossing_zero() {
+        // Exponent interval straddling 0
+        check_interval_eval(
+            deftree!(pow 'x 'y).unwrap(),
+            &[('x', 2., 3.), ('y', -1., 1.)],
+            15,
+            4,
+        );
+    }
+
+    #[test]
+    fn t_exp() {
+        check_interval_eval(deftree!(exp 'x).unwrap(), &[('x', -2., 2.)], 50, 10);
+    }
+
+    #[test]
+    fn t_negate() {
+        check_interval_eval(deftree!(- 'x).unwrap(), &[('x', -5., 5.)], 20, 5);
+    }
+
+    #[test]
+    fn t_interval_abs() {
+        // check_interval_eval(deftree!(abs 'x).unwrap(), &[('x', -5., 5.)], 20, 5);
+        check_interval_eval(deftree!(abs 'x).unwrap(), &[('x', -3., -1.)], 20, 5);
+    }
+
+    #[test]
+    fn t_min_max_direct() {
+        check_interval_eval(
+            deftree!(min 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -3., 7.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(max 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -3., 7.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_comparisons() {
+        check_interval_eval(
+            deftree!(if (== 'x 'y) (+ 'x 2.5) (- 'y 1.523)).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(if (!= 'x 'y) (+ 'x 2.5) (- 'y 1.523)).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(if (< 'x 'y) (+ 'x 2.5) (- 'y 1.523)).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(if (<= 'x 'y) (+ 'x 2.5) (- 'y 1.523)).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_interval_boolean_ops() {
+        check_interval_eval(
+            deftree!(if (and (> 'x 0) (< 'y 5)) (- 'x 2.) (+ 'y 1.5)).unwrap(),
+            &[('x', -2., 3.), ('y', 2., 7.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(if (or (> 'x 5) (< 'y 0)) (- 'x 2.) (+ 'y 1.5)).unwrap(),
+            &[('x', -2., 3.), ('y', 2., 7.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(if (not (> 'x 0)) (- 'x 2.) 1.5).unwrap(),
+            &[('x', -5., 5.)],
+            20,
+            5,
+        );
+    }
 
     fn test_jit_interval_negate<T: NumberType>() {
         let tree = deftree!(- 'x).unwrap();
