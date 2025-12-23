@@ -3038,4 +3038,124 @@ mod test {
         eval.run(&[[6.0, 6.0], [2.0, 2.0]], &mut outputs).unwrap(); // Point interval division
         assert_eq!(outputs[0], [3.0, 3.0]);
     }
+
+    #[test]
+    fn t_jit_interval_pow_comprehensive_f64() {
+        use crate::assert_float_eq;
+        let tree = deftree!(pow 'x 'y).unwrap();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "xy").unwrap();
+        let mut outputs = [[f64::NAN, f64::NAN]];
+        // Helper function to check if interval is empty (NaN, NaN)
+        let is_empty = |output: [f64; 2]| output[0].is_nan() && output[1].is_nan();
+        // Helper function to check if interval is entire (-inf, inf)
+        let is_entire =
+            |output: [f64; 2]| output[0] == f64::NEG_INFINITY && output[1] == f64::INFINITY;
+        // Test 1: NaN cases
+        eval.run(&[[f64::NAN, f64::NAN], [2.0, 3.0]], &mut outputs)
+            .unwrap();
+        assert!(
+            is_empty(outputs[0]),
+            "NaN base should produce empty interval"
+        );
+        eval.run(&[[2.0, 3.0], [f64::NAN, f64::NAN]], &mut outputs)
+            .unwrap();
+        assert!(
+            is_empty(outputs[0]),
+            "NaN exponent should produce empty interval"
+        );
+        // Test 2: Exponent = 0
+        eval.run(&[[2.0, 5.0], [0.0, 0.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 1.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 1.0, 1e-12);
+        // Test 3: Exponent = 2 (squaring), base crossing zero
+        eval.run(&[[-3.0, 2.0], [2.0, 2.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 9.0, 1e-12);
+        // Test 4: Positive even integer exponent
+        eval.run(&[[-2.0, 3.0], [4.0, 4.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 81.0, 1e-12);
+        // Test 5: Negative even integer exponent, non-zero base
+        eval.run(&[[2.0, 4.0], [-2.0, -2.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 1.0 / 16.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 1.0 / 4.0, 1e-12);
+        // Test 6: Negative even integer exponent with zero base
+        eval.run(&[[0.0, 0.0], [-2.0, -2.0]], &mut outputs).unwrap();
+        assert!(is_empty(outputs[0]), "0^(-2) should be empty");
+        // Test 7: Positive odd integer exponent
+        eval.run(&[[-2.0, 3.0], [3.0, 3.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], -8.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 27.0, 1e-12);
+        // Test 8: Odd negative integer exponent crossing zero
+        eval.run(&[[-2.0, 3.0], [-3.0, -3.0]], &mut outputs)
+            .unwrap();
+        assert!(
+            is_entire(outputs[0]),
+            "Base crossing zero with negative odd exponent should be entire"
+        );
+        // Test 9: Odd negative integer exponent, not crossing zero
+        eval.run(&[[2.0, 4.0], [-3.0, -3.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 1.0 / 64.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 1.0 / 8.0, 1e-12);
+        // Test 10: Base entirely below 1, positive rational exponent
+        eval.run(&[[0.2, 0.8], [1.5, 2.5]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.2f64.powf(2.5), 1e-12);
+        assert_float_eq!(outputs[0][1], 0.8f64.powf(1.5), 1e-12);
+        // Test 11: Base entirely above 1, positive rational exponent
+        eval.run(&[[2.0, 4.0], [1.5, 2.5]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 2.0f64.powf(1.5), 1e-12);
+        assert_float_eq!(outputs[0][1], 4.0f64.powf(2.5), 1e-12);
+        // Test 12: Base straddling 1, positive rational exponent
+        eval.run(&[[0.5, 2.0], [1.5, 2.5]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.5f64.powf(2.5), 1e-12);
+        assert_float_eq!(outputs[0][1], 2.0f64.powf(2.5), 1e-12);
+        // Test 13: Base entirely below 1, negative rational exponent
+        eval.run(&[[0.2, 0.8], [-2.5, -1.5]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.8f64.powf(-1.5), 1e-12);
+        assert_float_eq!(outputs[0][1], 0.2f64.powf(-2.5), 1e-12);
+        // Test 14: Base entirely above 1, negative rational exponent
+        eval.run(&[[2.0, 4.0], [-2.5, -1.5]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 4.0f64.powf(-2.5), 1e-12);
+        assert_float_eq!(outputs[0][1], 2.0f64.powf(-1.5), 1e-12);
+        // Test 15: Base straddling 1, negative rational exponent
+        eval.run(&[[0.5, 2.0], [-2.5, -1.5]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 2.0f64.powf(-2.5), 1e-12);
+        assert_float_eq!(outputs[0][1], 0.5f64.powf(-2.5), 1e-12);
+        // Test 16: Exponent crossing zero
+        eval.run(&[[2.0, 3.0], [-1.0, 1.0]], &mut outputs).unwrap();
+        assert_float_eq!(
+            outputs[0][0],
+            2.0f64.powf(-1.0).min(3.0f64.powf(-1.0)),
+            1e-12
+        );
+        assert_float_eq!(outputs[0][1], 2.0f64.powf(1.0).max(3.0f64.powf(1.0)), 1e-12);
+        // Test 17: Zero base with positive exponent
+        eval.run(&[[0.0, 0.0], [2.0, 3.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 0.0, 1e-12);
+        // Test 18: Zero upper bound of base with negative exponent
+        eval.run(&[[0.0, 0.0], [-2.5, -1.5]], &mut outputs).unwrap();
+        assert!(is_empty(outputs[0]), "0^(-x) should be empty");
+        // Test 19: Negative base with rational exponent (clamped to 0+)
+        eval.run(&[[-2.0, -0.5], [1.5, 2.5]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 0.0, 1e-12);
+        // Test 20: Negative base crossing to positive with rational exponent
+        eval.run(&[[-1.0, 2.0], [1.5, 2.5]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 2.0f64.powf(2.5), 1e-12);
+        // Test 21: Zero base with zero exponent
+        eval.run(&[[0.0, 0.0], [0.0, 0.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 1.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 1.0, 1e-12);
+        // Test 22: Base with small positive values, large positive exponent
+        eval.run(&[[0.1, 0.2], [10.0, 10.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 0.1f64.powi(10), 1e-20);
+        assert_float_eq!(outputs[0][1], 0.2f64.powi(10), 1e-20);
+        // Test 23: Singleton base and exponent
+        eval.run(&[[2.0, 2.0], [3.0, 3.0]], &mut outputs).unwrap();
+        assert_float_eq!(outputs[0][0], 8.0, 1e-12);
+        assert_float_eq!(outputs[0][1], 8.0, 1e-12);
+    }
 }
