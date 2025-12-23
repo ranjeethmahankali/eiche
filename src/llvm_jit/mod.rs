@@ -221,6 +221,39 @@ fn build_vec_unary_intrinsic<'ctx>(
         .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
+fn build_vec_binary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &str,
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(
+            module,
+            &[
+                BasicTypeEnum::VectorType(lhs.get_type()),
+                BasicTypeEnum::VectorType(rhs.get_type()),
+            ],
+        )
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[
+                BasicMetadataValueEnum::VectorValue(lhs),
+                BasicMetadataValueEnum::VectorValue(rhs),
+            ],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
 fn build_float_unary_intrinsic<'ctx>(
     builder: &'ctx Builder,
     module: &'ctx Module,

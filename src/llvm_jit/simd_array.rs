@@ -1,17 +1,16 @@
-use super::{JitCompiler, JitContext, NumberType, build_vec_unary_intrinsic};
+use super::{
+    JitCompiler, JitContext, NumberType, build_vec_binary_intrinsic, build_vec_unary_intrinsic,
+};
 use crate::{
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
-    builder::Builder,
     context::Context,
     execution_engine::JitFunction,
-    intrinsics::Intrinsic,
-    module::Module,
-    types::{BasicTypeEnum, FloatType, VectorType},
-    values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum},
+    types::{FloatType, VectorType},
+    values::{BasicValue, BasicValueEnum},
 };
 use std::{ffi::c_void, marker::PhantomData, mem::size_of};
 
@@ -1329,28 +1328,25 @@ impl Tree {
                         builder,
                         &compiler.module,
                         "llvm.pow.*",
-                        "pow_call",
-                        regs[*lhs],
-                        regs[*rhs],
-                        fvec_type,
+                        &format!("pow_call_{ni}"),
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
                     )?,
                     Min => build_vec_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.minnum.*",
-                        "min_call",
-                        regs[*lhs],
-                        regs[*rhs],
-                        fvec_type,
+                        &format!("min_call_{ni}"),
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
                     )?,
                     Max => build_vec_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.maxnum.*",
-                        "max_call",
-                        regs[*lhs],
-                        regs[*rhs],
-                        fvec_type,
+                        &format!("max_call_{ni}"),
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
                     )?,
                     Remainder => builder
                         .build_float_rem(
@@ -1480,40 +1476,6 @@ impl Tree {
             phantom: PhantomData,
         })
     }
-}
-
-fn build_vec_binary_intrinsic<'ctx>(
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    name: &'static str,
-    call_name: &'static str,
-    lhs: BasicValueEnum<'ctx>,
-    rhs: BasicValueEnum<'ctx>,
-    vec_type: VectorType<'ctx>,
-) -> Result<BasicValueEnum<'ctx>, Error> {
-    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
-    let intrinsic_fn = intrinsic
-        .get_declaration(
-            module,
-            &[
-                BasicTypeEnum::VectorType(vec_type),
-                BasicTypeEnum::VectorType(vec_type),
-            ],
-        )
-        .ok_or(Error::CannotCompileIntrinsic(name))?;
-    builder
-        .build_call(
-            intrinsic_fn,
-            &[
-                BasicMetadataValueEnum::VectorValue(lhs.into_vector_value()),
-                BasicMetadataValueEnum::VectorValue(rhs.into_vector_value()),
-            ],
-            call_name,
-        )
-        .map_err(|_| Error::CannotCompileIntrinsic(name))?
-        .try_as_basic_value()
-        .left()
-        .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
 #[cfg(test)]

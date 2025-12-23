@@ -1,4 +1,7 @@
-use super::{JitContext, NumberType, build_float_unary_intrinsic, build_vec_unary_intrinsic};
+use super::{
+    JitContext, NumberType, build_float_unary_intrinsic, build_vec_binary_intrinsic,
+    build_vec_unary_intrinsic,
+};
 use crate::{
     BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, interval::IntervalClass,
     llvm_jit::JitCompiler,
@@ -711,8 +714,22 @@ impl Tree {
                     )?
                     .as_basic_value_enum(),
                     Pow => todo!(),
-                    Min => todo!(),
-                    Max => todo!(),
+                    Min => build_vec_binary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.minnum.*",
+                        &format!("min_call_{ni}"),
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                    )?,
+                    Max => build_vec_binary_intrinsic(
+                        builder,
+                        &compiler.module,
+                        "llvm.maxnum.*",
+                        &format!("max_call_{ni}"),
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                    )?,
                     Remainder => todo!(),
                     Less => todo!(),
                     LessOrEqual => todo!(),
