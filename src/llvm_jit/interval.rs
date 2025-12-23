@@ -1075,7 +1075,7 @@ fn build_interval_pow<'ctx>(
                     &format!("pow_odd_exp_neg_check_{index}"),
                 )?
                 .into_vector_value();
-            builder.build_unconditional_branch(even_merge_bb);
+            builder.build_unconditional_branch(even_merge_bb)?;
             out
         };
         let phi = builder.build_phi(lhs.get_type(), &format!("pow_integer_case_output_{index}"))?;
