@@ -85,8 +85,8 @@ impl Tree {
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
-        let float_type = T::jit_type(context);
-        let interval_type = float_type.vec_type(2);
+        let flt_type = T::jit_type(context);
+        let interval_type = flt_type.vec_type(2);
         let iptr_type = context.ptr_type(AddressSpace::default());
         let bool_type = context.bool_type();
         let i32_type = context.i32_type();
@@ -96,7 +96,7 @@ impl Tree {
         let function = compiler.module.add_function(&func_name, fn_type, None);
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
-        for (ni, node) in self.nodes().iter().enumerate() {
+        for (index, node) in self.nodes().iter().enumerate() {
             let reg = match node {
                 Constant(value) => match value {
                     Value::Bool(flag) => VectorType::const_vector(
@@ -104,8 +104,8 @@ impl Tree {
                     )
                     .as_basic_value_enum(),
                     Value::Scalar(value) => VectorType::const_vector(&[
-                        float_type.const_float(*value),
-                        float_type.const_float(*value),
+                        flt_type.const_float(*value),
+                        flt_type.const_float(*value),
                     ])
                     .as_basic_value_enum(),
                 },
@@ -135,45 +135,45 @@ impl Tree {
                         regs[*input].into_vector_value(),
                         builder,
                         i32_type,
-                        ni,
-                        &format!("reg_{ni}"),
+                        index,
+                        &format!("reg_{index}"),
                     )?
                     .as_basic_value_enum(),
                     Sqrt => build_interval_sqrt(
                         regs[*input].into_vector_value(),
                         builder,
                         &compiler.module,
-                        float_type,
+                        flt_type,
                         i32_type,
-                        ni,
+                        index,
                     )?
                     .as_basic_value_enum(),
                     Abs => build_interval_abs(
                         regs[*input].into_vector_value(),
                         builder,
                         &compiler.module,
-                        float_type,
+                        flt_type,
                         i32_type,
-                        ni,
+                        index,
                     )?
                     .as_basic_value_enum(),
                     Sin => build_interval_sin(
                         regs[*input].into_vector_value(),
                         builder,
                         &compiler.module,
-                        float_type,
+                        flt_type,
                         i32_type,
                         bool_type,
-                        ni,
+                        index,
                     )?
                     .as_basic_value_enum(),
                     Cos => build_interval_cos(
                         regs[*input].into_vector_value(),
                         builder,
                         &compiler.module,
-                        float_type,
+                        flt_type,
                         i32_type,
-                        ni,
+                        index,
                     )?
                     .as_basic_value_enum(),
                     Tan => build_interval_tan(
@@ -181,8 +181,8 @@ impl Tree {
                         builder,
                         &compiler.module,
                         i32_type,
-                        float_type,
-                        ni,
+                        flt_type,
+                        index,
                     )?
                     .as_basic_value_enum(),
                     Log => build_interval_log(
@@ -190,22 +190,22 @@ impl Tree {
                         builder,
                         &compiler.module,
                         i32_type,
-                        float_type,
-                        ni,
+                        flt_type,
+                        index,
                     )?
                     .as_basic_value_enum(),
                     Exp => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.exp.*",
-                        &format!("exp_call_{ni}"),
+                        &format!("exp_call_{index}"),
                         regs[*input].into_vector_value(),
                     )?,
                     Floor => build_vec_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.floor.*",
-                        &format!("floor_call_{ni}"),
+                        &format!("floor_call_{index}"),
                         regs[*input].into_vector_value(),
                     )?,
                     Not => return Err(Error::TypeMismatch),
@@ -215,7 +215,7 @@ impl Tree {
                         .build_float_add(
                             regs[*lhs].into_vector_value(),
                             regs[*rhs].into_vector_value(),
-                            &format!("reg_{ni}"),
+                            &format!("reg_{index}"),
                         )?
                         .as_basic_value_enum(),
                     Subtract => builder
@@ -225,9 +225,9 @@ impl Tree {
                                 regs[*rhs].into_vector_value(),
                                 builder,
                                 i32_type,
-                                ni,
+                                index,
                             )?,
-                            &format!("reg_{ni}"),
+                            &format!("reg_{index}"),
                         )?
                         .as_basic_value_enum(),
                     Multiply => build_interval_mul(
@@ -236,7 +236,7 @@ impl Tree {
                         builder,
                         &compiler.module,
                         i32_type,
-                        ni,
+                        index,
                     )?
                     .as_basic_value_enum(),
                     Divide => build_interval_div(
@@ -245,8 +245,8 @@ impl Tree {
                         builder,
                         &compiler.module,
                         i32_type,
-                        float_type,
-                        ni,
+                        flt_type,
+                        index,
                     )?
                     .as_basic_value_enum(),
                     Pow => build_interval_pow(
@@ -255,8 +255,8 @@ impl Tree {
                         builder,
                         &compiler.module,
                         i32_type,
-                        float_type,
-                        ni,
+                        flt_type,
+                        index,
                         function,
                         context,
                     )?
@@ -265,7 +265,7 @@ impl Tree {
                         builder,
                         &compiler.module,
                         "llvm.minnum.*",
-                        &format!("min_call_{ni}"),
+                        &format!("min_call_{index}"),
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                     )?,
@@ -273,7 +273,7 @@ impl Tree {
                         builder,
                         &compiler.module,
                         "llvm.maxnum.*",
-                        &format!("max_call_{ni}"),
+                        &format!("max_call_{index}"),
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                     )?,
