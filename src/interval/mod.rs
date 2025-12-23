@@ -199,15 +199,6 @@ fn abs((llo, lhi): (f64, f64)) -> (f64, f64) {
     }
 }
 
-fn intersection((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> (f64, f64) {
-    let (lo, hi) = (llo.max(rlo), lhi.min(rhi));
-    if hi < lo {
-        (f64::NAN, f64::NAN)
-    } else {
-        (lo, hi)
-    }
-}
-
 fn precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
     lhi < llo || rhi < rlo || lhi <= rlo
 }
@@ -396,8 +387,11 @@ impl ValueType for Interval {
                         Interval::from_scalar(llo.powi(rhs), lhi.powi(rhs))
                     }
                 }
+                // Negative bases with rational exponents produce imaginary
+                // numbers, that's out of scope, so we return an empty interval.
+                Pow if llo < 0.0 && lhi < 0.0 => Ok(Interval::Scalar(f64::NAN, f64::NAN)),
                 Pow => {
-                    let (llo, lhi) = intersection((llo, lhi), (0.0, f64::INFINITY));
+                    let (llo, lhi) = (llo.max(0.0), lhi.min(f64::INFINITY));
                     if rhi <= 0.0 {
                         if lhi == 0.0 {
                             Ok(Interval::Scalar(f64::NAN, f64::NAN))
