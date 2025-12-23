@@ -878,21 +878,27 @@ fn build_interval_pow<'ctx>(
     function: FunctionValue<'ctx>,
     context: &'ctx Context,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let all_joined = builder.build_shuffle_vector(
+        lhs,
+        rhs,
+        VectorType::const_vector(&[
+            i32_type.const_int(0, false),
+            i32_type.const_int(1, false),
+            i32_type.const_int(2, false),
+            i32_type.const_int(3, false),
+        ]),
+        &format!("pow_nan_check_concat_{index}"),
+    )?;
     let is_any_nan = build_vec_unary_intrinsic(
         builder,
         module,
         "llvm.vector.reduce.or.*",
         &format!("pow_nan_check_{index}"),
-        builder.build_shuffle_vector(
-            lhs,
-            rhs,
-            VectorType::const_vector(&[
-                i32_type.const_int(0, false),
-                i32_type.const_int(1, false),
-                i32_type.const_int(2, false),
-                i32_type.const_int(3, false),
-            ]),
-            &format!("pow_nan_check_concat_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UNO,
+            all_joined,
+            all_joined,
+            &format!("pow_lane_wise_nan_check_{index}"),
         )?,
     )?
     .into_int_value();
@@ -1167,7 +1173,7 @@ fn build_interval_pow<'ctx>(
                         &format!("pow_general_extract_2_and_3_{index}"),
                     )?,
                 )?
-                .into_vector_value(),
+                .into_float_value(),
                 i32_type.const_int(0, false),
                 &format!("pow_general_other_vals_compose_0_{index}"),
             )?,
@@ -1186,7 +1192,7 @@ fn build_interval_pow<'ctx>(
                     &format!("pow_general_extract_0_and_1_{index}"),
                 )?,
             )?
-            .into_vector_value(),
+            .into_float_value(),
             i32_type.const_int(1, false),
             &format!("pow_general_other_vals_compose_1_{index}"),
         )?;
