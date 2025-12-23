@@ -133,6 +133,8 @@ pub trait NumberType:
 
     fn from_f64(val: f64) -> Self;
 
+    fn to_f64(&self) -> f64;
+
     fn min(a: Self, b: Self) -> Self;
 
     fn max(a: Self, b: Self) -> Self;
@@ -174,6 +176,10 @@ impl NumberType for f32 {
     fn is_nan(&self) -> bool {
         f32::is_nan(*self)
     }
+
+    fn to_f64(&self) -> f64 {
+        *self as f64
+    }
 }
 
 impl NumberType for f64 {
@@ -207,6 +213,10 @@ impl NumberType for f64 {
 
     fn is_nan(&self) -> bool {
         f64::is_nan(*self)
+    }
+
+    fn to_f64(&self) -> f64 {
+        *self
     }
 }
 
