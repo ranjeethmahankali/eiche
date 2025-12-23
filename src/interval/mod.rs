@@ -368,20 +368,25 @@ impl ValueType for Interval {
                 Pow if rlo.floor() == rlo && rlo == rhi => {
                     // Singleton integer exponent.
                     let rhs = rhi.floor() as i32;
-                    if rhs < 0 {
+                    if rhs % 2 == 0 {
+                        let (lo, hi) = abs((llo, lhi));
+                        if rhs < 0 {
+                            if llo == 0.0 && lhi == 0.0 {
+                                Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                            } else {
+                                Interval::from_scalar(hi.powi(rhs), lo.powi(rhs))
+                            }
+                        } else {
+                            Interval::from_scalar(lo.powi(rhs), hi.powi(rhs))
+                        }
+                    } else if rhs < 0 {
                         if llo == 0.0 && lhi == 0.0 {
                             Ok(Interval::Scalar(f64::NAN, f64::NAN))
-                        } else if rhs % 2 == 0 {
-                            let (lo, hi) = abs((llo, lhi));
-                            Interval::from_scalar(hi.powi(rhs), lo.powi(rhs))
                         } else if llo < 0.0 && lhi > 0.0 {
                             Ok(Interval::default())
                         } else {
                             Interval::from_scalar(lhi.powi(rhs), llo.powi(rhs))
                         }
-                    } else if rhs % 2 == 0 {
-                        let (lo, hi) = abs((llo, lhi));
-                        Interval::from_scalar(lo.powi(rhs), hi.powi(rhs))
                     } else {
                         Interval::from_scalar(llo.powi(rhs), lhi.powi(rhs))
                     }

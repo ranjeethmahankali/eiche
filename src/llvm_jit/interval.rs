@@ -898,6 +898,10 @@ fn build_interval_pow<'ctx>(
         flt_type.const_float(f64::NEG_INFINITY),
         flt_type.const_float(f64::INFINITY),
     ]);
+    let empty = VectorType::const_vector(&[
+        flt_type.const_float(f64::NAN),
+        flt_type.const_float(f64::NAN),
+    ]);
     let integer_bb =
         context.append_basic_block(function, &format!("pow_singleton_integer_exponent_{index}"));
     let general_bb = context.append_basic_block(function, &format!("pow_general_exponent_{index}"));
@@ -943,10 +947,7 @@ fn build_interval_pow<'ctx>(
     Ok(builder
         .build_select(
             is_any_nan,
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::NAN),
-                flt_type.const_float(f64::NAN),
-            ]),
+            empty,
             builder
                 .build_select(
                     is_exponent_zero,
