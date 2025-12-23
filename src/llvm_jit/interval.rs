@@ -6,7 +6,6 @@ use crate::{
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
     builder::Builder,
-    context::Context,
     execution_engine::JitFunction,
     module::Module,
     types::{FloatType, IntType, VectorType},
@@ -125,8 +124,8 @@ impl Tree {
                     // For negate all we need to do is swap the vector lanes.
                     Negate => build_interval_negate(
                         regs[*input].into_vector_value(),
-                        context,
                         builder,
+                        context.i32_type(),
                         ni,
                         &format!("reg_{ni}"),
                     )?
@@ -140,71 +139,15 @@ impl Tree {
                         ni,
                     )?
                     .as_basic_value_enum(),
-                    Abs => {
-                        let ireg = regs[*input].into_vector_value();
-                        let lt_zero = builder.build_float_compare(
-                            FloatPredicate::ULT,
-                            ireg,
-                            VectorType::const_vector(&[
-                                float_type.const_float(0.),
-                                float_type.const_float(0.),
-                            ]),
-                            &format!("lt_zero_{ni}"),
-                        )?;
-                        builder.build_select(
-                            builder
-                                .build_extract_element(
-                                    lt_zero,
-                                    context.i32_type().const_int(1, false),
-                                    &format!("first_lt_zero_{ni}"),
-                                )?
-                                .into_int_value(),
-                            // (-hi, -lo)
-                            build_interval_negate(
-                                ireg,
-                                context,
-                                builder,
-                                ni,
-                                &format!("intermediate_1_{ni}"),
-                            )?,
-                            builder
-                                .build_select(
-                                    builder
-                                        .build_extract_element(
-                                            lt_zero,
-                                            context.i32_type().const_int(0, false),
-                                            &format!("first_lt_zero_{ni}"),
-                                        )?
-                                        .into_int_value(),
-                                    // (0.0, max(abs(lo), abs(hi)))
-                                    builder.build_insert_element(
-                                        interval_type.const_zero(),
-                                        build_vec_unary_intrinsic(
-                                            builder,
-                                            &compiler.module,
-                                            "llvm.vector.reduce.fmax.*",
-                                            &format!("fmax_reduce_call_{ni}"),
-                                            build_vec_unary_intrinsic(
-                                                builder,
-                                                &compiler.module,
-                                                "llvm.fabs.*",
-                                                &format!("abs_call_{ni}"),
-                                                ireg,
-                                            )?
-                                            .into_vector_value(),
-                                        )?
-                                        .into_float_value(),
-                                        context.i32_type().const_int(1, false),
-                                        &format!("intermediate_2_{ni}"),
-                                    )?,
-                                    // (lo, hi),
-                                    ireg,
-                                    &format!("intermediate_3_{ni}"),
-                                )?
-                                .into_vector_value(),
-                            &format!("reg_{ni}"),
-                        )?
-                    }
+                    Abs => build_interval_abs(
+                        regs[*input].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        float_type,
+                        context.i32_type(),
+                        ni,
+                    )?
+                    .as_basic_value_enum(),
                     Sin => {
                         let ireg = regs[*input].into_vector_value();
                         let qinterval = build_vec_unary_intrinsic(
@@ -823,6 +766,71 @@ impl Tree {
     }
 }
 
+fn build_interval_abs<'ctx>(
+    ireg: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    float_type: FloatType<'ctx>,
+    i32_type: IntType<'ctx>,
+    ni: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let lt_zero = builder.build_float_compare(
+        FloatPredicate::ULT,
+        ireg,
+        VectorType::const_vector(&[float_type.const_float(0.), float_type.const_float(0.)]),
+        &format!("lt_zero_{ni}"),
+    )?;
+    Ok(builder
+        .build_select(
+            builder
+                .build_extract_element(
+                    lt_zero,
+                    i32_type.const_int(1, false),
+                    &format!("first_lt_zero_{ni}"),
+                )?
+                .into_int_value(),
+            // (-hi, -lo)
+            build_interval_negate(ireg, builder, i32_type, ni, &format!("intermediate_1_{ni}"))?,
+            builder
+                .build_select(
+                    builder
+                        .build_extract_element(
+                            lt_zero,
+                            i32_type.const_int(0, false),
+                            &format!("first_lt_zero_{ni}"),
+                        )?
+                        .into_int_value(),
+                    // (0.0, max(abs(lo), abs(hi)))
+                    builder.build_insert_element(
+                        ireg.get_type().const_zero(),
+                        build_vec_unary_intrinsic(
+                            builder,
+                            module,
+                            "llvm.vector.reduce.fmax.*",
+                            &format!("fmax_reduce_call_{ni}"),
+                            build_vec_unary_intrinsic(
+                                builder,
+                                module,
+                                "llvm.fabs.*",
+                                &format!("abs_call_{ni}"),
+                                ireg,
+                            )?
+                            .into_vector_value(),
+                        )?
+                        .into_float_value(),
+                        i32_type.const_int(1, false),
+                        &format!("intermediate_2_{ni}"),
+                    )?,
+                    // (lo, hi),
+                    ireg,
+                    &format!("intermediate_3_{ni}"),
+                )?
+                .into_vector_value(),
+            &format!("reg_{ni}"),
+        )?
+        .into_vector_value())
+}
+
 fn build_interval_sqrt<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -1299,18 +1307,15 @@ fn build_interval_mul<'ctx>(
 
 fn build_interval_negate<'ctx>(
     input: VectorValue<'ctx>,
-    context: &'ctx Context,
     builder: &'ctx Builder,
+    i32_type: IntType<'ctx>,
     index: usize,
     name: &str,
 ) -> Result<VectorValue<'ctx>, Error> {
     Ok(builder.build_shuffle_vector(
         builder.build_float_neg(input, &format!("negate_{index}"))?,
         input.get_type().get_undef(),
-        VectorType::const_vector(&[
-            context.i32_type().const_int(1, false),
-            context.i32_type().const_int(0, false),
-        ]),
+        VectorType::const_vector(&[i32_type.const_int(1, false), i32_type.const_int(0, false)]),
         name,
     )?)
 }
