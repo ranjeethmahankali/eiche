@@ -81,6 +81,7 @@ impl Tree {
         let interval_type = float_type.vec_type(2);
         let iptr_type = context.ptr_type(AddressSpace::default());
         let bool_type = context.bool_type();
+        let i32_type = context.i32_type();
         let fn_type = context
             .void_type()
             .fn_type(&[iptr_type.into(), iptr_type.into()], false);
@@ -125,7 +126,7 @@ impl Tree {
                     Negate => build_interval_negate(
                         regs[*input].into_vector_value(),
                         builder,
-                        context.i32_type(),
+                        i32_type,
                         ni,
                         &format!("reg_{ni}"),
                     )?
@@ -135,7 +136,7 @@ impl Tree {
                         builder,
                         &compiler.module,
                         float_type,
-                        context.i32_type(),
+                        i32_type,
                         ni,
                     )?
                     .as_basic_value_enum(),
@@ -144,7 +145,7 @@ impl Tree {
                         builder,
                         &compiler.module,
                         float_type,
-                        context.i32_type(),
+                        i32_type,
                         ni,
                     )?
                     .as_basic_value_enum(),
@@ -169,14 +170,14 @@ impl Tree {
                             builder
                                 .build_extract_element(
                                     ireg,
-                                    context.i32_type().const_int(0, false),
+                                    i32_type.const_int(0, false),
                                     &format!("extract_lo_{ni}"),
                                 )?
                                 .into_float_value(),
                             builder
                                 .build_extract_element(
                                     ireg,
-                                    context.i32_type().const_int(1, false),
+                                    i32_type.const_int(1, false),
                                     &format!("extract_lo_{ni}"),
                                 )?
                                 .into_float_value(),
@@ -184,7 +185,7 @@ impl Tree {
                         let qlo = builder
                             .build_extract_element(
                                 qinterval,
-                                context.i32_type().const_int(0, false),
+                                i32_type.const_int(0, false),
                                 &format!("q_extract_1_{ni}"),
                             )?
                             .into_float_value();
@@ -201,7 +202,7 @@ impl Tree {
                                     builder
                                         .build_extract_element(
                                             qinterval,
-                                            context.i32_type().const_int(1, false),
+                                            i32_type.const_int(1, false),
                                             &format!("q_extract_0_{ni}"),
                                         )?
                                         .into_float_value(),
@@ -242,7 +243,7 @@ impl Tree {
                         ];
                         let out_vals = [
                             sin_base,
-                            build_interval_flip(sin_base, builder, context.i32_type(), ni)?,
+                            build_interval_flip(sin_base, builder, i32_type, ni)?,
                             builder.build_insert_element(
                                 full_range,
                                 build_vec_unary_intrinsic(
@@ -253,7 +254,7 @@ impl Tree {
                                     sin_base,
                                 )?
                                 .into_float_value(),
-                                context.i32_type().const_int(0, false),
+                                i32_type.const_int(0, false),
                                 &format!("out_val_case_3_{ni}"),
                             )?,
                             builder.build_insert_element(
@@ -266,7 +267,7 @@ impl Tree {
                                     sin_base,
                                 )?
                                 .into_float_value(),
-                                context.i32_type().const_int(1, false),
+                                i32_type.const_int(1, false),
                                 &format!("out_val_case_3_{ni}"),
                             )?,
                         ];
@@ -343,14 +344,14 @@ impl Tree {
                             builder
                                 .build_extract_element(
                                     ireg,
-                                    context.i32_type().const_int(0, false),
+                                    i32_type.const_int(0, false),
                                     &format!("extract_lo_{ni}"),
                                 )?
                                 .into_float_value(),
                             builder
                                 .build_extract_element(
                                     ireg,
-                                    context.i32_type().const_int(1, false),
+                                    i32_type.const_int(1, false),
                                     &format!("extract_lo_{ni}"),
                                 )?
                                 .into_float_value(),
@@ -358,7 +359,7 @@ impl Tree {
                         let qlo = builder
                             .build_extract_element(
                                 qinterval,
-                                context.i32_type().const_int(0, false),
+                                i32_type.const_int(0, false),
                                 &format!("q_extract_1_{ni}"),
                             )?
                             .into_float_value();
@@ -375,7 +376,7 @@ impl Tree {
                                     builder
                                         .build_extract_element(
                                             qinterval,
-                                            context.i32_type().const_int(1, false),
+                                            i32_type.const_int(1, false),
                                             &format!("q_extract_0_{ni}"),
                                         )?
                                         .into_float_value(),
@@ -441,7 +442,7 @@ impl Tree {
                             builder
                                 .build_select(
                                     q_zero,
-                                    build_interval_flip(cos_base, builder, context.i32_type(), ni)?,
+                                    build_interval_flip(cos_base, builder, i32_type, ni)?,
                                     cos_base,
                                     &format!("edge_case_1_{ni}"),
                                 )?
@@ -467,7 +468,7 @@ impl Tree {
                                                     cos_base,
                                                 )?
                                                 .into_float_value(),
-                                                context.i32_type().const_int(1, false),
+                                                i32_type.const_int(1, false),
                                                 &format!("out_val_case_2_{ni}"),
                                             )?,
                                             builder.build_insert_element(
@@ -480,7 +481,7 @@ impl Tree {
                                                     cos_base,
                                                 )?
                                                 .into_float_value(),
-                                                context.i32_type().const_int(0, false),
+                                                i32_type.const_int(0, false),
                                                 &format!("out_val_case_3_{ni}"),
                                             )?,
                                             &format!("nval_cases_{ni}"),
@@ -508,7 +509,7 @@ impl Tree {
                         let lo = builder
                             .build_extract_element(
                                 ireg,
-                                context.i32_type().const_int(0, false),
+                                i32_type.const_int(0, false),
                                 &format!("tan_width_rhs_{ni}"),
                             )?
                             .into_float_value();
@@ -516,7 +517,7 @@ impl Tree {
                             builder
                                 .build_extract_element(
                                     ireg,
-                                    context.i32_type().const_int(1, false),
+                                    i32_type.const_int(1, false),
                                     &format!("tan_width_lhs_{ni}"),
                                 )?
                                 .into_float_value(),
@@ -624,7 +625,7 @@ impl Tree {
                             builder
                                 .build_extract_element(
                                     is_neg,
-                                    context.i32_type().const_int(1, false),
+                                    i32_type.const_int(1, false),
                                     &format!("log_hi_neg_check_{ni}"),
                                 )?
                                 .into_int_value(),
@@ -637,14 +638,14 @@ impl Tree {
                                     builder
                                         .build_extract_element(
                                             is_neg,
-                                            context.i32_type().const_int(0, false),
+                                            i32_type.const_int(0, false),
                                             &format!("log_hi_neg_check_{ni}"),
                                         )?
                                         .into_int_value(),
                                     builder.build_insert_element(
                                         log_base,
                                         float_type.const_float(f64::NEG_INFINITY),
-                                        context.i32_type().const_int(0, false),
+                                        i32_type.const_int(0, false),
                                         &format!("log_range_across_zero_{ni}"),
                                     )?,
                                     log_base,
@@ -684,7 +685,7 @@ impl Tree {
                             build_interval_flip(
                                 regs[*rhs].into_vector_value(),
                                 builder,
-                                context.i32_type(),
+                                i32_type,
                                 ni,
                             )?,
                             &format!("reg_{ni}"),
@@ -695,7 +696,7 @@ impl Tree {
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context.i32_type(),
+                        i32_type,
                         ni,
                     )?
                     .as_basic_value_enum(),
@@ -704,7 +705,7 @@ impl Tree {
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context.i32_type(),
+                        i32_type,
                         float_type,
                         ni,
                     )?
