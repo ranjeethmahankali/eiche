@@ -131,86 +131,15 @@ impl Tree {
                         &format!("reg_{ni}"),
                     )?
                     .as_basic_value_enum(),
-                    Sqrt => {
-                        let ireg = regs[*input].into_vector_value();
-                        builder.build_select(
-                            // Check each lane for NaN, then reduce to check if this interval is empty.
-                            build_check_interval_empty(ireg, builder, &compiler.module, ni)?,
-                            // The interval is empty, so return an emtpy (NaN) interval.
-                            VectorType::const_vector(&[
-                                float_type.const_float(f64::NAN),
-                                float_type.const_float(f64::NAN),
-                            ])
-                            .as_basic_value_enum(),
-                            {
-                                // Interval is not empty.
-                                let lt_zero = builder.build_float_compare(
-                                    FloatPredicate::ULT,
-                                    ireg,
-                                    VectorType::const_vector(&[
-                                        float_type.const_float(0.),
-                                        float_type.const_float(0.),
-                                    ]),
-                                    &format!("lt_zero_{ni}"),
-                                )?;
-                                let sqrt = build_vec_unary_intrinsic(
-                                    builder,
-                                    &compiler.module,
-                                    "llvm.sqrt.*",
-                                    &format!("sqrt_call_{ni}"),
-                                    build_vec_unary_intrinsic(
-                                        builder,
-                                        &compiler.module,
-                                        "llvm.fabs.*",
-                                        &format!("fabs_call_{ni}"),
-                                        ireg,
-                                    )?
-                                    .into_vector_value(),
-                                )?
-                                .into_vector_value();
-                                /* This a nested if. First we check the sign of
-                                 * the lower bound, then we check the sign of
-                                 * the upper bound in the nested select
-                                 * statement. Then we return different things.
-                                 */
-                                builder.build_select(
-                                    // Check first element of vec.
-                                    builder
-                                        .build_extract_element(
-                                            lt_zero,
-                                            context.i32_type().const_int(0, false),
-                                            &format!("first_lt_zero_{ni}"),
-                                        )?
-                                        .into_int_value(),
-                                    builder.build_select(
-                                        builder
-                                            .build_extract_element(
-                                                lt_zero,
-                                                context.i32_type().const_int(1, false),
-                                                &format!("second_lt_zero_{ni}"),
-                                            )?
-                                            .into_int_value(),
-                                        VectorType::const_vector(&[
-                                            float_type.const_float(f64::NAN),
-                                            float_type.const_float(f64::NAN),
-                                        ]),
-                                        builder.build_float_mul(
-                                            sqrt,
-                                            VectorType::const_vector(&[
-                                                float_type.const_float(0.0),
-                                                float_type.const_float(1.0),
-                                            ]),
-                                            &format!("sqrt_domain_clipping_{ni}"),
-                                        )?,
-                                        &format!("sqrt_edge_case_{ni}"),
-                                    )?,
-                                    sqrt.as_basic_value_enum(),
-                                    &format!("sqrt_branching_{ni}"),
-                                )?
-                            },
-                            &format!("reg_{ni}"),
-                        )?
-                    }
+                    Sqrt => build_interval_sqrt(
+                        regs[*input].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        float_type,
+                        context.i32_type(),
+                        ni,
+                    )?
+                    .as_basic_value_enum(),
                     Abs => {
                         let ireg = regs[*input].into_vector_value();
                         let lt_zero = builder.build_float_compare(
@@ -892,6 +821,92 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_sqrt<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    flt_type: FloatType<'ctx>,
+    i32_type: IntType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    Ok(builder
+        .build_select(
+            // Check each lane for NaN, then reduce to check if this interval is empty.
+            build_check_interval_empty(input, builder, module, index)?,
+            // The interval is empty, so return an emtpy (NaN) interval.
+            VectorType::const_vector(&[
+                flt_type.const_float(f64::NAN),
+                flt_type.const_float(f64::NAN),
+            ])
+            .as_basic_value_enum(),
+            {
+                // Interval is not empty.
+                let lt_zero = builder.build_float_compare(
+                    FloatPredicate::ULT,
+                    input,
+                    VectorType::const_vector(&[flt_type.const_float(0.), flt_type.const_float(0.)]),
+                    &format!("lt_zero_{index}"),
+                )?;
+                let sqrt = build_vec_unary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.sqrt.*",
+                    &format!("sqrt_call_{index}"),
+                    build_vec_unary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.fabs.*",
+                        &format!("fabs_call_{index}"),
+                        input,
+                    )?
+                    .into_vector_value(),
+                )?
+                .into_vector_value();
+                /* This a nested if. First we check the sign of
+                 * the lower bound, then we check the sign of
+                 * the upper bound in the nested select
+                 * statement. Then we return different things.
+                 */
+                builder.build_select(
+                    // Check first element of vec.
+                    builder
+                        .build_extract_element(
+                            lt_zero,
+                            i32_type.const_int(0, false),
+                            &format!("first_lt_zero_{index}"),
+                        )?
+                        .into_int_value(),
+                    builder.build_select(
+                        builder
+                            .build_extract_element(
+                                lt_zero,
+                                i32_type.const_int(1, false),
+                                &format!("second_lt_zero_{index}"),
+                            )?
+                            .into_int_value(),
+                        VectorType::const_vector(&[
+                            flt_type.const_float(f64::NAN),
+                            flt_type.const_float(f64::NAN),
+                        ]),
+                        builder.build_float_mul(
+                            sqrt,
+                            VectorType::const_vector(&[
+                                flt_type.const_float(0.0),
+                                flt_type.const_float(1.0),
+                            ]),
+                            &format!("sqrt_domain_clipping_{index}"),
+                        )?,
+                        &format!("sqrt_edge_case_{index}"),
+                    )?,
+                    sqrt.as_basic_value_enum(),
+                    &format!("sqrt_branching_{index}"),
+                )?
+            },
+            &format!("reg_{index}"),
+        )?
+        .into_vector_value())
 }
 
 fn build_interval_flip<'ctx>(
