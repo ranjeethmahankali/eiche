@@ -277,7 +277,16 @@ impl Tree {
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                     )?,
-                    Remainder => todo!(),
+                    Remainder => build_interval_remainder(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        flt_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                     Less => todo!(),
                     LessOrEqual => todo!(),
                     Equal => todo!(),
@@ -329,6 +338,35 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_remainder<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let div_result = build_interval_div(lhs, rhs, builder, module, i32_type, flt_type, index)?;
+    let mul_result = builder.build_float_mul(
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.floor.*",
+            &format!("remainder_floor_call_{index}"),
+            div_result,
+        )?
+        .into_vector_value(),
+        rhs,
+        &format!("remainder_floor_mul_{index}"),
+    )?;
+    Ok(builder.build_float_sub(
+        lhs,
+        build_interval_flip(mul_result, builder, i32_type, index)?,
+        &format!("remainder_final_sub_{index}"),
+    )?)
 }
 
 fn build_interval_log<'ctx>(
