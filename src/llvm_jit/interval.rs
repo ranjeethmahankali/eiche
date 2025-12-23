@@ -1095,6 +1095,7 @@ fn build_interval_pow<'ctx>(
             builder.build_unconditional_branch(even_merge_bb)?;
             out
         };
+        builder.position_at_end(even_merge_bb);
         let phi = builder.build_phi(lhs.get_type(), &format!("pow_integer_case_output_{index}"))?;
         phi.add_incoming(&[(&even_case, even_bb), (&else_case, else_bb)]);
         builder.build_unconditional_branch(integer_merge_bb)?;
