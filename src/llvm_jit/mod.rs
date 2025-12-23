@@ -13,6 +13,7 @@ use inkwell::{
 };
 use std::{
     cell::RefCell,
+    fmt::Debug,
     ops::{Add, AddAssign, Div, DivAssign, MulAssign, Neg, Sub, SubAssign},
     path::Path,
 };
@@ -122,6 +123,7 @@ pub trait NumberType:
     + Sub<Output = Self>
     + SubAssign
     + MulAssign
+    + Debug
 {
     fn nan() -> Self;
 

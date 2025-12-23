@@ -2189,72 +2189,56 @@ impl<'ctx, T: NumberType> JitIntervalFnSync<'ctx, T> {
 
 #[cfg(test)]
 mod test {
-    use crate::{Error, JitContext, deftree};
+    use crate::{Error, JitContext, deftree, llvm_jit::NumberType};
 
-    #[test]
-    fn t_jit_interval_negate_f32() {
+    fn test_jit_interval_negate<T: NumberType>() {
         let tree = deftree!(- 'x).unwrap();
         let context = JitContext::default();
-        let eval = tree.jit_compile_interval::<f32>(&context, "x").unwrap();
+        let eval = tree.jit_compile_interval::<T>(&context, "x").unwrap();
         // All positive.
-        let mut outputs = [[f32::NAN, f32::NAN]];
-        eval.run(&[[2.0, 3.0]], &mut outputs)
+        let mut outputs = [[T::nan(), T::nan()]];
+        eval.run(&[[T::from_f64(2.0), T::from_f64(3.0)]], &mut outputs)
             .expect("Failed to run the jit function");
-        assert_eq!(outputs[0], [-3.0, -2.0]);
+        assert_eq!(outputs[0], [T::from_f64(-3.0), T::from_f64(-2.0)]);
+        // Test with heap allocation to check alignment
+        let inputs = vec![[T::from_f64(2.0), T::from_f64(3.0)]];
+        let mut outputs = vec![[T::nan(), T::nan()]];
+        eval.run(&inputs, &mut outputs)
+            .expect("Failed with heap allocation");
+        assert_eq!(outputs[0], [T::from_f64(-3.0), T::from_f64(-2.0)]);
         // All negative.
-        eval.run(&[[-5.245, -3.123]], &mut outputs)
+        eval.run(&[[T::from_f64(-5.245), T::from_f64(-3.123)]], &mut outputs)
             .expect("Failed to run the jit function");
-        assert_eq!(outputs[0], [3.123, 5.245]);
+        assert_eq!(outputs[0], [T::from_f64(3.123), T::from_f64(5.245)]);
         // Spanning across zero.
-        eval.run(&[[-2.3345, 5.23445]], &mut outputs)
-            .expect("Failed to run the jit function");
-        assert_eq!(outputs[0], [-5.23445, 2.3345]);
+        eval.run(
+            &[[T::from_f64(-2.3345), T::from_f64(5.23445)]],
+            &mut outputs,
+        )
+        .expect("Failed to run the jit function");
+        assert_eq!(outputs[0], [T::from_f64(-5.23445), T::from_f64(2.3345)]);
         // Wrong number of inputs / outputs.
         matches!(
-            eval.run(&[[-5.245, -3.123], [-2.3345, 5.23445]], &mut outputs),
+            eval.run(
+                &[
+                    [T::from_f64(-5.245), T::from_f64(-3.123)],
+                    [T::from_f64(-2.3345), T::from_f64(5.23445)]
+                ],
+                &mut outputs
+            ),
             Err(Error::InputSizeMismatch(2, 1))
         );
-        let mut outputs = [[f32::NAN, f32::NAN], [f32::NAN, f32::NAN]];
+        let mut outputs = [[T::nan(), T::nan()], [T::nan(), T::nan()]];
         matches!(
-            eval.run(&[[-5.245, -3.123]], &mut outputs),
+            eval.run(&[[T::from_f64(-5.245), T::from_f64(-3.123)]], &mut outputs),
             Err(Error::OutputSizeMismatch(2, 1))
         );
     }
 
     #[test]
     fn t_jit_interval_negate_f64() {
-        let tree = deftree!(- 'x).unwrap();
-        let context = JitContext::default();
-        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
-        // All positive.
-        let mut outputs = [[f64::NAN, f64::NAN]];
-        eval.run(&[[2.0, 3.0]], &mut outputs)
-            .expect("Failed to run the jit function");
-        assert_eq!(outputs[0], [-3.0, -2.0]);
-        // Test with heap allocation to check alignment
-        let inputs = vec![[2.0, 3.0]];
-        let mut outputs = vec![[f64::NAN, f64::NAN]];
-        eval.run(&inputs, &mut outputs)
-            .expect("Failed with heap allocation");
-        assert_eq!(outputs[0], [-3.0, -2.0]);
-        // All negative.
-        eval.run(&[[-5.245, -3.123]], &mut outputs)
-            .expect("Failed to run the jit function");
-        assert_eq!(outputs[0], [3.123, 5.245]);
-        // Spanning across zero.
-        eval.run(&[[-2.3345, 5.23445]], &mut outputs)
-            .expect("Failed to run the jit function");
-        assert_eq!(outputs[0], [-5.23445, 2.3345]);
-        // Wrong number of inputs / outputs.
-        matches!(
-            eval.run(&[[-5.245, -3.123], [-2.3345, 5.23445]], &mut outputs),
-            Err(Error::InputSizeMismatch(2, 1))
-        );
-        let mut outputs = [[f64::NAN, f64::NAN], [f64::NAN, f64::NAN]];
-        matches!(
-            eval.run(&[[-5.245, -3.123]], &mut outputs),
-            Err(Error::OutputSizeMismatch(2, 1))
-        );
+        test_jit_interval_negate::<f32>();
+        test_jit_interval_negate::<f64>();
     }
 
     #[test]
@@ -2376,7 +2360,6 @@ mod test {
     #[test]
     fn t_jit_interval_sin_f64() {
         use std::f64::consts::{FRAC_PI_2, PI};
-
         let tree = deftree!(sin 'x).unwrap();
         let context = JitContext::default();
         let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
