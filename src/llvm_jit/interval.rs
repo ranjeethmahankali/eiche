@@ -11,9 +11,13 @@ use inkwell::{
     builder::Builder,
     context::Context,
     execution_engine::JitFunction,
+    intrinsics::Intrinsic,
     module::Module,
-    types::{FloatType, IntType, VectorType},
-    values::{BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue, VectorValue},
+    types::{BasicTypeEnum, FloatType, IntType, VectorType},
+    values::{
+        BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
+        VectorValue,
+    },
 };
 use std::{
     f64::consts::{FRAC_PI_2, PI},
@@ -818,6 +822,40 @@ fn build_check_interval_spanning_zero<'ctx>(
     )?)
 }
 
+fn build_float_vec_powi<'ctx>(
+    base: VectorValue<'ctx>,
+    exp: IntValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    call_name: &str,
+) -> Result<VectorValue<'ctx>, Error> {
+    const NAME: &str = "llvm.powi.*";
+    let intrinsic = Intrinsic::find(NAME).ok_or(Error::CannotCompileIntrinsic(NAME))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(
+            module,
+            &[
+                BasicTypeEnum::VectorType(base.get_type()),
+                BasicTypeEnum::IntType(exp.get_type()),
+            ],
+        )
+        .ok_or(Error::CannotCompileIntrinsic(NAME))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[
+                BasicMetadataValueEnum::VectorValue(base),
+                BasicMetadataValueEnum::IntValue(exp),
+            ],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(NAME))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(NAME))
+        .map(|v| v.into_vector_value())
+}
+
 fn build_interval_pow<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
@@ -905,7 +943,8 @@ fn build_interval_pow<'ctx>(
     let integer_bb =
         context.append_basic_block(function, &format!("pow_singleton_integer_exponent_{index}"));
     let general_bb = context.append_basic_block(function, &format!("pow_general_exponent_{index}"));
-    let merge_bb = context.append_basic_block(function, &format!("pow_outer_merge_{index}"));
+    let integer_merge_bb =
+        context.append_basic_block(function, &format!("pow_outer_merge_{index}"));
     builder.build_conditional_branch(is_exponent_singleton_integer, integer_bb, general_bb)?;
     let integer_case: VectorValue<'ctx> = {
         builder.position_at_end(integer_bb);
@@ -928,19 +967,128 @@ fn build_interval_pow<'ctx>(
             )?,
             &format!("pow_integer_even_check_{index}"),
         )?;
-        let neg_bb = context.append_basic_block(function, &format!("pow_integer_neg_bb_{index}"));
+        let is_neg = builder.build_int_compare(
+            IntPredicate::SLT,
+            exponent,
+            i32_type.const_zero(),
+            &format!("pow_integer_neg_check_{index}"),
+        )?;
+        let is_base_zero = build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.and.*",
+            &format!("pow_integer_base_zero_check_reduce_{index}"),
+            builder.build_float_compare(
+                FloatPredicate::UEQ,
+                lhs,
+                lhs.get_type().const_zero(),
+                &format!("pow_integer_base_zero_check_{index}"),
+            )?,
+        )?
+        .into_int_value();
         let even_bb = context.append_basic_block(function, &format!("pow_integer_even_bb_{index}"));
         let else_bb = context.append_basic_block(function, &format!("pow_integer_else_bb_{index}"));
-        let merge_bb = context.append_basic_block(function, &format!("pow_odd_even_merge_{index}"));
-        todo!();
-        builder.build_unconditional_branch(merge_bb)?;
+        let even_merge_bb =
+            context.append_basic_block(function, &format!("pow_odd_even_merge_{index}"));
+        builder.build_conditional_branch(is_even, even_bb, else_bb)?;
+        let even_case = {
+            builder.position_at_end(even_bb);
+            let abs_powi = build_float_vec_powi(
+                build_interval_abs(lhs, builder, module, flt_type, i32_type, index)?,
+                exponent,
+                builder,
+                module,
+                &format!("pow_even_integer_powi_call_{index}"),
+            )?;
+            let out = builder
+                .build_select(
+                    is_neg,
+                    builder
+                        .build_select(
+                            is_base_zero,
+                            empty,
+                            build_interval_flip(abs_powi, builder, i32_type, index)?,
+                            &format!("pow_even_integer_zero_base_check_{index}"),
+                        )?
+                        .into_vector_value(),
+                    abs_powi,
+                    &format!("pow_even_integer_case_{index}"),
+                )?
+                .into_vector_value();
+            builder.build_unconditional_branch(even_merge_bb)?;
+            out
+        };
+        let else_case = {
+            builder.position_at_end(else_bb);
+            let powi_base = build_float_vec_powi(
+                lhs,
+                exponent,
+                builder,
+                module,
+                &format!("pow_odd_exp_base_powi_call_{index}"),
+            )?;
+            let out = builder
+                .build_select(
+                    is_neg,
+                    builder
+                        .build_select(
+                            is_base_zero,
+                            empty,
+                            builder
+                                .build_select(
+                                    builder.build_and(
+                                        builder.build_float_compare(
+                                            FloatPredicate::ULT,
+                                            builder
+                                                .build_extract_element(
+                                                    lhs,
+                                                    i32_type.const_zero(),
+                                                    &format!("pow_odd_exp_extract_lower_{index}"),
+                                                )?
+                                                .into_float_value(),
+                                            flt_type.const_zero(),
+                                            &format!("pow_odd_exp_lower_neg_check_{index}"),
+                                        )?,
+                                        builder.build_float_compare(
+                                            FloatPredicate::UGT,
+                                            builder
+                                                .build_extract_element(
+                                                    lhs,
+                                                    i32_type.const_int(1, false),
+                                                    &format!("pow_odd_exp_extract_upper_{index}"),
+                                                )?
+                                                .into_float_value(),
+                                            flt_type.const_zero(),
+                                            &format!("pow_odd_exp_upper_positive_check_{index}"),
+                                        )?,
+                                        &format!("pow_odd_exp_base_zero_spanning_check_{index}"),
+                                    )?,
+                                    everything,
+                                    build_interval_flip(powi_base, builder, i32_type, index)?,
+                                    &format!("pow_odd_exp_case_{index}"),
+                                )?
+                                .into_vector_value(),
+                            &format!("pow_odd_exp_base_zero_check_{index}"),
+                        )?
+                        .into_vector_value(),
+                    powi_base,
+                    &format!("pow_odd_exp_neg_check_{index}"),
+                )?
+                .into_vector_value();
+            builder.build_unconditional_branch(even_merge_bb);
+            out
+        };
+        let phi = builder.build_phi(lhs.get_type(), &format!("pow_integer_case_output_{index}"))?;
+        phi.add_incoming(&[(&even_case, even_bb), (&else_case, else_bb)]);
+        builder.build_unconditional_branch(integer_merge_bb)?;
+        phi.as_basic_value().into_vector_value()
     };
     let general_case: VectorValue<'ctx> = {
         builder.position_at_end(general_bb);
         todo!();
-        builder.build_unconditional_branch(merge_bb)?;
+        builder.build_unconditional_branch(integer_merge_bb)?;
     };
-    builder.position_at_end(merge_bb);
+    builder.position_at_end(integer_merge_bb);
     let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
     phi.add_incoming(&[(&integer_case, integer_bb), (&general_case, general_bb)]);
     let sqbase = builder.build_float_mul(lhs, lhs, &format!("pow_lhs_square_base_{index}"))?;
