@@ -912,16 +912,25 @@ fn build_interval_pow<'ctx>(
             i32_type,
             &format!("pow_exponent_to_integer_convert_{index}"),
         )?;
-        let is_odd = builder.build_and(
-            exponent,
-            i32_type.const_int(1, false),
-            &format!("pow_integer_exp_odd_check_{index}"),
+        let is_even = builder.build_not(
+            builder.build_and(
+                exponent,
+                i32_type.const_int(1, false),
+                &format!("pow_integer_exp_odd_check_{index}"),
+            )?,
+            &format!("pow_integer_even_check_{index}"),
         )?;
+        let neg_bb = context.append_basic_block(function, &format!("pow_integer_neg_bb_{index}"));
+        let even_bb = context.append_basic_block(function, &format!("pow_integer_even_bb_{index}"));
+        let else_bb = context.append_basic_block(function, &format!("pow_integer_else_bb_{index}"));
+        let merge_bb = context.append_basic_block(function, &format!("pow_odd_even_merge_{index}"));
         todo!();
+        builder.build_unconditional_branch(merge_bb)?;
     };
     let general_case: VectorValue<'ctx> = {
         builder.position_at_end(general_bb);
         todo!();
+        builder.build_unconditional_branch(merge_bb)?;
     };
     builder.position_at_end(merge_bb);
     let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
