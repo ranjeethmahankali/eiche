@@ -939,6 +939,7 @@ fn build_interval_pow<'ctx>(
     builder.position_at_end(merge_bb);
     let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
     phi.add_incoming(&[(&integer_case, integer_bb), (&general_case, general_bb)]);
+    let sqbase = builder.build_float_mul(lhs, lhs, &format!("pow_lhs_square_base_{index}"))?;
     Ok(builder
         .build_select(
             is_any_nan,
@@ -956,41 +957,32 @@ fn build_interval_pow<'ctx>(
                     builder
                         .build_select(
                             is_square,
-                            {
-                                let sqbase = builder.build_float_mul(
-                                    lhs,
-                                    lhs,
-                                    &format!("pow_lhs_square_base_{index}"),
-                                )?;
-                                builder
-                                    .build_select(
-                                        build_check_interval_spanning_zero(
-                                            lhs,
+                            builder
+                                .build_select(
+                                    build_check_interval_spanning_zero(
+                                        lhs,
+                                        builder,
+                                        i32_type,
+                                        "pow_square_case",
+                                        index,
+                                    )?,
+                                    builder.build_insert_element(
+                                        sqbase.get_type().const_zero(),
+                                        build_vec_unary_intrinsic(
                                             builder,
-                                            i32_type,
-                                            "pow_square_case",
-                                            index,
-                                        )?,
-                                        builder.build_insert_element(
-                                            sqbase.get_type().const_zero(),
-                                            build_vec_unary_intrinsic(
-                                                builder,
-                                                module,
-                                                "llvm.vector.reduce.fmax.*",
-                                                &format!(
-                                                    "pow_square_case_zero_spanning_max_{index}"
-                                                ),
-                                                sqbase,
-                                            )?
-                                            .into_float_value(),
-                                            i32_type.const_int(1, false),
-                                            &format!("pow_square_insert_elem_{index}"),
-                                        )?,
-                                        sqbase,
-                                        &format!("pow_square_case_{index}"),
-                                    )?
-                                    .into_vector_value()
-                            },
+                                            module,
+                                            "llvm.vector.reduce.fmax.*",
+                                            &format!("pow_square_case_zero_spanning_max_{index}"),
+                                            sqbase,
+                                        )?
+                                        .into_float_value(),
+                                        i32_type.const_int(1, false),
+                                        &format!("pow_square_insert_elem_{index}"),
+                                    )?,
+                                    sqbase,
+                                    &format!("pow_square_case_{index}"),
+                                )?
+                                .into_vector_value(),
                             phi.as_basic_value().into_vector_value(),
                             &format!("pow_square_check_select_{index}"),
                         )?
