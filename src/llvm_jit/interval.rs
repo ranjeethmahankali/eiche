@@ -1197,6 +1197,7 @@ fn build_interval_pow<'ctx>(
             i32_type.const_int(1, false),
             &format!("pow_general_other_vals_compose_1_{index}"),
         )?;
+        debug_assert_eq!(pow_base.get_type(), other_vals.get_type());
         // Extract values from vector for ergonomic use later.
         let (llo, lhi) =
             build_interval_unpack(lhs, builder, i32_type, "pow_general_case_lhs", index)?;
@@ -1232,34 +1233,54 @@ fn build_interval_pow<'ctx>(
             flt_type.const_zero(),
             &format!("pow_general_rlo_gt_zero_{index}"),
         )?;
-        let mask = builder
+        let out = builder
             .build_select(
                 rhi_is_neg,
                 builder
                     .build_select(
                         lhi_is_zero,
-                        VectorType::const_vector(&[
-                            i32_type.const_int(6, false),
-                            i32_type.const_int(7, false),
-                        ]),
+                        builder.build_shuffle_vector(
+                            pow_base,
+                            other_vals,
+                            VectorType::const_vector(&[
+                                i32_type.const_int(6, false),
+                                i32_type.const_int(7, false),
+                            ]),
+                            &format!("pow_general_case_shuffle_6_7_{index}"),
+                        )?,
                         builder
                             .build_select(
                                 lhi_lt_one,
-                                VectorType::const_vector(&[
-                                    i32_type.const_int(1, false),
-                                    i32_type.const_int(0, false),
-                                ]),
+                                builder.build_shuffle_vector(
+                                    pow_base,
+                                    other_vals,
+                                    VectorType::const_vector(&[
+                                        i32_type.const_int(1, false),
+                                        i32_type.const_int(0, false),
+                                    ]),
+                                    &format!("pow_general_case_shuffle_1_0_{index}"),
+                                )?,
                                 builder
                                     .build_select(
                                         llo_gt_one,
-                                        VectorType::const_vector(&[
-                                            i32_type.const_int(3, false),
-                                            i32_type.const_int(2, false),
-                                        ]),
-                                        VectorType::const_vector(&[
-                                            i32_type.const_int(3, false),
-                                            i32_type.const_int(0, false),
-                                        ]),
+                                        builder.build_shuffle_vector(
+                                            pow_base,
+                                            other_vals,
+                                            VectorType::const_vector(&[
+                                                i32_type.const_int(3, false),
+                                                i32_type.const_int(2, false),
+                                            ]),
+                                            &format!("pow_general_case_shuffle_3_2_{index}"),
+                                        )?,
+                                        builder.build_shuffle_vector(
+                                            pow_base,
+                                            other_vals,
+                                            VectorType::const_vector(&[
+                                                i32_type.const_int(3, false),
+                                                i32_type.const_int(0, false),
+                                            ]),
+                                            &format!("pow_general_case_shuffle_3_0_{index}"),
+                                        )?,
                                         &format!("pow_general_mask_choice_llo_gt_one_{index}"),
                                     )?
                                     .into_vector_value(),
@@ -1275,45 +1296,57 @@ fn build_interval_pow<'ctx>(
                         builder
                             .build_select(
                                 lhi_lt_one,
-                                VectorType::const_vector(&[
-                                    i32_type.const_int(2, false),
-                                    i32_type.const_int(3, false),
-                                ]),
+                                builder.build_shuffle_vector(
+                                    pow_base,
+                                    other_vals,
+                                    VectorType::const_vector(&[
+                                        i32_type.const_int(2, false),
+                                        i32_type.const_int(3, false),
+                                    ]),
+                                    &format!("pow_general_case_shuffle_2_3_{index}"),
+                                )?,
                                 builder
                                     .build_select(
                                         llo_gt_one,
-                                        VectorType::const_vector(&[
-                                            i32_type.const_int(0, false),
-                                            i32_type.const_int(1, false),
-                                        ]),
-                                        VectorType::const_vector(&[
-                                            i32_type.const_int(2, false),
-                                            i32_type.const_int(1, false),
-                                        ]),
+                                        builder.build_shuffle_vector(
+                                            pow_base,
+                                            other_vals,
+                                            VectorType::const_vector(&[
+                                                i32_type.const_int(0, false),
+                                                i32_type.const_int(1, false),
+                                            ]),
+                                            &format!("pow_general_case_shuffle_0_1_{index}"),
+                                        )?,
+                                        builder.build_shuffle_vector(
+                                            pow_base,
+                                            other_vals,
+                                            VectorType::const_vector(&[
+                                                i32_type.const_int(2, false),
+                                                i32_type.const_int(1, false),
+                                            ]),
+                                            &format!("pow_general_case_shuffle_2_1_{index}"),
+                                        )?,
                                         &format!("pow_general_mask_choice_llo_gt_one_{index}"),
                                     )?
                                     .into_vector_value(),
                                 &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
                             )?
                             .into_vector_value(),
-                        VectorType::const_vector(&[
-                            i32_type.const_int(4, false),
-                            i32_type.const_int(5, false),
-                        ]),
+                        builder.build_shuffle_vector(
+                            pow_base,
+                            other_vals,
+                            VectorType::const_vector(&[
+                                i32_type.const_int(4, false),
+                                i32_type.const_int(5, false),
+                            ]),
+                            &format!("pow_general_case_shuffle_4_5_{index}"),
+                        )?,
                         &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
                     )?
                     .into_vector_value(),
                 &format!("pow_general_mask_choice_rhi_is_neg_{index}"),
             )?
             .into_vector_value();
-        dbg!("before");
-        let out = builder.build_shuffle_vector(
-            pow_base,
-            other_vals,
-            mask,
-            &format!("pow_general_case_final_shuffle_{index}"),
-        )?;
-        dbg!("after");
         builder.build_unconditional_branch(integer_merge_bb)?;
         out
     };
