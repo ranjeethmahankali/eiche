@@ -9,10 +9,11 @@ use crate::{
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
     builder::Builder,
+    context::Context,
     execution_engine::JitFunction,
     module::Module,
     types::{FloatType, IntType, VectorType},
-    values::{BasicValue, BasicValueEnum, FloatValue, IntValue, VectorValue},
+    values::{BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue, VectorValue},
 };
 use std::{
     f64::consts::{FRAC_PI_2, PI},
@@ -782,6 +783,212 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_check_interval_spanning_zero<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    prefix: &str,
+    index: usize,
+) -> Result<IntValue<'ctx>, Error> {
+    let is_neg = builder.build_float_compare(
+        FloatPredicate::ULT,
+        input,
+        input.get_type().const_zero(),
+        &format!("{prefix}_zero_spanning_check_{index}"),
+    )?;
+    Ok(build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("{prefix}_zero_spanning_reduce_{index}"),
+        builder.build_int_compare(
+            IntPredicate::NE,
+            is_neg,
+            build_interval_flip(is_neg, builder, i32_type, index)?,
+            &format!("{prefix}_zero_spanning_flip_comparison_{index}"),
+        )?,
+    )?
+    .into_int_value())
+}
+
+fn build_interval_pow<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+    function: FunctionValue<'ctx>,
+    context: &'ctx Context,
+) -> Result<VectorValue<'ctx>, Error> {
+    let is_any_nan = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.or.*",
+        &format!("pow_nan_check_{index}"),
+        builder.build_shuffle_vector(
+            lhs,
+            rhs,
+            VectorType::const_vector(&[
+                i32_type.const_int(0, false),
+                i32_type.const_int(1, false),
+                i32_type.const_int(2, false),
+                i32_type.const_int(3, false),
+            ]),
+            &format!("pow_nan_check_concat_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let is_exponent_zero = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("pow_zero_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            rhs,
+            rhs.get_type().const_zero(),
+            &format!("pow_zero_check_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let is_square = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("pow_square_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            rhs,
+            VectorType::const_vector(&[flt_type.const_float(2.0), flt_type.const_float(2.0)]),
+            &format!("pow_square_check_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let rhs_floor = build_vec_unary_intrinsic(
+        builder,
+        &module,
+        "llvm.floor.*",
+        &format!("pow_integer_check_floor_call_{index}"),
+        rhs,
+    )?
+    .into_vector_value();
+    let is_exponent_singleton_integer = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("pow_integer_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            rhs_floor,
+            build_interval_flip(rhs, builder, i32_type, index)?,
+            &format!("pow_integer_check_compare_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let everything = VectorType::const_vector(&[
+        flt_type.const_float(f64::NEG_INFINITY),
+        flt_type.const_float(f64::INFINITY),
+    ]);
+    let integer_bb =
+        context.append_basic_block(function, &format!("pow_singleton_integer_exponent_{index}"));
+    let general_bb = context.append_basic_block(function, &format!("pow_general_exponent_{index}"));
+    let merge_bb = context.append_basic_block(function, &format!("pow_outer_merge_{index}"));
+    builder.build_conditional_branch(is_exponent_singleton_integer, integer_bb, general_bb)?;
+    let integer_case: VectorValue<'ctx> = {
+        builder.position_at_end(integer_bb);
+        let exponent = builder.build_float_to_signed_int(
+            builder
+                .build_extract_element(
+                    rhs_floor,
+                    i32_type.const_zero(),
+                    &format!("pow_extract_floor_{index}"),
+                )?
+                .into_float_value(),
+            i32_type,
+            &format!("pow_exponent_to_integer_convert_{index}"),
+        )?;
+        let is_odd = builder.build_and(
+            exponent,
+            i32_type.const_int(1, false),
+            &format!("pow_integer_exp_odd_check_{index}"),
+        )?;
+        todo!();
+    };
+    let general_case: VectorValue<'ctx> = {
+        builder.position_at_end(general_bb);
+        todo!();
+    };
+    builder.position_at_end(merge_bb);
+    let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
+    phi.add_incoming(&[(&integer_case, integer_bb), (&general_case, general_bb)]);
+    Ok(builder
+        .build_select(
+            is_any_nan,
+            VectorType::const_vector(&[
+                flt_type.const_float(f64::NAN),
+                flt_type.const_float(f64::NAN),
+            ]),
+            builder
+                .build_select(
+                    is_exponent_zero,
+                    VectorType::const_vector(&[
+                        flt_type.const_float(1.0),
+                        flt_type.const_float(1.0),
+                    ]),
+                    builder
+                        .build_select(
+                            is_square,
+                            {
+                                let sqbase = builder.build_float_mul(
+                                    lhs,
+                                    lhs,
+                                    &format!("pow_lhs_square_base_{index}"),
+                                )?;
+                                builder
+                                    .build_select(
+                                        build_check_interval_spanning_zero(
+                                            lhs,
+                                            builder,
+                                            module,
+                                            i32_type,
+                                            "pow_square_case",
+                                            index,
+                                        )?,
+                                        builder.build_insert_element(
+                                            sqbase.get_type().const_zero(),
+                                            build_vec_unary_intrinsic(
+                                                builder,
+                                                module,
+                                                "llvm.vector.reduce.fmax.*",
+                                                &format!(
+                                                    "pow_square_case_zero_spanning_max_{index}"
+                                                ),
+                                                sqbase,
+                                            )?
+                                            .into_float_value(),
+                                            i32_type.const_int(1, false),
+                                            &format!("pow_square_insert_elem_{index}"),
+                                        )?,
+                                        sqbase,
+                                        &format!("pow_square_case_{index}"),
+                                    )?
+                                    .into_vector_value()
+                            },
+                            phi.as_basic_value().into_vector_value(),
+                            &format!("pow_square_check_select_{index}"),
+                        )?
+                        .into_vector_value(),
+                    &format!("pow_zero_check_select_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("pow_nan_check_select_{index}"),
+        )?
+        .into_vector_value())
 }
 
 fn build_interval_abs<'ctx>(
