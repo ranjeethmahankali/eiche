@@ -366,6 +366,7 @@ impl ValueType for Interval {
                     }
                 }
                 Pow if rlo.floor() == rlo && rlo == rhi => {
+                    // Singleton integer exponent.
                     let rhs = rhi.floor() as i32;
                     if rhs < 0 {
                         if llo == 0.0 && lhi == 0.0 {
