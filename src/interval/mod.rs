@@ -354,6 +354,7 @@ impl ValueType for Interval {
                 Pow if llo.is_nan() || lhi.is_nan() || rlo.is_nan() || rhi.is_nan() => {
                     Ok(Interval::Scalar(f64::NAN, f64::NAN))
                 }
+                Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo == 2.0 && rhi == 2.0 => {
                     match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0)) {
                         // Squaring
@@ -364,7 +365,6 @@ impl ValueType for Interval {
                         _ => Interval::from_scalar(llo * llo, lhi * lhi),
                     }
                 }
-                Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rlo == rhi => {
                     let rhs = rhi.floor() as i32;
                     if rhs < 0 {
