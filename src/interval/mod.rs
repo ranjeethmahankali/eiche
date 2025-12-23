@@ -200,7 +200,12 @@ fn abs((llo, lhi): (f64, f64)) -> (f64, f64) {
 }
 
 fn intersection((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> (f64, f64) {
-    (llo.max(rlo), lhi.min(rhi))
+    let (lo, hi) = (llo.max(rlo), lhi.min(rhi));
+    if hi < lo {
+        (f64::NAN, f64::NAN)
+    } else {
+        (lo, hi)
+    }
 }
 
 fn precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
