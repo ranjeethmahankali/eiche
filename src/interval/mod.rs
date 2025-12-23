@@ -1405,4 +1405,143 @@ mod test {
         let result = eval.run().unwrap()[0].scalar().unwrap();
         assert!(result.0.is_nan() && result.1.is_nan(), "NaN test failed");
     }
+
+    #[test]
+    fn t_interval_pow_comprehensive() {
+        let tree = deftree!(pow 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // NaN cases
+        eval.set_value('x', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
+        eval.set_value('y', Interval::from_scalar(2.0, 3.0).unwrap());
+        assert!(is_empty(&eval.run().unwrap()[0].scalar().unwrap()));
+        eval.set_value('x', Interval::from_scalar(2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
+        assert!(is_empty(&eval.run().unwrap()[0].scalar().unwrap()));
+        // Exponent = 0
+        eval.set_value('x', Interval::from_scalar(2.0, 5.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(0.0, 0.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 1.0, 1e-12);
+        assert_float_eq!(r.1, 1.0, 1e-12);
+        // Exponent = 2 (squaring), base crossing zero
+        eval.set_value('x', Interval::from_scalar(-3.0, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(2.0, 2.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 9.0, 1e-12);
+        // Positive even integer exponent
+        eval.set_value('x', Interval::from_scalar(-2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(4.0, 4.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 81.0, 1e-12);
+        // Negative even integer exponent, non-zero base
+        eval.set_value('x', Interval::from_scalar(2.0, 4.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.0, -2.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 1.0 / 16.0, 1e-12);
+        assert_float_eq!(r.1, 1.0 / 4.0, 1e-12);
+        // Negative even integer exponent with zero base
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.0, -2.0).unwrap());
+        assert!(is_empty(&eval.run().unwrap()[0].scalar().unwrap()));
+        // Positive odd integer exponent
+        eval.set_value('x', Interval::from_scalar(-2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(3.0, 3.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, -8.0, 1e-12);
+        assert_float_eq!(r.1, 27.0, 1e-12);
+        // Odd negative integer exponent crossing zero
+        eval.set_value('x', Interval::from_scalar(-2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-3.0, -3.0).unwrap());
+        assert!(is_entire(&eval.run().unwrap()[0].scalar().unwrap()));
+        // Odd negative integer exponent, not crossing zero
+        eval.set_value('x', Interval::from_scalar(2.0, 4.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-3.0, -3.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 1.0 / 64.0, 1e-12);
+        assert_float_eq!(r.1, 1.0 / 8.0, 1e-12);
+        // Base entirely below 1, positive rational exponent
+        eval.set_value('x', Interval::from_scalar(0.2, 0.8).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.2f64.powf(2.5), 1e-12);
+        assert_float_eq!(r.1, 0.8f64.powf(1.5), 1e-12);
+        // Base entirely above 1, positive rational exponent
+        eval.set_value('x', Interval::from_scalar(2.0, 4.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 2.0f64.powf(1.5), 1e-12);
+        assert_float_eq!(r.1, 4.0f64.powf(2.5), 1e-12);
+        // Base straddling 1, positive rational exponent
+        eval.set_value('x', Interval::from_scalar(0.5, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.5f64.powf(2.5), 1e-12);
+        assert_float_eq!(r.1, 2.0f64.powf(2.5), 1e-12);
+        // Base entirely below 1, negative rational exponent
+        eval.set_value('x', Interval::from_scalar(0.2, 0.8).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.5, -1.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.8f64.powf(-1.5), 1e-12);
+        assert_float_eq!(r.1, 0.2f64.powf(-2.5), 1e-12);
+        // Base entirely above 1, negative rational exponent
+        eval.set_value('x', Interval::from_scalar(2.0, 4.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.5, -1.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 4.0f64.powf(-2.5), 1e-12);
+        assert_float_eq!(r.1, 2.0f64.powf(-1.5), 1e-12);
+        // Base straddling 1, negative rational exponent
+        eval.set_value('x', Interval::from_scalar(0.5, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.5, -1.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 2.0f64.powf(-2.5), 1e-12);
+        assert_float_eq!(r.1, 0.5f64.powf(-2.5), 1e-12);
+        // Exponent crossing zero
+        eval.set_value('x', Interval::from_scalar(2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-1.0, 1.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 2.0f64.powf(-1.0).min(3.0f64.powf(-1.0)), 1e-12);
+        assert_float_eq!(r.1, 2.0f64.powf(1.0).max(3.0f64.powf(1.0)), 1e-12);
+        // Zero base with positive exponent
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(2.0, 3.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 0.0, 1e-12);
+        // Zero upper bound of base with negative exponent
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.5, -1.5).unwrap());
+        assert!(is_empty(&eval.run().unwrap()[0].scalar().unwrap()));
+        // Negative base with rational exponent (clamped to 0+)
+        eval.set_value('x', Interval::from_scalar(-2.0, -0.5).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 0.0, 1e-12);
+        // Negative base crossing to positive with rational exponent
+        eval.set_value('x', Interval::from_scalar(-1.0, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 2.0f64.powf(2.5), 1e-12);
+        // Zero base with zero exponent
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(0.0, 0.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 1.0, 1e-12);
+        assert_float_eq!(r.1, 1.0, 1e-12);
+        // Base with small positive values, large positive exponent
+        eval.set_value('x', Interval::from_scalar(0.1, 0.2).unwrap());
+        eval.set_value('y', Interval::from_scalar(10.0, 10.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.1f64.powi(10), 1e-20);
+        assert_float_eq!(r.1, 0.2f64.powi(10), 1e-20);
+        // Singleton base and exponent
+        eval.set_value('x', Interval::from_scalar(2.0, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(3.0, 3.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 8.0, 1e-12);
+        assert_float_eq!(r.1, 8.0, 1e-12);
+    }
 }
