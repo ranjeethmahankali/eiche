@@ -114,6 +114,7 @@ impl Tree {
                         .get_first_param()
                         .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
                         .into_pointer_value();
+                    // # SAFETY: This is unit tested a lot. If this goes wrong we get seg-fault.
                     let ptr = unsafe {
                         builder.build_gep(
                             interval_type,
@@ -310,6 +311,7 @@ impl Tree {
             ))?
             .into_pointer_value();
         for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
+            // # SAFETY: This is unit tested a lot. If this fails, we segfault.
             let dst = unsafe {
                 builder.build_gep(
                     interval_type,
@@ -2165,6 +2167,12 @@ impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
         Ok(())
     }
 
+    /// Same as above, but without bounds checking.
+    ///
+    /// # SAFETY
+    ///
+    /// The user is responsible for making sure the length of the `inputs` and
+    /// `outputs` slices are correct.
     pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]]) {
         // SAFETY: we told the caller it is their responsiblity.
         unsafe {
@@ -2199,6 +2207,12 @@ impl<'ctx, T: NumberType> JitIntervalFnSync<'ctx, T> {
         Ok(())
     }
 
+    /// Same as above, but without bounds checking.
+    ///
+    /// # SAFETY
+    ///
+    /// The user is responsible for making sure the length of the `inputs` and
+    /// `outputs` slices are correct.
     pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]]) {
         // SAFETY: we told the caller it is their responsiblity.
         unsafe { (self.func)(inputs.as_ptr().cast(), outputs.as_mut_ptr().cast()) }
