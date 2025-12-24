@@ -94,6 +94,7 @@ impl<'ctx> JitCompiler<'ctx> {
     /// Run optimization passes.
     fn run_passes(&self) {
         let fpm = PassManager::create(());
+        fpm.add_aggressive_dce_pass();
         fpm.add_instruction_combining_pass();
         fpm.add_reassociate_pass();
         fpm.add_gvn_pass();
