@@ -2923,11 +2923,7 @@ fn build_float_rem_euclid<'ctx>(
                 lhs.get_type().const_zero(),
                 &format!("rem_euclid_compare_{index}"),
             )?,
-            builder.build_float_add(
-                qval,
-                lhs.get_type().const_float(4.0),
-                &format!("rem_euclid_correction_{index}"),
-            )?,
+            builder.build_float_add(qval, rhs, &format!("rem_euclid_correction_{index}"))?,
             qval,
             name,
         )?
