@@ -3326,7 +3326,7 @@ mod test {
     }
 
     #[test]
-    fn t_interval_boolean_ops() {
+    fn t_jit_interval_boolean_ops() {
         check_interval_eval(
             deftree!(if (and (> 'x 0) (< 'y 5)) (- 'x 2.) (+ 'y 1.5)).unwrap(),
             &[('x', -2., 3.), ('y', 2., 7.)],

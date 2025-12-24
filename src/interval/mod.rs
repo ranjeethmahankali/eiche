@@ -290,7 +290,7 @@ impl ValueType for Interval {
                         (true, false) | (false, true) => (false, true),
                         (false, false) => (true, true),
                     };
-                    Interval::from_boolean(lower, upper)
+                    Ok(Interval::Bool(lower, upper))
                 }
                 Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
                     Err(Error::TypeMismatch)
