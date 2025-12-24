@@ -460,7 +460,7 @@ impl ValueType for Interval {
                         (_, _, false, false) | (false, false, _, _) => (false, false),
                         _ => (false, true),
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 Or => {
                     let (lo, hi) = match (llo, lhi, rlo, rhi) {
@@ -468,7 +468,7 @@ impl ValueType for Interval {
                         (_, _, true, true) | (true, true, _, _) => (true, true),
                         _ => (false, true),
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
             },
             _ => Err(Error::TypeMismatch),
@@ -491,7 +491,7 @@ impl ValueType for Interval {
                         if blo == bhi && blo == clo && blo == chi {
                             Interval::from_boolean(blo, bhi)
                         } else {
-                            Interval::from_boolean(false, true)
+                            Ok(Interval::Bool(false, true))
                         }
                     }
                 },
