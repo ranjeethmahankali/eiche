@@ -388,7 +388,7 @@ impl ValueType for Interval {
                     }
                 }
                 Pow => {
-                    let (llo, lhi) = (llo.max(0.0), lhi.min(f64::INFINITY).max(0.0));
+                    let (llo, lhi) = (llo.max(0.0), lhi.clamp(0.0, f64::INFINITY));
                     if rhi <= 0.0 {
                         if lhi == 0.0 {
                             Ok(Interval::Scalar(f64::NAN, f64::NAN))
