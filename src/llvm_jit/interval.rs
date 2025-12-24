@@ -390,6 +390,11 @@ fn build_interval_less<'ctx>(
     flt_type: FloatType<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let either_empty = builder.build_or(
+        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(rhs, builder, module, index)?,
+        &format!("less_either_empty_check"),
+    )?;
     // Compare (-a, b) with (-d, c).
     let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
     let cross_compare = builder.build_float_compare(
@@ -416,11 +421,6 @@ fn build_interval_less<'ctx>(
             &format!("less_b_lt_c_check_{index}"),
         )?
         .into_int_value();
-    let either_empty = builder.build_or(
-        build_check_interval_empty(lhs, builder, module, index)?,
-        build_check_interval_empty(rhs, builder, module, index)?,
-        &format!("less_either_empty_check"),
-    )?;
     let out_tt =
         VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
     let out_ft =
@@ -487,14 +487,15 @@ fn build_interval_less_equal<'ctx>(
             &format!("less_equal_b_lt_c_check_{index}"),
         )?
         .into_int_value();
+    let touching = builder.build_float_compare(
+        FloatPredicate::UEQ,
+        masked_lhs,
+        masked_rhs,
+        &format!("less_equal_eq_comp_{index}"),
+    )?;
     let touching_left = builder
         .build_extract_element(
-            builder.build_float_compare(
-                FloatPredicate::UEQ,
-                masked_lhs,
-                masked_rhs,
-                &format!("less_equal_eq_comp_{index}"),
-            )?,
+            touching,
             i32_type.const_int(1, false),
             &format!("less_equal_touching_left_{index}"),
         )?
