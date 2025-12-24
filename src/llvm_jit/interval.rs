@@ -1848,11 +1848,11 @@ fn build_interval_pow<'ctx, T: NumberType>(
         )?,
     )?
     .into_int_value();
-    let everything = VectorType::const_vector(&[
+    let out_entire = VectorType::const_vector(&[
         flt_type.const_float(f64::NEG_INFINITY),
         flt_type.const_float(f64::INFINITY),
     ]);
-    let empty = VectorType::const_vector(&[
+    let out_empty = VectorType::const_vector(&[
         flt_type.const_float(f64::NAN),
         flt_type.const_float(f64::NAN),
     ]);
@@ -1862,7 +1862,10 @@ fn build_interval_pow<'ctx, T: NumberType>(
     let integer_rational_merge_bb =
         context.append_basic_block(function, &format!("pow_outer_merge_{index}"));
     builder.build_conditional_branch(is_exponent_singleton_integer, integer_bb, general_bb)?;
-    let (integer_case, odd_even_merge_bb) = {
+    // We now go inside the integer case, and return the last inner block and
+    // let it shadow the integer case outside afterwards. Because LLVM wants to
+    // know the last inner most block of a phi. So shadowing is helpful.
+    let (integer_case, integer_bb) = {
         builder.position_at_end(integer_bb);
         let exponent = builder.build_float_to_signed_int(
             builder
@@ -1925,7 +1928,7 @@ fn build_interval_pow<'ctx, T: NumberType>(
                     builder
                         .build_select(
                             is_base_zero,
-                            empty,
+                            out_empty,
                             build_interval_flip(abs_powi, builder, i32_type, index)?,
                             &format!("pow_even_integer_zero_base_check_{index}"),
                         )?
@@ -1952,7 +1955,7 @@ fn build_interval_pow<'ctx, T: NumberType>(
                     builder
                         .build_select(
                             is_base_zero,
-                            empty,
+                            out_empty,
                             builder
                                 .build_select(
                                     builder.build_and(
@@ -1982,7 +1985,7 @@ fn build_interval_pow<'ctx, T: NumberType>(
                                         )?,
                                         &format!("pow_odd_exp_base_zero_spanning_check_{index}"),
                                     )?,
-                                    everything,
+                                    out_entire,
                                     build_interval_flip(powi_base, builder, i32_type, index)?,
                                     &format!("pow_odd_exp_case_{index}"),
                                 )?
@@ -2255,15 +2258,12 @@ fn build_interval_pow<'ctx, T: NumberType>(
     };
     builder.position_at_end(integer_rational_merge_bb);
     let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
-    phi.add_incoming(&[
-        (&integer_case, odd_even_merge_bb),
-        (&general_case, general_bb),
-    ]);
+    phi.add_incoming(&[(&integer_case, integer_bb), (&general_case, general_bb)]);
     let sqbase = builder.build_float_mul(lhs, lhs, &format!("pow_lhs_square_base_{index}"))?;
     Ok(builder
         .build_select(
             is_any_nan,
-            empty,
+            out_empty,
             builder
                 .build_select(
                     is_exponent_zero,
