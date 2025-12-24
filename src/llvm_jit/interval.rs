@@ -85,7 +85,6 @@ struct Constants<'ctx> {
     i32_seven: IntValue<'ctx>,
     // Floats.
     flt_zero: FloatValue<'ctx>,
-    flt_neg_one: FloatValue<'ctx>,
     flt_one: FloatValue<'ctx>,
     flt_neg_inf: FloatValue<'ctx>,
     flt_inf: FloatValue<'ctx>,
@@ -103,6 +102,7 @@ struct Constants<'ctx> {
     interval_true_true: VectorValue<'ctx>,
     interval_empty: VectorValue<'ctx>,
     interval_entire: VectorValue<'ctx>,
+    interval_neg_one_to_one: VectorValue<'ctx>,
     // Integer vectors.
     ivec_count_to_3: VectorValue<'ctx>,
 }
@@ -125,7 +125,6 @@ impl<'ctx> Constants<'ctx> {
             i32_seven: i32_type.const_int(7, false),
             // Floats.
             flt_zero: flt_type.const_float(0.0),
-            flt_neg_one: flt_type.const_float(-1.0),
             flt_one: flt_type.const_float(1.0),
             flt_neg_inf: flt_type.const_float(f64::NEG_INFINITY),
             flt_inf: flt_type.const_float(f64::INFINITY),
@@ -157,6 +156,10 @@ impl<'ctx> Constants<'ctx> {
             interval_entire: VectorType::const_vector(&[
                 flt_type.const_float(f64::NEG_INFINITY),
                 flt_type.const_float(f64::INFINITY),
+            ]),
+            interval_neg_one_to_one: VectorType::const_vector(&[
+                flt_type.const_float(-1.0),
+                flt_type.const_float(1.0),
             ]),
             // Integer vectors.
             ivec_count_to_3: VectorType::const_vector(&[
@@ -628,33 +631,28 @@ fn build_interval_choose<'ctx, T: NumberType>(
                         iftrue.get_type().get_element_type(),
                         iffalse.get_type().get_element_type(),
                     ) {
-                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => {
-                            let sign_mask = VectorType::const_vector(&[
-                                constants.flt_neg_one,
-                                constants.flt_one,
-                            ]);
-                            builder.build_float_mul(
-                                sign_mask,
+                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => builder
+                            .build_float_mul(
+                                constants.interval_neg_one_to_one,
                                 build_vec_binary_intrinsic(
                                     builder,
                                     module,
                                     "llvm.maxnum.*",
                                     &format!("choose_max_call_{index}"),
                                     builder.build_float_mul(
-                                        sign_mask,
+                                        constants.interval_neg_one_to_one,
                                         iftrue,
                                         &format!("choose_true_branch_sign_change_{index}"),
                                     )?,
                                     builder.build_float_mul(
-                                        sign_mask,
+                                        constants.interval_neg_one_to_one,
                                         iffalse,
                                         &format!("choose_false_branch_sign_change_{index}"),
                                     )?,
                                 )?
                                 .into_vector_value(),
                                 &format!("choose_sign_revert_{index}"),
-                            )?
-                        }
+                            )?,
                         (BasicTypeEnum::IntType(_), BasicTypeEnum::IntType(_)) => {
                             let combined = builder.build_shuffle_vector(
                                 iftrue,
@@ -840,11 +838,13 @@ fn build_interval_inequality_flags<'ctx>(
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
-    let mask = VectorType::const_vector(&[constants.flt_neg_one, constants.flt_one]);
-    let masked_lhs =
-        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?;
+    let masked_lhs = builder.build_float_mul(
+        constants.interval_neg_one_to_one,
+        lhs,
+        &format!("less_sign_adjust_lhs_{index}"),
+    )?;
     let masked_rhs = builder.build_float_mul(
-        mask,
+        constants.interval_neg_one_to_one,
         build_interval_flip(rhs, builder, constants, index)?,
         &format!("less_equal_sign_adjust_rhs_{index}"),
     )?;
@@ -977,11 +977,13 @@ fn build_interval_equality_flags<'ctx>(
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
-    let mask = VectorType::const_vector(&[constants.flt_neg_one, constants.flt_one]);
-    let masked_lhs =
-        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?;
+    let masked_lhs = builder.build_float_mul(
+        constants.interval_neg_one_to_one,
+        lhs,
+        &format!("less_sign_adjust_lhs_{index}"),
+    )?;
     let masked_rhs = builder.build_float_mul(
-        mask,
+        constants.interval_neg_one_to_one,
         build_interval_flip(rhs, builder, constants, index)?,
         &format!("less_equal_sign_adjust_rhs_{index}"),
     )?;
@@ -1417,7 +1419,6 @@ fn build_interval_cos<'ctx>(
         constants.flt_zero,
         &format!("qval_is_zero_{index}"),
     )?;
-    let full_range = VectorType::const_vector(&[constants.flt_neg_one, constants.flt_one]);
     let cos_base = build_vec_unary_intrinsic(
         builder,
         module,
@@ -1453,7 +1454,7 @@ fn build_interval_cos<'ctx>(
                     .build_select(
                         q_zero,
                         builder.build_insert_element(
-                            full_range,
+                            constants.interval_neg_one_to_one,
                             build_vec_unary_intrinsic(
                                 builder,
                                 module,
@@ -1466,7 +1467,7 @@ fn build_interval_cos<'ctx>(
                             &format!("out_val_case_2_{index}"),
                         )?,
                         builder.build_insert_element(
-                            full_range,
+                            constants.interval_neg_one_to_one,
                             build_vec_unary_intrinsic(
                                 builder,
                                 module,
@@ -1481,7 +1482,7 @@ fn build_interval_cos<'ctx>(
                         &format!("nval_cases_{index}"),
                     )?
                     .into_vector_value(),
-                full_range,
+                constants.interval_neg_one_to_one,
                 &format!("out_val_edge_case_0_{index}"),
             )?
             .into_vector_value(),
@@ -1572,7 +1573,6 @@ fn build_interval_sin<'ctx>(
         input,
     )?
     .into_vector_value();
-    let full_range = VectorType::const_vector(&[constants.flt_neg_one, constants.flt_one]);
     // Below part matches the long if/else chain in the
     // plain interval implementation. Go through the pairs
     // in reverse and accumulate a nested ternary
@@ -1587,7 +1587,7 @@ fn build_interval_sin<'ctx>(
         sin_base,
         build_interval_flip(sin_base, builder, constants, index)?,
         builder.build_insert_element(
-            full_range,
+            constants.interval_neg_one_to_one,
             build_vec_unary_intrinsic(
                 builder,
                 module,
@@ -1600,7 +1600,7 @@ fn build_interval_sin<'ctx>(
             &format!("out_val_case_3_{index}"),
         )?,
         builder.build_insert_element(
-            full_range,
+            constants.interval_neg_one_to_one,
             build_vec_unary_intrinsic(
                 builder,
                 module,
@@ -1618,7 +1618,7 @@ fn build_interval_sin<'ctx>(
         .zip(out_vals.iter())
         .enumerate()
         .try_rfold(
-            full_range,
+            constants.interval_neg_one_to_one,
             |acc, (i, (pairs, out))| -> Result<VectorValue<'_>, Error> {
                 let mut conds = [bool_type.get_poison(), bool_type.get_poison()];
                 for ((q, n), dst) in pairs.iter().zip(conds.iter_mut()) {
