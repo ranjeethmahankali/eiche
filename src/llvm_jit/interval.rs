@@ -103,6 +103,8 @@ struct Constants<'ctx> {
     interval_true_true: VectorValue<'ctx>,
     interval_empty: VectorValue<'ctx>,
     interval_entire: VectorValue<'ctx>,
+    // Integer vectors.
+    ivec_count_to_3: VectorValue<'ctx>,
 }
 
 impl<'ctx> Constants<'ctx> {
@@ -155,6 +157,13 @@ impl<'ctx> Constants<'ctx> {
             interval_entire: VectorType::const_vector(&[
                 flt_type.const_float(f64::NEG_INFINITY),
                 flt_type.const_float(f64::INFINITY),
+            ]),
+            // Integer vectors.
+            ivec_count_to_3: VectorType::const_vector(&[
+                i32_type.const_int(0, false),
+                i32_type.const_int(1, false),
+                i32_type.const_int(2, false),
+                i32_type.const_int(3, false),
             ]),
         }
     }
@@ -650,12 +659,7 @@ fn build_interval_choose<'ctx, T: NumberType>(
                             let combined = builder.build_shuffle_vector(
                                 iftrue,
                                 iffalse,
-                                VectorType::const_vector(&[
-                                    constants.i32_zero,
-                                    constants.i32_one,
-                                    constants.i32_two,
-                                    constants.i32_three,
-                                ]),
+                                constants.ivec_count_to_3,
                                 &format!("choose_boolean_combine_{index}"),
                             )?;
                             let all_same = builder.build_int_compare(
@@ -715,12 +719,7 @@ fn build_interval_or<'ctx>(
             builder.build_shuffle_vector(
                 lhs,
                 rhs,
-                VectorType::const_vector(&[
-                    constants.i32_zero,
-                    constants.i32_one,
-                    constants.i32_two,
-                    constants.i32_three,
-                ]),
+                constants.ivec_count_to_3,
                 &format!("or_all_true_check_{index}"),
             )?,
             &format!("or_all_false_flip_{index}"),
@@ -779,12 +778,7 @@ fn build_interval_and<'ctx>(
         builder.build_shuffle_vector(
             lhs,
             rhs,
-            VectorType::const_vector(&[
-                constants.i32_zero,
-                constants.i32_one,
-                constants.i32_two,
-                constants.i32_three,
-            ]),
+            constants.ivec_count_to_3,
             &format!("and_all_true_check_{index}"),
         )?,
     )?
@@ -1747,12 +1741,7 @@ fn build_interval_pow<'ctx, T: NumberType>(
     let all_joined = builder.build_shuffle_vector(
         lhs,
         rhs,
-        VectorType::const_vector(&[
-            constants.i32_zero,
-            constants.i32_one,
-            constants.i32_two,
-            constants.i32_three,
-        ]),
+        constants.ivec_count_to_3,
         &format!("pow_nan_check_concat_{index}"),
     )?;
     let is_any_nan = build_vec_unary_intrinsic(
@@ -2280,7 +2269,7 @@ fn build_interval_abs<'ctx>(
     let lt_zero = builder.build_float_compare(
         FloatPredicate::ULT,
         input,
-        VectorType::const_vector(&[constants.flt_zero, constants.flt_zero]),
+        constants.interval_zero,
         &format!("lt_zero_{index}"),
     )?;
     Ok(builder
@@ -2489,12 +2478,7 @@ fn build_interval_div<'ctx>(
     let combos = builder.build_shuffle_vector(
         straight,
         cross,
-        VectorType::const_vector(&[
-            constants.i32_zero,
-            constants.i32_one,
-            constants.i32_two,
-            constants.i32_three,
-        ]),
+        constants.ivec_count_to_3,
         &format!("interval_div_concat_cases_{index}"),
     )?;
     const CASES: [&[(IntervalClass, IntervalClass)]; 12] = [
@@ -2770,12 +2754,7 @@ fn build_interval_mul<'ctx>(
     let concat = builder.build_shuffle_vector(
         straight,
         cross,
-        VectorType::const_vector(&[
-            constants.i32_zero,
-            constants.i32_one,
-            constants.i32_two,
-            constants.i32_three,
-        ]),
+        constants.ivec_count_to_3,
         &format!("mul_concat_candidates_{index}"),
     )?;
     build_interval_compose(
