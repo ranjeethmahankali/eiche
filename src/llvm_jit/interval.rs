@@ -304,14 +304,12 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Equal => build_interval_equal(
+                    Equal => build_interval_equal::<T>(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        bool_type,
-                        flt_type,
+                        context,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -854,7 +852,7 @@ fn build_interval_equality_flags<'ctx>(
     let either_empty = builder.build_or(
         build_check_interval_empty(lhs, builder, module, index)?,
         build_check_interval_empty(lhs, builder, module, index)?,
-        &format!("less_equal_either_empty_check"),
+        &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
     let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
@@ -899,16 +897,17 @@ fn build_interval_equality_flags<'ctx>(
     Ok((no_overlap, matching_singleton))
 }
 
-fn build_interval_equal<'ctx>(
+fn build_interval_equal<'ctx, T: NumberType>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    context: &'ctx Context,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let flt_type = T::jit_type(context);
+    let i32_type = context.i32_type();
+    let bool_type = context.bool_type();
     let (no_overlap, matching_singleton) =
         build_interval_equality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
     let out_tt =
