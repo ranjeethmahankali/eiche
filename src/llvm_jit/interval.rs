@@ -398,7 +398,7 @@ fn build_interval_less<'ctx>(
         .into_int_value();
     let either_empty = builder.build_or(
         build_check_interval_empty(lhs, builder, module, index)?,
-        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(rhs, builder, module, index)?,
         &format!("less_either_empty_check"),
     )?;
     let out_tt =
@@ -484,7 +484,7 @@ fn build_interval_less_equal<'ctx>(
         .into_int_value();
     let either_empty = builder.build_or(
         build_check_interval_empty(lhs, builder, module, index)?,
-        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(rhs, builder, module, index)?,
         &format!("less_equal_either_empty_check"),
     )?;
     let out_tt =
