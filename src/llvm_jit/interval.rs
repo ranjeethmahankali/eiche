@@ -2351,12 +2351,7 @@ mod test {
 
     #[test]
     fn t_interval_squaring() {
-        check_interval_eval(
-            deftree!(pow 'x 2.).unwrap(),
-            &[('x', -10., 10.), ('y', -9., 10.)],
-            20,
-            5,
-        );
+        check_interval_eval(deftree!(pow 'x 2.).unwrap(), &[('x', -10., 10.)], 20, 5);
         check_interval_eval(
             deftree!(pow (- 'x 1.) 2.).unwrap(),
             &[('x', -10., 10.)],
