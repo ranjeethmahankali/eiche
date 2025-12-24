@@ -226,8 +226,8 @@ impl Tree {
                         &compiler.module,
                         "llvm.pow.*",
                         "pow_call",
-                        regs[*lhs],
-                        regs[*rhs],
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
                         float_type,
                     )?,
                     Min => build_float_binary_intrinsic(
@@ -235,8 +235,8 @@ impl Tree {
                         &compiler.module,
                         "llvm.minnum.*",
                         "min_call",
-                        regs[*lhs],
-                        regs[*rhs],
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
                         float_type,
                     )?,
                     Max => build_float_binary_intrinsic(
@@ -244,8 +244,8 @@ impl Tree {
                         &compiler.module,
                         "llvm.maxnum.*",
                         "max_call",
-                        regs[*lhs],
-                        regs[*rhs],
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
                         float_type,
                     )?,
                     Remainder => builder

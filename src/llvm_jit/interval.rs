@@ -3,8 +3,15 @@ use super::{
     build_vec_unary_intrinsic,
 };
 use crate::{
-    BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, interval::IntervalClass,
-    llvm_jit::JitCompiler,
+    BinaryOp::*,
+    Error,
+    Node::*,
+    TernaryOp::*,
+    Tree,
+    UnaryOp::*,
+    Value,
+    interval::IntervalClass,
+    llvm_jit::{JitCompiler, build_float_binary_intrinsic},
 };
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
@@ -2110,114 +2117,76 @@ fn build_interval_pow<'ctx, T: NumberType>(
             ]),
         )?
         .into_vector_value();
-        let pow_base = build_vec_binary_intrinsic(
+        let (a, b) = build_interval_unpack(lhs, builder, i32_type, "pow_general_case_", index)?;
+        let (c, d) = build_interval_unpack(rhs, builder, i32_type, "pow_general_case_", index)?;
+        let ac = build_float_binary_intrinsic(
             builder,
             module,
             "llvm.pow.*",
-            &format!("pow_general_case_base_call_{index}"),
-            builder.build_shuffle_vector(
-                lhs,
-                lhs,
-                VectorType::const_vector(&[
-                    i32_type.const_int(0, false),
-                    i32_type.const_int(1, false),
-                    i32_type.const_int(2, false),
-                    i32_type.const_int(3, false),
-                ]),
-                &format!("pow_general_exp_base_val_lhs_{index}"),
-            )?,
-            builder.build_shuffle_vector(
-                rhs,
-                rhs,
-                VectorType::const_vector(&[
-                    i32_type.const_int(0, false),
-                    i32_type.const_int(1, false),
-                    i32_type.const_int(3, false),
-                    i32_type.const_int(2, false),
-                ]),
-                &format!("pow_general_exp_base_val_rhs_{index}"),
-            )?,
+            &format!("pow_general_pow_ac_{index}"),
+            a,
+            c,
+            flt_type,
         )?
-        .into_vector_value();
-        let other_vals = builder.build_insert_element(
-            builder.build_insert_element(
-                VectorType::const_vector(&[
-                    flt_type.const_float(f64::NAN),
-                    flt_type.const_float(f64::NAN),
-                    flt_type.const_float(f64::NAN),
-                    flt_type.const_float(f64::NAN),
-                ]),
-                build_vec_unary_intrinsic(
-                    builder,
-                    module,
-                    "llvm.vector.reduce.fmin.*",
-                    &format!("pow_general_min_of_2_and_3_{index}"),
-                    builder.build_shuffle_vector(
-                        pow_base,
-                        pow_base.get_type().get_undef(),
-                        VectorType::const_vector(&[
-                            i32_type.const_int(2, false),
-                            i32_type.const_int(3, false),
-                        ]),
-                        &format!("pow_general_extract_2_and_3_{index}"),
-                    )?,
-                )?
-                .into_float_value(),
-                i32_type.const_int(0, false),
-                &format!("pow_general_other_vals_compose_0_{index}"),
-            )?,
-            build_vec_unary_intrinsic(
-                builder,
-                module,
-                "llvm.vector.reduce.fmax.*",
-                &format!("pow_general_max_of_0_and_1_{index}"),
-                builder.build_shuffle_vector(
-                    pow_base,
-                    pow_base.get_type().get_undef(),
-                    VectorType::const_vector(&[
-                        i32_type.const_int(0, false),
-                        i32_type.const_int(1, false),
-                    ]),
-                    &format!("pow_general_extract_0_and_1_{index}"),
-                )?,
-            )?
-            .into_float_value(),
-            i32_type.const_int(1, false),
-            &format!("pow_general_other_vals_compose_1_{index}"),
-        )?;
-        debug_assert_eq!(pow_base.get_type(), other_vals.get_type());
+        .into_float_value();
+        let ad = build_float_binary_intrinsic(
+            builder,
+            module,
+            "llvm.pow.*",
+            &format!("pow_general_pow_ad_{index}"),
+            a,
+            d,
+            flt_type,
+        )?
+        .into_float_value();
+        let bc = build_float_binary_intrinsic(
+            builder,
+            module,
+            "llvm.pow.*",
+            &format!("pow_general_pow_bc_{index}"),
+            b,
+            c,
+            flt_type,
+        )?
+        .into_float_value();
+        let bd = build_float_binary_intrinsic(
+            builder,
+            module,
+            "llvm.pow.*",
+            &format!("pow_general_pow_bd_{index}"),
+            b,
+            d,
+            flt_type,
+        )?
+        .into_float_value();
         // Extract values from vector for ergonomic use later.
-        let (llo, lhi) =
-            build_interval_unpack(lhs, builder, i32_type, "pow_general_case_lhs", index)?;
-        let (rlo, rhi) =
-            build_interval_unpack(rhs, builder, i32_type, "pow_general_case_rhs", index)?;
         let rhi_is_neg = builder.build_float_compare(
             FloatPredicate::ULE,
-            rhi,
-            rhi.get_type().const_zero(),
+            d,
+            d.get_type().const_zero(),
             &format!("pow_general_rhi_neg_check_{index}"),
         )?;
         let lhi_is_zero = builder.build_float_compare(
             FloatPredicate::UEQ,
-            lhi,
-            lhi.get_type().const_zero(),
+            b,
+            b.get_type().const_zero(),
             &format!("pow_general_lhi_zero_check_{index}"),
         )?;
         let lhi_lt_one = builder.build_float_compare(
             FloatPredicate::ULT,
-            lhi,
+            b,
             flt_type.const_float(1.0),
             &format!("pow_general_lhi_lt_one_check_{index}"),
         )?;
         let llo_gt_one = builder.build_float_compare(
             FloatPredicate::UGT,
-            llo,
+            a,
             flt_type.const_float(1.0),
             &format!("pow_general_llo_gt_one_check_{index}"),
         )?;
         let rlo_gt_zero = builder.build_float_compare(
             FloatPredicate::UGT,
-            rlo,
+            c,
             flt_type.const_zero(),
             &format!("pow_general_rlo_gt_zero_{index}"),
         )?;
@@ -2227,47 +2196,39 @@ fn build_interval_pow<'ctx, T: NumberType>(
                 builder
                     .build_select(
                         lhi_is_zero,
-                        builder.build_shuffle_vector(
-                            pow_base,
-                            other_vals,
-                            VectorType::const_vector(&[
-                                i32_type.const_int(6, false),
-                                i32_type.const_int(7, false),
-                            ]),
-                            &format!("pow_general_case_shuffle_6_7_{index}"),
-                        )?,
+                        VectorType::const_vector(&[
+                            flt_type.const_float(f64::NAN),
+                            flt_type.const_float(f64::NAN),
+                        ]),
                         builder
                             .build_select(
                                 lhi_lt_one,
-                                builder.build_shuffle_vector(
-                                    pow_base,
-                                    other_vals,
-                                    VectorType::const_vector(&[
-                                        i32_type.const_int(1, false),
-                                        i32_type.const_int(0, false),
-                                    ]),
-                                    &format!("pow_general_case_shuffle_1_0_{index}"),
+                                build_interval_compose(
+                                    bd,
+                                    ac,
+                                    builder,
+                                    i32_type,
+                                    "pow_general_case",
+                                    index,
                                 )?,
                                 builder
                                     .build_select(
                                         llo_gt_one,
-                                        builder.build_shuffle_vector(
-                                            pow_base,
-                                            other_vals,
-                                            VectorType::const_vector(&[
-                                                i32_type.const_int(3, false),
-                                                i32_type.const_int(2, false),
-                                            ]),
-                                            &format!("pow_general_case_shuffle_3_2_{index}"),
+                                        build_interval_compose(
+                                            bc,
+                                            ad,
+                                            builder,
+                                            i32_type,
+                                            "pow_general_case",
+                                            index,
                                         )?,
-                                        builder.build_shuffle_vector(
-                                            pow_base,
-                                            other_vals,
-                                            VectorType::const_vector(&[
-                                                i32_type.const_int(3, false),
-                                                i32_type.const_int(0, false),
-                                            ]),
-                                            &format!("pow_general_case_shuffle_3_0_{index}"),
+                                        build_interval_compose(
+                                            bc,
+                                            ac,
+                                            builder,
+                                            i32_type,
+                                            "pow_general_case",
+                                            index,
                                         )?,
                                         &format!("pow_general_mask_choice_llo_gt_one_{index}"),
                                     )?
@@ -2284,35 +2245,32 @@ fn build_interval_pow<'ctx, T: NumberType>(
                         builder
                             .build_select(
                                 lhi_lt_one,
-                                builder.build_shuffle_vector(
-                                    pow_base,
-                                    other_vals,
-                                    VectorType::const_vector(&[
-                                        i32_type.const_int(2, false),
-                                        i32_type.const_int(3, false),
-                                    ]),
-                                    &format!("pow_general_case_shuffle_2_3_{index}"),
+                                build_interval_compose(
+                                    ad,
+                                    bc,
+                                    builder,
+                                    i32_type,
+                                    "pow_general_case",
+                                    index,
                                 )?,
                                 builder
                                     .build_select(
                                         llo_gt_one,
-                                        builder.build_shuffle_vector(
-                                            pow_base,
-                                            other_vals,
-                                            VectorType::const_vector(&[
-                                                i32_type.const_int(0, false),
-                                                i32_type.const_int(1, false),
-                                            ]),
-                                            &format!("pow_general_case_shuffle_0_1_{index}"),
+                                        build_interval_compose(
+                                            ac,
+                                            bd,
+                                            builder,
+                                            i32_type,
+                                            "pow_general_case",
+                                            index,
                                         )?,
-                                        builder.build_shuffle_vector(
-                                            pow_base,
-                                            other_vals,
-                                            VectorType::const_vector(&[
-                                                i32_type.const_int(2, false),
-                                                i32_type.const_int(1, false),
-                                            ]),
-                                            &format!("pow_general_case_shuffle_2_1_{index}"),
+                                        build_interval_compose(
+                                            ad,
+                                            bd,
+                                            builder,
+                                            i32_type,
+                                            "pow_general_case",
+                                            index,
                                         )?,
                                         &format!("pow_general_mask_choice_llo_gt_one_{index}"),
                                     )?
@@ -2320,14 +2278,31 @@ fn build_interval_pow<'ctx, T: NumberType>(
                                 &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
                             )?
                             .into_vector_value(),
-                        builder.build_shuffle_vector(
-                            pow_base,
-                            other_vals,
-                            VectorType::const_vector(&[
-                                i32_type.const_int(4, false),
-                                i32_type.const_int(5, false),
-                            ]),
-                            &format!("pow_general_case_shuffle_4_5_{index}"),
+                        build_interval_compose(
+                            build_float_binary_intrinsic(
+                                builder,
+                                module,
+                                "llvm.minnum.*",
+                                &format!("pow_general_case_last_case_adbc_{index}"),
+                                ad,
+                                bc,
+                                flt_type,
+                            )?
+                            .into_float_value(),
+                            build_float_binary_intrinsic(
+                                builder,
+                                module,
+                                "llvm.maxnum.*",
+                                &format!("pow_general_case_last_case_acbd_{index}"),
+                                ac,
+                                bd,
+                                flt_type,
+                            )?
+                            .into_float_value(),
+                            builder,
+                            i32_type,
+                            "pow_general_case",
+                            index,
                         )?,
                         &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
                     )?
