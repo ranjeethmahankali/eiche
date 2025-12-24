@@ -2412,69 +2412,60 @@ fn build_interval_sqrt<'ctx>(
     i32_type: IntType<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let lt_zero = builder.build_float_compare(
+        FloatPredicate::ULT,
+        input,
+        input.get_type().const_zero(),
+        &format!("lt_zero_{index}"),
+    )?;
+    let all_neg = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("sqrt_all_neg_check_{index}"),
+        lt_zero,
+    )?
+    .into_int_value();
+    let is_invalid = builder.build_or(
+        all_neg,
+        build_check_interval_empty(input, builder, module, index)?,
+        &format!("sqrt_invalid_check_{index}"),
+    )?;
+    let sqrt = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.sqrt.*",
+        &format!("sqrt_call_{index}"),
+        input,
+    )?
+    .into_vector_value();
     Ok(builder
         .build_select(
-            build_check_interval_empty(input, builder, module, index)?,
+            is_invalid,
             // The interval is empty, so return an emtpy (NaN) interval.
             VectorType::const_vector(&[
                 flt_type.const_float(f64::NAN),
                 flt_type.const_float(f64::NAN),
             ])
             .as_basic_value_enum(),
-            {
-                // Interval is not empty.
-                let lt_zero = builder.build_float_compare(
-                    FloatPredicate::ULT,
-                    input,
-                    input.get_type().const_zero(),
-                    &format!("lt_zero_{index}"),
-                )?;
-                let sqrt = build_vec_unary_intrinsic(
-                    builder,
-                    module,
-                    "llvm.sqrt.*",
-                    &format!("sqrt_call_{index}"),
-                    input,
-                )?
-                .into_vector_value();
-                /* This a nested if. First we check the sign of
-                 * the lower bound, then we check the sign of
-                 * the upper bound in the nested select
-                 * statement. Then we return different things.
-                 */
-                builder.build_select(
-                    // Check first element of vec.
-                    builder
-                        .build_extract_element(
-                            lt_zero,
-                            i32_type.const_int(0, false),
-                            &format!("first_lt_zero_{index}"),
-                        )?
-                        .into_int_value(),
-                    builder.build_select(
-                        builder
-                            .build_extract_element(
-                                lt_zero,
-                                i32_type.const_int(1, false),
-                                &format!("second_lt_zero_{index}"),
-                            )?
-                            .into_int_value(),
-                        VectorType::const_vector(&[
-                            flt_type.const_float(f64::NAN),
-                            flt_type.const_float(f64::NAN),
-                        ]),
-                        builder.build_insert_element(
-                            sqrt,
-                            flt_type.const_zero(),
-                            i32_type.const_zero(),
-                            &format!("sqrt_domain_clipping_{index}"),
-                        )?,
-                        &format!("sqrt_edge_case_{index}"),
-                    )?,
-                    sqrt.as_basic_value_enum(),
-                    &format!("sqrt_branching_{index}"),
-                )?
-            },
+            builder.build_select(
+                // Check first element of vec.
+                builder
+                    .build_extract_element(
+                        lt_zero,
+                        i32_type.const_int(0, false),
+                        &format!("first_lt_zero_{index}"),
+                    )?
+                    .into_int_value(),
+                builder.build_insert_element(
+                    sqrt,
+                    flt_type.const_zero(),
+                    i32_type.const_zero(),
+                    &format!("sqrt_domain_clipping_{index}"),
+                )?,
+                sqrt,
+                &format!("sqrt_branching_{index}"),
+            )?,
             &format!("reg_{index}"),
         )?
         .into_vector_value())
