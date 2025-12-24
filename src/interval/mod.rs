@@ -489,9 +489,9 @@ impl ValueType for Interval {
                     }
                     (Bool(blo, bhi), Bool(clo, chi)) => {
                         if blo == bhi && blo == clo && blo == chi {
-                            Interval::from_boolean(false, true)
-                        } else {
                             Interval::from_boolean(blo, bhi)
+                        } else {
+                            Interval::from_boolean(false, true)
                         }
                     }
                 },
