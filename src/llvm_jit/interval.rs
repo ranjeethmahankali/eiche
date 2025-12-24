@@ -209,7 +209,14 @@ impl Tree {
                         &format!("floor_call_{index}"),
                         regs[*input].into_vector_value(),
                     )?,
-                    Not => return Err(Error::TypeMismatch),
+                    Not => build_interval_not(
+                        regs[*input].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        bool_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                 },
                 Binary(op, lhs, rhs) => match op {
                     Add => builder
@@ -413,6 +420,47 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_not<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    bool_type: IntType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let all_true = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("not_all_true_reduce_{index}"),
+        input,
+    )?
+    .into_int_value();
+    let mixed = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.xor.*",
+        &format!("not_all_true_reduce_{index}"),
+        input,
+    )?
+    .into_int_value();
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            all_true,
+            out_ff,
+            builder
+                .build_select(mixed, out_ft, out_tt, &format!("not_mixed_choice_{index}"))?
+                .into_vector_value(),
+            &format!("not_{index}"),
+        )?
+        .into_vector_value())
 }
 
 fn build_interval_choose<'ctx, T: NumberType>(
