@@ -380,6 +380,70 @@ impl Tree {
     }
 }
 
+struct InequalityFlags<'ctx> {
+    either_empty: IntValue<'ctx>,
+    strictly_before: IntValue<'ctx>,
+    strictly_after: IntValue<'ctx>,
+    touching: VectorValue<'ctx>,
+}
+
+fn build_interval_inequality_flags<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<InequalityFlags<'ctx>, Error> {
+    let either_empty = builder.build_or(
+        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(rhs, builder, module, index)?,
+        &format!("less_equal_either_empty_check"),
+    )?;
+    // Compare (-a, b) with (-d, c).
+    let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
+    let masked_lhs =
+        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?;
+    let masked_rhs = builder.build_float_mul(
+        mask,
+        build_interval_flip(rhs, builder, i32_type, index)?,
+        &format!("less_equal_sign_adjust_rhs_{index}"),
+    )?;
+    let cross_compare = builder.build_float_compare(
+        FloatPredicate::ULT,
+        masked_lhs,
+        masked_rhs,
+        &format!("less_equal_cross_compare_{index}"),
+    )?;
+    let strictly_after = builder
+        .build_extract_element(
+            cross_compare,
+            i32_type.const_zero(),
+            &format!("less_equal_a_gt_d_check_{index}"),
+        )?
+        .into_int_value();
+    let strictly_before = builder
+        .build_extract_element(
+            cross_compare,
+            i32_type.const_int(1, false),
+            &format!("less_equal_b_lt_c_check_{index}"),
+        )?
+        .into_int_value();
+    let touching = builder.build_float_compare(
+        FloatPredicate::UEQ,
+        masked_lhs,
+        masked_rhs,
+        &format!("less_equal_eq_comp_{index}"),
+    )?;
+    Ok(InequalityFlags {
+        either_empty,
+        strictly_before,
+        strictly_after,
+        touching,
+    })
+}
+
 fn build_interval_less<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
@@ -390,37 +454,12 @@ fn build_interval_less<'ctx>(
     flt_type: FloatType<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let either_empty = builder.build_or(
-        build_check_interval_empty(lhs, builder, module, index)?,
-        build_check_interval_empty(rhs, builder, module, index)?,
-        &format!("less_either_empty_check"),
-    )?;
-    // Compare (-a, b) with (-d, c).
-    let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
-    let cross_compare = builder.build_float_compare(
-        FloatPredicate::ULT,
-        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?,
-        builder.build_float_mul(
-            mask,
-            build_interval_flip(rhs, builder, i32_type, index)?,
-            &format!("less_sign_adjust_rhs_{index}"),
-        )?,
-        &format!("less_cross_compare_{index}"),
-    )?;
-    let strictly_after = builder
-        .build_extract_element(
-            cross_compare,
-            i32_type.const_zero(),
-            &format!("less_a_gt_d_check_{index}"),
-        )?
-        .into_int_value();
-    let strictly_before = builder
-        .build_extract_element(
-            cross_compare,
-            i32_type.const_int(1, false),
-            &format!("less_b_lt_c_check_{index}"),
-        )?
-        .into_int_value();
+    let InequalityFlags {
+        either_empty,
+        strictly_before,
+        strictly_after,
+        touching: _touching,
+    } = build_interval_inequality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
     let out_tt =
         VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
     let out_ft =
@@ -458,41 +497,12 @@ fn build_interval_less_equal<'ctx>(
     flt_type: FloatType<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    // Compare (-a, b) with (-d, c).
-    let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
-    let masked_lhs =
-        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?;
-    let masked_rhs = builder.build_float_mul(
-        mask,
-        build_interval_flip(rhs, builder, i32_type, index)?,
-        &format!("less_equal_sign_adjust_rhs_{index}"),
-    )?;
-    let cross_compare = builder.build_float_compare(
-        FloatPredicate::ULT,
-        masked_lhs,
-        masked_rhs,
-        &format!("less_equal_cross_compare_{index}"),
-    )?;
-    let strictly_after = builder
-        .build_extract_element(
-            cross_compare,
-            i32_type.const_zero(),
-            &format!("less_equal_a_gt_d_check_{index}"),
-        )?
-        .into_int_value();
-    let strictly_before = builder
-        .build_extract_element(
-            cross_compare,
-            i32_type.const_int(1, false),
-            &format!("less_equal_b_lt_c_check_{index}"),
-        )?
-        .into_int_value();
-    let touching = builder.build_float_compare(
-        FloatPredicate::UEQ,
-        masked_lhs,
-        masked_rhs,
-        &format!("less_equal_eq_comp_{index}"),
-    )?;
+    let InequalityFlags {
+        either_empty,
+        strictly_before,
+        strictly_after,
+        touching,
+    } = build_interval_inequality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
     let touching_left = builder
         .build_extract_element(
             touching,
@@ -500,11 +510,6 @@ fn build_interval_less_equal<'ctx>(
             &format!("less_equal_touching_left_{index}"),
         )?
         .into_int_value();
-    let either_empty = builder.build_or(
-        build_check_interval_empty(lhs, builder, module, index)?,
-        build_check_interval_empty(rhs, builder, module, index)?,
-        &format!("less_equal_either_empty_check"),
-    )?;
     let out_tt =
         VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
     let out_ft =
