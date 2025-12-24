@@ -2095,7 +2095,7 @@ fn build_interval_pow<'ctx, T: NumberType>(
         builder.build_unconditional_branch(merge_bb)?;
         (phi.as_basic_value().into_vector_value(), integer_merge_bb)
     };
-    let general_case: VectorValue<'ctx> = {
+    let general_out: VectorValue<'ctx> = {
         builder.position_at_end(general_bb);
         let lhs = build_vec_binary_intrinsic(
             builder,
@@ -2319,7 +2319,7 @@ fn build_interval_pow<'ctx, T: NumberType>(
         (&simple_out, simple_bb),
         (&square_out, square_bb),
         (&integer_out, integer_bb),
-        (&general_case, general_bb),
+        (&general_out, general_bb),
     ]);
     Ok(phi.as_basic_value().into_vector_value())
 }
