@@ -286,8 +286,28 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Less => todo!(),
-                    LessOrEqual => todo!(),
+                    Less => build_interval_less(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        bool_type,
+                        flt_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
+                    LessOrEqual => build_interval_less_equal(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        bool_type,
+                        flt_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                     Equal => todo!(),
                     NotEqual => todo!(),
                     Greater => todo!(),
@@ -338,6 +358,167 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_less<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    // Compare (-a, b) with (-d, c).
+    let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
+    let cross_compare = builder.build_float_compare(
+        FloatPredicate::ULT,
+        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?,
+        builder.build_float_mul(
+            mask,
+            build_interval_flip(rhs, builder, i32_type, index)?,
+            &format!("less_sign_adjust_rhs_{index}"),
+        )?,
+        &format!("less_cross_compare_{index}"),
+    )?;
+    let strictly_after = builder
+        .build_extract_element(
+            cross_compare,
+            i32_type.const_zero(),
+            &format!("less_a_gt_d_check_{index}"),
+        )?
+        .into_int_value();
+    let strictly_before = builder
+        .build_extract_element(
+            cross_compare,
+            i32_type.const_int(1, false),
+            &format!("less_b_lt_c_check_{index}"),
+        )?
+        .into_int_value();
+    let either_empty = builder.build_or(
+        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(lhs, builder, module, index)?,
+        &format!("less_either_empty_check"),
+    )?;
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            either_empty,
+            out_tt,
+            builder
+                .build_select(
+                    strictly_before,
+                    out_tt,
+                    builder
+                        .build_select(
+                            strictly_after,
+                            out_ff,
+                            out_ft,
+                            &format!("less_a_gt_d_chocie_{index}"),
+                        )?
+                        .into_vector_value(),
+                    &format!("less_b_lt_c_choice_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("less_{index}"),
+        )?
+        .into_vector_value())
+}
+
+fn build_interval_less_equal<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    // Compare (-a, b) with (-d, c).
+    let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
+    let masked_lhs =
+        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?;
+    let masked_rhs = builder.build_float_mul(
+        mask,
+        build_interval_flip(rhs, builder, i32_type, index)?,
+        &format!("less_equal_sign_adjust_rhs_{index}"),
+    )?;
+    let cross_compare = builder.build_float_compare(
+        FloatPredicate::ULT,
+        masked_lhs,
+        masked_rhs,
+        &format!("less_equal_cross_compare_{index}"),
+    )?;
+    let strictly_after = builder
+        .build_extract_element(
+            cross_compare,
+            i32_type.const_zero(),
+            &format!("less_equal_a_gt_d_check_{index}"),
+        )?
+        .into_int_value();
+    let strictly_before = builder
+        .build_extract_element(
+            cross_compare,
+            i32_type.const_int(1, false),
+            &format!("less_equal_b_lt_c_check_{index}"),
+        )?
+        .into_int_value();
+    let touching_left = builder
+        .build_extract_element(
+            builder.build_float_compare(
+                FloatPredicate::UEQ,
+                masked_lhs,
+                masked_rhs,
+                &format!("less_equal_eq_comp_{index}"),
+            )?,
+            i32_type.const_int(1, false),
+            &format!("less_equal_touching_left_{index}"),
+        )?
+        .into_int_value();
+    let either_empty = builder.build_or(
+        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(lhs, builder, module, index)?,
+        &format!("less_equal_either_empty_check"),
+    )?;
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            either_empty,
+            out_tt,
+            builder
+                .build_select(
+                    builder.build_or(
+                        strictly_before,
+                        touching_left,
+                        &format!("less_equal_before_or_touching_{index}"),
+                    )?,
+                    out_tt,
+                    builder
+                        .build_select(
+                            strictly_after,
+                            out_ff,
+                            out_ft,
+                            &format!("less_a_gt_d_chocie_{index}"),
+                        )?
+                        .into_vector_value(),
+                    &format!("less_b_lt_c_choice_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("less_{index}"),
+        )?
+        .into_vector_value())
 }
 
 fn build_interval_remainder<'ctx>(
