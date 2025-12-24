@@ -286,25 +286,21 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Less => build_interval_less(
+                    Less => build_interval_less::<T>(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        bool_type,
-                        flt_type,
+                        context,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    LessOrEqual => build_interval_less_equal(
+                    LessOrEqual => build_interval_less_equal::<T>(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        bool_type,
-                        flt_type,
+                        context,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -319,36 +315,30 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    NotEqual => build_interval_not_equal(
+                    NotEqual => build_interval_not_equal::<T>(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        bool_type,
-                        flt_type,
+                        context,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Greater => build_interval_greater(
+                    Greater => build_interval_greater::<T>(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        bool_type,
-                        flt_type,
+                        context,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    GreaterOrEqual => build_interval_greater_equal(
+                    GreaterOrEqual => build_interval_greater_equal::<T>(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        bool_type,
-                        flt_type,
+                        context,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -373,8 +363,17 @@ impl Tree {
                     )?
                     .as_basic_value_enum(),
                 },
-                Ternary(op, _a, _b, _c) => match op {
-                    Choose => todo!(),
+                Ternary(op, a, b, c) => match op {
+                    Choose => build_interval_choose::<T>(
+                        regs[*a].into_vector_value(),
+                        regs[*b].into_vector_value(),
+                        regs[*c].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        context,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                 },
             };
             regs.push(reg);
@@ -416,6 +415,127 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_choose<'ctx, T: NumberType>(
+    cond: VectorValue<'ctx>,
+    iftrue: VectorValue<'ctx>,
+    iffalse: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    context: &'ctx Context,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let flt_type = T::jit_type(context);
+    let i32_type = context.i32_type();
+    let bool_type = context.bool_type();
+    let cond_all_true = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("choose_cond_all_true_reduce_{index}"),
+        cond,
+    )?
+    .into_int_value();
+    let cond_mixed = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.xor.*",
+        &format!("choose_cond_all_true_reduce_{index}"),
+        cond,
+    )?
+    .into_int_value();
+    Ok(builder
+        .build_select(
+            cond_all_true,
+            iftrue,
+            builder
+                .build_select(
+                    cond_mixed,
+                    match (
+                        iftrue.get_type().get_element_type(),
+                        iffalse.get_type().get_element_type(),
+                    ) {
+                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => {
+                            let sign_mask = VectorType::const_vector(&[
+                                flt_type.const_float(-1.0),
+                                flt_type.const_float(1.0),
+                            ]);
+                            builder.build_float_mul(
+                                sign_mask,
+                                build_vec_binary_intrinsic(
+                                    builder,
+                                    module,
+                                    "llvm.maxnum.*",
+                                    &format!("choose_max_call_{index}"),
+                                    builder.build_float_mul(
+                                        sign_mask,
+                                        iftrue,
+                                        &format!("choose_true_branch_sign_change_{index}"),
+                                    )?,
+                                    builder.build_float_mul(
+                                        sign_mask,
+                                        iffalse,
+                                        &format!("choose_false_branch_sign_change_{index}"),
+                                    )?,
+                                )?
+                                .into_vector_value(),
+                                &format!("choose_sign_revert_{index}"),
+                            )?
+                        }
+                        (BasicTypeEnum::IntType(_), BasicTypeEnum::IntType(_)) => {
+                            let combined = builder.build_shuffle_vector(
+                                iftrue,
+                                iffalse,
+                                VectorType::const_vector(&[
+                                    i32_type.const_int(0, false),
+                                    i32_type.const_int(1, false),
+                                    i32_type.const_int(2, false),
+                                    i32_type.const_int(3, false),
+                                ]),
+                                &format!("choose_boolean_combine_{index}"),
+                            )?;
+                            let all_same = builder.build_int_compare(
+                                IntPredicate::EQ,
+                                build_vec_unary_intrinsic(
+                                    builder,
+                                    module,
+                                    "llvm.vector.reduce.and.*",
+                                    &format!("choose_boolean_and_reduce_{index}"),
+                                    combined,
+                                )?
+                                .into_int_value(),
+                                build_vec_unary_intrinsic(
+                                    builder,
+                                    module,
+                                    "llvm.vector.reduce.or.*",
+                                    &format!("choose_boolean_or_reduce_{index}"),
+                                    combined,
+                                )?
+                                .into_int_value(),
+                                &format!("choose_boolean_all_same_check_{index}"),
+                            )?;
+                            builder
+                                .build_select(
+                                    all_same,
+                                    iftrue,
+                                    VectorType::const_vector(&[
+                                        bool_type.const_int(0, false),
+                                        bool_type.const_int(1, false),
+                                    ]),
+                                    &format!("choose_boolean_out_{index}"),
+                                )?
+                                .into_vector_value()
+                        }
+                        _ => return Err(Error::TypeMismatch),
+                    },
+                    iffalse,
+                    &format!("choose_mixed_false_choice_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("choose_{index}"),
+        )?
+        .into_vector_value())
 }
 
 fn build_interval_or<'ctx>(
@@ -578,7 +698,7 @@ fn build_interval_inequality_flags<'ctx>(
     let either_empty = builder.build_or(
         build_check_interval_empty(lhs, builder, module, index)?,
         build_check_interval_empty(rhs, builder, module, index)?,
-        &format!("less_equal_either_empty_check"),
+        &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
     let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
@@ -623,16 +743,17 @@ fn build_interval_inequality_flags<'ctx>(
     })
 }
 
-fn build_interval_less<'ctx>(
+fn build_interval_less<'ctx, T: NumberType>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    context: &'ctx Context,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let flt_type = T::jit_type(context);
+    let i32_type = context.i32_type();
+    let bool_type = context.bool_type();
     let InequalityFlags {
         either_empty,
         strictly_before,
@@ -666,16 +787,17 @@ fn build_interval_less<'ctx>(
         .into_vector_value())
 }
 
-fn build_interval_less_equal<'ctx>(
+fn build_interval_less_equal<'ctx, T: NumberType>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    context: &'ctx Context,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let flt_type = T::jit_type(context);
+    let i32_type = context.i32_type();
+    let bool_type = context.bool_type();
     let InequalityFlags {
         either_empty,
         strictly_before,
@@ -812,16 +934,17 @@ fn build_interval_equal<'ctx>(
         .into_vector_value())
 }
 
-fn build_interval_not_equal<'ctx>(
+fn build_interval_not_equal<'ctx, T: NumberType>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    context: &'ctx Context,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let flt_type = T::jit_type(context);
+    let i32_type = context.i32_type();
+    let bool_type = context.bool_type();
     let (no_overlap, matching_singleton) =
         build_interval_equality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
     let out_tt =
@@ -847,16 +970,17 @@ fn build_interval_not_equal<'ctx>(
         .into_vector_value())
 }
 
-fn build_interval_greater<'ctx>(
+fn build_interval_greater<'ctx, T: NumberType>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    context: &'ctx Context,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let flt_type = T::jit_type(context);
+    let i32_type = context.i32_type();
+    let bool_type = context.bool_type();
     let InequalityFlags {
         either_empty,
         strictly_before,
@@ -890,16 +1014,17 @@ fn build_interval_greater<'ctx>(
         .into_vector_value())
 }
 
-fn build_interval_greater_equal<'ctx>(
+fn build_interval_greater_equal<'ctx, T: NumberType>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    context: &'ctx Context,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let flt_type = T::jit_type(context);
+    let i32_type = context.i32_type();
+    let bool_type = context.bool_type();
     let InequalityFlags {
         either_empty,
         strictly_before,
