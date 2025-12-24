@@ -362,7 +362,16 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Or => todo!(),
+                    Or => build_interval_or(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        bool_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                 },
                 Ternary(op, _a, _b, _c) => match op {
                     Choose => todo!(),
@@ -407,6 +416,78 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_or<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let all_false = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("or_all_true_reduce_{index}"),
+        builder.build_not(
+            builder.build_shuffle_vector(
+                lhs,
+                rhs,
+                VectorType::const_vector(&[
+                    i32_type.const_int(0, false),
+                    i32_type.const_int(1, false),
+                    i32_type.const_int(2, false),
+                    i32_type.const_int(3, false),
+                ]),
+                &format!("or_all_true_check_{index}"),
+            )?,
+            &format!("or_all_false_flip_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let one_side_true = builder.build_or(
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.and.*",
+            &format!("or_lhs_negate_reduce_{index}"),
+            lhs,
+        )?
+        .into_int_value(),
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.and.*",
+            &format!("or_rhs_negate_reduce_{index}"),
+            rhs,
+        )?
+        .into_int_value(),
+        &format!("or_one_side_all_false_{index}"),
+    )?;
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            all_false,
+            out_ff,
+            builder
+                .build_select(
+                    one_side_true,
+                    out_tt,
+                    out_ft,
+                    &format!("or_one_side_false_choice_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("or_{index}"),
+        )?
+        .into_vector_value())
 }
 
 fn build_interval_and<'ctx>(
