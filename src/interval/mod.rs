@@ -444,8 +444,7 @@ impl ValueType for Interval {
                 Equal => {
                     use Overlap::*;
                     let (lo, hi) = match overlap((llo, lhi), (rlo, rhi)) {
-                        BothEmpty => (true, true),
-                        FirstEmpty | SecondEmpty | Before | After => (false, false),
+                        BothEmpty | FirstEmpty | SecondEmpty | Before | After => (false, false),
                         Meets | Overlaps | Starts | ContainedBy | Finishes | StartedBy
                         | FinishedBy | OverlappedBy | Contains | MetBy => (false, true),
                         Matches => {
@@ -461,8 +460,7 @@ impl ValueType for Interval {
                 NotEqual => {
                     use Overlap::*;
                     let (lo, hi) = match overlap((llo, lhi), (rlo, rhi)) {
-                        BothEmpty => (false, false),
-                        FirstEmpty | SecondEmpty | Before | After => (true, true),
+                        BothEmpty | FirstEmpty | SecondEmpty | Before | After => (true, true),
                         Meets | Overlaps | Starts | ContainedBy | Finishes | FinishedBy
                         | Contains | StartedBy | OverlappedBy | MetBy => (false, true),
                         Matches => {
