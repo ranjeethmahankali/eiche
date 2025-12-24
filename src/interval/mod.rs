@@ -1491,4 +1491,247 @@ mod test {
         assert_float_eq!(r.0, 8.0, 1e-12);
         assert_float_eq!(r.1, 8.0, 1e-12);
     }
+
+    #[test]
+    fn t_bool_operations_direct() {
+        // Test And operation directly with all combinations
+        let tree = deftree!(and (> 'x 0) (< 'y 5)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Case 1: Both definitely true -> (true, true)
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Case 2: One definitely false -> (false, false)
+        eval.set_value('x', Interval::from_scalar(-2., -1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Case 3: Both uncertain -> (false, true)
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 6.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+        // Case 4: One certain true, one uncertain -> (false, true)
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(4., 6.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_bool_operations_or() {
+        let tree = deftree!(or (> 'x 5) (< 'y 0)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Both definitely false -> (false, false)
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // One definitely true -> (true, true)
+        eval.set_value('x', Interval::from_scalar(6., 7.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Both uncertain -> (false, true)
+        eval.set_value('x', Interval::from_scalar(4., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-1., 1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_bool_operations_not() {
+        let tree = deftree!(not (> 'x 0)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Input (true, true) -> (false, false)
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Input (false, false) -> (true, true)
+        eval.set_value('x', Interval::from_scalar(-2., -1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Input (false, true) -> (false, true)
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_choose_boolean_output() {
+        // Choose that returns Bool intervals
+        let tree = deftree!(if (> 'x 0) (> 'y 5) (< 'z 0)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Condition definitely true, return first branch
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(6., 7.).unwrap());
+        eval.set_value('z', Interval::from_scalar(-5., -1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Condition definitely false, return second branch
+        eval.set_value('x', Interval::from_scalar(-2., -1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('z', Interval::from_scalar(-2., -1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Condition uncertain, both branches certain but same
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(6., 7.).unwrap());
+        eval.set_value('z', Interval::from_scalar(-2., -1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Condition uncertain, branches differ
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(6., 7.).unwrap());
+        eval.set_value('z', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_comparisons_greater() {
+        let tree = deftree!(> 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Definitely true: x strictly after y
+        eval.set_value('x', Interval::from_scalar(5., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Definitely false: x before or equal y
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(5., 6.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Uncertain: overlap
+        eval.set_value('x', Interval::from_scalar(1., 5.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 7.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+        // Touching
+        eval.set_value('x', Interval::from_scalar(3., 5.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 3.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_comparisons_greater_or_equal() {
+        let tree = deftree!(>= 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Definitely true
+        eval.set_value('x', Interval::from_scalar(5., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 5.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Definitely false
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 6.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Uncertain
+        eval.set_value('x', Interval::from_scalar(1., 5.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 7.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_comparisons_edge_cases() {
+        // Equal: Exact overlap with singleton
+        let tree = deftree!(== 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(3., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 3.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Equal: Exact overlap non-singleton
+        eval.set_value('x', Interval::from_scalar(3., 5.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 5.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+        // Equal: No overlap
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 4.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Equal: Touching
+        eval.set_value('x', Interval::from_scalar(1., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 5.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+        // NotEqual: singleton same
+        let tree2 = deftree!(!= 'x 'y).unwrap();
+        let mut eval2 = IntervalEvaluator::new(&tree2);
+        eval2.set_value('x', Interval::from_scalar(3., 3.).unwrap());
+        eval2.set_value('y', Interval::from_scalar(3., 3.).unwrap());
+        assert_eq!(eval2.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // NotEqual: No overlap
+        eval2.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval2.set_value('y', Interval::from_scalar(3., 4.).unwrap());
+        assert_eq!(eval2.run().unwrap()[0].boolean().unwrap(), (true, true));
+    }
+
+    #[test]
+    fn t_comparisons_with_nan() {
+        let tree = deftree!(< 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // NaN intervals should be handled
+        eval.set_value('x', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        let result = eval.run().unwrap()[0].boolean().unwrap();
+        assert_eq!(result, (true, true)); // Check precedes behavior with NaN
+    }
+
+    #[test]
+    fn t_subtract_comprehensive() {
+        check_interval_eval(
+            deftree!(- 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -3., 7.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_multiply_sign_combinations() {
+        let tree = deftree!(* 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Both positive
+        eval.set_value('x', Interval::from_scalar(2., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(4., 5.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 8., 1e-12);
+        assert_float_eq!(r.1, 15., 1e-12);
+        // Both negative
+        eval.set_value('x', Interval::from_scalar(-3., -2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-5., -4.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 8., 1e-12);
+        assert_float_eq!(r.1, 15., 1e-12);
+        // One positive, one negative
+        eval.set_value('x', Interval::from_scalar(2., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-5., -4.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, -15., 1e-12);
+        assert_float_eq!(r.1, -8., 1e-12);
+        // First crossing zero
+        eval.set_value('x', Interval::from_scalar(-2., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(4., 5.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, -10., 1e-12);
+        assert_float_eq!(r.1, 15., 1e-12);
+        // Both crossing zero
+        eval.set_value('x', Interval::from_scalar(-2., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-5., 4.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, -15., 1e-12);
+        assert_float_eq!(r.1, 12., 1e-12);
+    }
+
+    #[test]
+    fn t_type_mismatch_errors() {
+        // Scalar operations on Bool
+        let tree = deftree!(+ (> 'x 0) 5.).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        assert!(eval.run().is_err());
+        // Bool operations on Scalar
+        let tree2 = deftree!(and 'x 'y).unwrap();
+        let mut eval2 = IntervalEvaluator::new(&tree2);
+        eval2.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval2.set_value('y', Interval::from_scalar(3., 4.).unwrap());
+        assert!(eval2.run().is_err());
+        // Not on scalar
+        let tree3 = deftree!(not 'x).unwrap();
+        let mut eval3 = IntervalEvaluator::new(&tree3);
+        eval3.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        assert!(eval3.run().is_err());
+    }
+
+    #[test]
+    fn t_bool_from_boolean_swapped() {
+        // Test that from_boolean swaps when lower=true, upper=false
+        let result = Interval::from_boolean(true, false).unwrap();
+        assert_eq!(result.boolean().unwrap(), (false, true));
+        let result2 = Interval::from_boolean(false, true).unwrap();
+        assert_eq!(result2.boolean().unwrap(), (false, true));
+        let result3 = Interval::from_boolean(true, true).unwrap();
+        assert_eq!(result3.boolean().unwrap(), (true, true));
+    }
 }
