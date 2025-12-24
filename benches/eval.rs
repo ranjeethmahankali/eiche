@@ -492,6 +492,87 @@ mod circles {
         criterion_group!(bench, b_no_compile, b_with_compile,);
     }
 
+    pub mod interval {
+        use super::*;
+        use eiche::IntervalEvaluator;
+        use rand::Rng;
+
+        const N_QUERIES: usize = 512;
+
+        fn init_benchmark() -> (Tree, Box<[[Interval; 2]]>, Vec<Interval>) {
+            let mut rng = StdRng::seed_from_u64(42);
+            let tree =
+                test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES)
+                    .compacted()
+                    .expect("Cannot compact tree");
+            assert_eq!(
+                tree.symbols().len(),
+                2,
+                "Several unchecked function calls in other benchmarks require the tree to have exactly 2 inputs: x and y"
+            );
+            // Sample random intervals.
+            let samples = (0..N_QUERIES)
+                .map(|_| {
+                    [(0., DIMS_F64), (0., DIMS_F64)].map(|range| {
+                        let mut bounds =
+                            [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
+                        if bounds[0] > bounds[1] {
+                            bounds.swap(0, 1);
+                        }
+                        Interval::Scalar(bounds[0], bounds[1])
+                    })
+                })
+                .collect();
+            (tree, samples, Vec::with_capacity(N_QUERIES))
+        }
+
+        fn with_compilation(tree: &Tree, values: &mut Vec<Interval>, queries: &[[Interval; 2]]) {
+            values.clear();
+            let mut eval = IntervalEvaluator::new(&tree);
+            values.extend(queries.iter().map(|interval| {
+                eval.set_value('x', interval[0]);
+                eval.set_value('y', interval[1]);
+                let result = eval.run().unwrap();
+                result[0]
+            }));
+        }
+
+        fn no_compilation(
+            eval: &mut IntervalEvaluator,
+            values: &mut Vec<Interval>,
+            queries: &[[Interval; 2]],
+        ) {
+            values.clear();
+            values.extend(queries.iter().map(|interval| {
+                eval.set_value('x', interval[0]);
+                eval.set_value('y', interval[1]);
+                let result = eval.run().unwrap();
+                result[0]
+            }));
+        }
+
+        fn b_with_compile(c: &mut Criterion) {
+            let (tree, queries, mut values) = init_benchmark();
+            c.bench_function("circles-interval-eval-with-compile", |b| {
+                b.iter(|| {
+                    with_compilation(&tree, black_box(&mut values), &queries);
+                })
+            });
+        }
+
+        fn b_no_compile(c: &mut Criterion) {
+            let (tree, queries, mut values) = init_benchmark();
+            let mut eval = IntervalEvaluator::new(&tree);
+            c.bench_function("circles-interval-eval-no-compile", |b| {
+                b.iter(|| {
+                    no_compilation(&mut eval, black_box(&mut values), &queries);
+                })
+            });
+        }
+
+        criterion_group!(bench, b_no_compile, b_with_compile);
+    }
+
     #[cfg(feature = "llvm-jit")]
     pub mod jit_interval {
         use super::*;
@@ -568,7 +649,7 @@ mod circles {
         fn b_with_compile(c: &mut Criterion) {
             {
                 let (tree, queries, mut values) = init_benchmark::<f64>();
-                c.bench_function("circles-jit-f64-interval-eval-with-compile", |b| {
+                c.bench_function("circles-interval-jit-f64-eval-with-compile", |b| {
                     b.iter(|| {
                         with_compilation(&tree, black_box(&mut values), &queries);
                     })
@@ -576,7 +657,7 @@ mod circles {
             }
             {
                 let (tree, queries, mut values) = init_benchmark::<f32>();
-                c.bench_function("circles-jit-f32-interval-eval-with-compile", |b| {
+                c.bench_function("circles-interval-jit-f32-eval-with-compile", |b| {
                     b.iter(|| {
                         with_compilation(&tree, black_box(&mut values), &queries);
                     })
@@ -589,7 +670,7 @@ mod circles {
                 let (tree, queries, mut values) = init_benchmark::<f64>();
                 let context = JitContext::default();
                 let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
-                c.bench_function("circles-jit-f64-interval-eval-no-compile", |b| {
+                c.bench_function("circles-interval-jit-f64-eval-no-compile", |b| {
                     b.iter(|| {
                         no_compilation(&eval, black_box(&mut values), &queries);
                     })
@@ -599,7 +680,7 @@ mod circles {
                 let (tree, queries, mut values) = init_benchmark::<f32>();
                 let context = JitContext::default();
                 let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
-                c.bench_function("circles-jit-f32-interval-eval-no-compile", |b| {
+                c.bench_function("circles-interval-jit-f32-eval-no-compile", |b| {
                     b.iter(|| {
                         no_compilation(&eval, black_box(&mut values), &queries);
                     })
@@ -612,7 +693,11 @@ mod circles {
 }
 
 #[cfg(not(feature = "llvm-jit"))]
-criterion_main!(spheres::value_eval::bench, circles::bench);
+criterion_main!(
+    spheres::value_eval::bench,
+    circles::bench,
+    circles::interval::bench
+);
 
 #[cfg(feature = "llvm-jit")]
 criterion_main!(
@@ -620,6 +705,7 @@ criterion_main!(
     spheres::jit_single::bench,
     spheres::jit_simd::bench,
     circles::bench,
+    circles::interval::bench,
     circles::jit_single::bench,
     circles::jit_interval::bench
 );
