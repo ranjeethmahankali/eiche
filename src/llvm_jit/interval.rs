@@ -1895,43 +1895,40 @@ fn build_interval_div<'ctx>(
         .rev()
         .zip(outputs.into_iter().rev())
         .enumerate()
-        .fold(
-            Ok(VectorType::const_vector(&[
+        .try_fold(
+            VectorType::const_vector(&[
                 flt_type.const_float(f64::NAN),
                 flt_type.const_float(f64::NAN),
-            ])),
-            |acc, (i, (cases, out))| match acc {
-                Ok(acc) => {
-                    let (_, cond) = cases
-                        .iter()
-                        .enumerate()
-                        .map(|(j, (lcase, rcase))| -> Result<IntValue<'ctx>, Error> {
-                            Ok(builder.build_int_compare(
-                                IntPredicate::EQ,
-                                mask,
-                                i32_type.const_int((*lcase as u64) * 7 + (*rcase as u64), false),
-                                &format!("interval_div_case_{i}_subcase_{j}_{index}"),
-                            )?)
-                        })
-                        .enumerate()
-                        .reduce(|(_, acc), (j, current)| match (acc, current) {
-                            (Ok(acc), Ok(current)) => match builder.build_or(
-                                acc,
-                                current,
-                                &format!("interval_div_case_{i}_combine_{j}_{index}"),
-                            ) {
-                                Ok(result) => (j, Ok(result)),
-                                Err(e) => (j, Err(e.into())),
-                            },
-                            (Ok(_), Err(e)) | (Err(e), Ok(_)) | (Err(e), Err(_)) => (j, Err(e)),
-                        })
-                        .expect("Unable to combine all the cases when compiling interval division");
-                    let cond = cond?;
-                    Ok(builder
-                        .build_select(cond, out, acc, &format!("interval_div_case_{i}_choice"))?
-                        .into_vector_value())
-                }
-                Err(e) => Err(e),
+            ]),
+            |acc, (i, (cases, out))| {
+                let (_, cond) = cases
+                    .iter()
+                    .enumerate()
+                    .map(|(j, (lcase, rcase))| -> Result<IntValue<'ctx>, Error> {
+                        Ok(builder.build_int_compare(
+                            IntPredicate::EQ,
+                            mask,
+                            i32_type.const_int((*lcase as u64) * 7 + (*rcase as u64), false),
+                            &format!("interval_div_case_{i}_subcase_{j}_{index}"),
+                        )?)
+                    })
+                    .enumerate()
+                    .reduce(|(_, acc), (j, current)| match (acc, current) {
+                        (Ok(acc), Ok(current)) => match builder.build_or(
+                            acc,
+                            current,
+                            &format!("interval_div_case_{i}_combine_{j}_{index}"),
+                        ) {
+                            Ok(result) => (j, Ok(result)),
+                            Err(e) => (j, Err(e.into())),
+                        },
+                        (Ok(_), Err(e)) | (Err(e), Ok(_)) | (Err(e), Err(_)) => (j, Err(e)),
+                    })
+                    .expect("Unable to combine all the cases when compiling interval division");
+                let cond = cond?;
+                Ok(builder
+                    .build_select(cond, out, acc, &format!("interval_div_case_{i}_choice"))?
+                    .into_vector_value())
             },
         )
 }
