@@ -899,7 +899,7 @@ fn build_interval_equality_flags<'ctx>(
 ) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
     let either_empty = builder.build_or(
         build_check_interval_empty(lhs, builder, module, index)?,
-        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(rhs, builder, module, index)?,
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
@@ -924,6 +924,10 @@ fn build_interval_equality_flags<'ctx>(
         )?,
     )?
     .into_int_value();
+    // To determine if the interval is a singleton, we're checking the masked
+    // intervals lanewise. But since we swapped the bounds of rhs, if they're
+    // equal lane wise, they must be singletons as long as b >= a and d >= c
+    // hold.
     let matching_singleton = build_vec_unary_intrinsic(
         builder,
         module,
@@ -931,8 +935,8 @@ fn build_interval_equality_flags<'ctx>(
         &format!("equal_exact_singleton_check_{index}"),
         builder.build_float_compare(
             FloatPredicate::UEQ,
-            lhs,
-            rhs,
+            masked_lhs,
+            masked_rhs,
             &format!("equal_exact_singleton_lanewise_check_{index}"),
         )?,
     )?
