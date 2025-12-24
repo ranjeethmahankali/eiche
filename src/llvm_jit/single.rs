@@ -1,13 +1,11 @@
-use super::{JitCompiler, JitContext, NumberType};
+use super::{
+    JitCompiler, JitContext, NumberType, build_float_binary_intrinsic, build_float_unary_intrinsic,
+};
 use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
-    builder::Builder,
     execution_engine::JitFunction,
-    intrinsics::Intrinsic,
-    module::Module,
-    types::{BasicTypeEnum, FloatType},
-    values::{BasicMetadataValueEnum, BasicValueEnum},
+    values::{BasicValue, BasicValueEnum},
 };
 use std::{ffi::c_void, marker::PhantomData};
 
@@ -28,6 +26,21 @@ where
     _phantom: PhantomData<T>,
 }
 
+/**
+`JitFn` is not thread safe, because it contains the executable memory where the
+JIT machine code resides, somewhere inside the Execution Engine. LLVM doesn't
+implement the `Send` trait for this block of memory, because it doesn't know
+what's in the JIT machine code, it doesn't know if that code itself is thread
+safe, or has side effects. This `JitFnSync` can be pulled out of a `JitFn`, via
+the `.as_async()` function, and is thread safe. It implements the `Send`
+trait. This is OK, because we know the machine code represents a mathematical
+expression without any side effects. So we pull out the function pointer and
+wrap it in this struct, that can be shared across threads. Still the execution
+engine held inside the original `JitSmdFn` needs to outlive this sync wrapper,
+because it owns the block of executable memory. To guarantee that, this structs
+pseudo borrows (via a phantom) from the `JitFn`. It has to be done via a phantom
+othwerwise we can't implement The Sync trait on this.
+*/
 pub struct JitFnSync<'ctx, T>
 where
     T: NumberType,
@@ -55,7 +68,7 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let num_roots = self.num_roots();
-        let func_name = context.new_func_name::<T, false>();
+        let func_name = context.new_func_name::<T>(None);
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
@@ -71,10 +84,10 @@ impl Tree {
         for (ni, node) in self.nodes().iter().enumerate() {
             let reg = match node {
                 Constant(val) => match val {
-                    Bool(val) => BasicValueEnum::IntValue(
-                        bool_type.const_int(if *val { 1 } else { 0 }, false),
-                    ),
-                    Scalar(val) => BasicValueEnum::FloatValue(float_type.const_float(*val)),
+                    Bool(val) => bool_type
+                        .const_int(if *val { 1 } else { 0 }, false)
+                        .as_basic_value_enum(),
+                    Scalar(val) => float_type.const_float(*val).as_basic_value_enum(),
                 },
                 Symbol(label) => {
                     let inputs = function
@@ -100,43 +113,36 @@ impl Tree {
                     builder.build_load(float_type, ptr, &format!("val_{}", *label))?
                 }
                 Unary(op, input) => match op {
-                    Negate => {
-                        BasicValueEnum::FloatValue(builder.build_float_neg(
-                            regs[*input].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?)
-                    }
+                    Negate => builder
+                        .build_float_neg(regs[*input].into_float_value(), &format!("val_{ni}"))?
+                        .as_basic_value_enum(),
                     Sqrt => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.sqrt.*",
                         "sqrt_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Abs => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.fabs.*",
                         "abs_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Sin => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.sin.*",
                         "sin_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Cos => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.cos.*",
                         "cos_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Tan => {
                         let sin = build_float_unary_intrinsic(
@@ -144,72 +150,77 @@ impl Tree {
                             &compiler.module,
                             "llvm.sin.*",
                             "sin_call",
-                            regs[*input],
-                            float_type,
+                            regs[*input].into_float_value(),
                         )?;
                         let cos = build_float_unary_intrinsic(
                             builder,
                             &compiler.module,
                             "llvm.cos.*",
                             "cos_call",
-                            regs[*input],
-                            float_type,
+                            regs[*input].into_float_value(),
                         )?;
-                        BasicValueEnum::FloatValue(builder.build_float_div(
-                            sin.into_float_value(),
-                            cos.into_float_value(),
-                            &format!("val_{ni}"),
-                        )?)
+                        builder
+                            .build_float_div(
+                                sin.into_float_value(),
+                                cos.into_float_value(),
+                                &format!("val_{ni}"),
+                            )?
+                            .as_basic_value_enum()
                     }
                     Log => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.log.*",
                         "log_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Exp => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.exp.*",
                         "exp_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
                     Floor => build_float_unary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.floor.*",
                         "floor_call",
-                        regs[*input],
-                        float_type,
+                        regs[*input].into_float_value(),
                     )?,
-                    Not => BasicValueEnum::IntValue(
-                        builder.build_not(regs[*input].into_int_value(), &format!("val_{ni}"))?,
-                    ),
+                    Not => builder
+                        .build_not(regs[*input].into_int_value(), &format!("val_{ni}"))?
+                        .as_basic_value_enum(),
                 },
                 Binary(op, lhs, rhs) => match op {
-                    Add => BasicValueEnum::FloatValue(builder.build_float_add(
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    Subtract => BasicValueEnum::FloatValue(builder.build_float_sub(
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    Multiply => BasicValueEnum::FloatValue(builder.build_float_mul(
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    Divide => BasicValueEnum::FloatValue(builder.build_float_div(
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
+                    Add => builder
+                        .build_float_add(
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Subtract => builder
+                        .build_float_sub(
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Multiply => builder
+                        .build_float_mul(
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Divide => builder
+                        .build_float_div(
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
                     Pow => build_float_binary_intrinsic(
                         builder,
                         &compiler.module,
@@ -237,57 +248,75 @@ impl Tree {
                         regs[*rhs],
                         float_type,
                     )?,
-                    Remainder => BasicValueEnum::FloatValue(builder.build_float_rem(
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    Less => BasicValueEnum::IntValue(builder.build_float_compare(
-                        FloatPredicate::ULT,
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    LessOrEqual => BasicValueEnum::IntValue(builder.build_float_compare(
-                        FloatPredicate::ULE,
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    Equal => BasicValueEnum::IntValue(builder.build_float_compare(
-                        FloatPredicate::UEQ,
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    NotEqual => BasicValueEnum::IntValue(builder.build_float_compare(
-                        FloatPredicate::UNE,
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    Greater => BasicValueEnum::IntValue(builder.build_float_compare(
-                        FloatPredicate::UGT,
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    GreaterOrEqual => BasicValueEnum::IntValue(builder.build_float_compare(
-                        FloatPredicate::UGE,
-                        regs[*lhs].into_float_value(),
-                        regs[*rhs].into_float_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    And => BasicValueEnum::IntValue(builder.build_and(
-                        regs[*lhs].into_int_value(),
-                        regs[*rhs].into_int_value(),
-                        &format!("val_{ni}"),
-                    )?),
-                    Or => BasicValueEnum::IntValue(builder.build_or(
-                        regs[*lhs].into_int_value(),
-                        regs[*rhs].into_int_value(),
-                        &format!("val_{ni}"),
-                    )?),
+                    Remainder => builder
+                        .build_float_rem(
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Less => builder
+                        .build_float_compare(
+                            FloatPredicate::ULT,
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    LessOrEqual => builder
+                        .build_float_compare(
+                            FloatPredicate::ULE,
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Equal => builder
+                        .build_float_compare(
+                            FloatPredicate::UEQ,
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    NotEqual => builder
+                        .build_float_compare(
+                            FloatPredicate::UNE,
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Greater => builder
+                        .build_float_compare(
+                            FloatPredicate::UGT,
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    GreaterOrEqual => builder
+                        .build_float_compare(
+                            FloatPredicate::UGE,
+                            regs[*lhs].into_float_value(),
+                            regs[*rhs].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    And => builder
+                        .build_and(
+                            regs[*lhs].into_int_value(),
+                            regs[*rhs].into_int_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
+                    Or => builder
+                        .build_or(
+                            regs[*lhs].into_int_value(),
+                            regs[*rhs].into_int_value(),
+                            &format!("val_{ni}"),
+                        )?
+                        .as_basic_value_enum(),
                 },
                 Ternary(op, a, b, c) => match op {
                     Choose => builder.build_select(
@@ -350,8 +379,10 @@ where
     /// order as returned by calling `tree.symbols()` which was compiled to
     /// produce this evaluator.
     pub fn run(&self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
-        if (inputs.len() != self.num_inputs) || (outputs.len() != self.num_outputs) {
+        if inputs.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        } else if outputs.len() != self.num_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.num_outputs));
         }
         // SAFETY: We just checked above.
         unsafe { self.run_unchecked(inputs, outputs) };
@@ -421,68 +452,10 @@ where
     }
 }
 
-fn build_float_unary_intrinsic<'ctx>(
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    name: &'static str,
-    call_name: &'static str,
-    input: BasicValueEnum<'ctx>,
-    float_type: FloatType<'ctx>,
-) -> Result<BasicValueEnum<'ctx>, Error> {
-    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
-    let intrinsic_fn = intrinsic
-        .get_declaration(module, &[BasicTypeEnum::FloatType(float_type)])
-        .ok_or(Error::CannotCompileIntrinsic(name))?;
-    builder
-        .build_call(
-            intrinsic_fn,
-            &[BasicMetadataValueEnum::FloatValue(input.into_float_value())],
-            call_name,
-        )
-        .map_err(|_| Error::CannotCompileIntrinsic(name))?
-        .try_as_basic_value()
-        .left()
-        .ok_or(Error::CannotCompileIntrinsic(name))
-}
-
-fn build_float_binary_intrinsic<'ctx>(
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    name: &'static str,
-    call_name: &'static str,
-    lhs: BasicValueEnum<'ctx>,
-    rhs: BasicValueEnum<'ctx>,
-    float_type: FloatType<'ctx>,
-) -> Result<BasicValueEnum<'ctx>, Error> {
-    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
-    let intrinsic_fn = intrinsic
-        .get_declaration(
-            module,
-            &[
-                BasicTypeEnum::FloatType(float_type),
-                BasicTypeEnum::FloatType(float_type),
-            ],
-        )
-        .ok_or(Error::CannotCompileIntrinsic(name))?;
-    builder
-        .build_call(
-            intrinsic_fn,
-            &[
-                BasicMetadataValueEnum::FloatValue(lhs.into_float_value()),
-                BasicMetadataValueEnum::FloatValue(rhs.into_float_value()),
-            ],
-            call_name,
-        )
-        .map_err(|_| Error::CannotCompileIntrinsic(name))?
-        .try_as_basic_value()
-        .left()
-        .ok_or(Error::CannotCompileIntrinsic(name))
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, test::check_value_eval};
+    use crate::{deftree, test_util::check_value_eval};
 
     fn check_jit_eval(
         tree: &Tree,

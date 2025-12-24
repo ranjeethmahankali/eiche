@@ -26,12 +26,12 @@ pub mod llvm_jit;
 #[cfg(feature = "llvm-jit")]
 pub use llvm_jit::{
     JitContext,
+    interval::{JitIntervalFn, JitIntervalFnSync},
     simd_array::{JitSimdFn, NativeSimdFunc, SimdVec, Wide},
     single::{JitFn, JitFnSync},
 };
 
-#[cfg(test)]
-mod test;
+pub mod test_util;
 
 pub use dedup::{Deduplicater, equivalent_trees};
 pub use derivative::{numerical_deriv, symbolic_deriv};

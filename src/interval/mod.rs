@@ -19,25 +19,6 @@ pub enum Interval {
     Bool(bool, bool),
 }
 
-pub enum Overlap {
-    BothEmpty,
-    FirstEmpty,
-    SecondEmpty,
-    Before,
-    Meets,
-    Overlaps,
-    Starts,
-    ContainedBy,
-    Finishes,
-    Matches,
-    FinishedBy,
-    Contains,
-    StartedBy,
-    OverlappedBy,
-    MetBy,
-    After,
-}
-
 #[derive(Copy, Clone)]
 pub enum IntervalClass {
     Empty = 0,
@@ -100,49 +81,34 @@ fn classify(lo: f64, hi: f64) -> IntervalClass {
     }
 }
 
-pub fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
-    use Overlap::*;
+enum Overlap {
+    Exact,
+    Partial,
+    TouchingLeft,
+    Before,
+    TouchingRight,
+    After,
+    None,
+}
+
+fn overlap(a: f64, b: f64, c: f64, d: f64) -> Overlap {
     use std::cmp::Ordering::*;
-    match (b < a, d < c) {
-        (true, true) => BothEmpty,
-        (true, false) => FirstEmpty,
-        (false, true) => SecondEmpty,
+    match (a.is_nan() && b.is_nan(), c.is_nan() && d.is_nan()) {
+        (true, _) | (_, true) => Overlap::None,
         (false, false) => {
-            //     |  aRc  |  aRd  |  bRc  |  bRd
-            //     | < = > | < = > | < = > | < = >
-            // ----+-------+-------+-------+-------
-            //   B | x     | x     | x     | x
-            //   M | x     | x     |   x   | x
-            //   O | x     | x     |     x | x
-            //   S |   x   | x     |   ? ? | x
-            //  Cb |     x | x     |     x | x
-            //   F |     x | ? ?   |     x |   x
-            //   E |   x   | ? ?   |   ? ? |   x
-            //  Fb | x     | x     |   ? ? |   x
-            //   C | x     | x     |     x |     x
-            //  Sb |   x   | ? ?   |     x |     x
-            //  Ob |     x | x     |     x |     x
-            //  Mb |     x |   x   |     x |     x
-            //   A |     x |     x |     x |     x
+            debug_assert!(b >= a && d >= c, "The intervals must be valid");
             match (
-                b.total_cmp(&d),
-                a.total_cmp(&c),
                 b.total_cmp(&c),
                 a.total_cmp(&d),
+                a.total_cmp(&c),
+                b.total_cmp(&d),
             ) {
-                (Less, Less, Less, _) => Before,
-                (Less, Less, Equal, _) => Meets,
-                (Less, Less, ..) => Overlaps,
-                (Less, Equal, ..) => Starts,
-                (Less, ..) => ContainedBy,
-                (Equal, Greater, ..) => Finishes,
-                (Equal, Equal, ..) => Matches,
-                (Equal, ..) => FinishedBy,
-                (Greater, Less, ..) => Contains,
-                (Greater, Equal, ..) => StartedBy,
-                (Greater, Greater, _, Less) => OverlappedBy,
-                (Greater, Greater, _, Equal) => MetBy,
-                (Greater, Greater, _, Greater) => After,
+                (_, _, Equal, Equal) => Overlap::Exact,
+                (Less, ..) => Overlap::Before,
+                (Equal, ..) => Overlap::TouchingLeft,
+                (_, Greater, ..) => Overlap::After,
+                (_, Equal, ..) => Overlap::TouchingRight,
+                _ => Overlap::Partial,
             }
         }
     }
@@ -199,16 +165,12 @@ fn abs((llo, lhi): (f64, f64)) -> (f64, f64) {
     }
 }
 
-fn intersection((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> (f64, f64) {
-    (llo.max(rlo), lhi.min(rhi))
-}
-
 fn precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
-    lhi < llo || rhi < rlo || lhi <= rlo
+    (lhi.is_nan() && llo.is_nan()) || (rhi.is_nan() && rlo.is_nan()) || lhi <= rlo
 }
 
 fn strict_precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
-    lhi < llo || rhi < rlo || lhi < rlo
+    (lhi.is_nan() && llo.is_nan()) || (rhi.is_nan() && rlo.is_nan()) || lhi < rlo
 }
 
 impl Default for Interval {
@@ -328,7 +290,7 @@ impl ValueType for Interval {
                         (true, false) | (false, true) => (false, true),
                         (false, false) => (true, true),
                     };
-                    Interval::from_boolean(lower, upper)
+                    Ok(Interval::Bool(lower, upper))
                 }
                 Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
                     Err(Error::TypeMismatch)
@@ -351,6 +313,10 @@ impl ValueType for Interval {
                 Divide => {
                     div((llo, lhi), (rlo, rhi)).and_then(|(lo, hi)| Interval::from_scalar(lo, hi))
                 }
+                Pow if llo.is_nan() || lhi.is_nan() || rlo.is_nan() || rhi.is_nan() => {
+                    Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                }
+                Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo == 2.0 && rhi == 2.0 => {
                     match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0)) {
                         // Squaring
@@ -361,37 +327,34 @@ impl ValueType for Interval {
                         _ => Interval::from_scalar(llo * llo, lhi * lhi),
                     }
                 }
-                Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
                 Pow if rlo.floor() == rlo && rlo == rhi => {
                     // Singleton integer exponent.
-                    if llo.is_nan() && lhi.is_nan() {
-                        Ok(Interval::Scalar(f64::NAN, f64::NAN))
-                    } else {
-                        let rhs = rhi.floor() as i32;
+                    let rhs = rhi.floor() as i32;
+                    if rhs % 2 == 0 {
+                        let (lo, hi) = abs((llo, lhi));
                         if rhs < 0 {
                             if llo == 0.0 && lhi == 0.0 {
                                 Ok(Interval::Scalar(f64::NAN, f64::NAN))
-                            } else if rhs % 2 == 0 {
-                                let (lo, hi) = abs((llo, lhi));
-                                Interval::from_scalar(hi.powi(rhs), lo.powi(rhs))
-                            } else if llo < 0.0 && lhi > 0.0 {
-                                Ok(Interval::default())
                             } else {
-                                Interval::from_scalar(lhi.powi(rhs), llo.powi(rhs))
+                                Interval::from_scalar(hi.powi(rhs), lo.powi(rhs))
                             }
-                        } else if rhs % 2 == 0 {
-                            let (lo, hi) = abs((llo, lhi));
-                            Interval::from_scalar(lo.powi(rhs), hi.powi(rhs))
                         } else {
-                            Interval::from_scalar(llo.powi(rhs), lhi.powi(rhs))
+                            Interval::from_scalar(lo.powi(rhs), hi.powi(rhs))
                         }
+                    } else if rhs < 0 {
+                        if llo == 0.0 && lhi == 0.0 {
+                            Ok(Interval::Scalar(f64::NAN, f64::NAN))
+                        } else if llo < 0.0 && lhi > 0.0 {
+                            Ok(Interval::default())
+                        } else {
+                            Interval::from_scalar(lhi.powi(rhs), llo.powi(rhs))
+                        }
+                    } else {
+                        Interval::from_scalar(llo.powi(rhs), lhi.powi(rhs))
                     }
                 }
-                Pow if llo.is_nan() || lhi.is_nan() || rlo.is_nan() || rhi.is_nan() => {
-                    Ok(Interval::Scalar(f64::NAN, f64::NAN))
-                }
                 Pow => {
-                    let (llo, lhi) = intersection((llo, lhi), (0.0, f64::INFINITY));
+                    let (llo, lhi) = (llo.max(0.0), lhi.clamp(0.0, f64::INFINITY));
                     if rhi <= 0.0 {
                         if lhi == 0.0 {
                             Ok(Interval::Scalar(f64::NAN, f64::NAN))
@@ -432,7 +395,7 @@ impl ValueType for Interval {
                     } else {
                         (false, true)
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 LessOrEqual => {
                     let (lo, hi) = if precedes((llo, lhi), (rlo, rhi)) {
@@ -442,41 +405,27 @@ impl ValueType for Interval {
                     } else {
                         (false, true)
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 Equal => {
                     use Overlap::*;
-                    let (lo, hi) = match overlap((llo, lhi), (rlo, rhi)) {
-                        BothEmpty => (true, true),
-                        FirstEmpty | SecondEmpty | Before | After => (false, false),
-                        Meets | Overlaps | Starts | ContainedBy | Finishes | StartedBy
-                        | FinishedBy | OverlappedBy | Contains | MetBy => (false, true),
-                        Matches => {
-                            if llo == lhi {
-                                (true, true)
-                            } else {
-                                (false, true)
-                            }
-                        }
+                    let (lo, hi) = match overlap(llo, lhi, rlo, rhi) {
+                        None | After | Before => (false, false),
+                        Partial | TouchingLeft | TouchingRight => (false, true),
+                        Exact if llo == lhi => (true, true),
+                        Exact => (false, true),
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 NotEqual => {
                     use Overlap::*;
-                    let (lo, hi) = match overlap((llo, lhi), (rlo, rhi)) {
-                        BothEmpty => (false, false),
-                        FirstEmpty | SecondEmpty | Before | After => (true, true),
-                        Meets | Overlaps | Starts | ContainedBy | Finishes | FinishedBy
-                        | Contains | StartedBy | OverlappedBy | MetBy => (false, true),
-                        Matches => {
-                            if llo == lhi {
-                                (false, false)
-                            } else {
-                                (false, true)
-                            }
-                        }
+                    let (lo, hi) = match overlap(llo, lhi, rlo, rhi) {
+                        None | After | Before => (true, true),
+                        Partial | TouchingLeft | TouchingRight => (false, true),
+                        Exact if llo == lhi => (false, false),
+                        Exact => (false, true),
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 Greater => {
                     let (lo, hi) = if strict_precedes((rlo, rhi), (llo, lhi)) {
@@ -486,7 +435,7 @@ impl ValueType for Interval {
                     } else {
                         (false, true)
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 GreaterOrEqual => {
                     let (lo, hi) = if precedes((rlo, rhi), (llo, lhi)) {
@@ -496,7 +445,7 @@ impl ValueType for Interval {
                     } else {
                         (false, true)
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 And | Or => Err(Error::TypeMismatch),
             },
@@ -511,7 +460,7 @@ impl ValueType for Interval {
                         (_, _, false, false) | (false, false, _, _) => (false, false),
                         _ => (false, true),
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 Or => {
                     let (lo, hi) = match (llo, lhi, rlo, rhi) {
@@ -519,7 +468,7 @@ impl ValueType for Interval {
                         (_, _, true, true) | (true, true, _, _) => (true, true),
                         _ => (false, true),
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
             },
             _ => Err(Error::TypeMismatch),
@@ -540,9 +489,9 @@ impl ValueType for Interval {
                     }
                     (Bool(blo, bhi), Bool(clo, chi)) => {
                         if blo == bhi && blo == clo && blo == chi {
-                            Interval::from_boolean(false, true)
-                        } else {
                             Interval::from_boolean(blo, bhi)
+                        } else {
+                            Ok(Interval::Bool(false, true))
                         }
                     }
                 },
@@ -557,7 +506,7 @@ pub type IntervalEvaluator = Evaluator<Interval>;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{ValueEvaluator, assert_float_eq, deftree, test::Sampler, tree::Tree};
+    use crate::{ValueEvaluator, assert_float_eq, deftree, test_util::Sampler, tree::Tree};
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
     const EPS: f64 = f64::EPSILON * 2.0;
@@ -730,6 +679,16 @@ mod test {
     }
 
     #[test]
+    fn t_interval_subtract() {
+        check_interval_eval(
+            deftree!(- 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -3., 7.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
     fn t_interval_sum() {
         check_interval_eval(
             deftree!(+ 'x 'y).unwrap(),
@@ -751,12 +710,7 @@ mod test {
 
     #[test]
     fn t_interval_squaring() {
-        check_interval_eval(
-            deftree!(pow 'x 2.).unwrap(),
-            &[('x', -10., 10.), ('y', -9., 10.)],
-            20,
-            5,
-        );
+        check_interval_eval(deftree!(pow 'x 2.).unwrap(), &[('x', -10., 10.)], 20, 5);
         check_interval_eval(
             deftree!(pow (- 'x 1.) 2.).unwrap(),
             &[('x', -10., 10.)],
@@ -1407,5 +1361,366 @@ mod test {
         eval.set_value('x', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
         let result = eval.run().unwrap()[0].scalar().unwrap();
         assert!(result.0.is_nan() && result.1.is_nan(), "NaN test failed");
+    }
+
+    #[test]
+    fn t_interval_pow_comprehensive() {
+        let tree = deftree!(pow 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // NaN cases
+        eval.set_value('x', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
+        eval.set_value('y', Interval::from_scalar(2.0, 3.0).unwrap());
+        assert!(is_empty(&eval.run().unwrap()[0].scalar().unwrap()));
+        eval.set_value('x', Interval::from_scalar(2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
+        assert!(is_empty(&eval.run().unwrap()[0].scalar().unwrap()));
+        // Exponent = 0
+        eval.set_value('x', Interval::from_scalar(2.0, 5.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(0.0, 0.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 1.0, 1e-12);
+        assert_float_eq!(r.1, 1.0, 1e-12);
+        // Exponent = 2 (squaring), base crossing zero
+        eval.set_value('x', Interval::from_scalar(-3.0, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(2.0, 2.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 9.0, 1e-12);
+        // Positive even integer exponent
+        eval.set_value('x', Interval::from_scalar(-2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(4.0, 4.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 81.0, 1e-12);
+        // Negative even integer exponent, non-zero base
+        eval.set_value('x', Interval::from_scalar(2.0, 4.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.0, -2.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 1.0 / 16.0, 1e-12);
+        assert_float_eq!(r.1, 1.0 / 4.0, 1e-12);
+        // Negative even integer exponent with zero base
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.0, -2.0).unwrap());
+        assert!(is_empty(&eval.run().unwrap()[0].scalar().unwrap()));
+        // Positive odd integer exponent
+        eval.set_value('x', Interval::from_scalar(-2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(3.0, 3.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, -8.0, 1e-12);
+        assert_float_eq!(r.1, 27.0, 1e-12);
+        // Odd negative integer exponent crossing zero
+        eval.set_value('x', Interval::from_scalar(-2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-3.0, -3.0).unwrap());
+        assert!(is_entire(&eval.run().unwrap()[0].scalar().unwrap()));
+        // Odd negative integer exponent, not crossing zero
+        eval.set_value('x', Interval::from_scalar(2.0, 4.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-3.0, -3.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 1.0 / 64.0, 1e-12);
+        assert_float_eq!(r.1, 1.0 / 8.0, 1e-12);
+        // Base entirely below 1, positive rational exponent
+        eval.set_value('x', Interval::from_scalar(0.2, 0.8).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.2f64.powf(2.5), 1e-12);
+        assert_float_eq!(r.1, 0.8f64.powf(1.5), 1e-12);
+        // Base entirely above 1, positive rational exponent
+        eval.set_value('x', Interval::from_scalar(2.0, 4.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 2.0f64.powf(1.5), 1e-12);
+        assert_float_eq!(r.1, 4.0f64.powf(2.5), 1e-12);
+        // Base straddling 1, positive rational exponent
+        eval.set_value('x', Interval::from_scalar(0.5, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.5f64.powf(2.5), 1e-12);
+        assert_float_eq!(r.1, 2.0f64.powf(2.5), 1e-12);
+        // Base entirely below 1, negative rational exponent
+        eval.set_value('x', Interval::from_scalar(0.2, 0.8).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.5, -1.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.8f64.powf(-1.5), 1e-12);
+        assert_float_eq!(r.1, 0.2f64.powf(-2.5), 1e-12);
+        // Base entirely above 1, negative rational exponent
+        eval.set_value('x', Interval::from_scalar(2.0, 4.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.5, -1.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 4.0f64.powf(-2.5), 1e-12);
+        assert_float_eq!(r.1, 2.0f64.powf(-1.5), 1e-12);
+        // Base straddling 1, negative rational exponent
+        eval.set_value('x', Interval::from_scalar(0.5, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.5, -1.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 2.0f64.powf(-2.5), 1e-12);
+        assert_float_eq!(r.1, 0.5f64.powf(-2.5), 1e-12);
+        // Exponent crossing zero
+        eval.set_value('x', Interval::from_scalar(2.0, 3.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-1.0, 1.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 2.0f64.powf(-1.0).min(3.0f64.powf(-1.0)), 1e-12);
+        assert_float_eq!(r.1, 2.0f64.powf(1.0).max(3.0f64.powf(1.0)), 1e-12);
+        // Zero base with positive exponent
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(2.0, 3.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 0.0, 1e-12);
+        // Zero upper bound of base with negative exponent
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(-2.5, -1.5).unwrap());
+        assert!(is_empty(&eval.run().unwrap()[0].scalar().unwrap()));
+        // Negative base with rational exponent (clamped to 0+)
+        eval.set_value('x', Interval::from_scalar(-2.0, -0.5).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 0.0, 1e-12);
+        // Negative base crossing to positive with rational exponent
+        eval.set_value('x', Interval::from_scalar(-1.0, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(1.5, 2.5).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.0, 1e-12);
+        assert_float_eq!(r.1, 2.0f64.powf(2.5), 1e-12);
+        // Zero base with zero exponent
+        eval.set_value('x', Interval::from_scalar(0.0, 0.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(0.0, 0.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 1.0, 1e-12);
+        assert_float_eq!(r.1, 1.0, 1e-12);
+        // Base with small positive values, large positive exponent
+        eval.set_value('x', Interval::from_scalar(0.1, 0.2).unwrap());
+        eval.set_value('y', Interval::from_scalar(10.0, 10.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 0.1f64.powi(10), 1e-20);
+        assert_float_eq!(r.1, 0.2f64.powi(10), 1e-20);
+        // Singleton base and exponent
+        eval.set_value('x', Interval::from_scalar(2.0, 2.0).unwrap());
+        eval.set_value('y', Interval::from_scalar(3.0, 3.0).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 8.0, 1e-12);
+        assert_float_eq!(r.1, 8.0, 1e-12);
+    }
+
+    #[test]
+    fn t_bool_operations_direct() {
+        // Test And operation directly with all combinations
+        let tree = deftree!(and (> 'x 0) (< 'y 5)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Case 1: Both definitely true -> (true, true)
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Case 2: One definitely false -> (false, false)
+        eval.set_value('x', Interval::from_scalar(-2., -1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Case 3: Both uncertain -> (false, true)
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 6.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+        // Case 4: One certain true, one uncertain -> (false, true)
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(4., 6.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_bool_operations_or() {
+        let tree = deftree!(or (> 'x 5) (< 'y 0)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Both definitely false -> (false, false)
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // One definitely true -> (true, true)
+        eval.set_value('x', Interval::from_scalar(6., 7.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Both uncertain -> (false, true)
+        eval.set_value('x', Interval::from_scalar(4., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-1., 1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_bool_operations_not() {
+        let tree = deftree!(not (> 'x 0)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Input (true, true) -> (false, false)
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Input (false, false) -> (true, true)
+        eval.set_value('x', Interval::from_scalar(-2., -1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Input (false, true) -> (false, true)
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_choose_boolean_output() {
+        // Choose that returns Bool intervals
+        let tree = deftree!(if (> 'x 0) (> 'y 5) (< 'z 0)).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Condition definitely true, return first branch
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(6., 7.).unwrap());
+        eval.set_value('z', Interval::from_scalar(-5., -1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Condition definitely false, return second branch
+        eval.set_value('x', Interval::from_scalar(-2., -1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('z', Interval::from_scalar(-2., -1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Condition uncertain, both branches certain but same
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(6., 7.).unwrap());
+        eval.set_value('z', Interval::from_scalar(-2., -1.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Condition uncertain, branches differ
+        eval.set_value('x', Interval::from_scalar(-1., 1.).unwrap());
+        eval.set_value('y', Interval::from_scalar(6., 7.).unwrap());
+        eval.set_value('z', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_comparisons_greater() {
+        let tree = deftree!(> 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Definitely true: x strictly after y
+        eval.set_value('x', Interval::from_scalar(5., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Definitely false: x before or equal y
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(5., 6.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Uncertain: overlap
+        eval.set_value('x', Interval::from_scalar(1., 5.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 7.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+        // Touching
+        eval.set_value('x', Interval::from_scalar(3., 5.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 3.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_comparisons_greater_or_equal() {
+        let tree = deftree!(>= 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Definitely true
+        eval.set_value('x', Interval::from_scalar(5., 6.).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 5.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Definitely false
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 6.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Uncertain
+        eval.set_value('x', Interval::from_scalar(1., 5.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 7.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+    }
+
+    #[test]
+    fn t_comparisons_edge_cases() {
+        // Equal: Exact overlap with singleton
+        let tree = deftree!(== 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(3., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 3.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (true, true));
+        // Equal: Exact overlap non-singleton
+        eval.set_value('x', Interval::from_scalar(3., 5.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 5.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+        // Equal: No overlap
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 4.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // Equal: Touching
+        eval.set_value('x', Interval::from_scalar(1., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(3., 5.).unwrap());
+        assert_eq!(eval.run().unwrap()[0].boolean().unwrap(), (false, true));
+        // NotEqual: singleton same
+        let tree2 = deftree!(!= 'x 'y).unwrap();
+        let mut eval2 = IntervalEvaluator::new(&tree2);
+        eval2.set_value('x', Interval::from_scalar(3., 3.).unwrap());
+        eval2.set_value('y', Interval::from_scalar(3., 3.).unwrap());
+        assert_eq!(eval2.run().unwrap()[0].boolean().unwrap(), (false, false));
+        // NotEqual: No overlap
+        eval2.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval2.set_value('y', Interval::from_scalar(3., 4.).unwrap());
+        assert_eq!(eval2.run().unwrap()[0].boolean().unwrap(), (true, true));
+    }
+
+    #[test]
+    fn t_comparisons_with_nan() {
+        let tree = deftree!(< 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // NaN intervals should be handled
+        eval.set_value('x', Interval::from_scalar(f64::NAN, f64::NAN).unwrap());
+        eval.set_value('y', Interval::from_scalar(1., 2.).unwrap());
+        let result = eval.run().unwrap()[0].boolean().unwrap();
+        assert_eq!(result, (true, true)); // Check precedes behavior with NaN
+    }
+
+    #[test]
+    fn t_multiply_sign_combinations() {
+        let tree = deftree!(* 'x 'y).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        // Both positive
+        eval.set_value('x', Interval::from_scalar(2., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(4., 5.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 8., 1e-12);
+        assert_float_eq!(r.1, 15., 1e-12);
+        // Both negative
+        eval.set_value('x', Interval::from_scalar(-3., -2.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-5., -4.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, 8., 1e-12);
+        assert_float_eq!(r.1, 15., 1e-12);
+        // One positive, one negative
+        eval.set_value('x', Interval::from_scalar(2., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-5., -4.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, -15., 1e-12);
+        assert_float_eq!(r.1, -8., 1e-12);
+        // First crossing zero
+        eval.set_value('x', Interval::from_scalar(-2., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(4., 5.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, -10., 1e-12);
+        assert_float_eq!(r.1, 15., 1e-12);
+        // Both crossing zero
+        eval.set_value('x', Interval::from_scalar(-2., 3.).unwrap());
+        eval.set_value('y', Interval::from_scalar(-5., 4.).unwrap());
+        let r = eval.run().unwrap()[0].scalar().unwrap();
+        assert_float_eq!(r.0, -15., 1e-12);
+        assert_float_eq!(r.1, 12., 1e-12);
+    }
+
+    #[test]
+    fn t_type_mismatch_errors() {
+        // Scalar operations on Bool
+        let tree = deftree!(+ (> 'x 0) 5.).unwrap();
+        let mut eval = IntervalEvaluator::new(&tree);
+        eval.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        assert!(eval.run().is_err());
+        // Bool operations on Scalar
+        let tree2 = deftree!(and 'x 'y).unwrap();
+        let mut eval2 = IntervalEvaluator::new(&tree2);
+        eval2.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        eval2.set_value('y', Interval::from_scalar(3., 4.).unwrap());
+        assert!(eval2.run().is_err());
+        // Not on scalar
+        let tree3 = deftree!(not 'x).unwrap();
+        let mut eval3 = IntervalEvaluator::new(&tree3);
+        eval3.set_value('x', Interval::from_scalar(1., 2.).unwrap());
+        assert!(eval3.run().is_err());
     }
 }

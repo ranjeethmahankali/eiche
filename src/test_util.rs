@@ -1,5 +1,5 @@
 use crate::{
-    assert_float_eq,
+    Error, assert_float_eq, deftree,
     eval::ValueEvaluator,
     tree::{Tree, Value},
 };
@@ -147,4 +147,39 @@ pub fn compare_trees(
             }
         }
     }
+}
+
+pub fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
+    deftree!(- (sqrt (+ (pow (- 'x (const cx)) 2) (pow (- 'y (const cy)) 2))) (const r))
+}
+
+fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
+    range.0 + rng.random::<f64>() * (range.1 - range.0)
+}
+
+pub fn random_circles(
+    xrange: (f64, f64),
+    yrange: (f64, f64),
+    rad_range: (f64, f64),
+    num_circles: usize,
+) -> Tree {
+    let mut rng = StdRng::seed_from_u64(42);
+    let mut tree = circle(
+        sample_range(xrange, &mut rng),
+        sample_range(yrange, &mut rng),
+        sample_range(rad_range, &mut rng),
+    );
+    for _ in 1..num_circles {
+        tree = crate::min(
+            tree,
+            circle(
+                sample_range(xrange, &mut rng),
+                sample_range(yrange, &mut rng),
+                sample_range(rad_range, &mut rng),
+            ),
+        );
+    }
+    let tree = tree.expect("Cannot create the union of random circles.");
+    assert_eq!(tree.dims(), (1, 1));
+    tree
 }

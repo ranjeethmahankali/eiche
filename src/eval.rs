@@ -215,7 +215,7 @@ pub type ValueEvaluator = Evaluator<Value>;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{assert_float_eq, deftree, test::check_value_eval};
+    use crate::{assert_float_eq, deftree, test_util::check_value_eval};
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
 

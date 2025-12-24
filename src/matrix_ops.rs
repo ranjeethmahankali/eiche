@@ -215,7 +215,7 @@ mod test {
     use core::f64;
 
     use super::*;
-    use crate::{deftree, test::compare_trees};
+    use crate::{deftree, test_util::compare_trees};
 
     #[test]
     fn t_matmul_2x2_times_2x1_simple() {

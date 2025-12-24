@@ -63,32 +63,31 @@ pub(crate) fn fold_for_interval(
                     return Err(Error::TypeMismatch);
                 }
                 (op, Interval::Scalar(llo, lhi), Interval::Scalar(rlo, rhi)) => {
-                    match (op, super::overlap((*llo, *lhi), (*rlo, *rhi))) {
+                    match (op, super::overlap(*llo, *lhi, *rlo, *rhi)) {
                         // Choose left
-                        (Min, super::Overlap::Before | super::Overlap::Meets)
-                        | (Max, super::Overlap::MetBy | super::Overlap::After) => {
+                        (Min, super::Overlap::Before | super::Overlap::TouchingLeft)
+                        | (Max, super::Overlap::TouchingRight | super::Overlap::After) => {
                             (Some(nodes[*li]), Interval::Scalar(*llo, *lhi))
                         }
                         // Choose right
-                        (Min, super::Overlap::MetBy | super::Overlap::After)
-                        | (Max, super::Overlap::Before | super::Overlap::Meets) => {
+                        (Min, super::Overlap::TouchingRight | super::Overlap::After)
+                        | (Max, super::Overlap::Before | super::Overlap::TouchingLeft) => {
                             (Some(nodes[*ri]), Interval::Scalar(*rlo, *rhi))
                         }
                         // Always true
                         (Less, super::Overlap::Before)
-                        | (LessOrEqual, super::Overlap::Before | super::Overlap::Meets)
+                        | (LessOrEqual, super::Overlap::Before | super::Overlap::TouchingLeft)
                         | (
                             NotEqual,
-                            super::Overlap::FirstEmpty
-                            | super::Overlap::SecondEmpty
-                            | super::Overlap::Before
-                            | super::Overlap::After,
+                            super::Overlap::None | super::Overlap::Before | super::Overlap::After,
                         )
                         | (Greater, super::Overlap::After)
-                        | (GreaterOrEqual, super::Overlap::MetBy | super::Overlap::After) => (
-                            Some(Constant(Value::Bool(true))),
-                            Interval::Bool(true, true),
-                        ),
+                        | (GreaterOrEqual, super::Overlap::TouchingRight | super::Overlap::After) => {
+                            (
+                                Some(Constant(Value::Bool(true))),
+                                Interval::Bool(true, true),
+                            )
+                        }
                         // Always false
                         (Less, super::Overlap::After)
                         | (LessOrEqual, super::Overlap::After)

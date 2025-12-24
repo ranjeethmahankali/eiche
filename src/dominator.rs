@@ -289,7 +289,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::DomTable;
-    use crate::{Tree, deftree, test::compare_trees};
+    use crate::{Tree, deftree, test_util::compare_trees};
 
     fn check(table: &DomTable, parent: usize, child: usize) -> bool {
         let offset = child * table.n_chunks;
