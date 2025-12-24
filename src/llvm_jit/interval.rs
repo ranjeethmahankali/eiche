@@ -319,7 +319,17 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    NotEqual => todo!(),
+                    NotEqual => build_interval_not_equal(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        bool_type,
+                        flt_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                     Greater => todo!(),
                     GreaterOrEqual => todo!(),
                     And => todo!(),
@@ -614,6 +624,41 @@ fn build_interval_equal<'ctx>(
                 .build_select(
                     matching_singleton,
                     out_tt,
+                    out_ft,
+                    &format!("equal_matching_singleton_select_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("equal_no_overlap_select_{index}"),
+        )?
+        .into_vector_value())
+}
+
+fn build_interval_not_equal<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let (no_overlap, matching_singleton) =
+        build_interval_equality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            no_overlap,
+            out_tt,
+            builder
+                .build_select(
+                    matching_singleton,
+                    out_ff,
                     out_ft,
                     &format!("equal_matching_singleton_select_{index}"),
                 )?
