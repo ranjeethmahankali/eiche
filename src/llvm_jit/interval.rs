@@ -3346,7 +3346,7 @@ mod test {
     }
 
     #[test]
-    fn t_interval_comparisons() {
+    fn t_jit_interval_comparisons() {
         check_interval_eval(
             deftree!(if (== 'x 'y) (+ 'x 2.5) (- 'y 1.523)).unwrap(),
             &[('x', 0., 5.), ('y', 3., 8.)],
