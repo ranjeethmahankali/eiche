@@ -429,21 +429,18 @@ fn build_interval_less<'ctx>(
         VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
     Ok(builder
         .build_select(
-            either_empty,
+            builder.build_or(
+                either_empty,
+                strictly_before,
+                &format!("less_empty_or_before_check_{index}"),
+            )?,
             out_tt,
             builder
                 .build_select(
-                    strictly_before,
-                    out_tt,
-                    builder
-                        .build_select(
-                            strictly_after,
-                            out_ff,
-                            out_ft,
-                            &format!("less_a_gt_d_chocie_{index}"),
-                        )?
-                        .into_vector_value(),
-                    &format!("less_b_lt_c_choice_{index}"),
+                    strictly_after,
+                    out_ff,
+                    out_ft,
+                    &format!("less_a_gt_d_choice_{index}"),
                 )?
                 .into_vector_value(),
             &format!("less_{index}"),
@@ -515,28 +512,25 @@ fn build_interval_less_equal<'ctx>(
         VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
     Ok(builder
         .build_select(
-            either_empty,
+            builder.build_or(
+                either_empty,
+                builder.build_or(
+                    strictly_before,
+                    touching_left,
+                    &format!("less_equal_before_or_touching_{index}"),
+                )?,
+                &format!("less_equal_empty_or_before_{index}"),
+            )?,
             out_tt,
             builder
                 .build_select(
-                    builder.build_or(
-                        strictly_before,
-                        touching_left,
-                        &format!("less_equal_before_or_touching_{index}"),
-                    )?,
-                    out_tt,
-                    builder
-                        .build_select(
-                            strictly_after,
-                            out_ff,
-                            out_ft,
-                            &format!("less_a_gt_d_chocie_{index}"),
-                        )?
-                        .into_vector_value(),
-                    &format!("less_b_lt_c_choice_{index}"),
+                    strictly_after,
+                    out_ff,
+                    out_ft,
+                    &format!("less_a_gt_d_chocie_{index}"),
                 )?
                 .into_vector_value(),
-            &format!("less_{index}"),
+            &format!("less_b_lt_c_choice_{index}"),
         )?
         .into_vector_value())
 }
