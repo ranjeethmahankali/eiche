@@ -531,16 +531,15 @@ fn build_interval_less_equal<'ctx>(
         .into_vector_value())
 }
 
-fn build_interval_equal<'ctx>(
+fn build_interval_equality_flags<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
     i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
     flt_type: FloatType<'ctx>,
     index: usize,
-) -> Result<VectorValue<'ctx>, Error> {
+) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
     let either_empty = builder.build_or(
         build_check_interval_empty(lhs, builder, module, index)?,
         build_check_interval_empty(lhs, builder, module, index)?,
@@ -586,6 +585,21 @@ fn build_interval_equal<'ctx>(
         no_overlap,
         &format!("equal_empty_or_no_overlap_{index}"),
     )?;
+    Ok((no_overlap, matching_singleton))
+}
+
+fn build_interval_equal<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let (no_overlap, matching_singleton) =
+        build_interval_equality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
     let out_tt =
         VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
     let out_ft =
