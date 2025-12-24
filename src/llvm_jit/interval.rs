@@ -330,8 +330,28 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Greater => todo!(),
-                    GreaterOrEqual => todo!(),
+                    Greater => build_interval_greater(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        bool_type,
+                        flt_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
+                    GreaterOrEqual => build_interval_greater_equal(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        bool_type,
+                        flt_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                     And => todo!(),
                     Or => todo!(),
                 },
@@ -664,6 +684,103 @@ fn build_interval_not_equal<'ctx>(
                 )?
                 .into_vector_value(),
             &format!("equal_no_overlap_select_{index}"),
+        )?
+        .into_vector_value())
+}
+
+fn build_interval_greater<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let InequalityFlags {
+        either_empty,
+        strictly_before,
+        strictly_after,
+        touching: _touching,
+    } = build_interval_inequality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            builder.build_or(
+                either_empty,
+                strictly_after,
+                &format!("less_empty_or_before_check_{index}"),
+            )?,
+            out_tt,
+            builder
+                .build_select(
+                    strictly_before,
+                    out_ff,
+                    out_ft,
+                    &format!("less_a_gt_d_choice_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("less_{index}"),
+        )?
+        .into_vector_value())
+}
+
+fn build_interval_greater_equal<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let InequalityFlags {
+        either_empty,
+        strictly_before,
+        strictly_after,
+        touching,
+    } = build_interval_inequality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
+    let touching_right = builder
+        .build_extract_element(
+            touching,
+            i32_type.const_int(0, false),
+            &format!("less_equal_touching_left_{index}"),
+        )?
+        .into_int_value();
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            builder.build_or(
+                either_empty,
+                builder.build_or(
+                    strictly_after,
+                    touching_right,
+                    &format!("less_equal_before_or_touching_{index}"),
+                )?,
+                &format!("less_equal_empty_or_before_{index}"),
+            )?,
+            out_tt,
+            builder
+                .build_select(
+                    strictly_before,
+                    out_ff,
+                    out_ft,
+                    &format!("less_a_gt_d_chocie_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("less_b_lt_c_choice_{index}"),
         )?
         .into_vector_value())
 }
