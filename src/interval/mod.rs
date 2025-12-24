@@ -200,11 +200,11 @@ fn abs((llo, lhi): (f64, f64)) -> (f64, f64) {
 }
 
 fn precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
-    lhi < llo || rhi < rlo || lhi <= rlo
+    (lhi.is_nan() && llo.is_nan()) || (rhi.is_nan() && rlo.is_nan()) || lhi <= rlo
 }
 
 fn strict_precedes((llo, lhi): (f64, f64), (rlo, rhi): (f64, f64)) -> bool {
-    lhi < llo || rhi < rlo || lhi < rlo
+    (lhi.is_nan() && llo.is_nan()) || (rhi.is_nan() && rlo.is_nan()) || lhi < rlo
 }
 
 impl Default for Interval {
