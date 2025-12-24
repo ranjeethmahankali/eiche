@@ -128,7 +128,15 @@ impl Tree {
                             &format!("arg_ptr_{}", *label),
                         )?
                     };
-                    builder.build_load(interval_type, ptr, &format!("arg_{}", *label))?
+                    let out = builder.build_load(interval_type, ptr, &format!("arg_{}", *label))?;
+                    if let Some(inst) = out.as_instruction_value() {
+                        inst.set_alignment(1).map_err(|msg| {
+                            Error::JitCompilationError(format!(
+                                "Cannot set alignment when loading value: {msg}"
+                            ))
+                        })?;
+                    }
+                    out
                 }
                 Unary(op, input) => match op {
                     // For negate all we need to do is swap the vector lanes.
@@ -400,7 +408,10 @@ impl Tree {
                     &format!("output_ptr_{i}"),
                 )?
             };
-            builder.build_store(dst, reg.into_vector_value())?;
+            let store_inst = builder.build_store(dst, reg.into_vector_value())?;
+            store_inst.set_alignment(1).map_err(|e| {
+                Error::JitCompilationError(format!("Cannot set alignment when storing output: {e}"))
+            })?;
         }
         builder.build_return(None)?;
         compiler.run_passes();
