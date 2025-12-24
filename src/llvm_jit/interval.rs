@@ -250,13 +250,11 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Pow => build_interval_pow(
+                    Pow => build_interval_pow::<T>(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        flt_type,
                         index,
                         function,
                         context,
@@ -959,17 +957,17 @@ fn build_float_vec_powi<'ctx>(
         .map(|v| v.into_vector_value())
 }
 
-fn build_interval_pow<'ctx>(
+fn build_interval_pow<'ctx, T: NumberType>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
     index: usize,
     function: FunctionValue<'ctx>,
     context: &'ctx Context,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let i32_type = context.i32_type();
+    let flt_type = T::jit_type(context);
     let all_joined = builder.build_shuffle_vector(
         lhs,
         rhs,
