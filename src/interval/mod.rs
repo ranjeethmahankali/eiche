@@ -19,25 +19,6 @@ pub enum Interval {
     Bool(bool, bool),
 }
 
-pub enum Overlap {
-    BothEmpty,
-    FirstEmpty,
-    SecondEmpty,
-    Before,
-    Meets,
-    Overlaps,
-    Starts,
-    ContainedBy,
-    Finishes,
-    Matches,
-    FinishedBy,
-    Contains,
-    StartedBy,
-    OverlappedBy,
-    MetBy,
-    After,
-}
-
 #[derive(Copy, Clone)]
 pub enum IntervalClass {
     Empty = 0,
@@ -100,49 +81,34 @@ fn classify(lo: f64, hi: f64) -> IntervalClass {
     }
 }
 
-pub fn overlap((a, b): (f64, f64), (c, d): (f64, f64)) -> Overlap {
-    use Overlap::*;
+enum Overlap {
+    Exact,
+    Partial,
+    TouchingLeft,
+    Before,
+    TouchingRight,
+    After,
+    None,
+}
+
+fn overlap(a: f64, b: f64, c: f64, d: f64) -> Overlap {
     use std::cmp::Ordering::*;
-    match (b < a, d < c) {
-        (true, true) => BothEmpty,
-        (true, false) => FirstEmpty,
-        (false, true) => SecondEmpty,
+    match (a.is_nan() && b.is_nan(), c.is_nan() && d.is_nan()) {
+        (true, _) | (_, true) => Overlap::None,
         (false, false) => {
-            //     |  aRc  |  aRd  |  bRc  |  bRd
-            //     | < = > | < = > | < = > | < = >
-            // ----+-------+-------+-------+-------
-            //   B | x     | x     | x     | x
-            //   M | x     | x     |   x   | x
-            //   O | x     | x     |     x | x
-            //   S |   x   | x     |   ? ? | x
-            //  Cb |     x | x     |     x | x
-            //   F |     x | ? ?   |     x |   x
-            //   E |   x   | ? ?   |   ? ? |   x
-            //  Fb | x     | x     |   ? ? |   x
-            //   C | x     | x     |     x |     x
-            //  Sb |   x   | ? ?   |     x |     x
-            //  Ob |     x | x     |     x |     x
-            //  Mb |     x |   x   |     x |     x
-            //   A |     x |     x |     x |     x
+            debug_assert!(b >= a && d >= c, "The intervals must be valid");
             match (
-                b.total_cmp(&d),
-                a.total_cmp(&c),
                 b.total_cmp(&c),
                 a.total_cmp(&d),
+                a.total_cmp(&c),
+                b.total_cmp(&d),
             ) {
-                (Less, Less, Less, _) => Before,
-                (Less, Less, Equal, _) => Meets,
-                (Less, Less, ..) => Overlaps,
-                (Less, Equal, ..) => Starts,
-                (Less, ..) => ContainedBy,
-                (Equal, Greater, ..) => Finishes,
-                (Equal, Equal, ..) => Matches,
-                (Equal, ..) => FinishedBy,
-                (Greater, Less, ..) => Contains,
-                (Greater, Equal, ..) => StartedBy,
-                (Greater, Greater, _, Less) => OverlappedBy,
-                (Greater, Greater, _, Equal) => MetBy,
-                (Greater, Greater, _, Greater) => After,
+                (_, _, Equal, Equal) => Overlap::Exact,
+                (Less, ..) => Overlap::Before,
+                (Equal, ..) => Overlap::TouchingLeft,
+                (_, Greater, ..) => Overlap::After,
+                (_, Equal, ..) => Overlap::TouchingRight,
+                _ => Overlap::Partial,
             }
         }
     }
@@ -443,33 +409,21 @@ impl ValueType for Interval {
                 }
                 Equal => {
                     use Overlap::*;
-                    let (lo, hi) = match overlap((llo, lhi), (rlo, rhi)) {
-                        BothEmpty | FirstEmpty | SecondEmpty | Before | After => (false, false),
-                        Meets | Overlaps | Starts | ContainedBy | Finishes | StartedBy
-                        | FinishedBy | OverlappedBy | Contains | MetBy => (false, true),
-                        Matches => {
-                            if llo == lhi {
-                                (true, true)
-                            } else {
-                                (false, true)
-                            }
-                        }
+                    let (lo, hi) = match overlap(llo, lhi, rlo, rhi) {
+                        None | After | Before => (false, false),
+                        Partial | TouchingLeft | TouchingRight => (false, true),
+                        Exact if llo == lhi => (true, true),
+                        Exact => (false, true),
                     };
                     Interval::from_boolean(lo, hi)
                 }
                 NotEqual => {
                     use Overlap::*;
-                    let (lo, hi) = match overlap((llo, lhi), (rlo, rhi)) {
-                        BothEmpty | FirstEmpty | SecondEmpty | Before | After => (true, true),
-                        Meets | Overlaps | Starts | ContainedBy | Finishes | FinishedBy
-                        | Contains | StartedBy | OverlappedBy | MetBy => (false, true),
-                        Matches => {
-                            if llo == lhi {
-                                (false, false)
-                            } else {
-                                (false, true)
-                            }
-                        }
+                    let (lo, hi) = match overlap(llo, lhi, rlo, rhi) {
+                        None | After | Before => (true, true),
+                        Partial | TouchingLeft | TouchingRight => (false, true),
+                        Exact if llo == lhi => (false, false),
+                        Exact => (false, true),
                     };
                     Interval::from_boolean(lo, hi)
                 }
