@@ -528,7 +528,7 @@ mod circles {
 
         fn with_compilation(tree: &Tree, values: &mut Vec<Interval>, queries: &[[Interval; 2]]) {
             values.clear();
-            let mut eval = IntervalEvaluator::new(&tree);
+            let mut eval = IntervalEvaluator::new(tree);
             values.extend(queries.iter().map(|interval| {
                 eval.set_value('x', interval[0]);
                 eval.set_value('y', interval[1]);
@@ -581,7 +581,13 @@ mod circles {
 
         const N_QUERIES: usize = 512;
 
-        fn init_benchmark<T: NumberType>() -> (Tree, Box<[[[T; 2]; 2]]>, Vec<[T; 2]>) {
+        struct BenchmarkSetup<T: NumberType> {
+            tree: Tree,
+            queries: Box<[[[T; 2]; 2]]>,
+            outputs: Vec<[T; 2]>,
+        }
+
+        fn init_benchmark<T: NumberType>() -> BenchmarkSetup<T> {
             let mut rng = StdRng::seed_from_u64(42);
             let tree =
                 test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES)
@@ -593,7 +599,7 @@ mod circles {
                 "Several unchecked function calls in other benchmarks require the tree to have exactly 2 inputs: x and y"
             );
             // Sample random intervals.
-            let samples = (0..N_QUERIES)
+            let queries = (0..N_QUERIES)
                 .map(|_| {
                     [(0., DIMS_F64), (0., DIMS_F64)].map(|range| {
                         let mut bounds =
@@ -605,7 +611,11 @@ mod circles {
                     })
                 })
                 .collect();
-            (tree, samples, Vec::with_capacity(N_QUERIES))
+            BenchmarkSetup {
+                tree,
+                queries,
+                outputs: Vec::with_capacity(N_QUERIES),
+            }
         }
 
         fn with_compilation<T: NumberType>(
@@ -648,18 +658,26 @@ mod circles {
 
         fn b_with_compile(c: &mut Criterion) {
             {
-                let (tree, queries, mut values) = init_benchmark::<f64>();
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark::<f64>();
                 c.bench_function("circles-interval-jit-f64-eval-with-compile", |b| {
                     b.iter(|| {
-                        with_compilation(&tree, black_box(&mut values), &queries);
+                        with_compilation(&tree, black_box(&mut outputs), &queries);
                     })
                 });
             }
             {
-                let (tree, queries, mut values) = init_benchmark::<f32>();
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark::<f32>();
                 c.bench_function("circles-interval-jit-f32-eval-with-compile", |b| {
                     b.iter(|| {
-                        with_compilation(&tree, black_box(&mut values), &queries);
+                        with_compilation(&tree, black_box(&mut outputs), &queries);
                     })
                 });
             }
@@ -667,22 +685,30 @@ mod circles {
 
         fn b_no_compile(c: &mut Criterion) {
             {
-                let (tree, queries, mut values) = init_benchmark::<f64>();
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark::<f64>();
                 let context = JitContext::default();
                 let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
                 c.bench_function("circles-interval-jit-f64-eval-no-compile", |b| {
                     b.iter(|| {
-                        no_compilation(&eval, black_box(&mut values), &queries);
+                        no_compilation(&eval, black_box(&mut outputs), &queries);
                     })
                 });
             }
             {
-                let (tree, queries, mut values) = init_benchmark::<f32>();
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark::<f32>();
                 let context = JitContext::default();
                 let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
                 c.bench_function("circles-interval-jit-f32-eval-no-compile", |b| {
                     b.iter(|| {
-                        no_compilation(&eval, black_box(&mut values), &queries);
+                        no_compilation(&eval, black_box(&mut outputs), &queries);
                     })
                 });
             }
