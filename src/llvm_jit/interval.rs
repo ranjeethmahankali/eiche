@@ -130,11 +130,19 @@ impl Tree {
                     };
                     let out = builder.build_load(interval_type, ptr, &format!("arg_{}", *label))?;
                     if let Some(inst) = out.as_instruction_value() {
-                        inst.set_alignment(1).map_err(|msg| {
-                            Error::JitCompilationError(format!(
-                                "Cannot set alignment when loading value: {msg}"
-                            ))
-                        })?;
+                        /*
+                        Rust arrays only guarantee alignment with the size of T,
+                        where as LLVM load / store instructions expect alignment
+                        with the vector size (double the size of T). This
+                        mismatch can cause a segfault. So we manually set the
+                        alignment for this load instruction.
+                        */
+                        inst.set_alignment(std::mem::size_of::<T>() as u32)
+                            .map_err(|msg| {
+                                Error::JitCompilationError(format!(
+                                    "Cannot set alignment when loading value: {msg}"
+                                ))
+                            })?;
                     }
                     out
                 }
@@ -409,9 +417,19 @@ impl Tree {
                 )?
             };
             let store_inst = builder.build_store(dst, reg.into_vector_value())?;
-            store_inst.set_alignment(1).map_err(|e| {
-                Error::JitCompilationError(format!("Cannot set alignment when storing output: {e}"))
-            })?;
+            /*
+            Rust arrays only guarantee alignment with the size of T, where as
+            LLVM load / store instructions expect alignment with the vector size
+            (double the size of T). This mismatch can cause a segfault. So we
+            manually set the alignment for this store instruction.
+            */
+            store_inst
+                .set_alignment(std::mem::size_of::<T>() as u32)
+                .map_err(|e| {
+                    Error::JitCompilationError(format!(
+                        "Cannot set alignment when storing output: {e}"
+                    ))
+                })?;
         }
         builder.build_return(None)?;
         compiler.run_passes();
