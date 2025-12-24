@@ -395,7 +395,7 @@ impl ValueType for Interval {
                     } else {
                         (false, true)
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 LessOrEqual => {
                     let (lo, hi) = if precedes((llo, lhi), (rlo, rhi)) {
@@ -405,7 +405,7 @@ impl ValueType for Interval {
                     } else {
                         (false, true)
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 Equal => {
                     use Overlap::*;
@@ -415,7 +415,7 @@ impl ValueType for Interval {
                         Exact if llo == lhi => (true, true),
                         Exact => (false, true),
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 NotEqual => {
                     use Overlap::*;
@@ -425,7 +425,7 @@ impl ValueType for Interval {
                         Exact if llo == lhi => (false, false),
                         Exact => (false, true),
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 Greater => {
                     let (lo, hi) = if strict_precedes((rlo, rhi), (llo, lhi)) {
@@ -435,7 +435,7 @@ impl ValueType for Interval {
                     } else {
                         (false, true)
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 GreaterOrEqual => {
                     let (lo, hi) = if precedes((rlo, rhi), (llo, lhi)) {
@@ -445,7 +445,7 @@ impl ValueType for Interval {
                     } else {
                         (false, true)
                     };
-                    Interval::from_boolean(lo, hi)
+                    Ok(Interval::Bool(lo, hi))
                 }
                 And | Or => Err(Error::TypeMismatch),
             },
