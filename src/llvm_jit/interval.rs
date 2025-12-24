@@ -352,7 +352,16 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    And => todo!(),
+                    And => build_interval_and(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        bool_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                     Or => todo!(),
                 },
                 Ternary(op, _a, _b, _c) => match op {
@@ -398,6 +407,75 @@ impl Tree {
             _phantom: PhantomData,
         })
     }
+}
+
+fn build_interval_and<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let all_true = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("and_all_true_reduce_{index}"),
+        builder.build_shuffle_vector(
+            lhs,
+            rhs,
+            VectorType::const_vector(&[
+                i32_type.const_int(0, false),
+                i32_type.const_int(1, false),
+                i32_type.const_int(2, false),
+                i32_type.const_int(3, false),
+            ]),
+            &format!("and_all_true_check_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let one_side_false = builder.build_or(
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.and.*",
+            &format!("and_lhs_negate_reduce_{index}"),
+            builder.build_not(lhs, &format!("and_lhs_negate_{index}"))?,
+        )?
+        .into_int_value(),
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.and.*",
+            &format!("and_rhs_negate_reduce_{index}"),
+            builder.build_not(rhs, &format!("and_rhs_negate_{index}"))?,
+        )?
+        .into_int_value(),
+        &format!("and_one_side_all_false_{index}"),
+    )?;
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            all_true,
+            out_tt,
+            builder
+                .build_select(
+                    one_side_false,
+                    out_ff,
+                    out_ft,
+                    &format!("and_one_side_false_choice_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("and_{index}"),
+        )?
+        .into_vector_value())
 }
 
 struct InequalityFlags<'ctx> {
