@@ -308,7 +308,17 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Equal => todo!(),
+                    Equal => build_interval_equal(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        i32_type,
+                        bool_type,
+                        flt_type,
+                        index,
+                    )?
+                    .as_basic_value_enum(),
                     NotEqual => todo!(),
                     Greater => todo!(),
                     GreaterOrEqual => todo!(),
@@ -517,6 +527,84 @@ fn build_interval_less_equal<'ctx>(
                 )?
                 .into_vector_value(),
             &format!("less_{index}"),
+        )?
+        .into_vector_value())
+}
+
+fn build_interval_equal<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    i32_type: IntType<'ctx>,
+    bool_type: IntType<'ctx>,
+    flt_type: FloatType<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let either_empty = builder.build_or(
+        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(lhs, builder, module, index)?,
+        &format!("less_equal_either_empty_check"),
+    )?;
+    // Compare (-a, b) with (-d, c).
+    let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
+    let masked_lhs =
+        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?;
+    let masked_rhs = builder.build_float_mul(
+        mask,
+        build_interval_flip(rhs, builder, i32_type, index)?,
+        &format!("less_equal_sign_adjust_rhs_{index}"),
+    )?;
+    let no_overlap = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.or.*",
+        &format!("equal_no_overlap_check_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::ULT,
+            masked_lhs,
+            masked_rhs,
+            &format!("less_equal_cross_compare_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let matching_singleton = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("equal_exact_singleton_check_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            lhs,
+            rhs,
+            &format!("equal_exact_singleton_lanewise_check_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let no_overlap = builder.build_or(
+        either_empty,
+        no_overlap,
+        &format!("equal_empty_or_no_overlap_{index}"),
+    )?;
+    let out_tt =
+        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
+    let out_ft =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
+    let out_ff =
+        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    Ok(builder
+        .build_select(
+            no_overlap,
+            out_ff,
+            builder
+                .build_select(
+                    matching_singleton,
+                    out_tt,
+                    out_ft,
+                    &format!("equal_matching_singleton_select_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("equal_no_overlap_select_{index}"),
         )?
         .into_vector_value())
 }
