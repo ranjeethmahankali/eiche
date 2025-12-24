@@ -179,7 +179,7 @@ pub fn random_circles(
             ),
         );
     }
-    let tree = tree.unwrap();
+    let tree = tree.expect("Cannot create the union of random circles.");
     assert_eq!(tree.dims(), (1, 1));
     tree
 }

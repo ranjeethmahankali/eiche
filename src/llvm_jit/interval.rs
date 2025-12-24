@@ -2999,8 +2999,12 @@ impl<'ctx, T: NumberType> JitIntervalFnSync<'ctx, T> {
 
 #[cfg(test)]
 mod test {
+    use rand::{Rng, SeedableRng, rngs::StdRng};
+
     use crate::{
-        Error, JitContext, Tree, assert_float_eq, deftree, llvm_jit::NumberType, test_util::Sampler,
+        Error, Interval, IntervalEvaluator, JitContext, Tree, assert_float_eq, deftree,
+        llvm_jit::NumberType,
+        test_util::{self, Sampler},
     };
 
     const EPS: f64 = f64::EPSILON * 2.0;
@@ -4535,5 +4539,61 @@ mod test {
             20,
             5,
         );
+    }
+
+    #[test]
+    fn t_jit_interval_random_circles_comparison() {
+        const XRANGE: (f64, f64) = (0.0, 128.0);
+        const YRANGE: (f64, f64) = (0.0, 128.0);
+        let tree = test_util::random_circles(XRANGE, YRANGE, (2.56, 12.8), 100);
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut eval = IntervalEvaluator::new(&tree);
+        let context = JitContext::default();
+        let params = "xy";
+        let jit_eval = tree
+            .jit_compile_interval::<f64>(&context, params)
+            .expect("Cannot JIT compile an interval evaluator");
+        for _ in 0..100 {
+            // Sample a random interval.
+            let interval = [XRANGE, YRANGE].map(|range| {
+                let mut bounds =
+                    [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
+                if bounds[0] > bounds[1] {
+                    bounds.swap(0, 1);
+                }
+                bounds
+            });
+            // Do the non-jit eval.
+            for (label, interval) in params.chars().zip(interval.iter()) {
+                eval.set_value(
+                    label,
+                    Interval::from_scalar(interval[0], interval[1])
+                        .expect("Cannot create interval"),
+                )
+            }
+            let result = eval.run().expect("Failed to run non-jit interval eval");
+            assert_eq!(result.len(), 1);
+            let mut jit_result = [[f64::NAN, f64::NAN]];
+            jit_eval
+                .run(&interval, &mut jit_result)
+                .expect("Failed to run jit eval");
+            let result = result[0]
+                .scalar()
+                .expect("Cannot retrieve scalar result from non-jit eval");
+            let jit_result = jit_result[0];
+            dbg!(jit_result, result);
+            assert_float_eq!(
+                jit_result[0],
+                result.0,
+                EPS,
+                "The lower bound does not match"
+            );
+            assert_float_eq!(
+                jit_result[1],
+                result.1,
+                EPS,
+                "The upper bound does not match"
+            );
+        }
     }
 }
