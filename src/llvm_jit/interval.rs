@@ -2414,7 +2414,6 @@ fn build_interval_sqrt<'ctx>(
 ) -> Result<VectorValue<'ctx>, Error> {
     Ok(builder
         .build_select(
-            // Check each lane for NaN, then reduce to check if this interval is empty.
             build_check_interval_empty(input, builder, module, index)?,
             // The interval is empty, so return an emtpy (NaN) interval.
             VectorType::const_vector(&[
@@ -2427,7 +2426,7 @@ fn build_interval_sqrt<'ctx>(
                 let lt_zero = builder.build_float_compare(
                     FloatPredicate::ULT,
                     input,
-                    VectorType::const_vector(&[flt_type.const_float(0.), flt_type.const_float(0.)]),
+                    input.get_type().const_zero(),
                     &format!("lt_zero_{index}"),
                 )?;
                 let sqrt = build_vec_unary_intrinsic(
@@ -2435,14 +2434,7 @@ fn build_interval_sqrt<'ctx>(
                     module,
                     "llvm.sqrt.*",
                     &format!("sqrt_call_{index}"),
-                    build_vec_unary_intrinsic(
-                        builder,
-                        module,
-                        "llvm.fabs.*",
-                        &format!("fabs_call_{index}"),
-                        input,
-                    )?
-                    .into_vector_value(),
+                    input,
                 )?
                 .into_vector_value();
                 /* This a nested if. First we check the sign of
@@ -2471,12 +2463,10 @@ fn build_interval_sqrt<'ctx>(
                             flt_type.const_float(f64::NAN),
                             flt_type.const_float(f64::NAN),
                         ]),
-                        builder.build_float_mul(
+                        builder.build_insert_element(
                             sqrt,
-                            VectorType::const_vector(&[
-                                flt_type.const_float(0.0),
-                                flt_type.const_float(1.0),
-                            ]),
+                            flt_type.const_zero(),
+                            i32_type.const_zero(),
                             &format!("sqrt_domain_clipping_{index}"),
                         )?,
                         &format!("sqrt_edge_case_{index}"),
