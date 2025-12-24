@@ -1020,7 +1020,7 @@ fn build_interval_pow<'ctx>(
     .into_int_value();
     let rhs_floor = build_vec_unary_intrinsic(
         builder,
-        &module,
+        module,
         "llvm.floor.*",
         &format!("pow_integer_check_floor_call_{index}"),
         rhs,
@@ -2069,7 +2069,7 @@ fn build_interval_mul<'ctx>(
         ]),
         &format!("mul_concat_candidates_{index}"),
     )?;
-    Ok(build_interval_compose(
+    build_interval_compose(
         build_vec_unary_intrinsic(
             builder,
             module,
@@ -2090,7 +2090,7 @@ fn build_interval_mul<'ctx>(
         i32_type,
         "interval_mul_compose",
         index,
-    )?)
+    )
 }
 
 fn build_interval_negate<'ctx>(
