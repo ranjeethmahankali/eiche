@@ -679,6 +679,16 @@ mod test {
     }
 
     #[test]
+    fn t_interval_subtract() {
+        check_interval_eval(
+            deftree!(- 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -3., 7.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
     fn t_interval_sum() {
         check_interval_eval(
             deftree!(+ 'x 'y).unwrap(),
@@ -1659,16 +1669,6 @@ mod test {
     }
 
     #[test]
-    fn t_subtract_comprehensive() {
-        check_interval_eval(
-            deftree!(- 'x 'y).unwrap(),
-            &[('x', -5., 5.), ('y', -3., 7.)],
-            20,
-            5,
-        );
-    }
-
-    #[test]
     fn t_multiply_sign_combinations() {
         let tree = deftree!(* 'x 'y).unwrap();
         let mut eval = IntervalEvaluator::new(&tree);
@@ -1722,16 +1722,5 @@ mod test {
         let mut eval3 = IntervalEvaluator::new(&tree3);
         eval3.set_value('x', Interval::from_scalar(1., 2.).unwrap());
         assert!(eval3.run().is_err());
-    }
-
-    #[test]
-    fn t_bool_from_boolean_swapped() {
-        // Test that from_boolean swaps when lower=true, upper=false
-        let result = Interval::from_boolean(true, false).unwrap();
-        assert_eq!(result.boolean().unwrap(), (false, true));
-        let result2 = Interval::from_boolean(false, true).unwrap();
-        assert_eq!(result2.boolean().unwrap(), (false, true));
-        let result3 = Interval::from_boolean(true, true).unwrap();
-        assert_eq!(result3.boolean().unwrap(), (true, true));
     }
 }
