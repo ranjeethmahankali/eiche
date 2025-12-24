@@ -506,7 +506,7 @@ pub type IntervalEvaluator = Evaluator<Interval>;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{ValueEvaluator, assert_float_eq, deftree, test::Sampler, tree::Tree};
+    use crate::{ValueEvaluator, assert_float_eq, deftree, test_util::Sampler, tree::Tree};
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
     const EPS: f64 = f64::EPSILON * 2.0;

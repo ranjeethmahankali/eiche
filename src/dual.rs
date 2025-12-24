@@ -190,7 +190,7 @@ mod test {
         assert_float_eq, deftree,
         dual::Dual,
         eval::ValueEvaluator,
-        test::Sampler,
+        test_util::Sampler,
         tree::{Tree, Value},
     };
     use core::f64;

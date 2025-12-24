@@ -1481,7 +1481,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{assert_float_eq, deftree, eval::ValueEvaluator, test::Sampler};
+    use crate::{assert_float_eq, deftree, eval::ValueEvaluator, test_util::Sampler};
 
     fn check_jit_eval(
         tree: &Tree,

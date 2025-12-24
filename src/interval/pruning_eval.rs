@@ -517,15 +517,11 @@ mod test {
         error::Error,
         eval::{ValueEvaluator, ValueType},
         interval::Interval,
-        tree::{Tree, Value, min},
+        test_util,
+        tree::{Tree, Value},
     };
-    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
-
-    fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
-        deftree!(- (sqrt (+ (pow (- 'x (const cx)) 2) (pow (- 'y (const cy)) 2))) (const r))
-    }
 
     fn sphere(cx: f64, cy: f64, cz: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+
@@ -543,40 +539,9 @@ mod test {
         eval.ops.last_slice().unwrap().len()
     }
 
-    fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
-        range.0 + rng.random::<f64>() * (range.1 - range.0)
-    }
-
-    fn random_circles(
-        xrange: (f64, f64),
-        yrange: (f64, f64),
-        rad_range: (f64, f64),
-        num_circles: usize,
-    ) -> Tree {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut tree = circle(
-            sample_range(xrange, &mut rng),
-            sample_range(yrange, &mut rng),
-            sample_range(rad_range, &mut rng),
-        );
-        for _ in 1..num_circles {
-            tree = min(
-                tree,
-                circle(
-                    sample_range(xrange, &mut rng),
-                    sample_range(yrange, &mut rng),
-                    sample_range(rad_range, &mut rng),
-                ),
-            );
-        }
-        let tree = tree.unwrap();
-        assert_eq!(tree.dims(), (1, 1));
-        tree
-    }
-
     #[test]
     fn t_two_circles() {
-        let tree = deftree!(min {circle(0., 0., 1.)} {circle(4., 0., 1.)})
+        let tree = deftree!(min {test_util::circle(0., 0., 1.)} {test_util::circle(4., 0., 1.)})
             .unwrap()
             .compacted()
             .unwrap();
@@ -654,7 +619,7 @@ mod test {
 
     #[test]
     fn t_random_circles_push() {
-        let circles = random_circles((0., 1.), (0., 1.), (0.02, 0.1), 100);
+        let circles = test_util::random_circles((0., 1.), (0., 1.), (0.02, 0.1), 100);
         let mut eval = ValuePruningEvaluator::new(
             &circles,
             4,
@@ -679,7 +644,7 @@ mod test {
         const DIMS: u32 = 1 << PRUNE_DEPTH;
         const DIMS_F64: f64 = DIMS as f64;
         const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
-        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, 100);
+        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, 100);
         let pruned_image = {
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let mut eval = ValuePruningEvaluator::new(

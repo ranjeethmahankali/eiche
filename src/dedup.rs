@@ -262,7 +262,7 @@ mod test {
     use crate::{
         deftree,
         prune::Pruner,
-        test::compare_trees,
+        test_util::compare_trees,
         tree::{BinaryOp::*, is_topological_order},
     };
 

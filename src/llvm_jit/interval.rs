@@ -3000,7 +3000,7 @@ impl<'ctx, T: NumberType> JitIntervalFnSync<'ctx, T> {
 #[cfg(test)]
 mod test {
     use crate::{
-        Error, JitContext, Tree, assert_float_eq, deftree, llvm_jit::NumberType, test::Sampler,
+        Error, JitContext, Tree, assert_float_eq, deftree, llvm_jit::NumberType, test_util::Sampler,
     };
 
     const EPS: f64 = f64::EPSILON * 2.0;

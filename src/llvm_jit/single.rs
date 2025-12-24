@@ -455,7 +455,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, test::check_value_eval};
+    use crate::{deftree, test_util::check_value_eval};
 
     fn check_jit_eval(
         tree: &Tree,

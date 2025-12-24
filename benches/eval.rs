@@ -291,6 +291,7 @@ mod spheres {
 
 mod circles {
     use super::*;
+    use eiche::test_util;
 
     type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
 
@@ -299,35 +300,6 @@ mod circles {
     const DIMS_F64: f64 = DIMS as f64;
     const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
     const N_CIRCLES: usize = 100;
-
-    fn circle(cx: f64, cy: f64, r: f64) -> Result<Tree, Error> {
-        deftree!(- (sqrt (+ (pow (- 'x (const cx)) 2) (pow (- 'y (const cy)) 2))) (const r))
-    }
-
-    fn random_circles(
-        xrange: (f64, f64),
-        yrange: (f64, f64),
-        rad_range: (f64, f64),
-        num_circles: usize,
-    ) -> Tree {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut tree = circle(
-            sample_range(xrange, &mut rng),
-            sample_range(yrange, &mut rng),
-            sample_range(rad_range, &mut rng),
-        );
-        for _ in 1..num_circles {
-            tree = min(
-                tree,
-                circle(
-                    sample_range(xrange, &mut rng),
-                    sample_range(yrange, &mut rng),
-                    sample_range(rad_range, &mut rng),
-                ),
-            );
-        }
-        tree.unwrap()
-    }
 
     /// Includes the time to compile, i.e. create the ValueEvaluator.
     fn with_compile(tree: &Tree, image: &mut ImageBuffer) {
@@ -458,7 +430,8 @@ mod circles {
         }
 
         fn b_with_compile(c: &mut Criterion) {
-            let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+            let tree =
+                test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
             assert_eq!(
                 tree.symbols().len(),
                 2,
@@ -473,7 +446,8 @@ mod circles {
         }
 
         fn b_no_compile(c: &mut Criterion) {
-            let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+            let tree =
+                test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let context = JitContext::default();
             let mut eval = tree.jit_compile(&context, "xy").unwrap();
@@ -488,7 +462,7 @@ mod circles {
     }
 
     fn b_with_compile(c: &mut Criterion) {
-        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
         c.bench_function("circles-value-eval-with-compilation", |b| {
             b.iter(|| with_compile(black_box(&tree), &mut image))
@@ -496,7 +470,7 @@ mod circles {
     }
 
     fn b_no_compile(c: &mut Criterion) {
-        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
         let mut eval = ValueEvaluator::new(&tree);
         c.bench_function("circles-value-eval-no-compilation", |b| {
@@ -505,7 +479,7 @@ mod circles {
     }
 
     fn b_pruned_eval(c: &mut Criterion) {
-        let tree = random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
+        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
         c.bench_function("circles-pruned-eval", |b| {
             b.iter(|| do_pruned_eval(black_box(&tree), &mut image))
