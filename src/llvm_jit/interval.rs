@@ -1487,7 +1487,28 @@ fn build_interval_pow<'ctx>(
                                         i32_type.const_int(1, false),
                                         &format!("pow_square_insert_elem_{index}"),
                                     )?,
-                                    sqbase,
+                                    builder
+                                        .build_select(
+                                            build_vec_unary_intrinsic(
+                                                builder,
+                                                module,
+                                                "llvm.vector.reduce.and.*",
+                                                &format!("pow_square_case_base_neg_reduce_{index}"),
+                                                builder.build_float_compare(
+                                                    FloatPredicate::ULT,
+                                                    lhs,
+                                                    sqbase.get_type().const_zero(),
+                                                    &format!(
+                                                        "pow_square_case_base_neg_check_{index}"
+                                                    ),
+                                                )?,
+                                            )?
+                                            .into_int_value(),
+                                            build_interval_flip(sqbase, builder, i32_type, index)?,
+                                            sqbase,
+                                            &format!("pow_square_case_base_neg_cases_{index}"),
+                                        )?
+                                        .into_vector_value(),
                                     &format!("pow_square_case_{index}"),
                                 )?
                                 .into_vector_value(),
