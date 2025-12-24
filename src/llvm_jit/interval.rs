@@ -4456,4 +4456,84 @@ mod test {
         assert_float_eq!(outputs[0][0], 8.0, 1e-12);
         assert_float_eq!(outputs[0][1], 8.0, 1e-12);
     }
+
+    #[test]
+    fn t_jit_interval_comparisons_greater() {
+        // Test > and >= operators
+        check_interval_eval(
+            deftree!(if (> 'x 'y) (+ 'x 1.) (- 'y 1.)).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(if (>= 'x 'y) (+ 'x 1.) (- 'y 1.)).unwrap(),
+            &[('x', 0., 5.), ('y', 3., 8.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_jit_interval_comparison_edge_cases() {
+        // Test with NaN, touching intervals, and exact overlaps
+        check_interval_eval(
+            deftree!(if (== 'x 'y) (+ 'x 10.) (- 'x 10.)).unwrap(),
+            &[('x', 1., 5.), ('y', 1., 5.)],
+            20,
+            5,
+        );
+        check_interval_eval(
+            deftree!(if (!= 'x 'y) (+ 'x 10.) (- 'x 10.)).unwrap(),
+            &[('x', 1., 5.), ('y', 6., 10.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_jit_interval_subtract() {
+        check_interval_eval(
+            deftree!(- 'x 'y).unwrap(),
+            &[('x', -5., 5.), ('y', -3., 7.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_jit_interval_multiply_signs() {
+        // Test multiplication with different sign combinations
+        check_interval_eval(
+            deftree!(* 'x 'y).unwrap(),
+            &[('x', -3., 3.), ('y', -5., 5.)],
+            20,
+            5,
+        );
+    }
+
+    #[test]
+    fn t_jit_interval_boolean_edge_cases() {
+        // Test And with all combinations
+        check_interval_eval(
+            deftree!(if (and (> 'x 0) (< 'y 5)) (* 'x 2.) (+ 'y 3.)).unwrap(),
+            &[('x', -1., 1.), ('y', 3., 6.)],
+            20,
+            5,
+        );
+        // Test Or with all combinations
+        check_interval_eval(
+            deftree!(if (or (> 'x 5) (< 'y 0)) (/ 'x 2.) (* 'y 2.)).unwrap(),
+            &[('x', 4., 6.), ('y', -1., 1.)],
+            20,
+            5,
+        );
+        // Test Not with uncertain input
+        check_interval_eval(
+            deftree!(if (not (> 'x 0)) (+ 'x 5.) (- 'x 5.)).unwrap(),
+            &[('x', -2., 2.)],
+            20,
+            5,
+        );
+    }
 }
