@@ -127,9 +127,9 @@ impl<'ctx> JitCompiler<'ctx> {
 
     /// Write out the compiled assembly to file specified by `path`.
     #[allow(dead_code)]
-    pub fn write_asm(&self, path: &Path) {
+    pub fn write_asm<P: AsRef<Path>>(&self, path: P) {
         self.machine
-            .write_to_file(&self.module, FileType::Assembly, path)
+            .write_to_file(&self.module, FileType::Assembly, path.as_ref())
             .unwrap();
     }
 }

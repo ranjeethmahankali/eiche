@@ -4374,6 +4374,7 @@ mod test {
 
     #[test]
     fn t_jit_interval_random_circles_comparison() {
+        // Compare JIT and non-JIT evaluation results.
         const XRANGE: (f64, f64) = (0.0, 128.0);
         const YRANGE: (f64, f64) = (0.0, 128.0);
         let tree = test_util::random_circles(XRANGE, YRANGE, (2.56, 12.8), 100);
