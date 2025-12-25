@@ -299,6 +299,7 @@ impl Tree {
                     .as_basic_value_enum(),
                     Abs => build_interval_abs(
                         regs[*input].into_vector_value(),
+                        ranges[*input].scalar()?,
                         builder,
                         &compiler.module,
                         &constants,
@@ -412,8 +413,11 @@ impl Tree {
                         .as_basic_value_enum()
                     }
                     Pow => build_interval_pow(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].scalar()?, ranges[*rhs].scalar()?),
                         builder,
                         &compiler.module,
                         index,
@@ -1704,8 +1708,8 @@ fn build_interval_square<'ctx>(
 }
 
 fn build_interval_pow<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    (lhs, rhs): (VectorValue<'ctx>, VectorValue<'ctx>),
+    (range_left, range_right): ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
     index: usize,
@@ -1886,7 +1890,7 @@ fn build_interval_pow<'ctx>(
         let even_case = {
             builder.position_at_end(even_bb);
             let abs_powi = build_float_vec_powi(
-                build_interval_abs(lhs, builder, module, constants, index)?,
+                build_interval_abs(lhs, range_left, builder, module, constants, index)?,
                 exponent,
                 builder,
                 module,
@@ -2195,11 +2199,23 @@ fn build_interval_pow<'ctx>(
 
 fn build_interval_abs<'ctx>(
     input: VectorValue<'ctx>,
+    range: (f64, f64),
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    if range.0 < 0.0 && range.1 < 0.0 {
+        return build_interval_negate(
+            input,
+            builder,
+            constants,
+            index,
+            &format!("intermediate_1_{index}"),
+        );
+    } else if range.0 >= 0.0 && range.1 >= 0.0 {
+        return Ok(input);
+    }
     let lt_zero = builder.build_float_compare(
         FloatPredicate::ULT,
         input,
