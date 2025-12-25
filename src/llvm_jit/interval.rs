@@ -450,18 +450,18 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Greater => build_interval_greater(
-                        regs[*lhs].into_vector_value(),
+                    Greater => build_interval_less(
                         regs[*rhs].into_vector_value(),
+                        regs[*lhs].into_vector_value(),
                         builder,
                         &compiler.module,
                         &constants,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    GreaterOrEqual => build_interval_greater_equal(
-                        regs[*lhs].into_vector_value(),
+                    GreaterOrEqual => build_interval_less_equal(
                         regs[*rhs].into_vector_value(),
+                        regs[*lhs].into_vector_value(),
                         builder,
                         &compiler.module,
                         &constants,
@@ -1074,87 +1074,6 @@ fn build_interval_not_equal<'ctx>(
                 )?
                 .into_vector_value(),
             &format!("equal_no_overlap_select_{index}"),
-        )?
-        .into_vector_value())
-}
-
-fn build_interval_greater<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    constants: &Constants<'ctx>,
-    index: usize,
-) -> Result<VectorValue<'ctx>, Error> {
-    let InequalityFlags {
-        either_empty,
-        strictly_before,
-        strictly_after,
-        touching: _touching,
-    } = build_interval_inequality_flags(lhs, rhs, builder, module, constants, index)?;
-    Ok(builder
-        .build_select(
-            builder.build_or(
-                either_empty,
-                strictly_after,
-                &format!("less_empty_or_before_check_{index}"),
-            )?,
-            constants.interval_true_true,
-            builder
-                .build_select(
-                    strictly_before,
-                    constants.interval_false_false,
-                    constants.interval_false_true,
-                    &format!("less_a_gt_d_choice_{index}"),
-                )?
-                .into_vector_value(),
-            &format!("less_{index}"),
-        )?
-        .into_vector_value())
-}
-
-fn build_interval_greater_equal<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    constants: &Constants<'ctx>,
-    index: usize,
-) -> Result<VectorValue<'ctx>, Error> {
-    let InequalityFlags {
-        either_empty,
-        strictly_before,
-        strictly_after,
-        touching,
-    } = build_interval_inequality_flags(lhs, rhs, builder, module, constants, index)?;
-    let touching_right = builder
-        .build_extract_element(
-            touching,
-            constants.i32_zero,
-            &format!("less_equal_touching_left_{index}"),
-        )?
-        .into_int_value();
-    Ok(builder
-        .build_select(
-            builder.build_or(
-                either_empty,
-                builder.build_or(
-                    strictly_after,
-                    touching_right,
-                    &format!("less_equal_before_or_touching_{index}"),
-                )?,
-                &format!("less_equal_empty_or_before_{index}"),
-            )?,
-            constants.interval_true_true,
-            builder
-                .build_select(
-                    strictly_before,
-                    constants.interval_false_false,
-                    constants.interval_false_true,
-                    &format!("less_a_gt_d_chocie_{index}"),
-                )?
-                .into_vector_value(),
-            &format!("less_b_lt_c_choice_{index}"),
         )?
         .into_vector_value())
 }
