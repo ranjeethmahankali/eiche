@@ -104,6 +104,27 @@ impl<'ctx> JitCompiler<'ctx> {
         fpm.run_on(&self.module);
     }
 
+    #[allow(dead_code)]
+    fn run_heavy_passes(&self) {
+        let fpm = PassManager::create(());
+        fpm.add_global_optimizer_pass();
+        fpm.add_sccp_pass();
+        fpm.add_dead_arg_elimination_pass();
+        fpm.add_scalar_repl_aggregates_pass();
+        fpm.add_early_cse_pass();
+        fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+        fpm.add_gvn_pass();
+        fpm.add_cfg_simplification_pass();
+        fpm.add_aggressive_dce_pass();
+        fpm.add_correlated_value_propagation_pass();
+        fpm.add_slp_vectorize_pass();
+        fpm.add_instruction_combining_pass();
+        fpm.add_cfg_simplification_pass();
+        fpm.add_global_dce_pass();
+        fpm.run_on(&self.module);
+    }
+
     /// Write out the compiled assembly to file specified by `path`.
     #[allow(dead_code)]
     pub fn write_asm(&self, path: &Path) {
