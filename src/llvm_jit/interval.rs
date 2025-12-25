@@ -378,9 +378,11 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Pow => build_interval_pow::<T>(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                    Pow => build_interval_pow(
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
                         builder,
                         &compiler.module,
                         index,
@@ -415,7 +417,7 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Less => build_interval_less::<T>(
+                    Less => build_interval_less(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
@@ -424,7 +426,7 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    LessOrEqual => build_interval_less_equal::<T>(
+                    LessOrEqual => build_interval_less_equal(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
@@ -433,7 +435,7 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Equal => build_interval_equal::<T>(
+                    Equal => build_interval_equal(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
@@ -442,7 +444,7 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    NotEqual => build_interval_not_equal::<T>(
+                    NotEqual => build_interval_not_equal(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
@@ -451,7 +453,7 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Greater => build_interval_greater::<T>(
+                    Greater => build_interval_greater(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
@@ -460,7 +462,7 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
-                    GreaterOrEqual => build_interval_greater_equal::<T>(
+                    GreaterOrEqual => build_interval_greater_equal(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
@@ -489,7 +491,7 @@ impl Tree {
                     .as_basic_value_enum(),
                 },
                 Ternary(op, a, b, c) => match op {
-                    Choose => build_interval_choose::<T>(
+                    Choose => build_interval_choose(
                         regs[*a].into_vector_value(),
                         regs[*b].into_vector_value(),
                         regs[*c].into_vector_value(),
@@ -595,7 +597,7 @@ fn build_interval_not<'ctx>(
         .into_vector_value())
 }
 
-fn build_interval_choose<'ctx, T: NumberType>(
+fn build_interval_choose<'ctx>(
     cond: VectorValue<'ctx>,
     iftrue: VectorValue<'ctx>,
     iffalse: VectorValue<'ctx>,
@@ -882,7 +884,7 @@ fn build_interval_inequality_flags<'ctx>(
     })
 }
 
-fn build_interval_less<'ctx, T: NumberType>(
+fn build_interval_less<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -917,7 +919,7 @@ fn build_interval_less<'ctx, T: NumberType>(
         .into_vector_value())
 }
 
-fn build_interval_less_equal<'ctx, T: NumberType>(
+fn build_interval_less_equal<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -1025,7 +1027,7 @@ fn build_interval_equality_flags<'ctx>(
     Ok((no_overlap, matching_singleton))
 }
 
-fn build_interval_equal<'ctx, T: NumberType>(
+fn build_interval_equal<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -1052,7 +1054,7 @@ fn build_interval_equal<'ctx, T: NumberType>(
         .into_vector_value())
 }
 
-fn build_interval_not_equal<'ctx, T: NumberType>(
+fn build_interval_not_equal<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -1079,7 +1081,7 @@ fn build_interval_not_equal<'ctx, T: NumberType>(
         .into_vector_value())
 }
 
-fn build_interval_greater<'ctx, T: NumberType>(
+fn build_interval_greater<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -1114,7 +1116,7 @@ fn build_interval_greater<'ctx, T: NumberType>(
         .into_vector_value())
 }
 
-fn build_interval_greater_equal<'ctx, T: NumberType>(
+fn build_interval_greater_equal<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -1726,9 +1728,8 @@ fn build_float_vec_powi<'ctx>(
         .map(|v| v.into_vector_value())
 }
 
-fn build_interval_pow<'ctx, T: NumberType>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+fn build_interval_pow<'ctx>(
+    (lhs, rhs): (VectorValue<'ctx>, VectorValue<'ctx>),
     builder: &'ctx Builder,
     module: &'ctx Module,
     index: usize,
@@ -1737,7 +1738,6 @@ fn build_interval_pow<'ctx, T: NumberType>(
     constants: &Constants<'ctx>,
 ) -> Result<VectorValue<'ctx>, Error> {
     let i32_type = context.i32_type();
-    let flt_type = T::jit_type(context);
     let all_joined = builder.build_shuffle_vector(
         lhs,
         rhs,
@@ -2064,7 +2064,6 @@ fn build_interval_pow<'ctx, T: NumberType>(
             &format!("pow_general_pow_ac_{index}"),
             a,
             c,
-            flt_type,
         )?
         .into_float_value();
         let ad = build_float_binary_intrinsic(
@@ -2074,7 +2073,6 @@ fn build_interval_pow<'ctx, T: NumberType>(
             &format!("pow_general_pow_ad_{index}"),
             a,
             d,
-            flt_type,
         )?
         .into_float_value();
         let bc = build_float_binary_intrinsic(
@@ -2084,7 +2082,6 @@ fn build_interval_pow<'ctx, T: NumberType>(
             &format!("pow_general_pow_bc_{index}"),
             b,
             c,
-            flt_type,
         )?
         .into_float_value();
         let bd = build_float_binary_intrinsic(
@@ -2094,7 +2091,6 @@ fn build_interval_pow<'ctx, T: NumberType>(
             &format!("pow_general_pow_bd_{index}"),
             b,
             d,
-            flt_type,
         )?
         .into_float_value();
         // Extract values from vector for ergonomic use later.
@@ -2221,7 +2217,6 @@ fn build_interval_pow<'ctx, T: NumberType>(
                                 &format!("pow_general_case_last_case_adbc_{index}"),
                                 ad,
                                 bc,
-                                flt_type,
                             )?
                             .into_float_value(),
                             build_float_binary_intrinsic(
@@ -2231,7 +2226,6 @@ fn build_interval_pow<'ctx, T: NumberType>(
                                 &format!("pow_general_case_last_case_acbd_{index}"),
                                 ac,
                                 bd,
-                                flt_type,
                             )?
                             .into_float_value(),
                             builder,

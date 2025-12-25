@@ -307,15 +307,14 @@ fn build_float_binary_intrinsic<'ctx>(
     call_name: &str,
     lhs: FloatValue<'ctx>,
     rhs: FloatValue<'ctx>,
-    float_type: FloatType<'ctx>,
 ) -> Result<BasicValueEnum<'ctx>, Error> {
     let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
     let intrinsic_fn = intrinsic
         .get_declaration(
             module,
             &[
-                BasicTypeEnum::FloatType(float_type),
-                BasicTypeEnum::FloatType(float_type),
+                BasicTypeEnum::FloatType(lhs.get_type()),
+                BasicTypeEnum::FloatType(rhs.get_type()),
             ],
         )
         .ok_or(Error::CannotCompileIntrinsic(name))?;

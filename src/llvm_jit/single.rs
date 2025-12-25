@@ -228,7 +228,6 @@ impl Tree {
                         "pow_call",
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        float_type,
                     )?,
                     Min => build_float_binary_intrinsic(
                         builder,
@@ -237,7 +236,6 @@ impl Tree {
                         "min_call",
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        float_type,
                     )?,
                     Max => build_float_binary_intrinsic(
                         builder,
@@ -246,7 +244,6 @@ impl Tree {
                         "max_call",
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                        float_type,
                     )?,
                     Remainder => builder
                         .build_float_rem(
