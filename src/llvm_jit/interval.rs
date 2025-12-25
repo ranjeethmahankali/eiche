@@ -378,6 +378,16 @@ impl Tree {
                         index,
                     )?
                     .as_basic_value_enum(),
+                    Pow if matches!(self.node(*rhs), Constant(Value::Scalar(2.0))) => {
+                        build_interval_square(
+                            regs[*lhs].into_vector_value(),
+                            builder,
+                            &compiler.module,
+                            &constants,
+                            index,
+                        )?
+                        .as_basic_value_enum()
+                    }
                     Pow => build_interval_pow(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
