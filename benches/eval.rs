@@ -189,63 +189,32 @@ mod spheres {
         }
 
         fn b_with_compile(c: &mut Criterion) {
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark();
-                let mut group = c.benchmark_group("lower sample count");
-                group.sample_size(10);
-                group.bench_function("spheres-interval-eval-with-compile", |b| {
-                    b.iter(|| {
-                        with_compilation(&tree, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
-            {
-                let mut group = c.benchmark_group("lower sample count");
-                group.sample_size(10);
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark();
-                group.bench_function("spheres-interval-eval-with-compile", |b| {
-                    b.iter(|| {
-                        with_compilation(&tree, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
+            let BenchmarkSetup {
+                tree,
+                queries,
+                mut outputs,
+            } = init_benchmark();
+            let mut group = c.benchmark_group("lower sample count");
+            group.sample_size(10);
+            group.bench_function("spheres-interval-eval-with-compile", |b| {
+                b.iter(|| {
+                    with_compilation(&tree, black_box(&mut outputs), &queries);
+                })
+            });
         }
 
         fn b_no_compile(c: &mut Criterion) {
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark();
-                let mut eval = IntervalEvaluator::new(&tree);
-                c.bench_function("spheres-interval-eval-no-compile", |b| {
-                    b.iter(|| {
-                        no_compilation(&mut eval, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark();
-                let mut eval = IntervalEvaluator::new(&tree);
-                c.bench_function("spheres-interval-eval-no-compile", |b| {
-                    b.iter(|| {
-                        no_compilation(&mut eval, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
+            let BenchmarkSetup {
+                tree,
+                queries,
+                mut outputs,
+            } = init_benchmark();
+            let mut eval = IntervalEvaluator::new(&tree);
+            c.bench_function("spheres-interval-eval-no-compile", |b| {
+                b.iter(|| {
+                    no_compilation(&mut eval, black_box(&mut outputs), &queries);
+                })
+            });
         }
 
         criterion_group!(bench, b_no_compile, b_with_compile);
