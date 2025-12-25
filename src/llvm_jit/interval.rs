@@ -1577,30 +1577,6 @@ fn build_interval_sin<'ctx>(
         .into_vector_value())
 }
 
-fn build_check_interval_spanning_zero<'ctx>(
-    input: VectorValue<'ctx>,
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    constants: &Constants<'ctx>,
-    prefix: &str,
-    index: usize,
-) -> Result<IntValue<'ctx>, Error> {
-    let is_neg = builder.build_float_compare(
-        FloatPredicate::ULT,
-        input,
-        constants.interval_zero,
-        &format!("{prefix}_zero_spanning_check_{index}"),
-    )?;
-    Ok(build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.xor.*",
-        &format!("{prefix}_zero_spanning_xor_reduce_{index}"),
-        is_neg,
-    )?
-    .into_int_value())
-}
-
 fn build_float_vec_powi<'ctx>(
     base: VectorValue<'ctx>,
     exp: IntValue<'ctx>,
@@ -1746,16 +1722,31 @@ fn build_interval_pow<'ctx>(
     let square_out = {
         builder.position_at_end(square_bb);
         let sqbase = builder.build_float_mul(lhs, lhs, &format!("pow_lhs_square_base_{index}"))?;
+        let is_neg = builder.build_float_compare(
+            FloatPredicate::ULT,
+            lhs,
+            constants.interval_zero,
+            &format!("pow_square_case_zero_spanning_check_{index}"),
+        )?;
+        let is_spanning_zero = build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.xor.*",
+            &format!("pow_square_case_zero_spanning_xor_{index}"),
+            is_neg,
+        )?
+        .into_int_value();
+        let all_neg = build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.and.*",
+            &format!("pow_square_case_zero_spanning_xor_{index}"),
+            is_neg,
+        )?
+        .into_int_value();
         let out = builder
             .build_select(
-                build_check_interval_spanning_zero(
-                    lhs,
-                    builder,
-                    module,
-                    constants,
-                    "pow_square_case",
-                    index,
-                )?,
+                is_spanning_zero,
                 builder.build_insert_element(
                     constants.interval_zero,
                     build_vec_unary_intrinsic(
@@ -1771,19 +1762,7 @@ fn build_interval_pow<'ctx>(
                 )?,
                 builder
                     .build_select(
-                        build_vec_unary_intrinsic(
-                            builder,
-                            module,
-                            "llvm.vector.reduce.and.*",
-                            &format!("pow_square_case_base_neg_reduce_{index}"),
-                            builder.build_float_compare(
-                                FloatPredicate::ULT,
-                                lhs,
-                                constants.interval_zero,
-                                &format!("pow_square_case_base_neg_check_{index}"),
-                            )?,
-                        )?
-                        .into_int_value(),
+                        all_neg,
                         build_interval_flip(sqbase, builder, constants, index)?,
                         sqbase,
                         &format!("pow_square_case_base_neg_cases_{index}"),
