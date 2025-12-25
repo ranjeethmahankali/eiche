@@ -377,19 +377,23 @@ mod spheres {
                     queries,
                     mut outputs,
                 } = init_benchmark::<f64>();
-                c.bench_function("spheres-jit-f64-interval-eval-with-compile", |b| {
+                let mut group = c.benchmark_group("lower sample count");
+                group.sample_size(10);
+                group.bench_function("spheres-jit-f64-interval-eval-with-compile", |b| {
                     b.iter(|| {
                         with_compilation(&tree, black_box(&mut outputs), &queries);
                     })
                 });
             }
             {
+                let mut group = c.benchmark_group("lower sample count");
+                group.sample_size(10);
                 let BenchmarkSetup {
                     tree,
                     queries,
                     mut outputs,
                 } = init_benchmark::<f32>();
-                c.bench_function("spheres-jit-f32-interval-eval-with-compile", |b| {
+                group.bench_function("spheres-jit-f32-interval-eval-with-compile", |b| {
                     b.iter(|| {
                         with_compilation(&tree, black_box(&mut outputs), &queries);
                     })
