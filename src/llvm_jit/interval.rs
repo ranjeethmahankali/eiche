@@ -1735,26 +1735,35 @@ fn build_interval_pow<'ctx>(
     constants: &Constants<'ctx>,
 ) -> Result<VectorValue<'ctx>, Error> {
     let context = module.get_context();
-    let i32_type = context.i32_type();
-    let all_joined = builder.build_shuffle_vector(
-        lhs,
-        rhs,
-        constants.ivec_count_to_3,
-        &format!("pow_nan_check_concat_{index}"),
+    let is_any_nan = builder.build_or(
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.or.*",
+            &format!("pow_nan_check_{index}"),
+            builder.build_float_compare(
+                FloatPredicate::UNO,
+                lhs,
+                lhs,
+                &format!("pow_lane_wise_nan_check_{index}"),
+            )?,
+        )?
+        .into_int_value(),
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.or.*",
+            &format!("pow_nan_check_{index}"),
+            builder.build_float_compare(
+                FloatPredicate::UNO,
+                rhs,
+                rhs,
+                &format!("pow_lane_wise_nan_check_{index}"),
+            )?,
+        )?
+        .into_int_value(),
+        &format!("pow_any_nan_check_{index}"),
     )?;
-    let is_any_nan = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.or.*",
-        &format!("pow_nan_check_{index}"),
-        builder.build_float_compare(
-            FloatPredicate::UNO,
-            all_joined,
-            all_joined,
-            &format!("pow_lane_wise_nan_check_{index}"),
-        )?,
-    )?
-    .into_int_value();
     let is_exponent_zero = build_vec_unary_intrinsic(
         builder,
         module,
@@ -1768,19 +1777,6 @@ fn build_interval_pow<'ctx>(
         )?,
     )?
     .into_int_value();
-    let is_square = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.and.*",
-        &format!("pow_square_check_reduce_{index}"),
-        builder.build_float_compare(
-            FloatPredicate::UEQ,
-            rhs,
-            VectorType::const_vector(&[constants.flt_two, constants.flt_two]),
-            &format!("pow_square_check_{index}"),
-        )?,
-    )?
-    .into_int_value();
     let rhs_floor = build_vec_unary_intrinsic(
         builder,
         module,
@@ -1789,19 +1785,6 @@ fn build_interval_pow<'ctx>(
         rhs,
     )?
     .into_vector_value();
-    let is_exponent_singleton_integer = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.and.*",
-        &format!("pow_integer_check_reduce_{index}"),
-        builder.build_float_compare(
-            FloatPredicate::UEQ,
-            rhs_floor,
-            build_interval_flip(rhs, builder, constants, index)?,
-            &format!("pow_integer_check_compare_{index}"),
-        )?,
-    )?
-    .into_int_value();
     // Create all the blocks up front before doing conditional branching.
     let simple_bb = context.append_basic_block(function, &format!("pow_simple_case_bb_{index}"));
     let test_square_bb =
@@ -1836,6 +1819,19 @@ fn build_interval_pow<'ctx>(
         builder.position_at_end(test_square_bb);
         out
     };
+    let is_square = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("pow_square_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            rhs,
+            VectorType::const_vector(&[constants.flt_two, constants.flt_two]),
+            &format!("pow_square_check_{index}"),
+        )?,
+    )?
+    .into_int_value();
     builder.build_conditional_branch(is_square, square_bb, test_integer_bb)?;
     let square_out = {
         builder.position_at_end(square_bb);
@@ -1889,6 +1885,19 @@ fn build_interval_pow<'ctx>(
         builder.position_at_end(test_integer_bb);
         out
     };
+    let is_exponent_singleton_integer = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("pow_integer_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            rhs_floor,
+            build_interval_flip(rhs, builder, constants, index)?,
+            &format!("pow_integer_check_compare_{index}"),
+        )?,
+    )?
+    .into_int_value();
     builder.build_conditional_branch(is_exponent_singleton_integer, integer_bb, general_bb)?;
     // We now go inside the integer case, and return the last inner block and
     // let it shadow the integer case outside afterwards. Because LLVM wants to
@@ -1903,7 +1912,7 @@ fn build_interval_pow<'ctx>(
                     &format!("pow_extract_floor_{index}"),
                 )?
                 .into_float_value(),
-            i32_type,
+            context.i32_type(),
             &format!("pow_exponent_to_integer_convert_{index}"),
         )?;
         let is_odd = builder.build_and(
