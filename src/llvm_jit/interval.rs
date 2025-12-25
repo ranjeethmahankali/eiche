@@ -5,7 +5,7 @@ use super::{
 use crate::{
     BinaryOp::*,
     Error,
-    Node::*,
+    Node::{self, *},
     TernaryOp::*,
     Tree,
     UnaryOp::*,
@@ -187,381 +187,388 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let num_roots = self.num_roots();
-        let func_name = context.new_func_name::<T>(Some("interval"));
-        let context = &context.inner;
-        let compiler = JitCompiler::new(context)?;
-        let builder = &compiler.builder;
-        let flt_type = T::jit_type(context);
-        let interval_type = flt_type.vec_type(2);
-        let iptr_type = context.ptr_type(AddressSpace::default());
-        let bool_type = context.bool_type();
-        let i32_type = context.i32_type();
-        let constants = Constants::create::<T>(context);
-        let fn_type = context
-            .void_type()
-            .fn_type(&[iptr_type.into(), iptr_type.into()], false);
-        let function = compiler.module.add_function(&func_name, fn_type, None);
-        builder.position_at_end(context.append_basic_block(function, "entry"));
-        let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
-        for (index, node) in self.nodes().iter().enumerate() {
-            let reg = match node {
-                Constant(value) => match value {
-                    Value::Bool(flag) => VectorType::const_vector(
-                        &[if *flag {
-                            constants.bool_true
-                        } else {
-                            constants.bool_false
-                        }; 2],
-                    )
-                    .as_basic_value_enum(),
-                    Value::Scalar(value) => {
-                        let val = flt_type.const_float(*value);
-                        VectorType::const_vector(&[val, val]).as_basic_value_enum()
-                    }
-                },
-                Symbol(label) => {
-                    let inputs = function
-                        .get_first_param()
-                        .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
-                        .into_pointer_value();
-                    // # SAFETY: This is unit tested a lot. If this goes wrong we get seg-fault.
-                    let ptr = unsafe {
-                        builder.build_gep(
-                            interval_type,
-                            inputs,
-                            &[context.i64_type().const_int(
-                                params.chars().position(|c| c == *label).ok_or(
-                                    Error::JitCompilationError("Cannot find symbol".to_string()),
-                                )? as u64,
-                                false,
-                            )],
-                            &format!("arg_ptr_{}", *label),
-                        )?
-                    };
-                    let out = builder.build_load(interval_type, ptr, &format!("arg_{}", *label))?;
-                    if let Some(inst) = out.as_instruction_value() {
-                        /*
-                        Rust arrays only guarantee alignment with the size of T,
-                        where as LLVM load / store instructions expect alignment
-                        with the vector size (double the size of T). This
-                        mismatch can cause a segfault. So we manually set the
-                        alignment for this load instruction.
-                        */
-                        inst.set_alignment(std::mem::size_of::<T>() as u32)
-                            .map_err(|msg| {
-                                Error::JitCompilationError(format!(
-                                    "Cannot set alignment when loading value: {msg}"
-                                ))
-                            })?;
-                    }
-                    out
+        jit_compile_interval_impl(context, params, self.nodes(), num_roots)
+    }
+}
+
+fn jit_compile_interval_impl<'ctx, T: NumberType>(
+    context: &'ctx JitContext,
+    params: &str,
+    nodes: &[Node],
+    num_roots: usize,
+) -> Result<JitIntervalFn<'ctx, T>, Error> {
+    let func_name = context.new_func_name::<T>(Some("interval"));
+    let context = &context.inner;
+    let compiler = JitCompiler::new(context)?;
+    let builder = &compiler.builder;
+    let flt_type = T::jit_type(context);
+    let interval_type = flt_type.vec_type(2);
+    let iptr_type = context.ptr_type(AddressSpace::default());
+    let bool_type = context.bool_type();
+    let i32_type = context.i32_type();
+    let constants = Constants::create::<T>(context);
+    let fn_type = context
+        .void_type()
+        .fn_type(&[iptr_type.into(), iptr_type.into()], false);
+    let function = compiler.module.add_function(&func_name, fn_type, None);
+    builder.position_at_end(context.append_basic_block(function, "entry"));
+    let mut regs = Vec::<BasicValueEnum>::with_capacity(nodes.len());
+    for (index, node) in nodes.iter().enumerate() {
+        let reg = match node {
+            Constant(value) => match value {
+                Value::Bool(flag) => VectorType::const_vector(
+                    &[if *flag {
+                        constants.bool_true
+                    } else {
+                        constants.bool_false
+                    }; 2],
+                )
+                .as_basic_value_enum(),
+                Value::Scalar(value) => {
+                    let val = flt_type.const_float(*value);
+                    VectorType::const_vector(&[val, val]).as_basic_value_enum()
                 }
-                Unary(op, input) => match op {
-                    // For negate all we need to do is swap the vector lanes.
-                    Negate => build_interval_negate(
-                        regs[*input].into_vector_value(),
-                        builder,
-                        &constants,
-                        index,
+            },
+            Symbol(label) => {
+                let inputs = function
+                    .get_first_param()
+                    .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
+                    .into_pointer_value();
+                // # SAFETY: This is unit tested a lot. If this goes wrong we get seg-fault.
+                let ptr = unsafe {
+                    builder.build_gep(
+                        interval_type,
+                        inputs,
+                        &[context.i64_type().const_int(
+                            params.chars().position(|c| c == *label).ok_or(
+                                Error::JitCompilationError("Cannot find symbol".to_string()),
+                            )? as u64,
+                            false,
+                        )],
+                        &format!("arg_ptr_{}", *label),
+                    )?
+                };
+                let out = builder.build_load(interval_type, ptr, &format!("arg_{}", *label))?;
+                if let Some(inst) = out.as_instruction_value() {
+                    /*
+                    Rust arrays only guarantee alignment with the size of T,
+                    where as LLVM load / store instructions expect alignment
+                    with the vector size (double the size of T). This
+                    mismatch can cause a segfault. So we manually set the
+                    alignment for this load instruction.
+                    */
+                    inst.set_alignment(std::mem::size_of::<T>() as u32)
+                        .map_err(|msg| {
+                            Error::JitCompilationError(format!(
+                                "Cannot set alignment when loading value: {msg}"
+                            ))
+                        })?;
+                }
+                out
+            }
+            Unary(op, input) => match op {
+                // For negate all we need to do is swap the vector lanes.
+                Negate => build_interval_negate(
+                    regs[*input].into_vector_value(),
+                    builder,
+                    &constants,
+                    index,
+                    &format!("reg_{index}"),
+                )?
+                .as_basic_value_enum(),
+                Sqrt => build_interval_sqrt(
+                    regs[*input].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Abs => build_interval_abs(
+                    regs[*input].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Sin => build_interval_sin(
+                    regs[*input].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    flt_type,
+                    &constants,
+                    bool_type,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Cos => build_interval_cos(
+                    regs[*input].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Tan => build_interval_tan(
+                    regs[*input].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Log => build_interval_log(
+                    regs[*input].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Exp => build_vec_unary_intrinsic(
+                    builder,
+                    &compiler.module,
+                    "llvm.exp.*",
+                    &format!("exp_call_{index}"),
+                    regs[*input].into_vector_value(),
+                )?,
+                Floor => build_vec_unary_intrinsic(
+                    builder,
+                    &compiler.module,
+                    "llvm.floor.*",
+                    &format!("floor_call_{index}"),
+                    regs[*input].into_vector_value(),
+                )?,
+                Not => build_interval_not(
+                    regs[*input].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+            },
+            Binary(op, lhs, rhs) => match op {
+                Add => builder
+                    .build_float_add(
+                        regs[*lhs].into_vector_value(),
+                        regs[*rhs].into_vector_value(),
                         &format!("reg_{index}"),
                     )?
                     .as_basic_value_enum(),
-                    Sqrt => build_interval_sqrt(
-                        regs[*input].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Abs => build_interval_abs(
-                        regs[*input].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Sin => build_interval_sin(
-                        regs[*input].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        flt_type,
-                        &constants,
-                        bool_type,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Cos => build_interval_cos(
-                        regs[*input].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Tan => build_interval_tan(
-                        regs[*input].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Log => build_interval_log(
-                        regs[*input].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Exp => build_vec_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.exp.*",
-                        &format!("exp_call_{index}"),
-                        regs[*input].into_vector_value(),
-                    )?,
-                    Floor => build_vec_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.floor.*",
-                        &format!("floor_call_{index}"),
-                        regs[*input].into_vector_value(),
-                    )?,
-                    Not => build_interval_not(
-                        regs[*input].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                },
-                Binary(op, lhs, rhs) => match op {
-                    Add => builder
-                        .build_float_add(
-                            regs[*lhs].into_vector_value(),
+                Subtract => builder
+                    .build_float_sub(
+                        regs[*lhs].into_vector_value(),
+                        build_interval_flip(
                             regs[*rhs].into_vector_value(),
-                            &format!("reg_{index}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Subtract => builder
-                        .build_float_sub(
-                            regs[*lhs].into_vector_value(),
-                            build_interval_flip(
-                                regs[*rhs].into_vector_value(),
-                                builder,
-                                &constants,
-                                index,
-                            )?,
-                            &format!("reg_{index}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Multiply => build_interval_mul(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Divide => build_interval_div(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        i32_type,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Pow if matches!(self.node(*rhs), Constant(Value::Scalar(2.0))) => {
-                        build_interval_square(
-                            regs[*lhs].into_vector_value(),
                             builder,
-                            &compiler.module,
                             &constants,
                             index,
-                        )?
-                        .as_basic_value_enum()
-                    }
-                    Pow => build_interval_pow(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        index,
-                        function,
-                        &constants,
+                        )?,
+                        &format!("reg_{index}"),
                     )?
                     .as_basic_value_enum(),
-                    Min => build_vec_binary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.minnum.*",
-                        &format!("min_call_{index}"),
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                    )?,
-                    Max => build_vec_binary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.maxnum.*",
-                        &format!("max_call_{index}"),
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                    )?,
-                    Remainder => build_interval_remainder(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        i32_type,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Less => build_interval_less(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    LessOrEqual => build_interval_less_equal(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Equal => build_interval_equal(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    NotEqual => build_interval_not_equal(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Greater => build_interval_less(
-                        regs[*rhs].into_vector_value(),
-                        regs[*lhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    GreaterOrEqual => build_interval_less_equal(
-                        regs[*rhs].into_vector_value(),
-                        regs[*lhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    And => build_interval_and(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                    Or => build_interval_or(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                },
-                Ternary(op, a, b, c) => match op {
-                    Choose => build_interval_choose(
-                        regs[*a].into_vector_value(),
-                        regs[*b].into_vector_value(),
-                        regs[*c].into_vector_value(),
-                        builder,
-                        &compiler.module,
-                        &constants,
-                        index,
-                    )?
-                    .as_basic_value_enum(),
-                },
-            };
-            regs.push(reg);
-        }
-        // Compile instructions to copy the outputs to the out argument.
-        let outputs = function
-            .get_nth_param(1)
-            .ok_or(Error::JitCompilationError(
-                "Cannot read output address".to_string(),
-            ))?
-            .into_pointer_value();
-        for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
-            // # SAFETY: This is unit tested a lot. If this fails, we segfault.
-            let dst = unsafe {
-                builder.build_gep(
-                    interval_type,
-                    outputs,
-                    &[context.i64_type().const_int(i as u64, false)],
-                    &format!("output_ptr_{i}"),
+                Multiply => build_interval_mul(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
                 )?
-            };
-            let store_inst = builder.build_store(dst, reg.into_vector_value())?;
-            /*
-            Rust arrays only guarantee alignment with the size of T, where as
-            LLVM load / store instructions expect alignment with the vector size
-            (double the size of T). This mismatch can cause a segfault. So we
-            manually set the alignment for this store instruction.
-            */
-            store_inst
-                .set_alignment(std::mem::size_of::<T>() as u32)
-                .map_err(|e| {
-                    Error::JitCompilationError(format!(
-                        "Cannot set alignment when storing output: {e}"
-                    ))
-                })?;
-        }
-        builder.build_return(None)?;
-        compiler.run_passes();
-        let engine = compiler
-            .module
-            .create_jit_execution_engine(OptimizationLevel::Aggressive)
-            .map_err(|_| Error::CannotCreateJitModule)?;
-        // SAFETY: The signature is correct, and well tested. The function
-        // pointer should never be invalidated, because we allocated a dedicated
-        // execution engine, with it's own block of executable memory, that will
-        // live as long as the function wrapper lives.
-        let func = unsafe { engine.get_function(&func_name)? };
-        Ok(JitIntervalFn {
-            func,
-            num_inputs: params.len(),
-            num_outputs: num_roots,
-            _phantom: PhantomData,
-        })
+                .as_basic_value_enum(),
+                Divide => build_interval_div(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    i32_type,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Pow if matches!(&nodes[*rhs], Constant(Value::Scalar(2.0))) => {
+                    build_interval_square(
+                        regs[*lhs].into_vector_value(),
+                        builder,
+                        &compiler.module,
+                        &constants,
+                        index,
+                    )?
+                    .as_basic_value_enum()
+                }
+                Pow => build_interval_pow(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    index,
+                    function,
+                    &constants,
+                )?
+                .as_basic_value_enum(),
+                Min => build_vec_binary_intrinsic(
+                    builder,
+                    &compiler.module,
+                    "llvm.minnum.*",
+                    &format!("min_call_{index}"),
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                )?,
+                Max => build_vec_binary_intrinsic(
+                    builder,
+                    &compiler.module,
+                    "llvm.maxnum.*",
+                    &format!("max_call_{index}"),
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                )?,
+                Remainder => build_interval_remainder(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    i32_type,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Less => build_interval_less(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                LessOrEqual => build_interval_less_equal(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Equal => build_interval_equal(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                NotEqual => build_interval_not_equal(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Greater => build_interval_less(
+                    regs[*rhs].into_vector_value(),
+                    regs[*lhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                GreaterOrEqual => build_interval_less_equal(
+                    regs[*rhs].into_vector_value(),
+                    regs[*lhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                And => build_interval_and(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+                Or => build_interval_or(
+                    regs[*lhs].into_vector_value(),
+                    regs[*rhs].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+            },
+            Ternary(op, a, b, c) => match op {
+                Choose => build_interval_choose(
+                    regs[*a].into_vector_value(),
+                    regs[*b].into_vector_value(),
+                    regs[*c].into_vector_value(),
+                    builder,
+                    &compiler.module,
+                    &constants,
+                    index,
+                )?
+                .as_basic_value_enum(),
+            },
+        };
+        regs.push(reg);
     }
+    // Compile instructions to copy the outputs to the out argument.
+    let outputs = function
+        .get_nth_param(1)
+        .ok_or(Error::JitCompilationError(
+            "Cannot read output address".to_string(),
+        ))?
+        .into_pointer_value();
+    for (i, reg) in regs[(nodes.len() - num_roots)..].iter().enumerate() {
+        // # SAFETY: This is unit tested a lot. If this fails, we segfault.
+        let dst = unsafe {
+            builder.build_gep(
+                interval_type,
+                outputs,
+                &[context.i64_type().const_int(i as u64, false)],
+                &format!("output_ptr_{i}"),
+            )?
+        };
+        let store_inst = builder.build_store(dst, reg.into_vector_value())?;
+        /*
+        Rust arrays only guarantee alignment with the size of T, where as
+        LLVM load / store instructions expect alignment with the vector size
+        (double the size of T). This mismatch can cause a segfault. So we
+        manually set the alignment for this store instruction.
+        */
+        store_inst
+            .set_alignment(std::mem::size_of::<T>() as u32)
+            .map_err(|e| {
+                Error::JitCompilationError(format!("Cannot set alignment when storing output: {e}"))
+            })?;
+    }
+    builder.build_return(None)?;
+    compiler.run_passes();
+    let engine = compiler
+        .module
+        .create_jit_execution_engine(OptimizationLevel::Aggressive)
+        .map_err(|_| Error::CannotCreateJitModule)?;
+    // SAFETY: The signature is correct, and well tested. The function
+    // pointer should never be invalidated, because we allocated a dedicated
+    // execution engine, with it's own block of executable memory, that will
+    // live as long as the function wrapper lives.
+    let func = unsafe { engine.get_function(&func_name)? };
+    Ok(JitIntervalFn {
+        func,
+        num_inputs: params.len(),
+        num_outputs: num_roots,
+        _phantom: PhantomData,
+    })
 }
 
 fn build_interval_not<'ctx>(
