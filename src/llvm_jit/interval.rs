@@ -2227,7 +2227,7 @@ fn build_interval_sqrt<'ctx>(
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let lt_zero = builder.build_float_compare(
+    let is_neg = builder.build_float_compare(
         FloatPredicate::ULT,
         input,
         constants.interval_zero,
@@ -2238,14 +2238,17 @@ fn build_interval_sqrt<'ctx>(
         module,
         "llvm.vector.reduce.and.*",
         &format!("sqrt_all_neg_check_{index}"),
-        lt_zero,
+        is_neg,
     )?
     .into_int_value();
-    let is_invalid = builder.build_or(
-        all_neg,
-        build_check_interval_empty(input, builder, module, index)?,
-        &format!("sqrt_invalid_check_{index}"),
-    )?;
+    let spanning_zero = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.xor.*",
+        &format!("sqrt_all_neg_check_{index}"),
+        is_neg,
+    )?
+    .into_int_value();
     let sqrt = build_vec_unary_intrinsic(
         builder,
         module,
@@ -2256,18 +2259,10 @@ fn build_interval_sqrt<'ctx>(
     .into_vector_value();
     Ok(builder
         .build_select(
-            is_invalid,
-            // The interval is empty, so return an emtpy (NaN) interval.
+            all_neg,
             constants.interval_empty.as_basic_value_enum(),
             builder.build_select(
-                // Check first element of vec.
-                builder
-                    .build_extract_element(
-                        lt_zero,
-                        constants.i32_zero,
-                        &format!("first_lt_zero_{index}"),
-                    )?
-                    .into_int_value(),
+                spanning_zero,
                 builder.build_insert_element(
                     sqrt,
                     constants.flt_zero,
