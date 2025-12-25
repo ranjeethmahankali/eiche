@@ -118,6 +118,139 @@ mod spheres {
         criterion_group!(bench, b_no_compile, b_with_compile,);
     }
 
+    pub mod interval {
+        use super::*;
+        use eiche::IntervalEvaluator;
+        use rand::Rng;
+
+        struct BenchmarkSetup {
+            tree: Tree,
+            queries: Box<[[Interval; 3]]>,
+            outputs: Vec<Interval>,
+        }
+
+        fn init_benchmark() -> BenchmarkSetup {
+            let mut rng = StdRng::seed_from_u64(42);
+            let tree = random_sphere_union()
+                .compacted()
+                .expect("Cannot compact tree");
+            assert_eq!(
+                tree.symbols().len(),
+                3,
+                "The benchmarks make unsafe calls that rely on the number of inputs to this tree being exactly 3."
+            );
+            let queries: Box<[_]> = (0..N_QUERIES)
+                .map(|_| {
+                    [X_RANGE, Y_RANGE, Z_RANGE].map(|range| {
+                        let mut bounds =
+                            [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
+                        if bounds[0] > bounds[1] {
+                            bounds.swap(0, 1);
+                        }
+                        Interval::Scalar(bounds[0], bounds[1])
+                    })
+                })
+                .collect();
+            BenchmarkSetup {
+                tree,
+                queries,
+                outputs: Vec::with_capacity(N_QUERIES),
+            }
+        }
+
+        fn with_compilation(tree: &Tree, outputs: &mut Vec<Interval>, queries: &[[Interval; 3]]) {
+            outputs.clear();
+            let mut eval = IntervalEvaluator::new(tree);
+            outputs.extend(queries.iter().map(|sample| {
+                let [x, y, z] = &sample;
+                eval.set_value('x', *x);
+                eval.set_value('y', *y);
+                eval.set_value('z', *z);
+                let result = eval.run().unwrap();
+                result[0]
+            }))
+        }
+
+        /// Does not include the time to jit-compile the tree.
+        fn no_compilation(
+            eval: &mut IntervalEvaluator,
+            outputs: &mut Vec<Interval>,
+            queries: &[[Interval; 3]],
+        ) {
+            outputs.clear();
+            outputs.extend(queries.iter().map(|sample| {
+                let [x, y, z] = &sample;
+                eval.set_value('x', *x);
+                eval.set_value('y', *y);
+                eval.set_value('z', *z);
+                let result = eval.run().unwrap();
+                result[0]
+            }))
+        }
+
+        fn b_with_compile(c: &mut Criterion) {
+            {
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark();
+                let mut group = c.benchmark_group("lower sample count");
+                group.sample_size(10);
+                group.bench_function("spheres-jit-f64-interval-eval-with-compile", |b| {
+                    b.iter(|| {
+                        with_compilation(&tree, black_box(&mut outputs), &queries);
+                    })
+                });
+            }
+            {
+                let mut group = c.benchmark_group("lower sample count");
+                group.sample_size(10);
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark();
+                group.bench_function("spheres-jit-f32-interval-eval-with-compile", |b| {
+                    b.iter(|| {
+                        with_compilation(&tree, black_box(&mut outputs), &queries);
+                    })
+                });
+            }
+        }
+
+        fn b_no_compile(c: &mut Criterion) {
+            {
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark();
+                let mut eval = IntervalEvaluator::new(&tree);
+                c.bench_function("spheres-jit-f64-interval-eval-no-compile", |b| {
+                    b.iter(|| {
+                        no_compilation(&mut eval, black_box(&mut outputs), &queries);
+                    })
+                });
+            }
+            {
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark();
+                let mut eval = IntervalEvaluator::new(&tree);
+                c.bench_function("spheres-jit-f32-interval-eval-no-compile", |b| {
+                    b.iter(|| {
+                        no_compilation(&mut eval, black_box(&mut outputs), &queries);
+                    })
+                });
+            }
+        }
+
+        criterion_group!(bench, b_no_compile, b_with_compile);
+    }
+
     #[cfg(feature = "llvm-jit")]
     pub mod jit_single {
         use super::*;
@@ -868,6 +1001,7 @@ mod circles {
 #[cfg(not(feature = "llvm-jit"))]
 criterion_main!(
     spheres::value_eval::bench,
+    spheres::interval::bench,
     circles::bench,
     circles::interval::bench
 );
@@ -875,6 +1009,7 @@ criterion_main!(
 #[cfg(feature = "llvm-jit")]
 criterion_main!(
     spheres::value_eval::bench,
+    spheres::interval::bench,
     spheres::jit_single::bench,
     spheres::jit_simd::bench,
     spheres::jit_interval::bench,
