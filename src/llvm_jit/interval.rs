@@ -1611,6 +1611,65 @@ fn build_float_vec_powi<'ctx>(
         .map(|v| v.into_vector_value())
 }
 
+fn build_interval_square<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    constants: &Constants<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let sqbase = builder.build_float_mul(input, input, &format!("pow_lhs_square_base_{index}"))?;
+    let is_neg = builder.build_float_compare(
+        FloatPredicate::ULT,
+        input,
+        constants.interval_zero,
+        &format!("pow_square_case_zero_spanning_check_{index}"),
+    )?;
+    let is_spanning_zero = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.xor.*",
+        &format!("pow_square_case_zero_spanning_xor_{index}"),
+        is_neg,
+    )?
+    .into_int_value();
+    let all_neg = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("pow_square_case_zero_spanning_xor_{index}"),
+        is_neg,
+    )?
+    .into_int_value();
+    Ok(builder
+        .build_select(
+            is_spanning_zero,
+            builder.build_insert_element(
+                constants.interval_zero,
+                build_vec_unary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.vector.reduce.fmax.*",
+                    &format!("pow_square_case_zero_spanning_max_{index}"),
+                    sqbase,
+                )?
+                .into_float_value(),
+                constants.i32_one,
+                &format!("pow_square_insert_elem_{index}"),
+            )?,
+            builder
+                .build_select(
+                    all_neg,
+                    build_interval_flip(sqbase, builder, constants, index)?,
+                    sqbase,
+                    &format!("pow_square_case_base_neg_cases_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("pow_square_case_{index}"),
+        )?
+        .into_vector_value())
+}
+
 fn build_interval_pow<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
@@ -1721,56 +1780,7 @@ fn build_interval_pow<'ctx>(
     builder.build_conditional_branch(is_square, square_bb, test_integer_bb)?;
     let square_out = {
         builder.position_at_end(square_bb);
-        let sqbase = builder.build_float_mul(lhs, lhs, &format!("pow_lhs_square_base_{index}"))?;
-        let is_neg = builder.build_float_compare(
-            FloatPredicate::ULT,
-            lhs,
-            constants.interval_zero,
-            &format!("pow_square_case_zero_spanning_check_{index}"),
-        )?;
-        let is_spanning_zero = build_vec_unary_intrinsic(
-            builder,
-            module,
-            "llvm.vector.reduce.xor.*",
-            &format!("pow_square_case_zero_spanning_xor_{index}"),
-            is_neg,
-        )?
-        .into_int_value();
-        let all_neg = build_vec_unary_intrinsic(
-            builder,
-            module,
-            "llvm.vector.reduce.and.*",
-            &format!("pow_square_case_zero_spanning_xor_{index}"),
-            is_neg,
-        )?
-        .into_int_value();
-        let out = builder
-            .build_select(
-                is_spanning_zero,
-                builder.build_insert_element(
-                    constants.interval_zero,
-                    build_vec_unary_intrinsic(
-                        builder,
-                        module,
-                        "llvm.vector.reduce.fmax.*",
-                        &format!("pow_square_case_zero_spanning_max_{index}"),
-                        sqbase,
-                    )?
-                    .into_float_value(),
-                    constants.i32_one,
-                    &format!("pow_square_insert_elem_{index}"),
-                )?,
-                builder
-                    .build_select(
-                        all_neg,
-                        build_interval_flip(sqbase, builder, constants, index)?,
-                        sqbase,
-                        &format!("pow_square_case_base_neg_cases_{index}"),
-                    )?
-                    .into_vector_value(),
-                &format!("pow_square_case_{index}"),
-            )?
-            .into_vector_value();
+        let out = build_interval_square(lhs, builder, module, constants, index)?;
         builder.build_unconditional_branch(merge_bb)?;
         builder.position_at_end(test_integer_bb);
         out
