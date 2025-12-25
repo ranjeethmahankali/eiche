@@ -287,6 +287,149 @@ mod spheres {
 
         criterion_group!(bench, b_no_compilation_f64, b_no_compilation_f32);
     }
+
+    #[cfg(feature = "llvm-jit")]
+    pub mod jit_interval {
+        use super::*;
+        use eiche::{JitContext, JitIntervalFn, llvm_jit::NumberType};
+        use rand::Rng;
+
+        struct BenchmarkSetup<T: NumberType> {
+            tree: Tree,
+            queries: Box<[[[T; 2]; 3]]>,
+            outputs: Vec<[T; 2]>,
+        }
+
+        fn init_benchmark<T: NumberType>() -> BenchmarkSetup<T> {
+            let mut rng = StdRng::seed_from_u64(42);
+            let tree = random_sphere_union()
+                .compacted()
+                .expect("Cannot compact tree");
+            assert_eq!(
+                tree.symbols().len(),
+                3,
+                "The benchmarks make unsafe calls that rely on the number of inputs to this tree being exactly 3."
+            );
+            let queries: Box<[_]> = (0..N_QUERIES)
+                .map(|_| {
+                    [X_RANGE, Y_RANGE, Z_RANGE].map(|range| {
+                        let mut bounds =
+                            [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
+                        if bounds[0] > bounds[1] {
+                            bounds.swap(0, 1);
+                        }
+                        bounds.map(|b| T::from_f64(b))
+                    })
+                })
+                .collect();
+            BenchmarkSetup {
+                tree,
+                queries,
+                outputs: Vec::with_capacity(N_QUERIES),
+            }
+        }
+
+        fn with_compilation<T: NumberType>(
+            tree: &Tree,
+            values: &mut Vec<[T; 2]>,
+            queries: &[[[T; 2]; 3]],
+        ) {
+            values.clear();
+            let context = JitContext::default();
+            let eval = tree.jit_compile_interval::<T>(&context, "xyz").unwrap();
+            values.extend(queries.iter().map(|coords| {
+                let mut output = [[T::nan(), T::nan()]];
+                // SAFETY: There is an assert to make sure the tree has 3 input
+                // symbols. That is what the safe version would check for, so
+                // we don't need to check here.
+                unsafe {
+                    eval.run_unchecked(coords.as_ref(), &mut output);
+                }
+                output[0]
+            }))
+        }
+
+        /// Does not include the time to jit-compile the tree.
+        fn no_compilation<T>(
+            eval: &JitIntervalFn<'_, T>,
+            values: &mut Vec<[T; 2]>,
+            queries: &[[[T; 2]; 3]],
+        ) where
+            T: NumberType,
+        {
+            values.clear();
+            values.extend(queries.iter().map(|coords| {
+                let mut output = [[T::nan(), T::nan()]];
+                // SAFETY: There is an assert to make sure the tree has 3 input
+                // symbols. That is what the safe version would check for, so we
+                // don't need to check here.
+                unsafe {
+                    eval.run_unchecked(coords.as_ref(), &mut output);
+                }
+                output[0]
+            }));
+        }
+
+        fn b_with_compile(c: &mut Criterion) {
+            {
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark::<f64>();
+                c.bench_function("spheres-jit-f64-interval-eval-with-compile", |b| {
+                    b.iter(|| {
+                        with_compilation(&tree, black_box(&mut outputs), &queries);
+                    })
+                });
+            }
+            {
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark::<f32>();
+                c.bench_function("spheres-jit-f32-interval-eval-with-compile", |b| {
+                    b.iter(|| {
+                        with_compilation(&tree, black_box(&mut outputs), &queries);
+                    })
+                });
+            }
+        }
+
+        fn b_no_compile(c: &mut Criterion) {
+            {
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark::<f64>();
+                let context = JitContext::default();
+                let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
+                c.bench_function("spheres-jit-f64-interval-eval-no-compile", |b| {
+                    b.iter(|| {
+                        no_compilation(&eval, black_box(&mut outputs), &queries);
+                    })
+                });
+            }
+            {
+                let BenchmarkSetup {
+                    tree,
+                    queries,
+                    mut outputs,
+                } = init_benchmark::<f32>();
+                let context = JitContext::default();
+                let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
+                c.bench_function("spheres-jit-f32-interval-eval-no-compile", |b| {
+                    b.iter(|| {
+                        no_compilation(&eval, black_box(&mut outputs), &queries);
+                    })
+                });
+            }
+        }
+
+        criterion_group!(bench, b_no_compile, b_with_compile);
+    }
 }
 
 mod circles {
@@ -730,6 +873,7 @@ criterion_main!(
     spheres::value_eval::bench,
     spheres::jit_single::bench,
     spheres::jit_simd::bench,
+    spheres::jit_interval::bench,
     circles::bench,
     circles::interval::bench,
     circles::jit_single::bench,
