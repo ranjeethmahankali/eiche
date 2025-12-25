@@ -197,7 +197,7 @@ mod spheres {
                 } = init_benchmark();
                 let mut group = c.benchmark_group("lower sample count");
                 group.sample_size(10);
-                group.bench_function("spheres-jit-f64-interval-eval-with-compile", |b| {
+                group.bench_function("spheres-interval-eval-with-compile", |b| {
                     b.iter(|| {
                         with_compilation(&tree, black_box(&mut outputs), &queries);
                     })
@@ -211,7 +211,7 @@ mod spheres {
                     queries,
                     mut outputs,
                 } = init_benchmark();
-                group.bench_function("spheres-jit-f32-interval-eval-with-compile", |b| {
+                group.bench_function("spheres-interval-eval-with-compile", |b| {
                     b.iter(|| {
                         with_compilation(&tree, black_box(&mut outputs), &queries);
                     })
@@ -227,7 +227,7 @@ mod spheres {
                     mut outputs,
                 } = init_benchmark();
                 let mut eval = IntervalEvaluator::new(&tree);
-                c.bench_function("spheres-jit-f64-interval-eval-no-compile", |b| {
+                c.bench_function("spheres-interval-eval-no-compile", |b| {
                     b.iter(|| {
                         no_compilation(&mut eval, black_box(&mut outputs), &queries);
                     })
@@ -240,7 +240,7 @@ mod spheres {
                     mut outputs,
                 } = init_benchmark();
                 let mut eval = IntervalEvaluator::new(&tree);
-                c.bench_function("spheres-jit-f32-interval-eval-no-compile", |b| {
+                c.bench_function("spheres-interval-eval-no-compile", |b| {
                     b.iter(|| {
                         no_compilation(&mut eval, black_box(&mut outputs), &queries);
                     })
