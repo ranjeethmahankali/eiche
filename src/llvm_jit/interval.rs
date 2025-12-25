@@ -1580,6 +1580,7 @@ fn build_interval_sin<'ctx>(
 fn build_check_interval_spanning_zero<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
+    module: &'ctx Module,
     constants: &Constants<'ctx>,
     prefix: &str,
     index: usize,
@@ -1590,24 +1591,14 @@ fn build_check_interval_spanning_zero<'ctx>(
         constants.interval_zero,
         &format!("{prefix}_zero_spanning_check_{index}"),
     )?;
-    Ok(builder.build_int_compare(
-        IntPredicate::NE,
-        builder
-            .build_extract_element(
-                is_neg,
-                constants.i32_zero,
-                &format!("{prefix}_zero_spanning_left_{index}"),
-            )?
-            .into_int_value(),
-        builder
-            .build_extract_element(
-                is_neg,
-                constants.i32_one,
-                &format!("{prefix}_zero_spanning_right_{index}"),
-            )?
-            .into_int_value(),
-        &format!("{prefix}_zero_spanning_check_{index}"),
-    )?)
+    Ok(build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.xor.*",
+        &format!("{prefix}_zero_spanning_xor_reduce_{index}"),
+        is_neg,
+    )?
+    .into_int_value())
 }
 
 fn build_float_vec_powi<'ctx>(
@@ -1760,6 +1751,7 @@ fn build_interval_pow<'ctx>(
                 build_check_interval_spanning_zero(
                     lhs,
                     builder,
+                    module,
                     constants,
                     "pow_square_case",
                     index,
