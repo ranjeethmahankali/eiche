@@ -2641,40 +2641,44 @@ fn build_interval_mul<'ctx>(
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let straight = builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?;
-    let cross = builder.build_float_mul(
-        lhs,
-        build_interval_flip(rhs, builder, constants, index)?,
-        &format!("mul_cross_{index}"),
-    )?;
-    let concat = builder.build_shuffle_vector(
-        straight,
-        cross,
-        constants.ivec_count_to_3,
-        &format!("mul_concat_candidates_{index}"),
-    )?;
-    build_interval_compose(
-        build_vec_unary_intrinsic(
+    if lhs == rhs {
+        build_interval_square(lhs, builder, module, constants, index)
+    } else {
+        let straight = builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?;
+        let cross = builder.build_float_mul(
+            lhs,
+            build_interval_flip(rhs, builder, constants, index)?,
+            &format!("mul_cross_{index}"),
+        )?;
+        let concat = builder.build_shuffle_vector(
+            straight,
+            cross,
+            constants.ivec_count_to_3,
+            &format!("mul_concat_candidates_{index}"),
+        )?;
+        build_interval_compose(
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmin.*",
+                &format!("mul_fmin_reduce_call_{index}"),
+                concat,
+            )?
+            .into_float_value(),
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmax.*",
+                &format!("mul_fmax_reduce_call_{index}"),
+                concat,
+            )?
+            .into_float_value(),
             builder,
-            module,
-            "llvm.vector.reduce.fmin.*",
-            &format!("mul_fmin_reduce_call_{index}"),
-            concat,
-        )?
-        .into_float_value(),
-        build_vec_unary_intrinsic(
-            builder,
-            module,
-            "llvm.vector.reduce.fmax.*",
-            &format!("mul_fmax_reduce_call_{index}"),
-            concat,
-        )?
-        .into_float_value(),
-        builder,
-        constants,
-        "interval_mul_compose",
-        index,
-    )
+            constants,
+            "interval_mul_compose",
+            index,
+        )
+    }
 }
 
 fn build_interval_negate<'ctx>(
@@ -4343,6 +4347,19 @@ mod test {
             20,
             5,
         );
+    }
+
+    #[test]
+    fn t_jit_interval_mul_with_self_optimization() {
+        let tree = deftree!(* 'x 'x).unwrap().compacted().unwrap();
+        assert_eq!(tree.symbols().len(), 1);
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = vec![[f64::NAN; 2]];
+        eval.run(&[[-2.0, 3.0]], &mut outputs).unwrap();
+        let result = outputs[0];
+        assert_float_eq!(result[0], 0.0);
+        assert_float_eq!(result[1], 9.0);
     }
 
     #[test]
