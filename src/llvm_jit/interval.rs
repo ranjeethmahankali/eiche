@@ -1376,6 +1376,13 @@ fn build_interval_cos<'ctx>(
             &format!("q_extract_1_{index}"),
         )?
         .into_float_value();
+    let qhi = builder
+        .build_extract_element(
+            qinterval,
+            constants.i32_one,
+            &format!("q_extract_0_{index}"),
+        )?
+        .into_float_value();
     let nval = builder
         .build_select(
             builder.build_float_compare(
@@ -1385,17 +1392,7 @@ fn build_interval_cos<'ctx>(
                 &format!("lo_hi_compare_{index}"),
             )?,
             constants.flt_zero,
-            builder.build_float_sub(
-                builder
-                    .build_extract_element(
-                        qinterval,
-                        constants.i32_one,
-                        &format!("q_extract_0_{index}"),
-                    )?
-                    .into_float_value(),
-                qlo,
-                &format!("nval_sub_{index}"),
-            )?,
+            builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
             &format!("nval_{index}"),
         )?
         .into_float_value();
@@ -1547,6 +1544,13 @@ fn build_interval_sin<'ctx>(
             &format!("q_extract_1_{index}"),
         )?
         .into_float_value();
+    let qhi = builder
+        .build_extract_element(
+            qinterval,
+            constants.i32_one,
+            &format!("q_extract_0_{index}"),
+        )?
+        .into_float_value();
     let nval = builder
         .build_select(
             builder.build_float_compare(
@@ -1556,17 +1560,7 @@ fn build_interval_sin<'ctx>(
                 &format!("lo_hi_compare_{index}"),
             )?,
             constants.flt_zero,
-            builder.build_float_sub(
-                builder
-                    .build_extract_element(
-                        qinterval,
-                        constants.i32_one,
-                        &format!("q_extract_0_{index}"),
-                    )?
-                    .into_float_value(),
-                qlo,
-                &format!("nval_sub_{index}"),
-            )?,
+            builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
             &format!("nval_{index}"),
         )?
         .into_float_value();
