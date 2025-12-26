@@ -12,7 +12,7 @@ use crate::{
     Value,
     eval::ValueType,
     interval::{IntervalClass, classify},
-    llvm_jit::{JitCompiler, build_float_binary_intrinsic},
+    llvm_jit::JitCompiler,
 };
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
@@ -2080,18 +2080,18 @@ fn build_interval_pow<'ctx>(
         builder.build_unconditional_branch(merge_bb)?;
         (phi.as_basic_value().into_vector_value(), integer_merge_bb)
     };
-    let general_out: VectorValue<'ctx> = {
+    let (general_out, general_bb): (VectorValue<'ctx>, BasicBlock<'ctx>) = {
         builder.position_at_end(general_bb);
         let lhs = build_vec_binary_intrinsic(
             builder,
             module,
             "llvm.minnum.*",
-            &format!("pow_general_domain_adjust_min_call_{index}"),
+            &format!("pow_general_domain_clip_min_call_{index}"),
             build_vec_binary_intrinsic(
                 builder,
                 module,
                 "llvm.maxnum.*",
-                &format!("pow_general_domain_adjust_max_call_{index}"),
+                &format!("pow_general_domain_clip_max_call_{index}"),
                 lhs,
                 constants.float_vec([0.0; 2]),
             )?
@@ -2101,42 +2101,6 @@ fn build_interval_pow<'ctx>(
         .into_vector_value();
         let (a, b) = build_interval_unpack(lhs, builder, constants, "pow_general_case_", index)?;
         let (c, d) = build_interval_unpack(rhs, builder, constants, "pow_general_case_", index)?;
-        let ac = build_float_binary_intrinsic(
-            builder,
-            module,
-            "llvm.pow.*",
-            &format!("pow_general_pow_ac_{index}"),
-            a,
-            c,
-        )?
-        .into_float_value();
-        let ad = build_float_binary_intrinsic(
-            builder,
-            module,
-            "llvm.pow.*",
-            &format!("pow_general_pow_ad_{index}"),
-            a,
-            d,
-        )?
-        .into_float_value();
-        let bc = build_float_binary_intrinsic(
-            builder,
-            module,
-            "llvm.pow.*",
-            &format!("pow_general_pow_bc_{index}"),
-            b,
-            c,
-        )?
-        .into_float_value();
-        let bd = build_float_binary_intrinsic(
-            builder,
-            module,
-            "llvm.pow.*",
-            &format!("pow_general_pow_bd_{index}"),
-            b,
-            d,
-        )?
-        .into_float_value();
         // Extract values from vector for ergonomic use later.
         let rhi_is_neg = builder.build_float_compare(
             FloatPredicate::ULE,
@@ -2168,123 +2132,189 @@ fn build_interval_pow<'ctx>(
             constants.float(0.0),
             &format!("pow_general_rlo_gt_zero_{index}"),
         )?;
-        let out = builder
+        let case_idx = builder
             .build_select(
                 rhi_is_neg,
                 builder
                     .build_select(
                         lhi_is_zero,
-                        constants.float_vec([f64::NAN; 2]),
+                        constants.int_32(0, false),
                         builder
                             .build_select(
                                 lhi_lt_one,
-                                build_interval_compose(
-                                    bd,
-                                    ac,
-                                    builder,
-                                    constants,
-                                    "pow_general_case",
-                                    index,
-                                )?,
+                                constants.int_32(1, false),
                                 builder
                                     .build_select(
                                         llo_gt_one,
-                                        build_interval_compose(
-                                            bc,
-                                            ad,
-                                            builder,
-                                            constants,
-                                            "pow_general_case",
-                                            index,
-                                        )?,
-                                        build_interval_compose(
-                                            bc,
-                                            ac,
-                                            builder,
-                                            constants,
-                                            "pow_general_case",
-                                            index,
-                                        )?,
+                                        constants.int_32(2, false),
+                                        constants.int_32(3, false),
                                         &format!("pow_general_mask_choice_llo_gt_one_{index}"),
                                     )?
-                                    .into_vector_value(),
+                                    .into_int_value(),
                                 &format!("pow_general_mask_choice_lhi_lt_one_{index}"),
                             )?
-                            .into_vector_value(),
+                            .into_int_value(),
                         &format!("pow_general_mask_choice_lhi_is_zero_{index}"),
                     )?
-                    .into_vector_value(),
+                    .into_int_value(),
                 builder
                     .build_select(
                         rlo_gt_zero,
                         builder
                             .build_select(
                                 lhi_lt_one,
-                                build_interval_compose(
-                                    ad,
-                                    bc,
-                                    builder,
-                                    constants,
-                                    "pow_general_case",
-                                    index,
-                                )?,
+                                constants.int_32(4, false),
                                 builder
                                     .build_select(
                                         llo_gt_one,
-                                        build_interval_compose(
-                                            ac,
-                                            bd,
-                                            builder,
-                                            constants,
-                                            "pow_general_case",
-                                            index,
-                                        )?,
-                                        build_interval_compose(
-                                            ad,
-                                            bd,
-                                            builder,
-                                            constants,
-                                            "pow_general_case",
-                                            index,
-                                        )?,
+                                        constants.int_32(5, false),
+                                        constants.int_32(6, false),
                                         &format!("pow_general_mask_choice_llo_gt_one_{index}"),
                                     )?
-                                    .into_vector_value(),
+                                    .into_int_value(),
                                 &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
                             )?
-                            .into_vector_value(),
-                        build_interval_compose(
-                            build_float_binary_intrinsic(
-                                builder,
-                                module,
-                                "llvm.minnum.*",
-                                &format!("pow_general_case_last_case_adbc_{index}"),
-                                ad,
-                                bc,
-                            )?
-                            .into_float_value(),
-                            build_float_binary_intrinsic(
-                                builder,
-                                module,
-                                "llvm.maxnum.*",
-                                &format!("pow_general_case_last_case_acbd_{index}"),
-                                ac,
-                                bd,
-                            )?
-                            .into_float_value(),
-                            builder,
-                            constants,
-                            "pow_general_case",
-                            index,
-                        )?,
+                            .into_int_value(),
+                        constants.int_32(7, false),
                         &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
                     )?
-                    .into_vector_value(),
+                    .into_int_value(),
                 &format!("pow_general_mask_choice_rhi_is_neg_{index}"),
             )?
-            .into_vector_value();
+            .into_int_value();
+        let default_bb =
+            context.append_basic_block(function, &format!("pow_general_switch_default_{index}"));
+        let switch_merge_bb =
+            context.append_basic_block(function, &format!("pow_general_switch_merge_{index}"));
+        let switch_bbs: [BasicBlock<'ctx>; 7] = std::array::from_fn(|i| {
+            context.append_basic_block(function, &format!("pow_general_switch_{i}_{index}"))
+        });
+        {
+            let cases: [(IntValue<'ctx>, BasicBlock<'ctx>); 7] =
+                std::array::from_fn(|i| (constants.int_32(i as u32, false), switch_bbs[i]));
+            builder.build_switch(case_idx, default_bb, &cases)?;
+        }
+        let case_outputs = {
+            let mut outputs = [constants.float_vec([0.0; 2]); 7];
+            for (i, bb) in switch_bbs.iter().enumerate() {
+                builder.position_at_end(*bb);
+                let name = &format!("pow_general_case_{i}_{index}");
+                outputs[i] = match i {
+                    0 => constants.float_vec([f64::NAN; 2]),
+                    1 => build_interval_flip(
+                        build_vec_binary_intrinsic(builder, module, "llvm.pow.*", &name, lhs, rhs)?
+                            .into_vector_value(),
+                        builder,
+                        constants,
+                        index,
+                    )?,
+                    2 => build_vec_binary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.pow.*",
+                        &name,
+                        build_interval_flip(lhs, builder, constants, index)?,
+                        rhs,
+                    )?
+                    .into_vector_value(),
+                    3 => build_vec_binary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.pow.*",
+                        &name,
+                        build_interval_flip(lhs, builder, constants, index)?,
+                        builder.build_shuffle_vector(
+                            rhs,
+                            rhs.get_type().get_undef(),
+                            constants.i32_vec([0, 0], false),
+                            &format!("pow_general_case_3_rhs_shuffle_{index}"),
+                        )?,
+                    )?
+                    .into_vector_value(),
+                    4 => build_vec_binary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.pow.*",
+                        &name,
+                        lhs,
+                        build_interval_flip(rhs, builder, constants, index)?,
+                    )?
+                    .into_vector_value(),
+                    5 => {
+                        build_vec_binary_intrinsic(builder, module, "llvm.pow.*", &name, lhs, rhs)?
+                            .into_vector_value()
+                    }
+                    6 => build_vec_binary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.pow.*",
+                        &name,
+                        lhs,
+                        builder.build_shuffle_vector(
+                            rhs,
+                            rhs.get_type().get_undef(),
+                            constants.i32_vec([1, 1], false),
+                            &format!("pow_general_case_3_rhs_shuffle_{index}"),
+                        )?,
+                    )?
+                    .into_vector_value(),
+                    _ => panic!("Unreachable code. This is a bug"),
+                };
+                builder.build_unconditional_branch(switch_merge_bb)?;
+            }
+            outputs
+        };
+        builder.position_at_end(default_bb);
+        let default_out = build_interval_compose(
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmin.*",
+                &format!("pow_general_switch_default_reduce_{index}"),
+                build_vec_binary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.pow.*",
+                    &format!("pow_general_switch_default_out_{index}"),
+                    lhs,
+                    build_interval_flip(rhs, builder, constants, index)?,
+                )?
+                .into_vector_value(),
+            )?
+            .into_float_value(),
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmax.*",
+                &format!("pow_general_switch_default_reduce_{index}"),
+                build_vec_binary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.pow.*",
+                    &format!("pow_general_switch_default_out_{index}"),
+                    lhs,
+                    rhs,
+                )?
+                .into_vector_value(),
+            )?
+            .into_float_value(),
+            builder,
+            constants,
+            "pow_general_case",
+            index,
+        )?;
+        builder.build_unconditional_branch(switch_merge_bb)?;
+        builder.position_at_end(switch_merge_bb);
+        let phi = builder.build_phi(lhs.get_type(), &format!("pow_general_switch_phi_{index}"))?;
+        {
+            let incoming: [(&dyn BasicValue<'ctx>, BasicBlock<'ctx>); 7] =
+                std::array::from_fn(|i| (&case_outputs[i] as &dyn BasicValue<'ctx>, switch_bbs[i]));
+            phi.add_incoming(&incoming);
+        }
+        phi.add_incoming(&[(&default_out, default_bb)]);
+        let out = phi.as_basic_value().into_vector_value();
         builder.build_unconditional_branch(merge_bb)?;
-        out
+        (out, switch_merge_bb)
     };
     builder.position_at_end(merge_bb);
     let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
