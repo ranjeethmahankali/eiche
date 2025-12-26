@@ -1,6 +1,10 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use eiche::{Deduplicater, Error, Pruner, Tree, Value, ValueEvaluator, deftree, min};
+use eiche::{
+    Deduplicater, Error, IntervalEvaluator, Pruner, Tree, Value, ValueEvaluator, deftree, min,
+    test_util,
+};
 use eiche::{Interval, PruningState, ValuePruningEvaluator};
+use rand::Rng;
 use rand::{SeedableRng, rngs::StdRng};
 use std::hint::black_box;
 
@@ -11,42 +15,14 @@ fn sample_range(range: (f64, f64), rng: &mut StdRng) -> f64 {
 
 mod spheres {
     use super::*;
+    pub const RADIUS_RANGE: (f64, f64) = (0.2, 2.);
+    pub const X_RANGE: (f64, f64) = (0., 100.);
+    pub const Y_RANGE: (f64, f64) = (0., 100.);
+    pub const Z_RANGE: (f64, f64) = (0., 100.);
+    pub const N_SPHERES: usize = 512;
+    pub const N_QUERIES: usize = 512;
 
-    const RADIUS_RANGE: (f64, f64) = (0.2, 2.);
-    const X_RANGE: (f64, f64) = (0., 100.);
-    const Y_RANGE: (f64, f64) = (0., 100.);
-    const Z_RANGE: (f64, f64) = (0., 100.);
-    const N_SPHERES: usize = 512;
-    const N_QUERIES: usize = 512;
-
-    fn init_benchmark() -> (Tree, Vec<[f64; 3]>, Vec<f64>) {
-        let mut rng = StdRng::seed_from_u64(234);
-        (
-            {
-                let mut dedup = Deduplicater::new();
-                let mut pruner = Pruner::new();
-                random_sphere_union()
-                    .fold()
-                    .unwrap()
-                    .deduplicate(&mut dedup)
-                    .unwrap()
-                    .prune(&mut pruner)
-                    .unwrap()
-            },
-            (0..N_QUERIES)
-                .map(|_| {
-                    [
-                        sample_range(X_RANGE, &mut rng),
-                        sample_range(Y_RANGE, &mut rng),
-                        sample_range(Z_RANGE, &mut rng),
-                    ]
-                })
-                .collect(),
-            Vec::with_capacity(N_QUERIES),
-        )
-    }
-
-    fn random_sphere_union() -> Tree {
+    pub fn random_sphere_union() -> Tree {
         let mut rng = StdRng::seed_from_u64(42);
         let mut make_sphere = || -> Result<Tree, Error> {
             deftree!(- (sqrt (+ (+
@@ -63,257 +39,344 @@ mod spheres {
         assert_eq!(tree.dims(), (1, 1));
         tree
     }
+}
 
-    pub mod value_eval {
-        use super::*;
+mod circles {
+    pub type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
+    pub const PRUNE_DEPTH: usize = 9;
+    pub const DIMS: u32 = 1 << PRUNE_DEPTH; // 512 x 512 image.
+    pub const DIMS_F64: f64 = DIMS as f64;
+    pub const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
+    pub const N_CIRCLES: usize = 100;
+}
 
-        /// Does not include the compilation time, i.e. the time spent creating
-        /// the ValueEvaluator.
-        fn no_compile(eval: &mut ValueEvaluator, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
-            values.clear();
-            values.extend(queries.iter().map(|coords| {
+fn b_sphere_value_eval(c: &mut Criterion) {
+    let (tree, queries, mut outputs) = {
+        let mut rng = StdRng::seed_from_u64(234);
+        (
+            {
+                let mut dedup = Deduplicater::new();
+                let mut pruner = Pruner::new();
+                spheres::random_sphere_union()
+                    .fold()
+                    .unwrap()
+                    .deduplicate(&mut dedup)
+                    .unwrap()
+                    .prune(&mut pruner)
+                    .unwrap()
+            },
+            (0..spheres::N_QUERIES)
+                .map(|_| {
+                    [
+                        sample_range(spheres::X_RANGE, &mut rng),
+                        sample_range(spheres::Y_RANGE, &mut rng),
+                        sample_range(spheres::Z_RANGE, &mut rng),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+            Vec::with_capacity(spheres::N_QUERIES),
+        )
+    };
+    let mut eval = ValueEvaluator::new(&tree);
+    c.bench_function("spheres-value-eval", |b| {
+        b.iter(|| {
+            black_box(&mut outputs).clear();
+            black_box(&mut outputs).extend(black_box(queries.iter().map(|coords| {
                 eval.set_value('x', coords[0].into());
                 eval.set_value('y', coords[1].into());
                 eval.set_value('z', coords[2].into());
                 let results = eval.run().unwrap();
                 results[0].scalar().unwrap()
-            }))
-        }
+            })))
+        })
+    });
+}
 
-        fn b_no_compile(c: &mut Criterion) {
-            let (tree, queries, mut values) = init_benchmark();
-            let mut eval = ValueEvaluator::new(&tree);
-            c.bench_function("spheres-value-evaluation-no-compilation", |b| {
-                b.iter(|| {
-                    no_compile(black_box(&mut eval), black_box(&mut values), &queries);
-                    assert_eq!(values.len(), N_QUERIES);
+fn b_spheres_interval_eval(c: &mut Criterion) {
+    let (tree, queries, mut outputs) = {
+        let mut rng = StdRng::seed_from_u64(42);
+        let tree = spheres::random_sphere_union()
+            .compacted()
+            .expect("Cannot compact tree");
+        assert_eq!(
+            tree.symbols().len(),
+            3,
+            "The benchmarks make unsafe calls that rely on the number of inputs to this tree being exactly 3."
+        );
+        let queries: Box<[_]> = (0..spheres::N_QUERIES)
+            .map(|_| {
+                [spheres::X_RANGE, spheres::Y_RANGE, spheres::Z_RANGE].map(|range| {
+                    let mut bounds =
+                        [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
+                    if bounds[0] > bounds[1] {
+                        bounds.swap(0, 1);
+                    }
+                    Interval::Scalar(bounds[0], bounds[1])
                 })
-            });
-        }
-
-        criterion_group!(bench, b_no_compile);
-    }
-
-    pub mod interval {
-        use super::*;
-        use eiche::IntervalEvaluator;
-        use rand::Rng;
-
-        struct BenchmarkSetup {
-            tree: Tree,
-            queries: Box<[[Interval; 3]]>,
-            outputs: Vec<Interval>,
-        }
-
-        fn init_benchmark() -> BenchmarkSetup {
-            let mut rng = StdRng::seed_from_u64(42);
-            let tree = random_sphere_union()
-                .compacted()
-                .expect("Cannot compact tree");
-            assert_eq!(
-                tree.symbols().len(),
-                3,
-                "The benchmarks make unsafe calls that rely on the number of inputs to this tree being exactly 3."
-            );
-            let queries: Box<[_]> = (0..N_QUERIES)
-                .map(|_| {
-                    [X_RANGE, Y_RANGE, Z_RANGE].map(|range| {
-                        let mut bounds =
-                            [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
-                        if bounds[0] > bounds[1] {
-                            bounds.swap(0, 1);
-                        }
-                        Interval::Scalar(bounds[0], bounds[1])
-                    })
-                })
-                .collect();
-            BenchmarkSetup {
-                tree,
-                queries,
-                outputs: Vec::with_capacity(N_QUERIES),
-            }
-        }
-
-        /// Does not include the time to jit-compile the tree.
-        fn no_compilation(
-            eval: &mut IntervalEvaluator,
-            outputs: &mut Vec<Interval>,
-            queries: &[[Interval; 3]],
-        ) {
-            outputs.clear();
-            outputs.extend(queries.iter().map(|sample| {
+            })
+            .collect();
+        (tree, queries, Vec::with_capacity(spheres::N_QUERIES))
+    };
+    let mut eval = IntervalEvaluator::new(&tree);
+    c.bench_function("spheres-interval-eval", |b| {
+        b.iter(|| {
+            black_box(&mut outputs).clear();
+            black_box(&mut outputs).extend(black_box(queries.iter().map(|sample| {
                 let [x, y, z] = &sample;
-                eval.set_value('x', *x);
-                eval.set_value('y', *y);
-                eval.set_value('z', *z);
-                let result = eval.run().unwrap();
+                black_box(&mut eval).set_value('x', *x);
+                black_box(&mut eval).set_value('y', *y);
+                black_box(&mut eval).set_value('z', *z);
+                let result = black_box(&mut eval).run().unwrap();
                 result[0]
-            }))
-        }
+            })))
+        })
+    });
+}
 
-        fn b_no_compile(c: &mut Criterion) {
-            let BenchmarkSetup {
-                tree,
-                queries,
-                mut outputs,
-            } = init_benchmark();
-            let mut eval = IntervalEvaluator::new(&tree);
-            c.bench_function("spheres-interval-eval-no-compile", |b| {
-                b.iter(|| {
-                    no_compilation(&mut eval, black_box(&mut outputs), &queries);
-                })
-            });
-        }
-
-        criterion_group!(bench, b_no_compile);
-    }
-
-    #[cfg(feature = "llvm-jit")]
-    pub mod jit_single {
-        use super::*;
-        use eiche::{JitContext, JitFn, llvm_jit::NumberType};
-
-        pub fn init_benchmark<T>() -> (Tree, Vec<[T; 3]>, Vec<T>)
-        where
-            T: NumberType,
-        {
-            let mut rng = StdRng::seed_from_u64(234);
-            (
-                {
-                    let mut dedup = Deduplicater::new();
-                    let mut pruner = Pruner::new();
-                    let tree = random_sphere_union()
-                        .fold()
-                        .unwrap()
-                        .deduplicate(&mut dedup)
-                        .unwrap()
-                        .prune(&mut pruner)
-                        .unwrap();
-                    assert_eq!(
-                        tree.symbols().len(),
-                        3,
-                        "Several unchecked function calls in other benchmarks require the the tree to have exactly three inputs."
-                    );
-                    tree
-                },
-                (0..N_QUERIES)
-                    .map(|_| {
-                        [
-                            T::from_f64(sample_range(X_RANGE, &mut rng)),
-                            T::from_f64(sample_range(Y_RANGE, &mut rng)),
-                            T::from_f64(sample_range(Z_RANGE, &mut rng)),
-                        ]
-                    })
-                    .collect(),
-                Vec::with_capacity(N_QUERIES),
-            )
-        }
-
-        /// Does not include the time to jit-compile the tree.
-        fn no_compilation<T>(eval: &JitFn<'_, T>, values: &mut Vec<T>, queries: &[[T; 3]])
-        where
-            T: NumberType,
-        {
-            values.clear();
-            values.extend(queries.iter().map(|coords| {
-                let mut output = [T::nan()];
-                // SAFETY: There is an assert to make sure the tree has 3 input
-                // symbols. That is what the safe version would check for, so we
-                // don't need to check here.
-                unsafe {
-                    eval.run_unchecked(coords, &mut output);
+fn b_circles_value_eval(c: &mut Criterion) {
+    let tree = test_util::random_circles(
+        (0., circles::DIMS_F64),
+        (0., circles::DIMS_F64),
+        circles::RAD_RANGE,
+        circles::N_CIRCLES,
+    );
+    let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
+    let mut eval = ValueEvaluator::new(&tree);
+    let mut group = c.benchmark_group("circles");
+    group.sample_size(10);
+    group.bench_function("circles-value-eval", |b| {
+        b.iter(|| {
+            for y in 0..circles::DIMS {
+                black_box(&mut eval).set_value('y', Value::Scalar(y as f64 + 0.5));
+                for x in 0..circles::DIMS {
+                    black_box(&mut eval).set_value('x', Value::Scalar(x as f64 + 0.5));
+                    let outputs = black_box(&mut eval)
+                        .run()
+                        .expect("Failed to run value evaluator");
+                    *image.get_pixel_mut(x, y) = match outputs[0] {
+                        Value::Bool(_) => panic!("Expecting a scalar"),
+                        Value::Scalar(val) => image::Luma([if val < 0. {
+                            f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
+                        } else {
+                            f64::min(
+                                ((circles::RAD_RANGE.1 - val) / circles::RAD_RANGE.1) * 255.,
+                                255.,
+                            ) as u8
+                        }]),
+                    };
                 }
-                output[0]
-            }));
-        }
-
-        fn b_no_compile(c: &mut Criterion) {
-            {
-                let (tree, queries, mut values) = init_benchmark::<f64>();
-                let context = JitContext::default();
-                let eval = tree.jit_compile(&context, "xyz").unwrap();
-                c.bench_function("spheres-jit-f64-single-eval-no-compile", |b| {
-                    b.iter(|| {
-                        no_compilation(&eval, black_box(&mut values), &queries);
-                    })
-                });
             }
-            {
-                let (tree, queries, mut values) = init_benchmark::<f32>();
-                let context = JitContext::default();
-                let eval = tree.jit_compile(&context, "xyz").unwrap();
-                c.bench_function("spheres-jit-f32-single-eval-no-compile", |b| {
-                    b.iter(|| {
-                        no_compilation(&eval, black_box(&mut values), &queries);
-                    })
-                });
-            }
-        }
+        });
+    });
+}
 
-        criterion_group!(bench, b_no_compile);
+fn b_circles_pruned_eval(c: &mut Criterion) {
+    let tree = test_util::random_circles(
+        (0., circles::DIMS_F64),
+        (0., circles::DIMS_F64),
+        circles::RAD_RANGE,
+        circles::N_CIRCLES,
+    );
+    let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
+    let mut group = c.benchmark_group("circles");
+    group.sample_size(10);
+    group.bench_function("circles-pruned-eval", |b| {
+        b.iter(|| {
+            let mut eval = ValuePruningEvaluator::new(
+                &tree,
+                circles::PRUNE_DEPTH + 1,
+                [
+                    (
+                        'x',
+                        (Interval::from_scalar(0., circles::DIMS_F64).unwrap(), 2),
+                    ),
+                    (
+                        'y',
+                        (Interval::from_scalar(0., circles::DIMS_F64).unwrap(), 2),
+                    ),
+                ]
+                .into(),
+            );
+            const NORM_SAMPLES: [[f64; 2]; 4] =
+                [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
+            let mut state = black_box(&mut eval).push_or_pop_to(circles::PRUNE_DEPTH);
+            loop {
+                match state {
+                    PruningState::None => break,
+                    PruningState::Valid(_, _) => {} // Keep going.
+                    PruningState::Failure(error) => panic!("Error during pruning: {error:?}"),
+                }
+                for norm in NORM_SAMPLES {
+                    let mut sample = [0.; 2];
+                    black_box(&mut eval)
+                        .sample(&norm, &mut sample)
+                        .expect("Cannot generate sample");
+                    black_box(&mut eval).set_value('x', Value::Scalar(sample[0]));
+                    black_box(&mut eval).set_value('y', Value::Scalar(sample[1]));
+                    let outputs = black_box(&mut eval)
+                        .run()
+                        .expect("Failed to run the pruning evaluator");
+                    let coords = sample.map(|c| c as u32);
+                    *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
+                        Value::Bool(_) => panic!("Expecting a scalar"),
+                        Value::Scalar(val) => image::Luma([if val < 0. {
+                            f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
+                        } else {
+                            f64::min(
+                                ((circles::RAD_RANGE.1 - val) / circles::RAD_RANGE.1) * 255.,
+                                255.,
+                            ) as u8
+                        }]),
+                    };
+                }
+                state = eval.advance(Some(circles::PRUNE_DEPTH));
+            }
+        })
+    });
+}
+
+fn b_circles_interval_eval(c: &mut Criterion) {
+    const N_QUERIES: usize = 512;
+    let (tree, queries, mut values) = {
+        let mut rng = StdRng::seed_from_u64(42);
+        let tree = test_util::random_circles(
+            (0., circles::DIMS_F64),
+            (0., circles::DIMS_F64),
+            circles::RAD_RANGE,
+            circles::N_CIRCLES,
+        )
+        .compacted()
+        .expect("Cannot compact tree");
+        assert_eq!(
+            tree.symbols().len(),
+            2,
+            "Several unchecked function calls in other benchmarks require the tree to have exactly 2 inputs: x and y"
+        );
+        // Sample random intervals.
+        let samples = (0..N_QUERIES)
+            .map(|_| {
+                [(0., circles::DIMS_F64), (0., circles::DIMS_F64)].map(|range| {
+                    let mut bounds =
+                        [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
+                    if bounds[0] > bounds[1] {
+                        bounds.swap(0, 1);
+                    }
+                    Interval::Scalar(bounds[0], bounds[1])
+                })
+            })
+            .collect::<Vec<_>>();
+        (tree, samples, Vec::with_capacity(N_QUERIES))
+    };
+    let mut eval = IntervalEvaluator::new(&tree);
+    c.bench_function("circles-interval-eval", |b| {
+        b.iter(|| {
+            black_box(&mut values).clear();
+            black_box(&mut values).extend(black_box(queries.iter().map(|interval| {
+                black_box(&mut eval).set_value('x', interval[0]);
+                black_box(&mut eval).set_value('y', interval[1]);
+                let result = black_box(&mut eval).run().unwrap();
+                result[0]
+            })));
+        })
+    });
+}
+
+criterion_group!(
+    non_jit,
+    b_sphere_value_eval,
+    b_spheres_interval_eval,
+    b_circles_value_eval,
+    b_circles_pruned_eval,
+    b_circles_interval_eval
+);
+
+#[cfg(feature = "llvm-jit")]
+mod jit {
+    use super::*;
+    use criterion::Criterion;
+    use eiche::{
+        JitContext, SimdVec, Wide,
+        llvm_jit::{NumberType, simd_array::JitSimdBuffers},
+    };
+    use rand::{SeedableRng, rngs::StdRng};
+
+    fn init_sphere_benchmark<T: NumberType>() -> (Tree, Box<[[T; 3]]>, Vec<T>) {
+        let mut rng = StdRng::seed_from_u64(234);
+        (
+            {
+                let mut dedup = Deduplicater::new();
+                let mut pruner = Pruner::new();
+                let tree = spheres::random_sphere_union()
+                    .fold()
+                    .unwrap()
+                    .deduplicate(&mut dedup)
+                    .unwrap()
+                    .prune(&mut pruner)
+                    .unwrap();
+                assert_eq!(
+                    tree.symbols().len(),
+                    3,
+                    "Several unchecked function calls in other benchmarks require the the tree to have exactly three inputs."
+                );
+                tree
+            },
+            (0..spheres::N_QUERIES)
+                .map(|_| {
+                    [
+                        T::from_f64(sample_range(spheres::X_RANGE, &mut rng)),
+                        T::from_f64(sample_range(spheres::Y_RANGE, &mut rng)),
+                        T::from_f64(sample_range(spheres::Z_RANGE, &mut rng)),
+                    ]
+                })
+                .collect::<Box<[_]>>(),
+            Vec::with_capacity(spheres::N_QUERIES),
+        )
     }
 
-    #[cfg(feature = "llvm-jit")]
-    pub mod jit_simd {
-        use super::*;
-        use eiche::{
-            JitContext, JitSimdFn, SimdVec, Wide,
-            llvm_jit::{NumberType, simd_array::JitSimdBuffers},
-        };
-
-        fn no_compilation<T>(eval: &mut JitSimdFn<'_, T>, buf: &mut JitSimdBuffers<T>)
-        where
-            Wide: SimdVec<T>,
-            T: Copy + NumberType,
-        {
-            buf.clear_outputs();
-            eval.run(buf);
-        }
-
-        fn b_no_compilation_f64(c: &mut Criterion) {
-            let (tree, queries, _) = jit_single::init_benchmark::<f64>();
-            let context = JitContext::default();
-            let mut eval = tree.jit_compile_array(&context, "xyz").unwrap();
-            let mut buf = JitSimdBuffers::new(&tree);
-            for q in queries {
-                buf.pack(&q).unwrap();
-            }
-            c.bench_function("spheres-jit-simd-f64-no-compilation", |b| {
-                b.iter(|| no_compilation(black_box(&mut eval), black_box(&mut buf)))
-            });
-        }
-
-        fn b_no_compilation_f32(c: &mut Criterion) {
-            let (tree, queries, _) = jit_single::init_benchmark::<f32>();
-            let context = JitContext::default();
-            let mut eval = tree.jit_compile_array(&context, "xyz").unwrap();
-            let mut buf = JitSimdBuffers::new(&tree);
-            for q in queries {
-                buf.pack(&q).unwrap();
-            }
-            c.bench_function("spheres-jit-simd-f32-no-compilation", |b| {
-                b.iter(|| no_compilation(black_box(&mut eval), black_box(&mut buf)))
-            });
-        }
-
-        criterion_group!(bench, b_no_compilation_f64, b_no_compilation_f32);
+    fn b_spheres_eval<T: NumberType>(c: &mut Criterion) {
+        let (tree, queries, mut values) = init_sphere_benchmark();
+        let context = JitContext::default();
+        let eval = tree.jit_compile(&context, "xyz").unwrap();
+        c.bench_function(&format!("spheres-jit-{}", T::type_str()), |b| {
+            b.iter(|| {
+                black_box(&mut values).clear();
+                black_box(&mut values).extend(black_box(queries.iter().map(|coords| {
+                    let mut output = [T::nan()];
+                    // SAFETY: There is an assert to make sure the tree has 3 input
+                    // symbols. That is what the safe version would check for, so we
+                    // don't need to check here.
+                    unsafe {
+                        eval.run_unchecked(coords, &mut output);
+                    }
+                    output[0]
+                })));
+            })
+        });
     }
 
-    #[cfg(feature = "llvm-jit")]
-    pub mod jit_interval {
-        use super::*;
-        use eiche::{JitContext, JitIntervalFn, llvm_jit::NumberType};
-        use rand::Rng;
-
-        struct BenchmarkSetup<T: NumberType> {
-            tree: Tree,
-            queries: Box<[[[T; 2]; 3]]>,
-            outputs: Vec<[T; 2]>,
+    fn b_spheres_simd<T: NumberType>(c: &mut Criterion)
+    where
+        Wide: SimdVec<T>,
+    {
+        let (tree, queries, _) = init_sphere_benchmark::<T>();
+        let context = JitContext::default();
+        let eval = tree.jit_compile_array(&context, "xyz").unwrap();
+        let mut buf = JitSimdBuffers::<T>::new(&tree);
+        for q in queries {
+            buf.pack(&q).unwrap();
         }
+        c.bench_function(&format!("spheres-jit-simd-{}", T::type_str()), |b| {
+            b.iter(|| {
+                buf.clear_outputs();
+                black_box(&eval).run(&mut buf);
+            })
+        });
+    }
 
-        fn init_benchmark<T: NumberType>() -> BenchmarkSetup<T> {
+    fn b_spheres_interval<T: NumberType>(c: &mut Criterion) {
+        let (tree, queries, mut outputs) = {
             let mut rng = StdRng::seed_from_u64(42);
-            let tree = random_sphere_union()
+            let tree = spheres::random_sphere_union()
                 .compacted()
                 .expect("Cannot compact tree");
             assert_eq!(
@@ -321,9 +384,9 @@ mod spheres {
                 3,
                 "The benchmarks make unsafe calls that rely on the number of inputs to this tree being exactly 3."
             );
-            let queries: Box<[_]> = (0..N_QUERIES)
+            let queries: Box<[_]> = (0..spheres::N_QUERIES)
                 .map(|_| {
-                    [X_RANGE, Y_RANGE, Z_RANGE].map(|range| {
+                    [spheres::X_RANGE, spheres::Y_RANGE, spheres::Z_RANGE].map(|range| {
                         let mut bounds =
                             [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
                         if bounds[0] > bounds[1] {
@@ -333,286 +396,39 @@ mod spheres {
                     })
                 })
                 .collect();
-            BenchmarkSetup {
-                tree,
-                queries,
-                outputs: Vec::with_capacity(N_QUERIES),
-            }
-        }
-
-        /// Does not include the time to jit-compile the tree.
-        fn no_compilation<T>(
-            eval: &JitIntervalFn<'_, T>,
-            values: &mut Vec<[T; 2]>,
-            queries: &[[[T; 2]; 3]],
-        ) where
-            T: NumberType,
-        {
-            values.clear();
-            values.extend(queries.iter().map(|coords| {
-                let mut output = [[T::nan(), T::nan()]];
-                // SAFETY: There is an assert to make sure the tree has 3 input
-                // symbols. That is what the safe version would check for, so we
-                // don't need to check here.
-                unsafe {
-                    eval.run_unchecked(coords.as_ref(), &mut output);
-                }
-                output[0]
-            }));
-        }
-
-        fn b_no_compile(c: &mut Criterion) {
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark::<f64>();
-                let context = JitContext::default();
-                let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
-                c.bench_function("spheres-jit-f64-interval-eval-no-compile", |b| {
-                    b.iter(|| {
-                        no_compilation(&eval, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark::<f32>();
-                let context = JitContext::default();
-                let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
-                c.bench_function("spheres-jit-f32-interval-eval-no-compile", |b| {
-                    b.iter(|| {
-                        no_compilation(&eval, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
-        }
-
-        criterion_group!(bench, b_no_compile);
-    }
-}
-
-mod circles {
-    use super::*;
-    use eiche::test_util;
-
-    type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
-
-    const PRUNE_DEPTH: usize = 9;
-    const DIMS: u32 = 1 << PRUNE_DEPTH; // 512 x 512 image.
-    const DIMS_F64: f64 = DIMS as f64;
-    const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
-    const N_CIRCLES: usize = 100;
-
-    fn no_compile(eval: &mut ValueEvaluator, image: &mut ImageBuffer) {
-        for y in 0..DIMS {
-            eval.set_value('y', Value::Scalar(y as f64 + 0.5));
-            for x in 0..DIMS {
-                eval.set_value('x', Value::Scalar(x as f64 + 0.5));
-                let outputs = eval.run().expect("Failed to run value evaluator");
-                *image.get_pixel_mut(x, y) = match outputs[0] {
-                    Value::Bool(_) => panic!("Expecting a scalar"),
-                    Value::Scalar(val) => image::Luma([if val < 0. {
-                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
-                    } else {
-                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
-                    }]),
-                };
-            }
-        }
-    }
-
-    /// Uses the pruning evaluator.
-    fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
-        let mut eval = ValuePruningEvaluator::new(
-            tree,
-            PRUNE_DEPTH + 1,
-            [
-                ('x', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
-                ('y', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
-            ]
-            .into(),
-        );
-        const NORM_SAMPLES: [[f64; 2]; 4] =
-            [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
-        let mut state = eval.push_or_pop_to(PRUNE_DEPTH);
-        loop {
-            match state {
-                PruningState::None => break,
-                PruningState::Valid(_, _) => {} // Keep going.
-                PruningState::Failure(error) => panic!("Error during pruning: {error:?}"),
-            }
-            for norm in NORM_SAMPLES {
-                let mut sample = [0.; 2];
-                eval.sample(&norm, &mut sample)
-                    .expect("Cannot generate sample");
-                eval.set_value('x', Value::Scalar(sample[0]));
-                eval.set_value('y', Value::Scalar(sample[1]));
-                let outputs = eval.run().expect("Failed to run the pruning evaluator");
-                let coords = sample.map(|c| c as u32);
-                *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
-                    Value::Bool(_) => panic!("Expecting a scalar"),
-                    Value::Scalar(val) => image::Luma([if val < 0. {
-                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
-                    } else {
-                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
-                    }]),
-                };
-            }
-            state = eval.advance(Some(PRUNE_DEPTH));
-        }
-    }
-
-    fn b_no_compile(c: &mut Criterion) {
-        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
-        let mut image = ImageBuffer::new(DIMS, DIMS);
-        let mut eval = ValueEvaluator::new(&tree);
-        c.bench_function("circles-value-eval-no-compilation", |b| {
-            b.iter(|| no_compile(black_box(&mut eval), &mut image));
+            (tree, queries, Vec::with_capacity(spheres::N_QUERIES))
+        };
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
+        c.bench_function(&format!("spheres-jit-interval-{}", T::type_str()), |b| {
+            b.iter(|| {
+                black_box(&mut outputs).clear();
+                black_box(&mut outputs).extend(black_box(queries.iter().map(|coords| {
+                    let mut output = [[T::nan(), T::nan()]];
+                    // SAFETY: There is an assert to make sure the tree has 3 input
+                    // symbols. That is what the safe version would check for, so we
+                    // don't need to check here.
+                    unsafe {
+                        black_box(&eval).run_unchecked(coords.as_ref(), &mut output);
+                    }
+                    output[0]
+                })));
+            })
         });
     }
 
-    fn b_pruned_eval(c: &mut Criterion) {
-        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
-        let mut image = ImageBuffer::new(DIMS, DIMS);
-        c.bench_function("circles-pruned-eval", |b| {
-            b.iter(|| do_pruned_eval(black_box(&tree), &mut image))
-        });
-    }
-
-    criterion_group! {
-        name = bench;
-        config = Criterion::default().sample_size(10);
-        targets = b_no_compile, b_pruned_eval
-    }
-
-    #[cfg(feature = "llvm-jit")]
-    pub mod jit_single {
-        use super::*;
-        use eiche::{JitContext, JitFn};
-
-        fn no_compilation(eval: &mut JitFn<'_, f64>, image: &mut ImageBuffer) {
-            let mut coord = [0., 0.];
-            for y in 0..DIMS {
-                coord[1] = y as f64 + 0.5;
-                for x in 0..DIMS {
-                    coord[0] = x as f64 + 0.5;
-                    let mut output = [0.];
-                    // SAFETY: Upstream functions assert to make sure the tree
-                    // has exactly 3 inputs. This is what the safe version
-                    // checks for, so we don't need to check agian.
-                    unsafe { eval.run_unchecked(&coord, &mut output) };
-                    let val = output[0];
-                    *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
-                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
-                    } else {
-                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
-                    }]);
-                }
-            }
-        }
-
-        fn b_no_compile(c: &mut Criterion) {
-            let tree =
-                test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
-            let mut image = ImageBuffer::new(DIMS, DIMS);
-            let context = JitContext::default();
-            let mut eval = tree.jit_compile(&context, "xy").unwrap();
-            c.bench_function("circles-jit-single-eval-no-compile", |b| {
-                b.iter(|| {
-                    no_compilation(&mut eval, black_box(&mut image));
-                })
-            });
-        }
-
-        criterion_group!(bench, b_no_compile);
-    }
-
-    pub mod interval {
-        use super::*;
-        use eiche::IntervalEvaluator;
-        use rand::Rng;
-
+    fn b_circles_interval<T: NumberType>(c: &mut Criterion) {
         const N_QUERIES: usize = 512;
-
-        fn init_benchmark() -> (Tree, Box<[[Interval; 2]]>, Vec<Interval>) {
+        let (tree, queries, mut outputs) = {
             let mut rng = StdRng::seed_from_u64(42);
-            let tree =
-                test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES)
-                    .compacted()
-                    .expect("Cannot compact tree");
-            assert_eq!(
-                tree.symbols().len(),
-                2,
-                "Several unchecked function calls in other benchmarks require the tree to have exactly 2 inputs: x and y"
-            );
-            // Sample random intervals.
-            let samples = (0..N_QUERIES)
-                .map(|_| {
-                    [(0., DIMS_F64), (0., DIMS_F64)].map(|range| {
-                        let mut bounds =
-                            [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
-                        if bounds[0] > bounds[1] {
-                            bounds.swap(0, 1);
-                        }
-                        Interval::Scalar(bounds[0], bounds[1])
-                    })
-                })
-                .collect();
-            (tree, samples, Vec::with_capacity(N_QUERIES))
-        }
-
-        fn no_compilation(
-            eval: &mut IntervalEvaluator,
-            values: &mut Vec<Interval>,
-            queries: &[[Interval; 2]],
-        ) {
-            values.clear();
-            values.extend(queries.iter().map(|interval| {
-                eval.set_value('x', interval[0]);
-                eval.set_value('y', interval[1]);
-                let result = eval.run().unwrap();
-                result[0]
-            }));
-        }
-
-        fn b_no_compile(c: &mut Criterion) {
-            let (tree, queries, mut values) = init_benchmark();
-            let mut eval = IntervalEvaluator::new(&tree);
-            c.bench_function("circles-interval-eval-no-compile", |b| {
-                b.iter(|| {
-                    no_compilation(&mut eval, black_box(&mut values), &queries);
-                })
-            });
-        }
-
-        criterion_group!(bench, b_no_compile);
-    }
-
-    #[cfg(feature = "llvm-jit")]
-    pub mod jit_interval {
-        use super::*;
-        use eiche::{JitContext, JitIntervalFn, llvm_jit::NumberType};
-        use rand::Rng;
-
-        const N_QUERIES: usize = 512;
-
-        struct BenchmarkSetup<T: NumberType> {
-            tree: Tree,
-            queries: Box<[[[T; 2]; 2]]>,
-            outputs: Vec<[T; 2]>,
-        }
-
-        fn init_benchmark<T: NumberType>() -> BenchmarkSetup<T> {
-            let mut rng = StdRng::seed_from_u64(42);
-            let tree =
-                test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES)
-                    .compacted()
-                    .expect("Cannot compact tree");
+            let tree = test_util::random_circles(
+                (0., circles::DIMS_F64),
+                (0., circles::DIMS_F64),
+                circles::RAD_RANGE,
+                circles::N_CIRCLES,
+            )
+            .compacted()
+            .expect("Cannot compact tree");
             assert_eq!(
                 tree.symbols().len(),
                 2,
@@ -621,7 +437,7 @@ mod circles {
             // Sample random intervals.
             let queries = (0..N_QUERIES)
                 .map(|_| {
-                    [(0., DIMS_F64), (0., DIMS_F64)].map(|range| {
+                    [(0., circles::DIMS_F64), (0., circles::DIMS_F64)].map(|range| {
                         let mut bounds =
                             [0, 1].map(|_| range.0 + rng.random::<f64>() * (range.1 - range.0));
                         if bounds[0] > bounds[1] {
@@ -630,84 +446,82 @@ mod circles {
                         bounds.map(|b| T::from_f64(b))
                     })
                 })
-                .collect();
-            BenchmarkSetup {
-                tree,
-                queries,
-                outputs: Vec::with_capacity(N_QUERIES),
-            }
-        }
-
-        fn no_compilation<T: NumberType>(
-            eval: &JitIntervalFn<'_, T>,
-            values: &mut Vec<[T; 2]>,
-            queries: &[[[T; 2]; 2]],
-        ) {
-            values.clear();
-            values.extend(queries.iter().map(|interval| {
-                let mut output = [[T::nan(); 2]];
-                // SAFETY: There is an assert to make sure the tree has 3 input
-                // symbols. That is what the safe version would check for, so
-                // we don't need to check here.
-                unsafe {
-                    eval.run_unchecked(interval.as_ref(), &mut output);
-                }
-                output[0]
-            }));
-        }
-
-        fn b_no_compile(c: &mut Criterion) {
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark::<f64>();
-                let context = JitContext::default();
-                let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
-                c.bench_function("circles-interval-jit-f64-eval-no-compile", |b| {
-                    b.iter(|| {
-                        no_compilation(&eval, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark::<f32>();
-                let context = JitContext::default();
-                let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
-                c.bench_function("circles-interval-jit-f32-eval-no-compile", |b| {
-                    b.iter(|| {
-                        no_compilation(&eval, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
-        }
-
-        criterion_group!(bench, b_no_compile);
+                .collect::<Vec<_>>();
+            (tree, queries, Vec::with_capacity(N_QUERIES))
+        };
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval(&context, "xyz").unwrap();
+        c.bench_function(&format!("circles-jit-interval-{}", T::type_str()), |b| {
+            b.iter(|| {
+                black_box(&mut outputs).clear();
+                black_box(&mut outputs).extend(black_box(queries.iter().map(|interval| {
+                    let mut output = [[T::nan(); 2]];
+                    // SAFETY: There is an assert to make sure the tree has 3 input
+                    // symbols. That is what the safe version would check for, so
+                    // we don't need to check here.
+                    unsafe {
+                        black_box(&eval).run_unchecked(interval.as_ref(), &mut output);
+                    }
+                    output[0]
+                })));
+            })
+        });
     }
+
+    fn b_circles_eval<T: NumberType>(c: &mut Criterion) {
+        let tree = test_util::random_circles(
+            (0., circles::DIMS_F64),
+            (0., circles::DIMS_F64),
+            circles::RAD_RANGE,
+            circles::N_CIRCLES,
+        );
+        let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
+        let context = JitContext::default();
+        let eval = tree.jit_compile::<T>(&context, "xy").unwrap();
+        c.bench_function(&format!("circles-jit-{}", T::type_str()), |b| {
+            b.iter(|| {
+                let mut coord = [T::nan(); 2];
+                for y in 0..circles::DIMS {
+                    coord[1] = T::from_f64(y as f64 + 0.5);
+                    for x in 0..circles::DIMS {
+                        coord[0] = T::from_f64(x as f64 + 0.5);
+                        let mut output = [T::nan()];
+                        // SAFETY: Upstream functions assert to make sure the tree
+                        // has exactly 3 inputs. This is what the safe version
+                        // checks for, so we don't need to check agian.
+                        unsafe { eval.run_unchecked(&coord, &mut output) };
+                        let val = output[0].to_f64();
+                        *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                            f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
+                        } else {
+                            f64::min(
+                                ((circles::RAD_RANGE.1 - val) / circles::RAD_RANGE.1) * 255.,
+                                255.,
+                            ) as u8
+                        }]);
+                    }
+                }
+            })
+        });
+    }
+
+    criterion_group!(
+        jit_group,
+        b_spheres_eval::<f32>,
+        b_spheres_eval::<f64>,
+        b_spheres_simd::<f32>,
+        b_spheres_simd::<f64>,
+        b_spheres_interval::<f32>,
+        b_spheres_interval::<f64>,
+        b_circles_interval::<f32>,
+        b_circles_interval::<f64>,
+        b_circles_eval::<f32>,
+        b_circles_eval::<f64>
+    );
 }
 
 #[cfg(not(feature = "llvm-jit"))]
-criterion_main!(
-    spheres::value_eval::bench,
-    spheres::interval::bench,
-    circles::bench,
-    circles::interval::bench
-);
+criterion_main!(non_jit);
 
 #[cfg(feature = "llvm-jit")]
-criterion_main!(
-    spheres::value_eval::bench,
-    spheres::interval::bench,
-    spheres::jit_single::bench,
-    spheres::jit_simd::bench,
-    spheres::jit_interval::bench,
-    circles::bench,
-    circles::interval::bench,
-    circles::jit_single::bench,
-    circles::jit_interval::bench
-);
+criterion_main!(non_jit, jit::jit_group);
