@@ -385,8 +385,11 @@ impl Tree {
                         )?
                         .as_basic_value_enum(),
                     Multiply => build_interval_mul(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].scalar()?, ranges[*rhs].scalar()?),
                         builder,
                         &compiler.module,
                         &constants,
@@ -394,8 +397,10 @@ impl Tree {
                     )?
                     .as_basic_value_enum(),
                     Divide => build_interval_div(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
                         builder,
                         &compiler.module,
                         &constants,
@@ -1132,7 +1137,7 @@ fn build_interval_remainder<'ctx>(
     i32_type: IntType<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let div_result = build_interval_div(lhs, rhs, builder, module, constants, i32_type, index)?;
+    let div_result = build_interval_div((lhs, rhs), builder, module, constants, i32_type, index)?;
     let mul_result = builder.build_float_mul(
         build_vec_unary_intrinsic(
             builder,
@@ -2419,8 +2424,7 @@ fn build_interval_unpack<'ctx>(
 }
 
 fn build_interval_div<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
@@ -2428,6 +2432,7 @@ fn build_interval_div<'ctx>(
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     use crate::interval::IntervalClass::*;
+    let (lhs, rhs) = inputs;
     let mask = builder.build_int_add(
         builder.build_int_mul(
             build_interval_classify(lhs, builder, module, constants, index)?,
@@ -2706,15 +2711,25 @@ fn build_interval_classify<'ctx>(
 }
 
 fn build_interval_mul<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let (lhs, rhs) = inputs;
+    let (range_left, range_right) = ranges;
     if lhs == rhs {
         build_interval_square(lhs, builder, module, constants, index)
+    } else if (range_left.0 == 0.0 && range_left.1 == 0.0)
+        || (range_right.0 == 0.0 && range_right.1 == 0.0)
+    {
+        Ok(constants.interval_zero)
+    } else if range_left.0 == 1.0 && range_left.1 == 1.0 {
+        Ok(rhs)
+    } else if range_right.0 == 1.0 && range_right.1 == 1.0 {
+        Ok(lhs)
     } else {
         let straight = builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?;
         let cross = builder.build_float_mul(
