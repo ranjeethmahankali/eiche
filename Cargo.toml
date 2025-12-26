@@ -46,12 +46,6 @@ path = "benches/substitute.rs"
 harness = false
 
 
-[[bench]]
-name = "interval"
-path = "benches/interval.rs"
-harness = false
-
-
 [profile.release-with-debug]
 inherits = "release"
 strip = false # Automatically strip symbols
