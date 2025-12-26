@@ -360,7 +360,7 @@ fn b_circles_value_eval(c: &mut Criterion) {
     let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
     let mut eval = ValueEvaluator::new(&tree);
     let mut group = c.benchmark_group("circles");
-    group.sample_size(10);
+    group.sample_size(5);
     group.bench_function("circles-value-eval", |b| {
         b.iter(|| {
             for y in 0..circles::DIMS {
@@ -957,7 +957,7 @@ mod jit {
 }
 
 #[cfg(not(feature = "llvm-jit"))]
-criterion_main!(non_jit);
+criterion_main!(bench_group);
 
 #[cfg(feature = "llvm-jit")]
 criterion_main!(bench_group, jit::bench_group);
