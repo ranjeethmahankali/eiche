@@ -427,7 +427,16 @@ mod circles {
     }
 
     /// Uses the pruning evaluator.
-    fn do_pruned_eval(eval: &mut ValuePruningEvaluator, image: &mut ImageBuffer) {
+    fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
+        let mut eval = ValuePruningEvaluator::new(
+            tree,
+            PRUNE_DEPTH + 1,
+            [
+                ('x', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
+                ('y', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
+            ]
+            .into(),
+        );
         const NORM_SAMPLES: [[f64; 2]; 4] =
             [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
         let mut state = eval.push_or_pop_to(PRUNE_DEPTH);
@@ -470,17 +479,8 @@ mod circles {
     fn b_pruned_eval(c: &mut Criterion) {
         let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
-        let mut eval = ValuePruningEvaluator::new(
-            &tree,
-            PRUNE_DEPTH + 1,
-            [
-                ('x', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
-                ('y', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
-            ]
-            .into(),
-        );
         c.bench_function("circles-pruned-eval", |b| {
-            b.iter(|| do_pruned_eval(black_box(&mut eval), &mut image))
+            b.iter(|| do_pruned_eval(black_box(&tree), &mut image))
         });
     }
 
