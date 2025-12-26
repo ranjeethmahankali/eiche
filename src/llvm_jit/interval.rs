@@ -16,6 +16,7 @@ use crate::{
 };
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
+    basic_block::BasicBlock,
     builder::Builder,
     context::Context,
     execution_engine::JitFunction,
@@ -80,7 +81,6 @@ struct Constants<'ctx> {
     i32_one: IntValue<'ctx>,
     i32_two: IntValue<'ctx>,
     i32_three: IntValue<'ctx>,
-    i32_four: IntValue<'ctx>,
     // Floats.
     flt_zero: FloatValue<'ctx>,
     flt_one: FloatValue<'ctx>,
@@ -118,7 +118,6 @@ impl<'ctx> Constants<'ctx> {
             i32_one: i32_type.const_int(1, false),
             i32_two: i32_type.const_int(2, false),
             i32_three: i32_type.const_int(3, false),
-            i32_four: i32_type.const_int(4, false),
             // Floats.
             flt_zero: flt_type.const_float(0.0),
             flt_one: flt_type.const_float(1.0),
@@ -396,6 +395,7 @@ impl Tree {
                         ),
                         builder,
                         &compiler.module,
+                        function,
                         &constants,
                         index,
                     )?
@@ -445,6 +445,7 @@ impl Tree {
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
+                        function,
                         &constants,
                         index,
                     )?
@@ -1154,10 +1155,11 @@ fn build_interval_remainder<'ctx>(
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
+    function: FunctionValue<'ctx>,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let div_result = build_interval_div((lhs, rhs), builder, module, constants, index)?;
+    let div_result = build_interval_div((lhs, rhs), builder, module, function, constants, index)?;
     let mul_result = builder.build_float_mul(
         build_vec_unary_intrinsic(
             builder,
@@ -2453,6 +2455,7 @@ fn build_interval_div<'ctx>(
     inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
     builder: &'ctx Builder,
     module: &'ctx Module,
+    function: FunctionValue<'ctx>,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
@@ -2463,7 +2466,7 @@ fn build_interval_div<'ctx>(
     let mask = builder.build_or(
         builder.build_left_shift(
             build_interval_classify(rhs, builder, module, constants, index)?,
-            constants.i32_four,
+            i8_type.const_int(4, false),
             &format!("interval_div_mask_shift_{index}"),
         )?,
         build_interval_classify(lhs, builder, module, constants, index)?,
@@ -2505,125 +2508,129 @@ fn build_interval_div<'ctx>(
         &[(ZeroPositive, ZeroPositive), (Positive, ZeroPositive)],
         &[(ZeroPositive, Positive), (Positive, Positive)],
     ];
-    let outputs: [VectorValue<'ctx>; 12] = [
-        constants.interval_entire,
-        constants.interval_zero,
-        builder.build_shuffle_vector(
-            straight,
-            cross,
-            VectorType::const_vector(&[constants.i32_one, constants.i32_two]),
-            &format!("interval_div_case_spanning_negative_{index}"),
-        )?,
-        builder.build_shuffle_vector(
-            straight,
-            cross,
-            VectorType::const_vector(&[constants.i32_zero, constants.i32_three]),
-            &format!("interval_div_case_spanning_positive_{index}"),
-        )?,
-        build_interval_compose(
-            builder
-                .build_extract_element(
-                    cross,
-                    constants.i32_one,
-                    &format!("interval_div_case_neg_neg_zero_intermediate_0_{index}"),
-                )?
-                .into_float_value(),
-            constants.flt_inf,
-            builder,
-            constants,
-            "case_neg_neg_zero",
-            index,
-        )?,
-        builder.build_shuffle_vector(
-            straight,
-            cross,
-            VectorType::const_vector(&[constants.i32_three, constants.i32_two]),
-            &format!("interval_div_case_neg_zero_neg_{index}"),
-        )?,
-        build_interval_compose(
-            constants.flt_neg_inf,
-            builder
-                .build_extract_element(
+    let default_bb = context.append_basic_block(function, &format!("div_switch_default_{index}"));
+    let merge_bb = context.append_basic_block(function, &format!("div_switch_merge_{index}"));
+    let (cases, bbs) = {
+        let mut cases: Vec<(IntValue<'ctx>, BasicBlock<'ctx>)> = Vec::with_capacity(32);
+        let mut bbs = Vec::new();
+        for (i, group) in CASES.iter().enumerate() {
+            let bb = context.append_basic_block(function, &format!("div_siwtch_case_{i}_{index}"));
+            bbs.push(bb);
+            cases.extend(group.iter().map(move |&(lcase, rcase)| {
+                (
+                    i8_type.const_int(((class_mask(rcase) << 4) | class_mask(lcase)) as u64, false),
+                    bb,
+                )
+            }));
+        }
+        (cases.into_boxed_slice(), bbs)
+    };
+    builder.build_switch(mask, default_bb, &cases)?;
+    let outputs = {
+        let mut outputs = [constants.interval_empty; CASES.len()];
+        for (i, bb) in bbs.iter().copied().enumerate() {
+            builder.position_at_end(bb);
+            outputs[i] = match i {
+                0 => constants.interval_entire,
+                1 => constants.interval_zero,
+                2 => builder.build_shuffle_vector(
                     straight,
-                    constants.i32_one,
-                    &format!("interval_div_case_neg_zero_positive_upper_{index}"),
-                )?
-                .into_float_value(),
-            builder,
-            constants,
-            "interval_div_case_neg_zero_positive",
-            index,
-        )?,
-        straight,
-        build_interval_compose(
-            constants.flt_neg_inf,
-            builder
-                .build_extract_element(
-                    straight,
-                    constants.i32_zero,
-                    &format!("interval_div_case_zero_positive_neg_{index}"),
-                )?
-                .into_float_value(),
-            builder,
-            constants,
-            "interval_div_case_zero_positive_neg",
-            index,
-        )?,
-        build_interval_flip(straight, builder, constants, index)?,
-        build_interval_compose(
-            builder
-                .build_extract_element(
                     cross,
-                    constants.i32_zero,
-                    &format!("interval_div_case_zero_positive_extract_{index}"),
-                )?
-                .into_float_value(),
-            constants.flt_inf,
-            builder,
-            constants,
-            "interval_div_case_zero_positive",
-            index,
-        )?,
-        cross,
-    ];
-    CASES
+                    VectorType::const_vector(&[constants.i32_one, constants.i32_two]),
+                    &format!("interval_div_case_spanning_negative_{index}"),
+                )?,
+                3 => builder.build_shuffle_vector(
+                    straight,
+                    cross,
+                    VectorType::const_vector(&[constants.i32_zero, constants.i32_three]),
+                    &format!("interval_div_case_spanning_positive_{index}"),
+                )?,
+                4 => build_interval_compose(
+                    builder
+                        .build_extract_element(
+                            cross,
+                            constants.i32_one,
+                            &format!("interval_div_case_neg_neg_zero_intermediate_0_{index}"),
+                        )?
+                        .into_float_value(),
+                    constants.flt_inf,
+                    builder,
+                    constants,
+                    "case_neg_neg_zero",
+                    index,
+                )?,
+                5 => builder.build_shuffle_vector(
+                    straight,
+                    cross,
+                    VectorType::const_vector(&[constants.i32_three, constants.i32_two]),
+                    &format!("interval_div_case_neg_zero_neg_{index}"),
+                )?,
+                6 => build_interval_compose(
+                    constants.flt_neg_inf,
+                    builder
+                        .build_extract_element(
+                            straight,
+                            constants.i32_one,
+                            &format!("interval_div_case_neg_zero_positive_upper_{index}"),
+                        )?
+                        .into_float_value(),
+                    builder,
+                    constants,
+                    "interval_div_case_neg_zero_positive",
+                    index,
+                )?,
+                7 => straight,
+                8 => build_interval_compose(
+                    constants.flt_neg_inf,
+                    builder
+                        .build_extract_element(
+                            straight,
+                            constants.i32_zero,
+                            &format!("interval_div_case_zero_positive_neg_{index}"),
+                        )?
+                        .into_float_value(),
+                    builder,
+                    constants,
+                    "interval_div_case_zero_positive_neg",
+                    index,
+                )?,
+                9 => build_interval_flip(straight, builder, constants, index)?,
+                10 => build_interval_compose(
+                    builder
+                        .build_extract_element(
+                            cross,
+                            constants.i32_zero,
+                            &format!("interval_div_case_zero_positive_extract_{index}"),
+                        )?
+                        .into_float_value(),
+                    constants.flt_inf,
+                    builder,
+                    constants,
+                    "interval_div_case_zero_positive",
+                    index,
+                )?,
+                11 => cross,
+                _ => panic!("This should never happen as there are only 12 cases."),
+            };
+            builder.build_unconditional_branch(merge_bb)?;
+        }
+        outputs
+    };
+    builder.position_at_end(default_bb);
+    builder.build_unconditional_branch(merge_bb)?;
+    builder.position_at_end(merge_bb);
+    let phi = builder.build_phi(
+        constants.interval_empty.get_type(),
+        &format!("div_switch_phi_{index}"),
+    )?;
+    let incoming: Box<[_]> = outputs
         .iter()
-        .rev()
-        .zip(outputs.into_iter().rev())
-        .enumerate()
-        .try_fold(constants.interval_empty, |acc, (i, (cases, out))| {
-            let (_, cond) = cases
-                .iter()
-                .enumerate()
-                .map(|(j, (lcase, rcase))| -> Result<IntValue<'ctx>, Error> {
-                    Ok(builder.build_int_compare(
-                        IntPredicate::EQ,
-                        mask,
-                        i8_type.const_int(
-                            ((class_mask(*rcase) << 4) as u64) | (class_mask(*lcase) as u64),
-                            false,
-                        ),
-                        &format!("interval_div_case_{i}_subcase_{j}_{index}"),
-                    )?)
-                })
-                .enumerate()
-                .reduce(|(_, acc), (j, current)| match (acc, current) {
-                    (Ok(acc), Ok(current)) => match builder.build_or(
-                        acc,
-                        current,
-                        &format!("interval_div_case_{i}_combine_{j}_{index}"),
-                    ) {
-                        Ok(result) => (j, Ok(result)),
-                        Err(e) => (j, Err(e.into())),
-                    },
-                    (Ok(_), Err(e)) | (Err(e), Ok(_)) | (Err(e), Err(_)) => (j, Err(e)),
-                })
-                .expect("Unable to combine all the cases when compiling interval division");
-            let cond = cond?;
-            Ok(builder
-                .build_select(cond, out, acc, &format!("interval_div_case_{i}_choice"))?
-                .into_vector_value())
-        })
+        .zip(bbs.into_iter())
+        .map(|(out, bb)| (out as &dyn BasicValue<'ctx>, bb))
+        .collect();
+    phi.add_incoming(&[(&constants.interval_empty, default_bb)]);
+    phi.add_incoming(&incoming);
+    Ok(phi.as_basic_value().into_vector_value())
 }
 
 const fn class_mask(c: IntervalClass) -> u8 {
