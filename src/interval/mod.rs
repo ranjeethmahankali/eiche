@@ -64,7 +64,7 @@ impl Interval {
     }
 }
 
-fn classify(lo: f64, hi: f64) -> IntervalClass {
+pub fn classify(lo: f64, hi: f64) -> IntervalClass {
     use IntervalClass::*;
     use std::cmp::Ordering::*;
     if lo.is_nan() && hi.is_nan() {

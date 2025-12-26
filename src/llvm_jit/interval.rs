@@ -11,7 +11,7 @@ use crate::{
     UnaryOp::*,
     Value,
     eval::ValueType,
-    interval::IntervalClass,
+    interval::{IntervalClass, classify},
     llvm_jit::{JitCompiler, build_float_binary_intrinsic},
 };
 use inkwell::{
@@ -402,6 +402,7 @@ impl Tree {
                             regs[*lhs].into_vector_value(),
                             regs[*rhs].into_vector_value(),
                         ),
+                        (ranges[*lhs].scalar()?, ranges[*rhs].scalar()?),
                         builder,
                         &compiler.module,
                         function,
@@ -450,8 +451,11 @@ impl Tree {
                         regs[*rhs].into_vector_value(),
                     )?,
                     Remainder => build_interval_remainder(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].scalar()?, ranges[*rhs].scalar()?),
                         builder,
                         &compiler.module,
                         function,
@@ -1160,15 +1164,17 @@ fn build_interval_not_equal<'ctx>(
 }
 
 fn build_interval_remainder<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
     function: FunctionValue<'ctx>,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let div_result = build_interval_div((lhs, rhs), builder, module, function, constants, index)?;
+    let div_result =
+        build_interval_div(inputs, ranges, builder, module, function, constants, index)?;
+    let (lhs, rhs) = inputs;
     let mul_result = builder.build_float_mul(
         build_vec_unary_intrinsic(
             builder,
@@ -2462,6 +2468,7 @@ fn build_interval_unpack<'ctx>(
 
 fn build_interval_div<'ctx>(
     inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
     function: FunctionValue<'ctx>,
@@ -2469,9 +2476,49 @@ fn build_interval_div<'ctx>(
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     use crate::interval::IntervalClass::*;
+    let (lhs, rhs) = inputs;
+    let ((llo, lhi), (rlo, rhi)) = ranges;
+    // Check for special case optimizations.
+    match (classify(llo, lhi), classify(rlo, rhi)) {
+        (Empty, _) | (_, Empty) | (_, SingletonZero) => return Ok(constants.interval_empty),
+        (SingletonZero, Spanning)
+        | (SingletonZero, NegativeZero)
+        | (SingletonZero, Negative)
+        | (SingletonZero, ZeroPositive)
+        | (SingletonZero, Positive) => return Ok(constants.interval_zero),
+        (NegativeZero, Negative) | (Negative, Negative) => {
+            return Ok(builder.build_float_div(
+                build_interval_flip(lhs, builder, constants, index)?,
+                rhs,
+                &format!("div_neg_neg_special_case_{index}"),
+            )?);
+        }
+        (NegativeZero, Positive) | (Negative, Positive) => {
+            return Ok(builder.build_float_div(
+                lhs,
+                rhs,
+                &format!("div_neg_pos_special_case_{index}"),
+            )?);
+        }
+        (ZeroPositive, Negative) | (Positive, Negative) => {
+            return Ok(build_interval_flip(
+                builder.build_float_div(lhs, rhs, &format!("div_pos_neg_special_case_{index}"))?,
+                builder,
+                constants,
+                index,
+            )?);
+        }
+        (ZeroPositive, Positive) | (Positive, Positive) => {
+            return Ok(builder.build_float_div(
+                lhs,
+                build_interval_flip(rhs, builder, constants, index)?,
+                &format!("div_pos_pos_special_case_{index}"),
+            )?);
+        }
+        _ => {} // No special cases found.
+    }
     let context = module.get_context();
     let i8_type = context.i8_type();
-    let (lhs, rhs) = inputs;
     let mask = builder.build_or(
         builder.build_left_shift(
             build_interval_classify(rhs, builder, module, constants, index)?,
