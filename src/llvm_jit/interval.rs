@@ -1361,14 +1361,19 @@ fn build_interval_cos<'ctx>(
         )?,
     )?
     .into_vector_value();
-    let (lo, hi) = (
-        builder
-            .build_extract_element(input, constants.i32_zero, &format!("extract_lo_{index}"))?
-            .into_float_value(),
-        builder
-            .build_extract_element(input, constants.i32_one, &format!("extract_lo_{index}"))?
-            .into_float_value(),
-    );
+    let is_singleton = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("sin_singleton_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            input,
+            build_interval_flip(input, builder, constants, index)?,
+            &format!("sin_singleton_check_reduce_{index}"),
+        )?,
+    )?
+    .into_int_value();
     let qlo = builder
         .build_extract_element(
             qinterval,
@@ -1385,12 +1390,7 @@ fn build_interval_cos<'ctx>(
         .into_float_value();
     let nval = builder
         .build_select(
-            builder.build_float_compare(
-                FloatPredicate::UEQ,
-                lo,
-                hi,
-                &format!("lo_hi_compare_{index}"),
-            )?,
+            is_singleton,
             constants.flt_zero,
             builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
             &format!("nval_{index}"),
@@ -1516,14 +1516,19 @@ fn build_interval_sin<'ctx>(
         )?,
     )?
     .into_vector_value();
-    let (lo, hi) = (
-        builder
-            .build_extract_element(input, constants.i32_zero, &format!("extract_lo_{index}"))?
-            .into_float_value(),
-        builder
-            .build_extract_element(input, constants.i32_one, &format!("extract_lo_{index}"))?
-            .into_float_value(),
-    );
+    let is_singleton = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("sin_singleton_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            input,
+            build_interval_flip(input, builder, constants, index)?,
+            &format!("sin_singleton_check_reduce_{index}"),
+        )?,
+    )?
+    .into_int_value();
     let qlo = builder
         .build_extract_element(
             qinterval,
@@ -1540,12 +1545,7 @@ fn build_interval_sin<'ctx>(
         .into_float_value();
     let nval = builder
         .build_select(
-            builder.build_float_compare(
-                FloatPredicate::UEQ,
-                lo,
-                hi,
-                &format!("lo_hi_compare_{index}"),
-            )?,
+            is_singleton,
             constants.flt_zero,
             builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
             &format!("nval_{index}"),
