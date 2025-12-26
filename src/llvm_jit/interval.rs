@@ -1342,160 +1342,6 @@ fn build_interval_tan<'ctx>(
         .into_vector_value())
 }
 
-fn build_interval_cos<'ctx>(
-    input: VectorValue<'ctx>,
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    constants: &Constants<'ctx>,
-    index: usize,
-) -> Result<VectorValue<'ctx>, Error> {
-    let qinterval = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.floor.*",
-        &format!("intermediate_floor_{index}"),
-        builder.build_float_div(
-            input,
-            VectorType::const_vector(&[constants.flt_pi, constants.flt_pi]),
-            &format!("div_pi_{index}"),
-        )?,
-    )?
-    .into_vector_value();
-    let is_singleton = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.and.*",
-        &format!("sin_singleton_check_reduce_{index}"),
-        builder.build_float_compare(
-            FloatPredicate::UEQ,
-            input,
-            build_interval_flip(input, builder, constants, index)?,
-            &format!("sin_singleton_check_reduce_{index}"),
-        )?,
-    )?
-    .into_int_value();
-    let qlo = builder
-        .build_extract_element(
-            qinterval,
-            constants.i32_zero,
-            &format!("q_extract_1_{index}"),
-        )?
-        .into_float_value();
-    let qhi = builder
-        .build_extract_element(
-            qinterval,
-            constants.i32_one,
-            &format!("q_extract_0_{index}"),
-        )?
-        .into_float_value();
-    let nval = builder
-        .build_select(
-            is_singleton,
-            constants.flt_zero,
-            builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
-            &format!("nval_{index}"),
-        )?
-        .into_float_value();
-    let q_is_even = builder.build_float_compare(
-        FloatPredicate::UEQ,
-        qlo,
-        builder.build_float_mul(
-            constants.flt_two,
-            build_float_unary_intrinsic(
-                builder,
-                module,
-                "llvm.floor.*",
-                &format!("intermediate_qval_floor_{index}"),
-                builder.build_float_mul(
-                    qlo,
-                    constants.flt_half,
-                    &format!("qval_half_mul_{index}"),
-                )?,
-            )?
-            .into_float_value(),
-            &format!("qval_doubling_{index}"),
-        )?,
-        &format!("qval_comparison_{index}"),
-    )?;
-    let cos_base = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.cos.*",
-        &format!("sin_base_{index}"),
-        input,
-    )?
-    .into_vector_value();
-    let out = builder.build_select(
-        builder.build_float_compare(
-            FloatPredicate::UEQ,
-            nval,
-            constants.flt_zero,
-            &format!("nval_zero_compare_{index}"),
-        )?,
-        builder
-            .build_select(
-                q_is_even,
-                build_interval_flip(cos_base, builder, constants, index)?,
-                cos_base,
-                &format!("edge_case_1_{index}"),
-            )?
-            .into_vector_value(),
-        builder
-            .build_select(
-                builder.build_float_compare(
-                    FloatPredicate::ULE,
-                    nval,
-                    constants.flt_one,
-                    &format!("nval_one_compare_{index}"),
-                )?,
-                builder
-                    .build_select(
-                        q_is_even,
-                        builder.build_insert_element(
-                            constants.interval_neg_one_to_one,
-                            build_vec_unary_intrinsic(
-                                builder,
-                                module,
-                                "llvm.vector.reduce.fmax.*",
-                                &format!("case_3_max_reduce_{index}"),
-                                cos_base,
-                            )?
-                            .into_float_value(),
-                            constants.i32_one,
-                            &format!("out_val_case_2_{index}"),
-                        )?,
-                        builder.build_insert_element(
-                            constants.interval_neg_one_to_one,
-                            build_vec_unary_intrinsic(
-                                builder,
-                                module,
-                                "llvm.vector.reduce.fmin.*",
-                                &format!("case_3_min_reduce_{index}"),
-                                cos_base,
-                            )?
-                            .into_float_value(),
-                            constants.i32_zero,
-                            &format!("out_val_case_3_{index}"),
-                        )?,
-                        &format!("nval_cases_{index}"),
-                    )?
-                    .into_vector_value(),
-                constants.interval_neg_one_to_one,
-                &format!("out_val_edge_case_0_{index}"),
-            )?
-            .into_vector_value(),
-        &format!("out_val_{index}"),
-    )?;
-    Ok(builder
-        .build_select(
-            build_check_interval_empty(input, builder, module, index)?,
-            constants.interval_empty.as_basic_value_enum(),
-            out,
-            &format!("reg_{index}"),
-        )?
-        .into_vector_value())
-}
-
 fn build_interval_sin<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -1643,6 +1489,160 @@ fn build_interval_sin<'ctx>(
             },
         )?
         .as_basic_value_enum();
+    Ok(builder
+        .build_select(
+            build_check_interval_empty(input, builder, module, index)?,
+            constants.interval_empty.as_basic_value_enum(),
+            out,
+            &format!("reg_{index}"),
+        )?
+        .into_vector_value())
+}
+
+fn build_interval_cos<'ctx>(
+    input: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    constants: &Constants<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let qinterval = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.floor.*",
+        &format!("intermediate_floor_{index}"),
+        builder.build_float_div(
+            input,
+            VectorType::const_vector(&[constants.flt_pi, constants.flt_pi]),
+            &format!("div_pi_{index}"),
+        )?,
+    )?
+    .into_vector_value();
+    let is_singleton = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("sin_singleton_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            input,
+            build_interval_flip(input, builder, constants, index)?,
+            &format!("sin_singleton_check_reduce_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let qlo = builder
+        .build_extract_element(
+            qinterval,
+            constants.i32_zero,
+            &format!("q_extract_1_{index}"),
+        )?
+        .into_float_value();
+    let qhi = builder
+        .build_extract_element(
+            qinterval,
+            constants.i32_one,
+            &format!("q_extract_0_{index}"),
+        )?
+        .into_float_value();
+    let nval = builder
+        .build_select(
+            is_singleton,
+            constants.flt_zero,
+            builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
+            &format!("nval_{index}"),
+        )?
+        .into_float_value();
+    let q_is_even = builder.build_float_compare(
+        FloatPredicate::UEQ,
+        qlo,
+        builder.build_float_mul(
+            constants.flt_two,
+            build_float_unary_intrinsic(
+                builder,
+                module,
+                "llvm.floor.*",
+                &format!("intermediate_qval_floor_{index}"),
+                builder.build_float_mul(
+                    qlo,
+                    constants.flt_half,
+                    &format!("qval_half_mul_{index}"),
+                )?,
+            )?
+            .into_float_value(),
+            &format!("qval_doubling_{index}"),
+        )?,
+        &format!("qval_comparison_{index}"),
+    )?;
+    let cos_base = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.cos.*",
+        &format!("sin_base_{index}"),
+        input,
+    )?
+    .into_vector_value();
+    let out = builder.build_select(
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            nval,
+            constants.flt_zero,
+            &format!("nval_zero_compare_{index}"),
+        )?,
+        builder
+            .build_select(
+                q_is_even,
+                build_interval_flip(cos_base, builder, constants, index)?,
+                cos_base,
+                &format!("edge_case_1_{index}"),
+            )?
+            .into_vector_value(),
+        builder
+            .build_select(
+                builder.build_float_compare(
+                    FloatPredicate::ULE,
+                    nval,
+                    constants.flt_one,
+                    &format!("nval_one_compare_{index}"),
+                )?,
+                builder
+                    .build_select(
+                        q_is_even,
+                        builder.build_insert_element(
+                            constants.interval_neg_one_to_one,
+                            build_vec_unary_intrinsic(
+                                builder,
+                                module,
+                                "llvm.vector.reduce.fmax.*",
+                                &format!("case_3_max_reduce_{index}"),
+                                cos_base,
+                            )?
+                            .into_float_value(),
+                            constants.i32_one,
+                            &format!("out_val_case_2_{index}"),
+                        )?,
+                        builder.build_insert_element(
+                            constants.interval_neg_one_to_one,
+                            build_vec_unary_intrinsic(
+                                builder,
+                                module,
+                                "llvm.vector.reduce.fmin.*",
+                                &format!("case_3_min_reduce_{index}"),
+                                cos_base,
+                            )?
+                            .into_float_value(),
+                            constants.i32_zero,
+                            &format!("out_val_case_3_{index}"),
+                        )?,
+                        &format!("nval_cases_{index}"),
+                    )?
+                    .into_vector_value(),
+                constants.interval_neg_one_to_one,
+                &format!("out_val_edge_case_0_{index}"),
+            )?
+            .into_vector_value(),
+        &format!("out_val_{index}"),
+    )?;
     Ok(builder
         .build_select(
             build_check_interval_empty(input, builder, module, index)?,
