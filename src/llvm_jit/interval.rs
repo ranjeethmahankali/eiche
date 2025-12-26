@@ -81,6 +81,10 @@ struct Constants<'ctx> {
     i32_one: IntValue<'ctx>,
     i32_two: IntValue<'ctx>,
     i32_three: IntValue<'ctx>,
+    i8_one: IntValue<'ctx>,
+    i8_two: IntValue<'ctx>,
+    i8_three: IntValue<'ctx>,
+    i8_four: IntValue<'ctx>,
     // Floats.
     flt_zero: FloatValue<'ctx>,
     flt_one: FloatValue<'ctx>,
@@ -112,12 +116,17 @@ impl<'ctx> Constants<'ctx> {
         let flt_type = T::jit_type(context);
         let interval_type = flt_type.vec_type(2);
         let bool_type = context.bool_type();
+        let i8_type = context.i8_type();
         Self {
             // Integers.
             i32_zero: i32_type.const_int(0, false),
             i32_one: i32_type.const_int(1, false),
             i32_two: i32_type.const_int(2, false),
             i32_three: i32_type.const_int(3, false),
+            i8_one: i8_type.const_int(1, false),
+            i8_two: i8_type.const_int(2, false),
+            i8_three: i8_type.const_int(3, false),
+            i8_four: i8_type.const_int(4, false),
             // Floats.
             flt_zero: flt_type.const_float(0.0),
             flt_one: flt_type.const_float(1.0),
@@ -2466,7 +2475,7 @@ fn build_interval_div<'ctx>(
     let mask = builder.build_or(
         builder.build_left_shift(
             build_interval_classify(rhs, builder, module, constants, index)?,
-            i8_type.const_int(4, false),
+            constants.i8_four,
             &format!("interval_div_mask_shift_{index}"),
         )?,
         build_interval_classify(lhs, builder, module, constants, index)?,
@@ -2682,9 +2691,9 @@ fn build_interval_classify<'ctx>(
         &format!("interval_classify_first_bit_extended_{index}"),
     )?;
     let mask = [
-        (is_neg, constants.i32_one, constants.i32_one, "first"),
-        (is_eq, constants.i32_zero, constants.i32_two, "second"),
-        (is_eq, constants.i32_one, constants.i32_three, "third"),
+        (is_neg, constants.i32_one, constants.i8_one, "first"),
+        (is_eq, constants.i32_zero, constants.i8_two, "second"),
+        (is_eq, constants.i32_one, constants.i8_three, "third"),
     ]
     .into_iter()
     .try_fold(b0, |acc, (v, i, shift, label)| {
