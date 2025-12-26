@@ -21,7 +21,7 @@ use inkwell::{
     execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
-    types::{BasicTypeEnum, IntType, VectorType},
+    types::{BasicTypeEnum, VectorType},
     values::{
         BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
         VectorValue,
@@ -218,7 +218,6 @@ impl Tree {
         let flt_type = T::jit_type(context);
         let interval_type = flt_type.vec_type(2);
         let iptr_type = context.ptr_type(AddressSpace::default());
-        let i32_type = context.i32_type();
         let constants = Constants::create::<T>(context);
         let fn_type = context
             .void_type()
@@ -404,7 +403,6 @@ impl Tree {
                         builder,
                         &compiler.module,
                         &constants,
-                        i32_type,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -454,7 +452,6 @@ impl Tree {
                         builder,
                         &compiler.module,
                         &constants,
-                        i32_type,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -1164,10 +1161,9 @@ fn build_interval_remainder<'ctx>(
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
-    i32_type: IntType<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let div_result = build_interval_div((lhs, rhs), builder, module, constants, i32_type, index)?;
+    let div_result = build_interval_div((lhs, rhs), builder, module, constants, index)?;
     let mul_result = builder.build_float_mul(
         build_vec_unary_intrinsic(
             builder,
@@ -2464,10 +2460,10 @@ fn build_interval_div<'ctx>(
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
-    i32_type: IntType<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     use crate::interval::IntervalClass::*;
+    let i32_type = module.get_context().i32_type();
     let (lhs, rhs) = inputs;
     let mask = builder.build_int_add(
         builder.build_int_mul(
