@@ -2480,12 +2480,6 @@ fn build_interval_div<'ctx>(
         build_interval_flip(rhs, builder, constants, index)?,
         &format!("interval_div_cross_{index}"),
     )?;
-    let combos = builder.build_shuffle_vector(
-        straight,
-        cross,
-        constants.ivec_count_to_3,
-        &format!("interval_div_concat_cases_{index}"),
-    )?;
     const CASES: [&[(IntervalClass, IntervalClass)]; 12] = [
         // Spanning zero, so output includes everything.
         &[
@@ -2520,22 +2514,22 @@ fn build_interval_div<'ctx>(
         constants.interval_entire,
         constants.interval_zero,
         builder.build_shuffle_vector(
-            combos,
-            combos.get_type().get_undef(),
+            straight,
+            cross,
             VectorType::const_vector(&[constants.i32_one, constants.i32_two]),
             &format!("interval_div_case_spanning_negative_{index}"),
         )?,
         builder.build_shuffle_vector(
-            combos,
-            combos.get_type().get_undef(),
+            straight,
+            cross,
             VectorType::const_vector(&[constants.i32_zero, constants.i32_three]),
             &format!("interval_div_case_spanning_positive_{index}"),
         )?,
         build_interval_compose(
             builder
                 .build_extract_element(
-                    combos,
-                    constants.i32_three,
+                    cross,
+                    constants.i32_one,
                     &format!("interval_div_case_neg_neg_zero_intermediate_0_{index}"),
                 )?
                 .into_float_value(),
@@ -2546,8 +2540,8 @@ fn build_interval_div<'ctx>(
             index,
         )?,
         builder.build_shuffle_vector(
-            combos,
-            combos.get_type().get_undef(),
+            straight,
+            cross,
             VectorType::const_vector(&[constants.i32_three, constants.i32_two]),
             &format!("interval_div_case_neg_zero_neg_{index}"),
         )?,
@@ -2555,7 +2549,7 @@ fn build_interval_div<'ctx>(
             constants.flt_neg_inf,
             builder
                 .build_extract_element(
-                    combos,
+                    straight,
                     constants.i32_one,
                     &format!("interval_div_case_neg_zero_positive_upper_{index}"),
                 )?
@@ -2570,7 +2564,7 @@ fn build_interval_div<'ctx>(
             constants.flt_neg_inf,
             builder
                 .build_extract_element(
-                    combos,
+                    straight,
                     constants.i32_zero,
                     &format!("interval_div_case_zero_positive_neg_{index}"),
                 )?
@@ -2584,8 +2578,8 @@ fn build_interval_div<'ctx>(
         build_interval_compose(
             builder
                 .build_extract_element(
-                    combos,
-                    constants.i32_two,
+                    cross,
+                    constants.i32_zero,
                     &format!("interval_div_case_zero_positive_extract_{index}"),
                 )?
                 .into_float_value(),
