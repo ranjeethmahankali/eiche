@@ -21,7 +21,7 @@ use inkwell::{
     execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
-    types::{BasicTypeEnum, FloatType, IntType, VectorType},
+    types::{BasicTypeEnum, IntType, VectorType},
     values::{
         BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
         VectorValue,
@@ -1730,7 +1730,7 @@ fn build_interval_square<'ctx>(
 
 fn build_interval_pow<'ctx>(
     (lhs, rhs): (VectorValue<'ctx>, VectorValue<'ctx>),
-    (range_left, range_right): ((f64, f64), (f64, f64)),
+    (range_left, _range_right): ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
     index: usize,
