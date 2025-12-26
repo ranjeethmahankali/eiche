@@ -519,7 +519,9 @@ fn b_small_tree_interval(c: &mut Criterion) {
         .collect();
     let mut outputs: Vec<Interval> = Vec::with_capacity(N_QUERIES);
     let mut eval = IntervalEvaluator::new(&tree);
-    c.bench_function("small-tree-interval", |b| {
+    let mut group = c.benchmark_group("small");
+    group.sample_size(50);
+    group.bench_function("small-tree-interval", |b| {
         b.iter(|| {
             outputs.clear();
             outputs.extend(std::hint::black_box(
