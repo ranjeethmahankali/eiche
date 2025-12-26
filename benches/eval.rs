@@ -295,7 +295,9 @@ fn b_sphere_value_eval(c: &mut Criterion) {
         )
     };
     let mut eval = ValueEvaluator::new(&tree);
-    c.bench_function("spheres-value-eval", |b| {
+    let mut group = c.benchmark_group("spheres");
+    group.sample_size(50);
+    group.bench_function("spheres-value-eval", |b| {
         b.iter(|| {
             black_box(&mut outputs).clear();
             black_box(&mut outputs).extend(black_box(queries.iter().map(|coords| {
@@ -360,7 +362,7 @@ fn b_circles_value_eval(c: &mut Criterion) {
     let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
     let mut eval = ValueEvaluator::new(&tree);
     let mut group = c.benchmark_group("circles");
-    group.sample_size(5);
+    group.sample_size(10);
     group.bench_function("circles-value-eval", |b| {
         b.iter(|| {
             for y in 0..circles::DIMS {
@@ -485,7 +487,9 @@ fn b_circles_interval_eval(c: &mut Criterion) {
         (tree, samples, Vec::with_capacity(N_QUERIES))
     };
     let mut eval = IntervalEvaluator::new(&tree);
-    c.bench_function("circles-interval-eval", |b| {
+    let mut group = c.benchmark_group("circles");
+    group.sample_size(32);
+    group.bench_function("circles-interval-eval", |b| {
         b.iter(|| {
             black_box(&mut values).clear();
             black_box(&mut values).extend(black_box(queries.iter().map(|interval| {
