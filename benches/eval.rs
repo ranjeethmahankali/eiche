@@ -852,7 +852,7 @@ mod jit {
         let eval = tree
             .jit_compile_interval::<T>(&context, &params)
             .expect("Cannot compile tree");
-        c.bench_function(&format!("interval-jit-large-{}", T::type_str()), |b| {
+        c.bench_function(&format!("interval-jit-small-{}", T::type_str()), |b| {
             b.iter(|| {
                 outputs.clear();
                 outputs.extend(std::hint::black_box(
@@ -889,7 +889,7 @@ mod jit {
         let eval = tree
             .jit_compile_interval::<T>(&context, &params)
             .expect("Cannot compile tree");
-        c.bench_function(&format!("interval-jit-huge-{}", T::type_str()), |b| {
+        c.bench_function(&format!("interval-jit-medium-{}", T::type_str()), |b| {
             b.iter(|| {
                 outputs.clear();
                 outputs.extend(std::hint::black_box(
@@ -926,7 +926,7 @@ mod jit {
         let eval = tree
             .jit_compile_interval::<T>(&context, &params)
             .expect("Cannot compile tree");
-        c.bench_function(&format!("interval-jit-massive-{}", T::type_str()), |b| {
+        c.bench_function(&format!("interval-jit-large-{}", T::type_str()), |b| {
             b.iter(|| {
                 outputs.clear();
                 outputs.extend(std::hint::black_box(
