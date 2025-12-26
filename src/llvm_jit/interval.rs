@@ -96,6 +96,7 @@ struct Constants<'ctx> {
     // Bools
     bool_false: IntValue<'ctx>,
     bool_true: IntValue<'ctx>,
+    bool_poison: IntValue<'ctx>,
     // Intervals.
     interval_zero: VectorValue<'ctx>,
     interval_false_false: VectorValue<'ctx>,
@@ -136,6 +137,7 @@ impl<'ctx> Constants<'ctx> {
             // Bools
             bool_false: bool_type.const_int(0, false),
             bool_true: bool_type.const_int(1, false),
+            bool_poison: bool_type.get_poison(),
             // Intervals
             interval_zero: interval_type.const_zero(),
             interval_false_false: VectorType::const_vector(&[
@@ -216,7 +218,6 @@ impl Tree {
         let flt_type = T::jit_type(context);
         let interval_type = flt_type.vec_type(2);
         let iptr_type = context.ptr_type(AddressSpace::default());
-        let bool_type = context.bool_type();
         let i32_type = context.i32_type();
         let constants = Constants::create::<T>(context);
         let fn_type = context
@@ -310,9 +311,7 @@ impl Tree {
                         regs[*input].into_vector_value(),
                         builder,
                         &compiler.module,
-                        flt_type,
                         &constants,
-                        bool_type,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -334,6 +333,7 @@ impl Tree {
                     .as_basic_value_enum(),
                     Log => build_interval_log(
                         regs[*input].into_vector_value(),
+                        ranges[*input].scalar()?,
                         builder,
                         &compiler.module,
                         &constants,
@@ -356,6 +356,7 @@ impl Tree {
                     )?,
                     Not => build_interval_not(
                         regs[*input].into_vector_value(),
+                        ranges[*input].boolean()?,
                         builder,
                         &compiler.module,
                         &constants,
@@ -593,42 +594,49 @@ impl Tree {
 
 fn build_interval_not<'ctx>(
     input: VectorValue<'ctx>,
+    range: (bool, bool),
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let all_true = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.and.*",
-        &format!("not_all_true_reduce_{index}"),
-        input,
-    )?
-    .into_int_value();
-    let mixed = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.xor.*",
-        &format!("not_all_true_reduce_{index}"),
-        input,
-    )?
-    .into_int_value();
-    Ok(builder
-        .build_select(
-            all_true,
-            constants.interval_false_false,
-            builder
+    match range {
+        (true, true) => Ok(constants.interval_false_false),
+        (false, false) => Ok(constants.interval_true_true),
+        (true, false) | (false, true) => {
+            let all_true = build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.and.*",
+                &format!("not_all_true_reduce_{index}"),
+                input,
+            )?
+            .into_int_value();
+            let mixed = build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.xor.*",
+                &format!("not_all_true_reduce_{index}"),
+                input,
+            )?
+            .into_int_value();
+            Ok(builder
                 .build_select(
-                    mixed,
-                    constants.interval_false_true,
-                    constants.interval_true_true,
-                    &format!("not_mixed_choice_{index}"),
+                    all_true,
+                    constants.interval_false_false,
+                    builder
+                        .build_select(
+                            mixed,
+                            constants.interval_false_true,
+                            constants.interval_true_true,
+                            &format!("not_mixed_choice_{index}"),
+                        )?
+                        .into_vector_value(),
+                    &format!("not_{index}"),
                 )?
-                .into_vector_value(),
-            &format!("not_{index}"),
-        )?
-        .into_vector_value())
+                .into_vector_value())
+        }
+    }
 }
 
 fn build_interval_choose<'ctx>(
@@ -1146,11 +1154,20 @@ fn build_interval_remainder<'ctx>(
 
 fn build_interval_log<'ctx>(
     input: VectorValue<'ctx>,
+    range: (f64, f64),
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    if range.0 > 0.0 && range.1 > 0.0 {
+        return Ok(
+            build_vec_unary_intrinsic(builder, module, "llvm.log.*", "log_call", input)?
+                .into_vector_value(),
+        );
+    } else if range.0 < 0.0 && range.1 < 0.0 {
+        return Ok(constants.interval_empty);
+    }
     let is_neg = builder.build_float_compare(
         FloatPredicate::ULE,
         input,
@@ -1457,11 +1474,10 @@ fn build_interval_sin<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    flt_type: FloatType<'ctx>,
     constants: &Constants<'ctx>,
-    bool_type: IntType<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let flt_type = input.get_type().get_element_type().into_float_type();
     let qinterval = build_vec_unary_intrinsic(
         builder,
         module,
@@ -1575,7 +1591,7 @@ fn build_interval_sin<'ctx>(
         .try_rfold(
             constants.interval_neg_one_to_one,
             |acc, (i, (pairs, out))| -> Result<VectorValue<'_>, Error> {
-                let mut conds = [bool_type.get_poison(), bool_type.get_poison()];
+                let mut conds = [constants.bool_poison, constants.bool_poison];
                 for ((q, n), dst) in pairs.iter().zip(conds.iter_mut()) {
                     *dst = builder.build_and(
                         builder.build_float_compare(
