@@ -67,20 +67,6 @@ mod spheres {
     pub mod value_eval {
         use super::*;
 
-        /// Includes the compilation times. In this case that is the time spent
-        /// creating the ValueEvaluator.
-        fn with_compile(tree: &Tree, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
-            let mut eval = ValueEvaluator::new(tree);
-            values.clear();
-            values.extend(queries.iter().map(|coords| {
-                eval.set_value('x', coords[0].into());
-                eval.set_value('y', coords[1].into());
-                eval.set_value('z', coords[2].into());
-                let results = eval.run().unwrap();
-                results[0].scalar().unwrap()
-            }))
-        }
-
         /// Does not include the compilation time, i.e. the time spent creating
         /// the ValueEvaluator.
         fn no_compile(eval: &mut ValueEvaluator, values: &mut Vec<f64>, queries: &[[f64; 3]]) {
@@ -94,16 +80,6 @@ mod spheres {
             }))
         }
 
-        fn b_with_compile(c: &mut Criterion) {
-            let (tree, queries, mut values) = init_benchmark();
-            c.bench_function("spheres-value-evaluator-with-compilation", |b| {
-                b.iter(|| {
-                    with_compile(black_box(&tree), black_box(&mut values), &queries);
-                    assert_eq!(values.len(), N_QUERIES);
-                })
-            });
-        }
-
         fn b_no_compile(c: &mut Criterion) {
             let (tree, queries, mut values) = init_benchmark();
             let mut eval = ValueEvaluator::new(&tree);
@@ -115,7 +91,7 @@ mod spheres {
             });
         }
 
-        criterion_group!(bench, b_no_compile, b_with_compile);
+        criterion_group!(bench, b_no_compile);
     }
 
     pub mod interval {
@@ -158,19 +134,6 @@ mod spheres {
             }
         }
 
-        fn with_compilation(tree: &Tree, outputs: &mut Vec<Interval>, queries: &[[Interval; 3]]) {
-            outputs.clear();
-            let mut eval = IntervalEvaluator::new(tree);
-            outputs.extend(queries.iter().map(|sample| {
-                let [x, y, z] = &sample;
-                eval.set_value('x', *x);
-                eval.set_value('y', *y);
-                eval.set_value('z', *z);
-                let result = eval.run().unwrap();
-                result[0]
-            }))
-        }
-
         /// Does not include the time to jit-compile the tree.
         fn no_compilation(
             eval: &mut IntervalEvaluator,
@@ -188,21 +151,6 @@ mod spheres {
             }))
         }
 
-        fn b_with_compile(c: &mut Criterion) {
-            let BenchmarkSetup {
-                tree,
-                queries,
-                mut outputs,
-            } = init_benchmark();
-            let mut group = c.benchmark_group("lower sample count");
-            group.sample_size(10);
-            group.bench_function("spheres-interval-eval-with-compile", |b| {
-                b.iter(|| {
-                    with_compilation(&tree, black_box(&mut outputs), &queries);
-                })
-            });
-        }
-
         fn b_no_compile(c: &mut Criterion) {
             let BenchmarkSetup {
                 tree,
@@ -217,7 +165,7 @@ mod spheres {
             });
         }
 
-        criterion_group!(bench, b_no_compile, b_with_compile);
+        criterion_group!(bench, b_no_compile);
     }
 
     #[cfg(feature = "llvm-jit")]
@@ -261,26 +209,6 @@ mod spheres {
             )
         }
 
-        /// Includes the time to jit-compile the tree.
-        fn with_compilation<T>(tree: &Tree, values: &mut Vec<T>, queries: &[[T; 3]])
-        where
-            T: NumberType + Copy,
-        {
-            values.clear();
-            let context = JitContext::default();
-            let eval = tree.jit_compile(&context, "xyz").unwrap();
-            values.extend(queries.iter().map(|coords| {
-                let mut output = [T::nan()];
-                // SAFETY: There is an assert to make sure the tree has 3 input
-                // symbols. That is what the safe version would check for, so
-                // we don't need to check here.
-                unsafe {
-                    eval.run_unchecked(coords, &mut output);
-                }
-                output[0]
-            }));
-        }
-
         /// Does not include the time to jit-compile the tree.
         fn no_compilation<T>(eval: &JitFn<'_, T>, values: &mut Vec<T>, queries: &[[T; 3]])
         where
@@ -297,25 +225,6 @@ mod spheres {
                 }
                 output[0]
             }));
-        }
-
-        fn b_with_compile(c: &mut Criterion) {
-            {
-                let (tree, queries, mut values) = init_benchmark::<f64>();
-                c.bench_function("spheres-jit-f64-single-eval-with-compile", |b| {
-                    b.iter(|| {
-                        with_compilation(&tree, black_box(&mut values), &queries);
-                    })
-                });
-            }
-            {
-                let (tree, queries, mut values) = init_benchmark::<f32>();
-                c.bench_function("spheres-jit-f32-single-eval-with-compile", |b| {
-                    b.iter(|| {
-                        with_compilation(&tree, black_box(&mut values), &queries);
-                    })
-                });
-            }
         }
 
         fn b_no_compile(c: &mut Criterion) {
@@ -341,7 +250,7 @@ mod spheres {
             }
         }
 
-        criterion_group!(bench, b_no_compile, b_with_compile);
+        criterion_group!(bench, b_no_compile);
     }
 
     #[cfg(feature = "llvm-jit")]
@@ -431,26 +340,6 @@ mod spheres {
             }
         }
 
-        fn with_compilation<T: NumberType>(
-            tree: &Tree,
-            values: &mut Vec<[T; 2]>,
-            queries: &[[[T; 2]; 3]],
-        ) {
-            values.clear();
-            let context = JitContext::default();
-            let eval = tree.jit_compile_interval::<T>(&context, "xyz").unwrap();
-            values.extend(queries.iter().map(|coords| {
-                let mut output = [[T::nan(), T::nan()]];
-                // SAFETY: There is an assert to make sure the tree has 3 input
-                // symbols. That is what the safe version would check for, so
-                // we don't need to check here.
-                unsafe {
-                    eval.run_unchecked(coords.as_ref(), &mut output);
-                }
-                output[0]
-            }))
-        }
-
         /// Does not include the time to jit-compile the tree.
         fn no_compilation<T>(
             eval: &JitIntervalFn<'_, T>,
@@ -470,37 +359,6 @@ mod spheres {
                 }
                 output[0]
             }));
-        }
-
-        fn b_with_compile(c: &mut Criterion) {
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark::<f64>();
-                let mut group = c.benchmark_group("lower sample count");
-                group.sample_size(10);
-                group.bench_function("spheres-jit-f64-interval-eval-with-compile", |b| {
-                    b.iter(|| {
-                        with_compilation(&tree, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
-            {
-                let mut group = c.benchmark_group("lower sample count");
-                group.sample_size(10);
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark::<f32>();
-                group.bench_function("spheres-jit-f32-interval-eval-with-compile", |b| {
-                    b.iter(|| {
-                        with_compilation(&tree, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
         }
 
         fn b_no_compile(c: &mut Criterion) {
@@ -534,7 +392,7 @@ mod spheres {
             }
         }
 
-        criterion_group!(bench, b_no_compile, b_with_compile);
+        criterion_group!(bench, b_no_compile);
     }
 }
 
@@ -549,26 +407,6 @@ mod circles {
     const DIMS_F64: f64 = DIMS as f64;
     const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
     const N_CIRCLES: usize = 100;
-
-    /// Includes the time to compile, i.e. create the ValueEvaluator.
-    fn with_compile(tree: &Tree, image: &mut ImageBuffer) {
-        let mut eval = ValueEvaluator::new(tree);
-        for y in 0..DIMS {
-            eval.set_value('y', Value::Scalar(y as f64 + 0.5));
-            for x in 0..DIMS {
-                eval.set_value('x', Value::Scalar(x as f64 + 0.5));
-                let outputs = eval.run().expect("Failed to run value evaluator");
-                *image.get_pixel_mut(x, y) = match outputs[0] {
-                    Value::Bool(_) => panic!("Expecting a scalar"),
-                    Value::Scalar(val) => image::Luma([if val < 0. {
-                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
-                    } else {
-                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
-                    }]),
-                };
-            }
-        }
-    }
 
     fn no_compile(eval: &mut ValueEvaluator, image: &mut ImageBuffer) {
         for y in 0..DIMS {
@@ -589,16 +427,7 @@ mod circles {
     }
 
     /// Uses the pruning evaluator.
-    fn do_pruned_eval(tree: &Tree, image: &mut ImageBuffer) {
-        let mut eval = ValuePruningEvaluator::new(
-            tree,
-            PRUNE_DEPTH + 1,
-            [
-                ('x', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
-                ('y', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
-            ]
-            .into(),
-        );
+    fn do_pruned_eval(eval: &mut ValuePruningEvaluator, image: &mut ImageBuffer) {
         const NORM_SAMPLES: [[f64; 2]; 4] =
             [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
         let mut state = eval.push_or_pop_to(PRUNE_DEPTH);
@@ -629,14 +458,6 @@ mod circles {
         }
     }
 
-    fn b_with_compile(c: &mut Criterion) {
-        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
-        let mut image = ImageBuffer::new(DIMS, DIMS);
-        c.bench_function("circles-value-eval-with-compilation", |b| {
-            b.iter(|| with_compile(black_box(&tree), &mut image))
-        });
-    }
-
     fn b_no_compile(c: &mut Criterion) {
         let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
@@ -649,44 +470,30 @@ mod circles {
     fn b_pruned_eval(c: &mut Criterion) {
         let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
         let mut image = ImageBuffer::new(DIMS, DIMS);
+        let mut eval = ValuePruningEvaluator::new(
+            &tree,
+            PRUNE_DEPTH + 1,
+            [
+                ('x', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
+                ('y', (Interval::from_scalar(0., DIMS_F64).unwrap(), 2)),
+            ]
+            .into(),
+        );
         c.bench_function("circles-pruned-eval", |b| {
-            b.iter(|| do_pruned_eval(black_box(&tree), &mut image))
+            b.iter(|| do_pruned_eval(black_box(&mut eval), &mut image))
         });
     }
 
     criterion_group! {
         name = bench;
         config = Criterion::default().sample_size(10);
-        targets = b_with_compile, b_no_compile, b_pruned_eval
+        targets = b_no_compile, b_pruned_eval
     }
 
     #[cfg(feature = "llvm-jit")]
     pub mod jit_single {
         use super::*;
         use eiche::{JitContext, JitFn};
-
-        fn with_compilation(tree: &Tree, image: &mut ImageBuffer) {
-            let context = JitContext::default();
-            let eval = tree.jit_compile(&context, "xy").unwrap();
-            let mut coord = [0., 0.];
-            for y in 0..DIMS {
-                coord[1] = y as f64 + 0.5;
-                for x in 0..DIMS {
-                    coord[0] = x as f64 + 0.5;
-                    let mut output = [0.];
-                    // SAFETY: Upstream functions assert to make sure the tree
-                    // has exactly 2 inputs. This is what the safe version
-                    // checks for, so we don't need to check agian.
-                    unsafe { eval.run_unchecked(&coord, &mut output) };
-                    let val = output[0];
-                    *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
-                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
-                    } else {
-                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
-                    }]);
-                }
-            }
-        }
 
         fn no_compilation(eval: &mut JitFn<'_, f64>, image: &mut ImageBuffer) {
             let mut coord = [0., 0.];
@@ -709,22 +516,6 @@ mod circles {
             }
         }
 
-        fn b_with_compile(c: &mut Criterion) {
-            let tree =
-                test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
-            assert_eq!(
-                tree.symbols().len(),
-                2,
-                "Later calls require exactly two inputs."
-            );
-            let mut image = ImageBuffer::new(DIMS, DIMS);
-            c.bench_function("circles-jit-single-eval-with-compile", |b| {
-                b.iter(|| {
-                    with_compilation(&tree, black_box(&mut image));
-                })
-            });
-        }
-
         fn b_no_compile(c: &mut Criterion) {
             let tree =
                 test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, N_CIRCLES);
@@ -738,7 +529,7 @@ mod circles {
             });
         }
 
-        criterion_group!(bench, b_no_compile, b_with_compile,);
+        criterion_group!(bench, b_no_compile);
     }
 
     pub mod interval {
@@ -775,17 +566,6 @@ mod circles {
             (tree, samples, Vec::with_capacity(N_QUERIES))
         }
 
-        fn with_compilation(tree: &Tree, values: &mut Vec<Interval>, queries: &[[Interval; 2]]) {
-            values.clear();
-            let mut eval = IntervalEvaluator::new(tree);
-            values.extend(queries.iter().map(|interval| {
-                eval.set_value('x', interval[0]);
-                eval.set_value('y', interval[1]);
-                let result = eval.run().unwrap();
-                result[0]
-            }));
-        }
-
         fn no_compilation(
             eval: &mut IntervalEvaluator,
             values: &mut Vec<Interval>,
@@ -800,15 +580,6 @@ mod circles {
             }));
         }
 
-        fn b_with_compile(c: &mut Criterion) {
-            let (tree, queries, mut values) = init_benchmark();
-            c.bench_function("circles-interval-eval-with-compile", |b| {
-                b.iter(|| {
-                    with_compilation(&tree, black_box(&mut values), &queries);
-                })
-            });
-        }
-
         fn b_no_compile(c: &mut Criterion) {
             let (tree, queries, mut values) = init_benchmark();
             let mut eval = IntervalEvaluator::new(&tree);
@@ -819,7 +590,7 @@ mod circles {
             });
         }
 
-        criterion_group!(bench, b_no_compile, b_with_compile);
+        criterion_group!(bench, b_no_compile);
     }
 
     #[cfg(feature = "llvm-jit")]
@@ -867,26 +638,6 @@ mod circles {
             }
         }
 
-        fn with_compilation<T: NumberType>(
-            tree: &Tree,
-            values: &mut Vec<[T; 2]>,
-            queries: &[[[T; 2]; 2]],
-        ) {
-            values.clear();
-            let context = JitContext::default();
-            let eval = tree.jit_compile_interval::<T>(&context, "xy").unwrap();
-            values.extend(queries.iter().map(|interval| {
-                let mut output = [[T::nan(); 2]];
-                // SAFETY: There is an assert to make sure the tree has 3 input
-                // symbols. That is what the safe version would check for, so
-                // we don't need to check here.
-                unsafe {
-                    eval.run_unchecked(interval.as_ref(), &mut output);
-                }
-                output[0]
-            }));
-        }
-
         fn no_compilation<T: NumberType>(
             eval: &JitIntervalFn<'_, T>,
             values: &mut Vec<[T; 2]>,
@@ -903,33 +654,6 @@ mod circles {
                 }
                 output[0]
             }));
-        }
-
-        fn b_with_compile(c: &mut Criterion) {
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark::<f64>();
-                c.bench_function("circles-interval-jit-f64-eval-with-compile", |b| {
-                    b.iter(|| {
-                        with_compilation(&tree, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
-            {
-                let BenchmarkSetup {
-                    tree,
-                    queries,
-                    mut outputs,
-                } = init_benchmark::<f32>();
-                c.bench_function("circles-interval-jit-f32-eval-with-compile", |b| {
-                    b.iter(|| {
-                        with_compilation(&tree, black_box(&mut outputs), &queries);
-                    })
-                });
-            }
         }
 
         fn b_no_compile(c: &mut Criterion) {
@@ -963,7 +687,7 @@ mod circles {
             }
         }
 
-        criterion_group!(bench, b_no_compile, b_with_compile);
+        criterion_group!(bench, b_no_compile);
     }
 }
 
