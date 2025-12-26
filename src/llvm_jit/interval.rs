@@ -1396,39 +1396,26 @@ fn build_interval_cos<'ctx>(
             &format!("nval_{index}"),
         )?
         .into_float_value();
-    let qval = builder
-        .build_select(
-            builder.build_float_compare(
-                FloatPredicate::UEQ,
-                qlo,
-                builder.build_float_mul(
-                    constants.flt_two,
-                    build_float_unary_intrinsic(
-                        builder,
-                        module,
-                        "llvm.floor.*",
-                        &format!("intermediate_qval_floor_{index}"),
-                        builder.build_float_mul(
-                            qlo,
-                            constants.flt_half,
-                            &format!("qval_half_mul_{index}"),
-                        )?,
-                    )?
-                    .into_float_value(),
-                    &format!("qval_doubling_{index}"),
-                )?,
-                &format!("qval_comparison_{index}"),
-            )?,
-            constants.flt_zero,
-            constants.flt_one,
-            &format!("qval_{index}"),
-        )?
-        .into_float_value();
-    let q_zero = builder.build_float_compare(
+    let q_is_even = builder.build_float_compare(
         FloatPredicate::UEQ,
-        qval,
-        constants.flt_zero,
-        &format!("qval_is_zero_{index}"),
+        qlo,
+        builder.build_float_mul(
+            constants.flt_two,
+            build_float_unary_intrinsic(
+                builder,
+                module,
+                "llvm.floor.*",
+                &format!("intermediate_qval_floor_{index}"),
+                builder.build_float_mul(
+                    qlo,
+                    constants.flt_half,
+                    &format!("qval_half_mul_{index}"),
+                )?,
+            )?
+            .into_float_value(),
+            &format!("qval_doubling_{index}"),
+        )?,
+        &format!("qval_comparison_{index}"),
     )?;
     let cos_base = build_vec_unary_intrinsic(
         builder,
@@ -1447,7 +1434,7 @@ fn build_interval_cos<'ctx>(
         )?,
         builder
             .build_select(
-                q_zero,
+                q_is_even,
                 build_interval_flip(cos_base, builder, constants, index)?,
                 cos_base,
                 &format!("edge_case_1_{index}"),
@@ -1463,7 +1450,7 @@ fn build_interval_cos<'ctx>(
                 )?,
                 builder
                     .build_select(
-                        q_zero,
+                        q_is_even,
                         builder.build_insert_element(
                             constants.interval_neg_one_to_one,
                             build_vec_unary_intrinsic(
