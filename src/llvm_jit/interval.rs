@@ -2240,10 +2240,8 @@ fn build_interval_pow<'ctx>(
                         build_interval_flip(rhs, builder, constants, index)?,
                     )?
                     .into_vector_value(),
-                    5 => {
-                        build_vec_binary_intrinsic(builder, module, "llvm.pow.*", name, lhs, rhs)?
-                            .into_vector_value()
-                    }
+                    5 => build_vec_binary_intrinsic(builder, module, "llvm.pow.*", name, lhs, rhs)?
+                        .into_vector_value(),
                     6 => build_vec_binary_intrinsic(
                         builder,
                         module,
@@ -2641,7 +2639,7 @@ fn build_interval_div<'ctx>(
             bbs.push(bb);
             cases.extend(group.iter().map(|&(lcase, rcase)| {
                 (
-                    constants.int_8((class_mask(rcase) << 4) | class_mask(lcase) , false),
+                    constants.int_8((class_mask(rcase) << 4) | class_mask(lcase), false),
                     bb,
                 )
             }));
