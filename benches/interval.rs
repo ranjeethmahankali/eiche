@@ -142,9 +142,7 @@ mod jit {
                     queries.chunks_exact(symbols.len()).map(|inputs| {
                         let mut out = [[T::nan(); 2]];
                         // # SAFETY: We already checked the sizes.
-                        unsafe {
-                            std::hint::black_box(eval.run_unchecked(&inputs, &mut out));
-                        }
+                        unsafe { eval.run_unchecked(std::hint::black_box(inputs), &mut out) }
                         out[0]
                     }),
                 ));
@@ -181,9 +179,7 @@ mod jit {
                     queries.chunks_exact(symbols.len()).map(|inputs| {
                         let mut out = [[T::nan(); 2]];
                         // # SAFETY: We already checked the sizes.
-                        unsafe {
-                            std::hint::black_box(eval.run_unchecked(&inputs, &mut out));
-                        }
+                        unsafe { eval.run_unchecked(std::hint::black_box(inputs), &mut out) }
                         out[0]
                     }),
                 ));
@@ -220,9 +216,7 @@ mod jit {
                     queries.chunks_exact(symbols.len()).map(|inputs| {
                         let mut out = [[T::nan(); 2]];
                         // # SAFETY: We already checked the sizes.
-                        unsafe {
-                            std::hint::black_box(eval.run_unchecked(&inputs, &mut out));
-                        }
+                        unsafe { eval.run_unchecked(std::hint::black_box(inputs), &mut out) }
                         out[0]
                     }),
                 ));
