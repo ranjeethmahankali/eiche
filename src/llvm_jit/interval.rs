@@ -2202,7 +2202,7 @@ fn build_interval_pow<'ctx>(
                 outputs[i] = match i {
                     0 => constants.float_vec([f64::NAN; 2]),
                     1 => build_interval_flip(
-                        build_vec_binary_intrinsic(builder, module, "llvm.pow.*", &name, lhs, rhs)?
+                        build_vec_binary_intrinsic(builder, module, "llvm.pow.*", name, lhs, rhs)?
                             .into_vector_value(),
                         builder,
                         constants,
@@ -2212,7 +2212,7 @@ fn build_interval_pow<'ctx>(
                         builder,
                         module,
                         "llvm.pow.*",
-                        &name,
+                        name,
                         build_interval_flip(lhs, builder, constants, index)?,
                         rhs,
                     )?
@@ -2221,7 +2221,7 @@ fn build_interval_pow<'ctx>(
                         builder,
                         module,
                         "llvm.pow.*",
-                        &name,
+                        name,
                         build_interval_flip(lhs, builder, constants, index)?,
                         builder.build_shuffle_vector(
                             rhs,
@@ -2235,20 +2235,20 @@ fn build_interval_pow<'ctx>(
                         builder,
                         module,
                         "llvm.pow.*",
-                        &name,
+                        name,
                         lhs,
                         build_interval_flip(rhs, builder, constants, index)?,
                     )?
                     .into_vector_value(),
                     5 => {
-                        build_vec_binary_intrinsic(builder, module, "llvm.pow.*", &name, lhs, rhs)?
+                        build_vec_binary_intrinsic(builder, module, "llvm.pow.*", name, lhs, rhs)?
                             .into_vector_value()
                     }
                     6 => build_vec_binary_intrinsic(
                         builder,
                         module,
                         "llvm.pow.*",
-                        &name,
+                        name,
                         lhs,
                         builder.build_shuffle_vector(
                             rhs,
@@ -2569,12 +2569,12 @@ fn build_interval_div<'ctx>(
             )?);
         }
         (ZeroPositive, Negative) | (Positive, Negative) => {
-            return Ok(build_interval_flip(
+            return build_interval_flip(
                 builder.build_float_div(lhs, rhs, &format!("div_pos_neg_special_case_{index}"))?,
                 builder,
                 constants,
                 index,
-            )?);
+            );
         }
         (ZeroPositive, Positive) | (Positive, Positive) => {
             return Ok(builder.build_float_div(
@@ -2641,7 +2641,7 @@ fn build_interval_div<'ctx>(
             bbs.push(bb);
             cases.extend(group.iter().map(|&(lcase, rcase)| {
                 (
-                    constants.int_8(((class_mask(rcase) << 4) | class_mask(lcase)) as u8, false),
+                    constants.int_8((class_mask(rcase) << 4) | class_mask(lcase) , false),
                     bb,
                 )
             }));
@@ -2748,7 +2748,7 @@ fn build_interval_div<'ctx>(
     )?;
     let incoming: Box<[_]> = outputs
         .iter()
-        .zip(bbs.into_iter())
+        .zip(bbs)
         .map(|(out, bb)| (out as &dyn BasicValue<'ctx>, bb))
         .collect();
     phi.add_incoming(&[(&constants.float_vec([f64::NAN; 2]), default_bb)]);
