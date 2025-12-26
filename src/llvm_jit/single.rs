@@ -1,7 +1,15 @@
 use super::{
     JitCompiler, JitContext, NumberType, build_float_binary_intrinsic, build_float_unary_intrinsic,
 };
-use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*};
+use crate::{
+    BinaryOp::*,
+    Error,
+    Node::*,
+    TernaryOp::*,
+    Tree,
+    UnaryOp::*,
+    Value::{self, *},
+};
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
     execution_engine::JitFunction,
@@ -221,32 +229,35 @@ impl Tree {
                             &format!("val_{ni}"),
                         )?
                         .as_basic_value_enum(),
+                    Pow if matches!(self.node(*rhs), Constant(Value::Scalar(2.0))) => {
+                        let input = regs[*lhs].into_float_value();
+                        builder
+                            .build_float_mul(input, input, &format!("val_{ni}"))?
+                            .as_basic_value_enum()
+                    }
                     Pow => build_float_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.pow.*",
                         "pow_call",
-                        regs[*lhs],
-                        regs[*rhs],
-                        float_type,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
                     )?,
                     Min => build_float_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.minnum.*",
                         "min_call",
-                        regs[*lhs],
-                        regs[*rhs],
-                        float_type,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
                     )?,
                     Max => build_float_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.maxnum.*",
                         "max_call",
-                        regs[*lhs],
-                        regs[*rhs],
-                        float_type,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
                     )?,
                     Remainder => builder
                         .build_float_rem(

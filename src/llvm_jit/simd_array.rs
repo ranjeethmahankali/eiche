@@ -2,6 +2,7 @@ use super::{
     JitCompiler, JitContext, NumberType, build_vec_binary_intrinsic, build_vec_unary_intrinsic,
 };
 use crate::{
+    Value,
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
@@ -1324,6 +1325,12 @@ impl Tree {
                             &format!("reg_{ni}"),
                         )?
                         .as_basic_value_enum(),
+                    Pow if matches!(self.node(*rhs), Constant(Value::Scalar(2.0))) => {
+                        let input = regs[*lhs].into_vector_value();
+                        builder
+                            .build_float_mul(input, input, &format!("reg_{ni}"))?
+                            .as_basic_value_enum()
+                    }
                     Pow => build_vec_binary_intrinsic(
                         builder,
                         &compiler.module,

@@ -21,13 +21,13 @@ pub enum Interval {
 
 #[derive(Copy, Clone)]
 pub enum IntervalClass {
-    Empty = 0,
-    Negative = 1,
-    NegativeZero = 2,
-    SingletonZero = 3,
-    Spanning = 4,
-    ZeroPositive = 5,
-    Positive = 6,
+    Empty,
+    Negative,
+    NegativeZero,
+    SingletonZero,
+    Spanning,
+    ZeroPositive,
+    Positive,
 }
 
 impl Interval {
@@ -64,7 +64,7 @@ impl Interval {
     }
 }
 
-fn classify(lo: f64, hi: f64) -> IntervalClass {
+pub fn classify(lo: f64, hi: f64) -> IntervalClass {
     use IntervalClass::*;
     use std::cmp::Ordering::*;
     if lo.is_nan() && hi.is_nan() {
@@ -303,21 +303,21 @@ impl ValueType for Interval {
         use Interval::*;
         use std::cmp::Ordering;
         match (lhs, rhs) {
-            (Scalar(llo, lhi), Scalar(rlo, rhi)) => match op {
-                Add => Interval::from_scalar(llo + rlo, lhi + rhi),
-                Subtract => Interval::from_scalar(llo - rhi, lhi - rlo),
+            (Scalar(llo, lhi), Scalar(c, d)) => match op {
+                Add => Interval::from_scalar(llo + c, lhi + d),
+                Subtract => Interval::from_scalar(llo - d, lhi - c),
                 Multiply => {
-                    let (lo, hi) = mul((llo, lhi), (rlo, rhi));
+                    let (lo, hi) = mul((llo, lhi), (c, d));
                     Interval::from_scalar(lo, hi)
                 }
                 Divide => {
-                    div((llo, lhi), (rlo, rhi)).and_then(|(lo, hi)| Interval::from_scalar(lo, hi))
+                    div((llo, lhi), (c, d)).and_then(|(lo, hi)| Interval::from_scalar(lo, hi))
                 }
-                Pow if llo.is_nan() || lhi.is_nan() || rlo.is_nan() || rhi.is_nan() => {
+                Pow if llo.is_nan() || lhi.is_nan() || c.is_nan() || d.is_nan() => {
                     Ok(Interval::Scalar(f64::NAN, f64::NAN))
                 }
-                Pow if rlo == 0.0 && rhi == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
-                Pow if rlo == 2.0 && rhi == 2.0 => {
+                Pow if c == 0.0 && d == 0.0 => Ok(Interval::Scalar(1.0, 1.0)),
+                Pow if c == 2.0 && d == 2.0 => {
                     match (llo.total_cmp(&0.0), lhi.total_cmp(&0.0)) {
                         // Squaring
                         (Ordering::Less, Ordering::Greater)
@@ -327,9 +327,9 @@ impl ValueType for Interval {
                         _ => Interval::from_scalar(llo * llo, lhi * lhi),
                     }
                 }
-                Pow if rlo.floor() == rlo && rlo == rhi => {
+                Pow if c.floor() == c && c == d => {
                     // Singleton integer exponent.
-                    let rhs = rhi.floor() as i32;
+                    let rhs = d.floor() as i32;
                     if rhs % 2 == 0 {
                         let (lo, hi) = abs((llo, lhi));
                         if rhs < 0 {
@@ -354,43 +354,40 @@ impl ValueType for Interval {
                     }
                 }
                 Pow => {
-                    let (llo, lhi) = (llo.max(0.0), lhi.clamp(0.0, f64::INFINITY));
-                    if rhi <= 0.0 {
-                        if lhi == 0.0 {
+                    let (a, b) = (llo.max(0.0), lhi.clamp(0.0, f64::INFINITY));
+                    if d <= 0.0 {
+                        if b == 0.0 {
                             Ok(Interval::Scalar(f64::NAN, f64::NAN))
-                        } else if lhi < 1.0 {
-                            Interval::from_scalar(lhi.powf(rhi), llo.powf(rlo))
-                        } else if llo > 1.0 {
-                            Interval::from_scalar(lhi.powf(rlo), llo.powf(rhi))
+                        } else if b < 1.0 {
+                            Interval::from_scalar(b.powf(d), a.powf(c))
+                        } else if a > 1.0 {
+                            Interval::from_scalar(b.powf(c), a.powf(d))
                         } else {
-                            Interval::from_scalar(lhi.powf(rlo), llo.powf(rlo))
+                            Interval::from_scalar(b.powf(c), a.powf(c))
                         }
-                    } else if rlo > 0.0 {
-                        if lhi < 1.0 {
-                            Interval::from_scalar(llo.powf(rhi), lhi.powf(rlo))
-                        } else if llo > 1.0 {
-                            Interval::from_scalar(llo.powf(rlo), lhi.powf(rhi))
+                    } else if c > 0.0 {
+                        if b < 1.0 {
+                            Interval::from_scalar(a.powf(d), b.powf(c))
+                        } else if a > 1.0 {
+                            Interval::from_scalar(a.powf(c), b.powf(d))
                         } else {
-                            Interval::from_scalar(llo.powf(rhi), lhi.powf(rhi))
+                            Interval::from_scalar(a.powf(d), b.powf(d))
                         }
                     } else {
-                        Interval::from_scalar(
-                            llo.powf(rhi).min(lhi.powf(rlo)),
-                            llo.powf(rlo).max(lhi.powf(rhi)),
-                        )
+                        Interval::from_scalar(a.powf(d).min(b.powf(c)), a.powf(c).max(b.powf(d)))
                     }
                 }
-                Min => Interval::from_scalar(rlo.min(llo), rhi.min(lhi)),
-                Max => Interval::from_scalar(rlo.max(llo), rhi.max(lhi)),
+                Min => Interval::from_scalar(c.min(llo), d.min(lhi)),
+                Max => Interval::from_scalar(c.max(llo), d.max(lhi)),
                 Remainder => {
-                    let (lo, hi) = div((llo, lhi), (rlo, rhi))?;
-                    let (lo, hi) = mul((lo.floor(), hi.floor()), (rlo, rhi));
+                    let (lo, hi) = div((llo, lhi), (c, d))?;
+                    let (lo, hi) = mul((lo.floor(), hi.floor()), (c, d));
                     Interval::from_scalar(llo - hi, lhi - lo)
                 }
                 Less => {
-                    let (lo, hi) = if strict_precedes((llo, lhi), (rlo, rhi)) {
+                    let (lo, hi) = if strict_precedes((llo, lhi), (c, d)) {
                         (true, true)
-                    } else if strict_precedes((rlo, rhi), (llo, lhi)) {
+                    } else if strict_precedes((c, d), (llo, lhi)) {
                         (false, false)
                     } else {
                         (false, true)
@@ -398,9 +395,9 @@ impl ValueType for Interval {
                     Ok(Interval::Bool(lo, hi))
                 }
                 LessOrEqual => {
-                    let (lo, hi) = if precedes((llo, lhi), (rlo, rhi)) {
+                    let (lo, hi) = if precedes((llo, lhi), (c, d)) {
                         (true, true)
-                    } else if strict_precedes((rlo, rhi), (llo, lhi)) {
+                    } else if strict_precedes((c, d), (llo, lhi)) {
                         (false, false)
                     } else {
                         (false, true)
@@ -409,7 +406,7 @@ impl ValueType for Interval {
                 }
                 Equal => {
                     use Overlap::*;
-                    let (lo, hi) = match overlap(llo, lhi, rlo, rhi) {
+                    let (lo, hi) = match overlap(llo, lhi, c, d) {
                         None | After | Before => (false, false),
                         Partial | TouchingLeft | TouchingRight => (false, true),
                         Exact if llo == lhi => (true, true),
@@ -419,7 +416,7 @@ impl ValueType for Interval {
                 }
                 NotEqual => {
                     use Overlap::*;
-                    let (lo, hi) = match overlap(llo, lhi, rlo, rhi) {
+                    let (lo, hi) = match overlap(llo, lhi, c, d) {
                         None | After | Before => (true, true),
                         Partial | TouchingLeft | TouchingRight => (false, true),
                         Exact if llo == lhi => (false, false),
@@ -428,9 +425,9 @@ impl ValueType for Interval {
                     Ok(Interval::Bool(lo, hi))
                 }
                 Greater => {
-                    let (lo, hi) = if strict_precedes((rlo, rhi), (llo, lhi)) {
+                    let (lo, hi) = if strict_precedes((c, d), (llo, lhi)) {
                         (true, true)
-                    } else if strict_precedes((llo, lhi), (rlo, rhi)) {
+                    } else if strict_precedes((llo, lhi), (c, d)) {
                         (false, false)
                     } else {
                         (false, true)
@@ -438,9 +435,9 @@ impl ValueType for Interval {
                     Ok(Interval::Bool(lo, hi))
                 }
                 GreaterOrEqual => {
-                    let (lo, hi) = if precedes((rlo, rhi), (llo, lhi)) {
+                    let (lo, hi) = if precedes((c, d), (llo, lhi)) {
                         (true, true)
-                    } else if strict_precedes((llo, lhi), (rlo, rhi)) {
+                    } else if strict_precedes((llo, lhi), (c, d)) {
                         (false, false)
                     } else {
                         (false, true)

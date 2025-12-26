@@ -106,10 +106,16 @@ impl<'ctx> JitCompiler<'ctx> {
 
     /// Write out the compiled assembly to file specified by `path`.
     #[allow(dead_code)]
-    pub fn write_asm(&self, path: &Path) {
+    pub fn write_asm<P: AsRef<Path>>(&self, path: P) {
         self.machine
-            .write_to_file(&self.module, FileType::Assembly, path)
+            .write_to_file(&self.module, FileType::Assembly, path.as_ref())
             .unwrap();
+    }
+
+    /// Write out the compiled LLVM IR to file specified by `path`.
+    #[allow(dead_code)]
+    pub fn write_ir<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
+        self.module.print_to_file(path).map_err(|e| e.to_string())
     }
 }
 
@@ -305,17 +311,16 @@ fn build_float_binary_intrinsic<'ctx>(
     module: &'ctx Module,
     name: &'static str,
     call_name: &str,
-    lhs: BasicValueEnum<'ctx>,
-    rhs: BasicValueEnum<'ctx>,
-    float_type: FloatType<'ctx>,
+    lhs: FloatValue<'ctx>,
+    rhs: FloatValue<'ctx>,
 ) -> Result<BasicValueEnum<'ctx>, Error> {
     let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
     let intrinsic_fn = intrinsic
         .get_declaration(
             module,
             &[
-                BasicTypeEnum::FloatType(float_type),
-                BasicTypeEnum::FloatType(float_type),
+                BasicTypeEnum::FloatType(lhs.get_type()),
+                BasicTypeEnum::FloatType(rhs.get_type()),
             ],
         )
         .ok_or(Error::CannotCompileIntrinsic(name))?;
@@ -323,8 +328,8 @@ fn build_float_binary_intrinsic<'ctx>(
         .build_call(
             intrinsic_fn,
             &[
-                BasicMetadataValueEnum::FloatValue(lhs.into_float_value()),
-                BasicMetadataValueEnum::FloatValue(rhs.into_float_value()),
+                BasicMetadataValueEnum::FloatValue(lhs),
+                BasicMetadataValueEnum::FloatValue(rhs),
             ],
             call_name,
         )

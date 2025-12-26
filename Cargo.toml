@@ -45,6 +45,7 @@ name = "substitute"
 path = "benches/substitute.rs"
 harness = false
 
+
 [profile.release-with-debug]
 inherits = "release"
 strip = false # Automatically strip symbols

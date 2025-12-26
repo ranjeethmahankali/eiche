@@ -14,8 +14,8 @@ use crate::{
 };
 
 /// Fold the given nodes by pruning for the given interval. The intervals are
-/// assumed to be sorted by the variable labels, and each variable label must
-/// appear at most once.
+/// assumed to be sorted by the variable labels, and each variable label MUST
+/// appear at most once, in a sorted list.
 pub(crate) fn fold_for_interval(
     nodes: &[Node],
     interval: &[(char, Interval)],
@@ -29,6 +29,7 @@ pub(crate) fn fold_for_interval(
     for node in nodes {
         let (folded, value) = match node {
             Constant(value) => (None, Interval::from_value(*value)?),
+            // This binary search assumes the symbols are sorted.
             Symbol(label) => match interval.binary_search_by(|(var, _)| var.cmp(label)) {
                 Ok(index) => (None, interval[index].1),
                 Err(_) => (None, Interval::default()),

@@ -3,25 +3,36 @@ use super::{
     build_vec_unary_intrinsic,
 };
 use crate::{
-    BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value, interval::IntervalClass,
+    BinaryOp::*,
+    Error, Interval,
+    Node::*,
+    TernaryOp::*,
+    Tree,
+    UnaryOp::*,
+    Value,
+    eval::ValueType,
+    interval::{IntervalClass, classify},
     llvm_jit::JitCompiler,
 };
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
+    basic_block::BasicBlock,
     builder::Builder,
     context::Context,
     execution_engine::JitFunction,
     intrinsics::Intrinsic,
     module::Module,
-    types::{BasicTypeEnum, FloatType, IntType, VectorType},
+    types::{BasicTypeEnum, FloatType, VectorType},
     values::{
         BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
         VectorValue,
     },
 };
 use std::{
+    collections::{HashMap, hash_map::Entry},
     f64::consts::{FRAC_PI_2, PI},
     ffi::c_void,
+    hash::{DefaultHasher, Hash, Hasher},
     marker::PhantomData,
 };
 
@@ -66,6 +77,184 @@ where
 
 unsafe impl<'ctx, T> Sync for JitIntervalFnSync<'ctx, T> where T: NumberType {}
 
+struct Constants<'ctx> {
+    ctx: &'ctx Context,
+    flt_type: FloatType<'ctx>,
+    cache: HashMap<u64, BasicValueEnum<'ctx>>,
+}
+
+impl<'ctx> Constants<'ctx> {
+    fn create<T: NumberType>(context: &'ctx Context) -> Self {
+        Self {
+            ctx: context,
+            flt_type: T::jit_type(context),
+            cache: HashMap::with_capacity(32),
+        }
+    }
+
+    fn int_32(&mut self, val: u32, signed: bool) -> IntValue<'ctx> {
+        let hash = {
+            let mut s: DefaultHasher = Default::default();
+            "int_32".hash(&mut s);
+            val.hash(&mut s);
+            signed.hash(&mut s);
+            s.finish()
+        };
+        match self.cache.entry(hash) {
+            Entry::Occupied(occupiled) => occupiled.get().into_int_value(),
+            Entry::Vacant(vacant) => vacant
+                .insert(
+                    self.ctx
+                        .i32_type()
+                        .const_int(val as u64, signed)
+                        .as_basic_value_enum(),
+                )
+                .into_int_value(),
+        }
+    }
+
+    fn int_8(&mut self, val: u8, signed: bool) -> IntValue<'ctx> {
+        let hash = {
+            let mut s: DefaultHasher = Default::default();
+            "int_8".hash(&mut s);
+            val.hash(&mut s);
+            signed.hash(&mut s);
+            s.finish()
+        };
+        match self.cache.entry(hash) {
+            Entry::Occupied(occupiled) => occupiled.get().into_int_value(),
+            Entry::Vacant(vacant) => vacant
+                .insert(
+                    self.ctx
+                        .i8_type()
+                        .const_int(val as u64, signed)
+                        .as_basic_value_enum(),
+                )
+                .into_int_value(),
+        }
+    }
+
+    fn float(&mut self, val: f64) -> FloatValue<'ctx> {
+        let hash = {
+            let mut s: DefaultHasher = Default::default();
+            "float".hash(&mut s);
+            val.to_bits().hash(&mut s);
+            s.finish()
+        };
+        match self.cache.entry(hash) {
+            Entry::Occupied(occupiled) => occupiled.get().into_float_value(),
+            Entry::Vacant(vacant) => vacant
+                .insert(self.flt_type.const_float(val).as_basic_value_enum())
+                .into_float_value(),
+        }
+    }
+
+    fn boolean(&mut self, val: bool) -> IntValue<'ctx> {
+        let hash = {
+            let mut s: DefaultHasher = Default::default();
+            "bool".hash(&mut s);
+            val.hash(&mut s);
+            s.finish()
+        };
+        match self.cache.entry(hash) {
+            Entry::Occupied(occupied) => occupied.get().into_int_value(),
+            Entry::Vacant(vacant) => vacant
+                .insert(
+                    self.ctx
+                        .bool_type()
+                        .const_int(if val { 1 } else { 0 }, false)
+                        .as_basic_value_enum(),
+                )
+                .into_int_value(),
+        }
+    }
+
+    fn i32_vec<const N: usize>(&mut self, vals: [u32; N], signed: bool) -> VectorValue<'ctx> {
+        let hash = {
+            let mut s: DefaultHasher = Default::default();
+            "i32_vec".hash(&mut s);
+            for val in vals {
+                val.hash(&mut s);
+            }
+            signed.hash(&mut s);
+            s.finish()
+        };
+        match self.cache.entry(hash) {
+            Entry::Occupied(occupied) => occupied.get().into_vector_value(),
+            Entry::Vacant(vacant) => {
+                let vals = vals.map(|v| self.ctx.i32_type().const_int(v as u64, signed));
+                vacant
+                    .insert(VectorType::const_vector(&vals).as_basic_value_enum())
+                    .into_vector_value()
+            }
+        }
+    }
+
+    fn float_vec<const N: usize>(&mut self, vals: [f64; N]) -> VectorValue<'ctx> {
+        // It is ok even if the user asks for a NAN as long as they consistently
+        // use a single constant NAN, e.g. f64::NAN. Because the bit
+        // representation of that will be the same and produce the same hash.
+        let hash = {
+            let mut s: DefaultHasher = Default::default();
+            "float_vec".hash(&mut s);
+            for val in vals {
+                val.to_bits().hash(&mut s);
+            }
+            s.finish()
+        };
+        match self.cache.entry(hash) {
+            Entry::Occupied(occupied) => occupied.get().into_vector_value(),
+            Entry::Vacant(vacant) => {
+                let vals = vals.map(|v| self.flt_type.const_float(v));
+                vacant
+                    .insert(VectorType::const_vector(&vals).as_basic_value_enum())
+                    .into_vector_value()
+            }
+        }
+    }
+
+    fn bool_vec<const N: usize>(&mut self, vals: [bool; N]) -> VectorValue<'ctx> {
+        let hash = {
+            let mut s: DefaultHasher = Default::default();
+            "bool_vec".hash(&mut s);
+            for val in vals {
+                val.hash(&mut s);
+            }
+            s.finish()
+        };
+        match self.cache.entry(hash) {
+            Entry::Occupied(occupied) => occupied.get().into_vector_value(),
+            Entry::Vacant(vacant) => {
+                let vals =
+                    vals.map(|v| self.ctx.bool_type().const_int(if v { 1 } else { 0 }, false));
+                vacant
+                    .insert(VectorType::const_vector(&vals).as_basic_value_enum())
+                    .into_vector_value()
+            }
+        }
+    }
+}
+
+fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
+    let mut ranges = Vec::with_capacity(tree.len());
+    for node in tree.nodes().iter() {
+        let out = match node {
+            Constant(value) => Interval::from_value(*value)?,
+            Symbol(_) => Interval::default(),
+            Unary(op, input) => Interval::unary_op(*op, ranges[*input])?,
+            Binary(op, lhs, rhs) => Interval::binary_op(*op, ranges[*lhs], ranges[*rhs])?,
+            Ternary(op, a, b, c) => Interval::ternary_op(*op, ranges[*a], ranges[*b], ranges[*c])?,
+        };
+        ranges.push(out);
+    }
+    assert_eq!(
+        ranges.len(),
+        tree.len(),
+        "Number of nodes and ranges must be equal. This is an assert not an error because this should never happen."
+    );
+    Ok(ranges.into_boxed_slice())
+}
+
 impl Tree {
     /// JIT compile the tree for interval evaluations.
     pub fn jit_compile_interval<'ctx, T>(
@@ -81,6 +270,7 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let num_roots = self.num_roots();
+        let ranges = compute_ranges(self)?;
         let func_name = context.new_func_name::<T>(Some("interval"));
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
@@ -88,8 +278,7 @@ impl Tree {
         let flt_type = T::jit_type(context);
         let interval_type = flt_type.vec_type(2);
         let iptr_type = context.ptr_type(AddressSpace::default());
-        let bool_type = context.bool_type();
-        let i32_type = context.i32_type();
+        let mut constants = Constants::create::<T>(context);
         let fn_type = context
             .void_type()
             .fn_type(&[iptr_type.into(), iptr_type.into()], false);
@@ -99,15 +288,8 @@ impl Tree {
         for (index, node) in self.nodes().iter().enumerate() {
             let reg = match node {
                 Constant(value) => match value {
-                    Value::Bool(flag) => VectorType::const_vector(
-                        &[bool_type.const_int(if *flag { 1 } else { 0 }, false); 2],
-                    )
-                    .as_basic_value_enum(),
-                    Value::Scalar(value) => VectorType::const_vector(&[
-                        flt_type.const_float(*value),
-                        flt_type.const_float(*value),
-                    ])
-                    .as_basic_value_enum(),
+                    Value::Bool(flag) => constants.bool_vec([*flag; 2]).as_basic_value_enum(),
+                    Value::Scalar(value) => constants.float_vec([*value; 2]).as_basic_value_enum(),
                 },
                 Symbol(label) => {
                     let inputs = function
@@ -119,10 +301,10 @@ impl Tree {
                         builder.build_gep(
                             interval_type,
                             inputs,
-                            &[context.i64_type().const_int(
+                            &[constants.int_32(
                                 params.chars().position(|c| c == *label).ok_or(
                                     Error::JitCompilationError("Cannot find symbol".to_string()),
-                                )? as u64,
+                                )? as u32,
                                 false,
                             )],
                             &format!("arg_ptr_{}", *label),
@@ -151,26 +333,26 @@ impl Tree {
                     Negate => build_interval_negate(
                         regs[*input].into_vector_value(),
                         builder,
-                        i32_type,
+                        &mut constants,
                         index,
                         &format!("reg_{index}"),
                     )?
                     .as_basic_value_enum(),
                     Sqrt => build_interval_sqrt(
                         regs[*input].into_vector_value(),
+                        ranges[*input].scalar()?,
                         builder,
                         &compiler.module,
-                        flt_type,
-                        i32_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
                     Abs => build_interval_abs(
                         regs[*input].into_vector_value(),
+                        ranges[*input].scalar()?,
                         builder,
                         &compiler.module,
-                        flt_type,
-                        i32_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -178,9 +360,7 @@ impl Tree {
                         regs[*input].into_vector_value(),
                         builder,
                         &compiler.module,
-                        flt_type,
-                        i32_type,
-                        bool_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -188,8 +368,7 @@ impl Tree {
                         regs[*input].into_vector_value(),
                         builder,
                         &compiler.module,
-                        flt_type,
-                        i32_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -197,17 +376,16 @@ impl Tree {
                         regs[*input].into_vector_value(),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        flt_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
                     Log => build_interval_log(
                         regs[*input].into_vector_value(),
+                        ranges[*input].scalar()?,
                         builder,
                         &compiler.module,
-                        i32_type,
-                        flt_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -227,9 +405,10 @@ impl Tree {
                     )?,
                     Not => build_interval_not(
                         regs[*input].into_vector_value(),
+                        ranges[*input].boolean()?,
                         builder,
                         &compiler.module,
-                        bool_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -248,39 +427,59 @@ impl Tree {
                             build_interval_flip(
                                 regs[*rhs].into_vector_value(),
                                 builder,
-                                i32_type,
+                                &mut constants,
                                 index,
                             )?,
                             &format!("reg_{index}"),
                         )?
                         .as_basic_value_enum(),
                     Multiply => build_interval_mul(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].scalar()?, ranges[*rhs].scalar()?),
                         builder,
                         &compiler.module,
-                        i32_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
                     Divide => build_interval_div(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].scalar()?, ranges[*rhs].scalar()?),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        flt_type,
+                        function,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Pow => build_interval_pow::<T>(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                    Pow if matches!(self.node(*rhs), Constant(Value::Scalar(2.0))) => {
+                        build_interval_square(
+                            regs[*lhs].into_vector_value(),
+                            ranges[*lhs].scalar()?,
+                            builder,
+                            &compiler.module,
+                            &mut constants,
+                            index,
+                        )?
+                        .as_basic_value_enum()
+                    }
+                    Pow => build_interval_pow(
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].scalar()?, ranges[*rhs].scalar()?),
                         builder,
                         &compiler.module,
                         index,
                         function,
-                        context,
+                        &mut constants,
                     )?
                     .as_basic_value_enum(),
                     Min => build_vec_binary_intrinsic(
@@ -300,98 +499,105 @@ impl Tree {
                         regs[*rhs].into_vector_value(),
                     )?,
                     Remainder => build_interval_remainder(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].scalar()?, ranges[*rhs].scalar()?),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        flt_type,
+                        function,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Less => build_interval_less::<T>(
+                    Less => build_interval_less(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    LessOrEqual => build_interval_less_equal::<T>(
+                    LessOrEqual => build_interval_less_equal(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Equal => build_interval_equal::<T>(
+                    Equal => build_interval_equal(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    NotEqual => build_interval_not_equal::<T>(
+                    NotEqual => build_interval_not_equal(
                         regs[*lhs].into_vector_value(),
                         regs[*rhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    Greater => build_interval_greater::<T>(
-                        regs[*lhs].into_vector_value(),
+                    Greater => build_interval_less(
                         regs[*rhs].into_vector_value(),
+                        regs[*lhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
-                    GreaterOrEqual => build_interval_greater_equal::<T>(
-                        regs[*lhs].into_vector_value(),
+                    GreaterOrEqual => build_interval_less_equal(
                         regs[*rhs].into_vector_value(),
+                        regs[*lhs].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
                     And => build_interval_and(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].boolean()?, ranges[*rhs].boolean()?),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        bool_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
                     Or => build_interval_or(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].boolean()?, ranges[*rhs].boolean()?),
                         builder,
                         &compiler.module,
-                        i32_type,
-                        bool_type,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
                 },
                 Ternary(op, a, b, c) => match op {
-                    Choose => build_interval_choose::<T>(
+                    Choose => build_interval_choose(
                         regs[*a].into_vector_value(),
                         regs[*b].into_vector_value(),
                         regs[*c].into_vector_value(),
                         builder,
                         &compiler.module,
-                        context,
+                        &mut constants,
                         index,
                     )?
                     .as_basic_value_enum(),
@@ -412,7 +618,7 @@ impl Tree {
                 builder.build_gep(
                     interval_type,
                     outputs,
-                    &[context.i64_type().const_int(i as u64, false)],
+                    &[constants.int_32(i as u32, false)],
                     &format!("output_ptr_{i}"),
                 )?
             };
@@ -453,57 +659,60 @@ impl Tree {
 
 fn build_interval_not<'ctx>(
     input: VectorValue<'ctx>,
+    range: (bool, bool),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    bool_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let all_true = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.and.*",
-        &format!("not_all_true_reduce_{index}"),
-        input,
-    )?
-    .into_int_value();
-    let mixed = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.xor.*",
-        &format!("not_all_true_reduce_{index}"),
-        input,
-    )?
-    .into_int_value();
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
-    Ok(builder
-        .build_select(
-            all_true,
-            out_ff,
-            builder
-                .build_select(mixed, out_ft, out_tt, &format!("not_mixed_choice_{index}"))?
-                .into_vector_value(),
-            &format!("not_{index}"),
-        )?
-        .into_vector_value())
+    match range {
+        (true, true) => Ok(constants.bool_vec([false; 2])),
+        (false, false) => Ok(constants.bool_vec([true; 2])),
+        (true, false) | (false, true) => {
+            let all_true = build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.and.*",
+                &format!("not_all_true_reduce_{index}"),
+                input,
+            )?
+            .into_int_value();
+            let mixed = build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.xor.*",
+                &format!("not_all_true_reduce_{index}"),
+                input,
+            )?
+            .into_int_value();
+            Ok(builder
+                .build_select(
+                    all_true,
+                    constants.bool_vec([false; 2]),
+                    builder
+                        .build_select(
+                            mixed,
+                            constants.bool_vec([false, true]),
+                            constants.bool_vec([true; 2]),
+                            &format!("not_mixed_choice_{index}"),
+                        )?
+                        .into_vector_value(),
+                    &format!("not_{index}"),
+                )?
+                .into_vector_value())
+        }
+    }
 }
 
-fn build_interval_choose<'ctx, T: NumberType>(
+fn build_interval_choose<'ctx>(
     cond: VectorValue<'ctx>,
     iftrue: VectorValue<'ctx>,
     iffalse: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    context: &'ctx Context,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let flt_type = T::jit_type(context);
-    let i32_type = context.i32_type();
-    let bool_type = context.bool_type();
     let cond_all_true = build_vec_unary_intrinsic(
         builder,
         module,
@@ -531,43 +740,33 @@ fn build_interval_choose<'ctx, T: NumberType>(
                         iftrue.get_type().get_element_type(),
                         iffalse.get_type().get_element_type(),
                     ) {
-                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => {
-                            let sign_mask = VectorType::const_vector(&[
-                                flt_type.const_float(-1.0),
-                                flt_type.const_float(1.0),
-                            ]);
-                            builder.build_float_mul(
-                                sign_mask,
+                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => builder
+                            .build_float_mul(
+                                constants.float_vec([-1.0, 1.0]),
                                 build_vec_binary_intrinsic(
                                     builder,
                                     module,
                                     "llvm.maxnum.*",
                                     &format!("choose_max_call_{index}"),
                                     builder.build_float_mul(
-                                        sign_mask,
+                                        constants.float_vec([-1.0, 1.0]),
                                         iftrue,
                                         &format!("choose_true_branch_sign_change_{index}"),
                                     )?,
                                     builder.build_float_mul(
-                                        sign_mask,
+                                        constants.float_vec([-1.0, 1.0]),
                                         iffalse,
                                         &format!("choose_false_branch_sign_change_{index}"),
                                     )?,
                                 )?
                                 .into_vector_value(),
                                 &format!("choose_sign_revert_{index}"),
-                            )?
-                        }
+                            )?,
                         (BasicTypeEnum::IntType(_), BasicTypeEnum::IntType(_)) => {
                             let combined = builder.build_shuffle_vector(
                                 iftrue,
                                 iffalse,
-                                VectorType::const_vector(&[
-                                    i32_type.const_int(0, false),
-                                    i32_type.const_int(1, false),
-                                    i32_type.const_int(2, false),
-                                    i32_type.const_int(3, false),
-                                ]),
+                                constants.i32_vec([0, 1, 2, 3], false),
                                 &format!("choose_boolean_combine_{index}"),
                             )?;
                             let all_same = builder.build_int_compare(
@@ -594,10 +793,7 @@ fn build_interval_choose<'ctx, T: NumberType>(
                                 .build_select(
                                     all_same,
                                     iftrue,
-                                    VectorType::const_vector(&[
-                                        bool_type.const_int(0, false),
-                                        bool_type.const_int(1, false),
-                                    ]),
+                                    constants.bool_vec([false, true]),
                                     &format!("choose_boolean_out_{index}"),
                                 )?
                                 .into_vector_value()
@@ -614,14 +810,20 @@ fn build_interval_choose<'ctx, T: NumberType>(
 }
 
 fn build_interval_or<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((bool, bool), (bool, bool)),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let (lhs, rhs) = inputs;
+    let ((llo, lhi), (rlo, rhi)) = ranges;
+    if (llo && lhi) || (rlo && rhi) {
+        return Ok(constants.bool_vec([true; 2]));
+    } else if !llo && !lhi && !rlo && !rhi {
+        return Ok(constants.bool_vec([false; 2]));
+    }
     let all_false = build_vec_unary_intrinsic(
         builder,
         module,
@@ -631,12 +833,7 @@ fn build_interval_or<'ctx>(
             builder.build_shuffle_vector(
                 lhs,
                 rhs,
-                VectorType::const_vector(&[
-                    i32_type.const_int(0, false),
-                    i32_type.const_int(1, false),
-                    i32_type.const_int(2, false),
-                    i32_type.const_int(3, false),
-                ]),
+                constants.i32_vec([0, 1, 2, 3], false),
                 &format!("or_all_true_check_{index}"),
             )?,
             &format!("or_all_false_flip_{index}"),
@@ -662,21 +859,15 @@ fn build_interval_or<'ctx>(
         .into_int_value(),
         &format!("or_one_side_all_false_{index}"),
     )?;
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
     Ok(builder
         .build_select(
             all_false,
-            out_ff,
+            constants.bool_vec([false; 2]),
             builder
                 .build_select(
                     one_side_true,
-                    out_tt,
-                    out_ft,
+                    constants.bool_vec([true; 2]),
+                    constants.bool_vec([false, true]),
                     &format!("or_one_side_false_choice_{index}"),
                 )?
                 .into_vector_value(),
@@ -686,14 +877,20 @@ fn build_interval_or<'ctx>(
 }
 
 fn build_interval_and<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((bool, bool), (bool, bool)),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let (lhs, rhs) = inputs;
+    let ((llo, lhi), (rlo, rhi)) = ranges;
+    if (!llo && !lhi) || (!rlo && !rhi) {
+        return Ok(constants.bool_vec([false; 2]));
+    } else if llo && lhi && rlo && rhi {
+        return Ok(constants.bool_vec([true; 2]));
+    }
     let all_true = build_vec_unary_intrinsic(
         builder,
         module,
@@ -702,12 +899,7 @@ fn build_interval_and<'ctx>(
         builder.build_shuffle_vector(
             lhs,
             rhs,
-            VectorType::const_vector(&[
-                i32_type.const_int(0, false),
-                i32_type.const_int(1, false),
-                i32_type.const_int(2, false),
-                i32_type.const_int(3, false),
-            ]),
+            constants.i32_vec([0, 1, 2, 3], false),
             &format!("and_all_true_check_{index}"),
         )?,
     )?
@@ -731,21 +923,15 @@ fn build_interval_and<'ctx>(
         .into_int_value(),
         &format!("and_one_side_all_false_{index}"),
     )?;
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
     Ok(builder
         .build_select(
             all_true,
-            out_tt,
+            constants.bool_vec([true; 2]),
             builder
                 .build_select(
                     one_side_false,
-                    out_ff,
-                    out_ft,
+                    constants.bool_vec([false; 2]),
+                    constants.bool_vec([false, true]),
                     &format!("and_one_side_false_choice_{index}"),
                 )?
                 .into_vector_value(),
@@ -766,8 +952,7 @@ fn build_interval_inequality_flags<'ctx>(
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<InequalityFlags<'ctx>, Error> {
     let either_empty = builder.build_or(
@@ -776,12 +961,14 @@ fn build_interval_inequality_flags<'ctx>(
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
-    let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
-    let masked_lhs =
-        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?;
+    let masked_lhs = builder.build_float_mul(
+        constants.float_vec([-1.0, 1.0]),
+        lhs,
+        &format!("less_sign_adjust_lhs_{index}"),
+    )?;
     let masked_rhs = builder.build_float_mul(
-        mask,
-        build_interval_flip(rhs, builder, i32_type, index)?,
+        constants.float_vec([-1.0, 1.0]),
+        build_interval_flip(rhs, builder, constants, index)?,
         &format!("less_equal_sign_adjust_rhs_{index}"),
     )?;
     let cross_compare = builder.build_float_compare(
@@ -793,14 +980,14 @@ fn build_interval_inequality_flags<'ctx>(
     let strictly_after = builder
         .build_extract_element(
             cross_compare,
-            i32_type.const_zero(),
+            constants.int_32(0, false),
             &format!("less_equal_a_gt_d_check_{index}"),
         )?
         .into_int_value();
     let strictly_before = builder
         .build_extract_element(
             cross_compare,
-            i32_type.const_int(1, false),
+            constants.int_32(1, false),
             &format!("less_equal_b_lt_c_check_{index}"),
         )?
         .into_int_value();
@@ -818,29 +1005,23 @@ fn build_interval_inequality_flags<'ctx>(
     })
 }
 
-fn build_interval_less<'ctx, T: NumberType>(
+fn build_interval_less<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    context: &'ctx Context,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let flt_type = T::jit_type(context);
-    let i32_type = context.i32_type();
-    let bool_type = context.bool_type();
+    if lhs == rhs {
+        return Ok(constants.bool_vec([false; 2]));
+    }
     let InequalityFlags {
         either_empty,
         strictly_before,
         strictly_after,
         touching: _touching,
-    } = build_interval_inequality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+    } = build_interval_inequality_flags(lhs, rhs, builder, module, constants, index)?;
     Ok(builder
         .build_select(
             builder.build_or(
@@ -848,12 +1029,12 @@ fn build_interval_less<'ctx, T: NumberType>(
                 strictly_before,
                 &format!("less_empty_or_before_check_{index}"),
             )?,
-            out_tt,
+            constants.bool_vec([true; 2]),
             builder
                 .build_select(
                     strictly_after,
-                    out_ff,
-                    out_ft,
+                    constants.bool_vec([false; 2]),
+                    constants.bool_vec([false, true]),
                     &format!("less_a_gt_d_choice_{index}"),
                 )?
                 .into_vector_value(),
@@ -862,36 +1043,27 @@ fn build_interval_less<'ctx, T: NumberType>(
         .into_vector_value())
 }
 
-fn build_interval_less_equal<'ctx, T: NumberType>(
+fn build_interval_less_equal<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    context: &'ctx Context,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let flt_type = T::jit_type(context);
-    let i32_type = context.i32_type();
-    let bool_type = context.bool_type();
     let InequalityFlags {
         either_empty,
         strictly_before,
         strictly_after,
         touching,
-    } = build_interval_inequality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
+    } = build_interval_inequality_flags(lhs, rhs, builder, module, constants, index)?;
     let touching_left = builder
         .build_extract_element(
             touching,
-            i32_type.const_int(1, false),
+            constants.int_32(1, false),
             &format!("less_equal_touching_left_{index}"),
         )?
         .into_int_value();
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
     Ok(builder
         .build_select(
             builder.build_or(
@@ -903,12 +1075,12 @@ fn build_interval_less_equal<'ctx, T: NumberType>(
                 )?,
                 &format!("less_equal_empty_or_before_{index}"),
             )?,
-            out_tt,
+            constants.bool_vec([true; 2]),
             builder
                 .build_select(
                     strictly_after,
-                    out_ff,
-                    out_ft,
+                    constants.bool_vec([false; 2]),
+                    constants.bool_vec([false, true]),
                     &format!("less_a_gt_d_chocie_{index}"),
                 )?
                 .into_vector_value(),
@@ -922,8 +1094,7 @@ fn build_interval_equality_flags<'ctx>(
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
     let either_empty = builder.build_or(
@@ -932,12 +1103,14 @@ fn build_interval_equality_flags<'ctx>(
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
-    let mask = VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
-    let masked_lhs =
-        builder.build_float_mul(mask, lhs, &format!("less_sign_adjust_lhs_{index}"))?;
+    let masked_lhs = builder.build_float_mul(
+        constants.float_vec([-1.0, 1.0]),
+        lhs,
+        &format!("less_sign_adjust_lhs_{index}"),
+    )?;
     let masked_rhs = builder.build_float_mul(
-        mask,
-        build_interval_flip(rhs, builder, i32_type, index)?,
+        constants.float_vec([-1.0, 1.0]),
+        build_interval_flip(rhs, builder, constants, index)?,
         &format!("less_equal_sign_adjust_rhs_{index}"),
     )?;
     let no_overlap = build_vec_unary_intrinsic(
@@ -978,34 +1151,28 @@ fn build_interval_equality_flags<'ctx>(
     Ok((no_overlap, matching_singleton))
 }
 
-fn build_interval_equal<'ctx, T: NumberType>(
+fn build_interval_equal<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    context: &'ctx Context,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let flt_type = T::jit_type(context);
-    let i32_type = context.i32_type();
-    let bool_type = context.bool_type();
+    if lhs == rhs {
+        return Ok(constants.bool_vec([true; 2]));
+    }
     let (no_overlap, matching_singleton) =
-        build_interval_equality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+        build_interval_equality_flags(lhs, rhs, builder, module, constants, index)?;
     Ok(builder
         .build_select(
             no_overlap,
-            out_ff,
+            constants.bool_vec([false; 2]),
             builder
                 .build_select(
                     matching_singleton,
-                    out_tt,
-                    out_ft,
+                    constants.bool_vec([true; 2]),
+                    constants.bool_vec([false, true]),
                     &format!("equal_matching_singleton_select_{index}"),
                 )?
                 .into_vector_value(),
@@ -1014,151 +1181,48 @@ fn build_interval_equal<'ctx, T: NumberType>(
         .into_vector_value())
 }
 
-fn build_interval_not_equal<'ctx, T: NumberType>(
+fn build_interval_not_equal<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    context: &'ctx Context,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let flt_type = T::jit_type(context);
-    let i32_type = context.i32_type();
-    let bool_type = context.bool_type();
+    if lhs == rhs {
+        return Ok(constants.bool_vec([false; 2]));
+    }
     let (no_overlap, matching_singleton) =
-        build_interval_equality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
+        build_interval_equality_flags(lhs, rhs, builder, module, constants, index)?;
     Ok(builder
         .build_select(
             no_overlap,
-            out_tt,
+            constants.bool_vec([true; 2]),
             builder
                 .build_select(
                     matching_singleton,
-                    out_ff,
-                    out_ft,
+                    constants.bool_vec([false; 2]),
+                    constants.bool_vec([false, true]),
                     &format!("equal_matching_singleton_select_{index}"),
                 )?
                 .into_vector_value(),
             &format!("equal_no_overlap_select_{index}"),
-        )?
-        .into_vector_value())
-}
-
-fn build_interval_greater<'ctx, T: NumberType>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    context: &'ctx Context,
-    index: usize,
-) -> Result<VectorValue<'ctx>, Error> {
-    let flt_type = T::jit_type(context);
-    let i32_type = context.i32_type();
-    let bool_type = context.bool_type();
-    let InequalityFlags {
-        either_empty,
-        strictly_before,
-        strictly_after,
-        touching: _touching,
-    } = build_interval_inequality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
-    Ok(builder
-        .build_select(
-            builder.build_or(
-                either_empty,
-                strictly_after,
-                &format!("less_empty_or_before_check_{index}"),
-            )?,
-            out_tt,
-            builder
-                .build_select(
-                    strictly_before,
-                    out_ff,
-                    out_ft,
-                    &format!("less_a_gt_d_choice_{index}"),
-                )?
-                .into_vector_value(),
-            &format!("less_{index}"),
-        )?
-        .into_vector_value())
-}
-
-fn build_interval_greater_equal<'ctx, T: NumberType>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    context: &'ctx Context,
-    index: usize,
-) -> Result<VectorValue<'ctx>, Error> {
-    let flt_type = T::jit_type(context);
-    let i32_type = context.i32_type();
-    let bool_type = context.bool_type();
-    let InequalityFlags {
-        either_empty,
-        strictly_before,
-        strictly_after,
-        touching,
-    } = build_interval_inequality_flags(lhs, rhs, builder, module, i32_type, flt_type, index)?;
-    let touching_right = builder
-        .build_extract_element(
-            touching,
-            i32_type.const_int(0, false),
-            &format!("less_equal_touching_left_{index}"),
-        )?
-        .into_int_value();
-    let out_tt =
-        VectorType::const_vector(&[bool_type.const_int(1, false), bool_type.const_int(1, false)]);
-    let out_ft =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(1, false)]);
-    let out_ff =
-        VectorType::const_vector(&[bool_type.const_int(0, false), bool_type.const_int(0, false)]);
-    Ok(builder
-        .build_select(
-            builder.build_or(
-                either_empty,
-                builder.build_or(
-                    strictly_after,
-                    touching_right,
-                    &format!("less_equal_before_or_touching_{index}"),
-                )?,
-                &format!("less_equal_empty_or_before_{index}"),
-            )?,
-            out_tt,
-            builder
-                .build_select(
-                    strictly_before,
-                    out_ff,
-                    out_ft,
-                    &format!("less_a_gt_d_chocie_{index}"),
-                )?
-                .into_vector_value(),
-            &format!("less_b_lt_c_choice_{index}"),
         )?
         .into_vector_value())
 }
 
 fn build_interval_remainder<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    function: FunctionValue<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let div_result = build_interval_div(lhs, rhs, builder, module, i32_type, flt_type, index)?;
+    let div_result =
+        build_interval_div(inputs, ranges, builder, module, function, constants, index)?;
+    let (lhs, rhs) = inputs;
     let mul_result = builder.build_float_mul(
         build_vec_unary_intrinsic(
             builder,
@@ -1173,23 +1237,31 @@ fn build_interval_remainder<'ctx>(
     )?;
     Ok(builder.build_float_sub(
         lhs,
-        build_interval_flip(mul_result, builder, i32_type, index)?,
+        build_interval_flip(mul_result, builder, constants, index)?,
         &format!("remainder_final_sub_{index}"),
     )?)
 }
 
 fn build_interval_log<'ctx>(
     input: VectorValue<'ctx>,
+    range: (f64, f64),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    if range.0 > 0.0 && range.1 > 0.0 {
+        return Ok(
+            build_vec_unary_intrinsic(builder, module, "llvm.log.*", "log_call", input)?
+                .into_vector_value(),
+        );
+    } else if range.0 < 0.0 && range.1 < 0.0 {
+        return Ok(constants.float_vec([f64::NAN; 2]));
+    }
     let is_neg = builder.build_float_compare(
         FloatPredicate::ULE,
         input,
-        input.get_type().const_zero(),
+        constants.float_vec([0.0; 2]),
         &format!("log_neg_compare_{index}"),
     )?;
     let log_base = build_vec_unary_intrinsic(builder, module, "llvm.log.*", "log_call", input)?
@@ -1199,27 +1271,24 @@ fn build_interval_log<'ctx>(
             builder
                 .build_extract_element(
                     is_neg,
-                    i32_type.const_int(1, false),
+                    constants.int_32(1, false),
                     &format!("log_hi_neg_check_{index}"),
                 )?
                 .into_int_value(),
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::NAN),
-                flt_type.const_float(f64::NAN),
-            ]),
+            constants.float_vec([f64::NAN; 2]),
             builder
                 .build_select(
                     builder
                         .build_extract_element(
                             is_neg,
-                            i32_type.const_int(0, false),
+                            constants.int_32(0, false),
                             &format!("log_hi_neg_check_{index}"),
                         )?
                         .into_int_value(),
                     builder.build_insert_element(
                         log_base,
-                        flt_type.const_float(f64::NEG_INFINITY),
-                        i32_type.const_int(0, false),
+                        constants.float(f64::NEG_INFINITY),
+                        constants.int_32(0, false),
                         &format!("log_range_across_zero_{index}"),
                     )?,
                     log_base,
@@ -1235,14 +1304,13 @@ fn build_interval_tan<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     let lo = builder
         .build_extract_element(
             input,
-            i32_type.const_int(0, false),
+            constants.int_32(0, false),
             &format!("tan_width_rhs_{index}"),
         )?
         .into_float_value();
@@ -1250,40 +1318,37 @@ fn build_interval_tan<'ctx>(
         builder
             .build_extract_element(
                 input,
-                i32_type.const_int(1, false),
+                constants.int_32(1, false),
                 &format!("tan_width_lhs_{index}"),
             )?
             .into_float_value(),
         lo,
         &format!("tan_width_{index}"),
     )?;
-    let everything = VectorType::const_vector(&[
-        flt_type.const_float(f64::NEG_INFINITY),
-        flt_type.const_float(f64::INFINITY),
-    ]);
     let out = builder.build_select(
         builder.build_float_compare(
             FloatPredicate::UGE,
             width,
-            flt_type.const_float(PI),
+            constants.float(PI),
             &format!("tan_pi_compare_{index}"),
         )?,
-        everything,
+        constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
         {
             // Shift lo to an equivalent value in -pi/2 to pi/2.
             let lo = builder.build_float_sub(
                 build_float_rem_euclid(
                     builder.build_float_add(
                         lo,
-                        flt_type.const_float(FRAC_PI_2),
+                        constants.float(FRAC_PI_2),
                         &format!("tan_pi_shift_add_{index}"),
                     )?,
-                    flt_type.const_float(PI),
+                    constants.float(PI),
                     builder,
+                    constants,
                     &format!("tan_rem_euclid_{index}"),
                     index,
                 )?,
-                flt_type.const_float(FRAC_PI_2),
+                constants.float(FRAC_PI_2),
                 &format!("tan_shifted_lo_{index}"),
             )?;
             let hi = builder.build_float_add(lo, width, &format!("tan_shifted_hi_{index}"))?;
@@ -1292,10 +1357,10 @@ fn build_interval_tan<'ctx>(
                     builder.build_float_compare(
                         FloatPredicate::UGE,
                         hi,
-                        flt_type.const_float(FRAC_PI_2),
+                        constants.float(FRAC_PI_2),
                         &format!("tan_second_compare_{index}"),
                     )?,
-                    everything,
+                    constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
                     {
                         let sin = build_vec_unary_intrinsic(
                             builder,
@@ -1326,196 +1391,7 @@ fn build_interval_tan<'ctx>(
     Ok(builder
         .build_select(
             build_check_interval_empty(input, builder, module, index)?,
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::NAN),
-                flt_type.const_float(f64::NAN),
-            ])
-            .as_basic_value_enum(),
-            out,
-            &format!("reg_{index}"),
-        )?
-        .into_vector_value())
-}
-
-fn build_interval_cos<'ctx>(
-    input: VectorValue<'ctx>,
-    builder: &'ctx Builder,
-    module: &'ctx Module,
-    flt_type: FloatType<'ctx>,
-    i32_type: IntType<'ctx>,
-    index: usize,
-) -> Result<VectorValue<'ctx>, Error> {
-    let qinterval = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.floor.*",
-        &format!("intermediate_floor_{index}"),
-        builder.build_float_div(
-            input,
-            VectorType::const_vector(&[flt_type.const_float(PI), flt_type.const_float(PI)]),
-            &format!("div_pi_{index}"),
-        )?,
-    )?
-    .into_vector_value();
-    let (lo, hi) = (
-        builder
-            .build_extract_element(
-                input,
-                i32_type.const_int(0, false),
-                &format!("extract_lo_{index}"),
-            )?
-            .into_float_value(),
-        builder
-            .build_extract_element(
-                input,
-                i32_type.const_int(1, false),
-                &format!("extract_lo_{index}"),
-            )?
-            .into_float_value(),
-    );
-    let qlo = builder
-        .build_extract_element(
-            qinterval,
-            i32_type.const_int(0, false),
-            &format!("q_extract_1_{index}"),
-        )?
-        .into_float_value();
-    let nval = builder
-        .build_select(
-            builder.build_float_compare(
-                FloatPredicate::UEQ,
-                lo,
-                hi,
-                &format!("lo_hi_compare_{index}"),
-            )?,
-            flt_type.const_float(0.0),
-            builder.build_float_sub(
-                builder
-                    .build_extract_element(
-                        qinterval,
-                        i32_type.const_int(1, false),
-                        &format!("q_extract_0_{index}"),
-                    )?
-                    .into_float_value(),
-                qlo,
-                &format!("nval_sub_{index}"),
-            )?,
-            &format!("nval_{index}"),
-        )?
-        .into_float_value();
-    let qval = builder
-        .build_select(
-            builder.build_float_compare(
-                FloatPredicate::UEQ,
-                qlo,
-                builder.build_float_mul(
-                    flt_type.const_float(2.0),
-                    build_float_unary_intrinsic(
-                        builder,
-                        module,
-                        "llvm.floor.*",
-                        &format!("intermediate_qval_floor_{index}"),
-                        builder.build_float_mul(
-                            qlo,
-                            flt_type.const_float(0.5),
-                            &format!("qval_half_mul_{index}"),
-                        )?,
-                    )?
-                    .into_float_value(),
-                    &format!("qval_doubling_{index}"),
-                )?,
-                &format!("qval_comparison_{index}"),
-            )?,
-            flt_type.const_float(0.0),
-            flt_type.const_float(1.0),
-            &format!("qval_{index}"),
-        )?
-        .into_float_value();
-    let q_zero = builder.build_float_compare(
-        FloatPredicate::UEQ,
-        qval,
-        flt_type.const_float(0.0),
-        &format!("qval_is_zero_{index}"),
-    )?;
-    let full_range =
-        VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
-    let cos_base = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.cos.*",
-        &format!("sin_base_{index}"),
-        input,
-    )?
-    .into_vector_value();
-    let out = builder.build_select(
-        builder.build_float_compare(
-            FloatPredicate::UEQ,
-            nval,
-            flt_type.const_float(0.0),
-            &format!("nval_zero_compare_{index}"),
-        )?,
-        builder
-            .build_select(
-                q_zero,
-                build_interval_flip(cos_base, builder, i32_type, index)?,
-                cos_base,
-                &format!("edge_case_1_{index}"),
-            )?
-            .into_vector_value(),
-        builder
-            .build_select(
-                builder.build_float_compare(
-                    FloatPredicate::ULE,
-                    nval,
-                    flt_type.const_float(1.0),
-                    &format!("nval_one_compare_{index}"),
-                )?,
-                builder
-                    .build_select(
-                        q_zero,
-                        builder.build_insert_element(
-                            full_range,
-                            build_vec_unary_intrinsic(
-                                builder,
-                                module,
-                                "llvm.vector.reduce.fmax.*",
-                                &format!("case_3_max_reduce_{index}"),
-                                cos_base,
-                            )?
-                            .into_float_value(),
-                            i32_type.const_int(1, false),
-                            &format!("out_val_case_2_{index}"),
-                        )?,
-                        builder.build_insert_element(
-                            full_range,
-                            build_vec_unary_intrinsic(
-                                builder,
-                                module,
-                                "llvm.vector.reduce.fmin.*",
-                                &format!("case_3_min_reduce_{index}"),
-                                cos_base,
-                            )?
-                            .into_float_value(),
-                            i32_type.const_int(0, false),
-                            &format!("out_val_case_3_{index}"),
-                        )?,
-                        &format!("nval_cases_{index}"),
-                    )?
-                    .into_vector_value(),
-                full_range,
-                &format!("out_val_edge_case_0_{index}"),
-            )?
-            .into_vector_value(),
-        &format!("out_val_{index}"),
-    )?;
-    Ok(builder
-        .build_select(
-            build_check_interval_empty(input, builder, module, index)?,
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::NAN),
-                flt_type.const_float(f64::NAN),
-            ])
-            .as_basic_value_enum(),
+            constants.float_vec([f64::NAN; 2]).as_basic_value_enum(),
             out,
             &format!("reg_{index}"),
         )?
@@ -1526,9 +1402,7 @@ fn build_interval_sin<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    flt_type: FloatType<'ctx>,
-    i32_type: IntType<'ctx>,
-    bool_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     let qinterval = build_vec_unary_intrinsic(
@@ -1538,64 +1412,51 @@ fn build_interval_sin<'ctx>(
         &format!("intermediate_floor_{index}"),
         builder.build_float_div(
             input,
-            VectorType::const_vector(&[
-                flt_type.const_float(FRAC_PI_2),
-                flt_type.const_float(FRAC_PI_2),
-            ]),
+            constants.float_vec([FRAC_PI_2; 2]),
             &format!("div_pi_{index}"),
         )?,
     )?
     .into_vector_value();
-    let (lo, hi) = (
-        builder
-            .build_extract_element(
-                input,
-                i32_type.const_int(0, false),
-                &format!("extract_lo_{index}"),
-            )?
-            .into_float_value(),
-        builder
-            .build_extract_element(
-                input,
-                i32_type.const_int(1, false),
-                &format!("extract_lo_{index}"),
-            )?
-            .into_float_value(),
-    );
+    let is_singleton = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("sin_singleton_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            input,
+            build_interval_flip(input, builder, constants, index)?,
+            &format!("sin_singleton_check_reduce_{index}"),
+        )?,
+    )?
+    .into_int_value();
     let qlo = builder
         .build_extract_element(
             qinterval,
-            i32_type.const_int(0, false),
+            constants.int_32(0, false),
             &format!("q_extract_1_{index}"),
+        )?
+        .into_float_value();
+    let qhi = builder
+        .build_extract_element(
+            qinterval,
+            constants.int_32(1, false),
+            &format!("q_extract_0_{index}"),
         )?
         .into_float_value();
     let nval = builder
         .build_select(
-            builder.build_float_compare(
-                FloatPredicate::UEQ,
-                lo,
-                hi,
-                &format!("lo_hi_compare_{index}"),
-            )?,
-            flt_type.const_float(0.0),
-            builder.build_float_sub(
-                builder
-                    .build_extract_element(
-                        qinterval,
-                        i32_type.const_int(1, false),
-                        &format!("q_extract_0_{index}"),
-                    )?
-                    .into_float_value(),
-                qlo,
-                &format!("nval_sub_{index}"),
-            )?,
+            is_singleton,
+            constants.float(0.0),
+            builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
             &format!("nval_{index}"),
         )?
         .into_float_value();
     let qval = build_float_rem_euclid(
         qlo,
-        flt_type.const_float(4.0),
+        constants.float(4.0),
         builder,
+        constants,
         &format!("q_rem_euclid_val_{index}"),
         index,
     )?;
@@ -1607,8 +1468,6 @@ fn build_interval_sin<'ctx>(
         input,
     )?
     .into_vector_value();
-    let full_range =
-        VectorType::const_vector(&[flt_type.const_float(-1.0), flt_type.const_float(1.0)]);
     // Below part matches the long if/else chain in the
     // plain interval implementation. Go through the pairs
     // in reverse and accumulate a nested ternary
@@ -1621,9 +1480,9 @@ fn build_interval_sin<'ctx>(
     ];
     let out_vals = [
         sin_base,
-        build_interval_flip(sin_base, builder, i32_type, index)?,
+        build_interval_flip(sin_base, builder, constants, index)?,
         builder.build_insert_element(
-            full_range,
+            constants.float_vec([-1.0, 1.0]),
             build_vec_unary_intrinsic(
                 builder,
                 module,
@@ -1632,11 +1491,11 @@ fn build_interval_sin<'ctx>(
                 sin_base,
             )?
             .into_float_value(),
-            i32_type.const_int(0, false),
+            constants.int_32(0, false),
             &format!("out_val_case_3_{index}"),
         )?,
         builder.build_insert_element(
-            full_range,
+            constants.float_vec([-1.0, 1.0]),
             build_vec_unary_intrinsic(
                 builder,
                 module,
@@ -1645,7 +1504,7 @@ fn build_interval_sin<'ctx>(
                 sin_base,
             )?
             .into_float_value(),
-            i32_type.const_int(1, false),
+            constants.int_32(1, false),
             &format!("out_val_case_3_{index}"),
         )?,
     ];
@@ -1654,21 +1513,21 @@ fn build_interval_sin<'ctx>(
         .zip(out_vals.iter())
         .enumerate()
         .try_rfold(
-            full_range,
+            constants.float_vec([-1.0, 1.0]),
             |acc, (i, (pairs, out))| -> Result<VectorValue<'_>, Error> {
-                let mut conds = [bool_type.get_poison(), bool_type.get_poison()];
+                let mut conds = [constants.boolean(false), constants.boolean(false)];
                 for ((q, n), dst) in pairs.iter().zip(conds.iter_mut()) {
                     *dst = builder.build_and(
                         builder.build_float_compare(
                             FloatPredicate::UEQ,
                             qval,
-                            flt_type.const_float(*q),
+                            constants.float(*q),
                             &format!("q_compare_{q}_{index}"),
                         )?,
                         builder.build_float_compare(
                             FloatPredicate::ULT,
                             nval,
-                            flt_type.const_float(*n),
+                            constants.float(*n),
                             &format!("n_compare_{n}_{index}"),
                         )?,
                         &format!("and_q_n_{index}"),
@@ -1688,48 +1547,165 @@ fn build_interval_sin<'ctx>(
     Ok(builder
         .build_select(
             build_check_interval_empty(input, builder, module, index)?,
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::NAN),
-                flt_type.const_float(f64::NAN),
-            ])
-            .as_basic_value_enum(),
+            constants.float_vec([f64::NAN; 2]).as_basic_value_enum(),
             out,
             &format!("reg_{index}"),
         )?
         .into_vector_value())
 }
 
-fn build_check_interval_spanning_zero<'ctx>(
+fn build_interval_cos<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
-    i32_type: IntType<'ctx>,
-    prefix: &str,
+    module: &'ctx Module,
+    constants: &mut Constants<'ctx>,
     index: usize,
-) -> Result<IntValue<'ctx>, Error> {
-    let is_neg = builder.build_float_compare(
-        FloatPredicate::ULT,
-        input,
-        input.get_type().const_zero(),
-        &format!("{prefix}_zero_spanning_check_{index}"),
+) -> Result<VectorValue<'ctx>, Error> {
+    let qinterval = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.floor.*",
+        &format!("intermediate_floor_{index}"),
+        builder.build_float_div(
+            input,
+            constants.float_vec([PI; 2]),
+            &format!("div_pi_{index}"),
+        )?,
+    )?
+    .into_vector_value();
+    let is_singleton = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("sin_singleton_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            input,
+            build_interval_flip(input, builder, constants, index)?,
+            &format!("sin_singleton_check_reduce_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    let qlo = builder
+        .build_extract_element(
+            qinterval,
+            constants.int_32(0, false),
+            &format!("q_extract_1_{index}"),
+        )?
+        .into_float_value();
+    let qhi = builder
+        .build_extract_element(
+            qinterval,
+            constants.int_32(1, false),
+            &format!("q_extract_0_{index}"),
+        )?
+        .into_float_value();
+    let nval = builder
+        .build_select(
+            is_singleton,
+            constants.float(0.0),
+            builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
+            &format!("nval_{index}"),
+        )?
+        .into_float_value();
+    let q_is_even = builder.build_float_compare(
+        FloatPredicate::UEQ,
+        qlo,
+        builder.build_float_mul(
+            constants.float(2.0),
+            build_float_unary_intrinsic(
+                builder,
+                module,
+                "llvm.floor.*",
+                &format!("intermediate_qval_floor_{index}"),
+                builder.build_float_mul(
+                    qlo,
+                    constants.float(0.5),
+                    &format!("qval_half_mul_{index}"),
+                )?,
+            )?
+            .into_float_value(),
+            &format!("qval_doubling_{index}"),
+        )?,
+        &format!("qval_comparison_{index}"),
     )?;
-    Ok(builder.build_int_compare(
-        IntPredicate::NE,
+    let cos_base = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.cos.*",
+        &format!("sin_base_{index}"),
+        input,
+    )?
+    .into_vector_value();
+    let out = builder.build_select(
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            nval,
+            constants.float(0.0),
+            &format!("nval_zero_compare_{index}"),
+        )?,
         builder
-            .build_extract_element(
-                is_neg,
-                i32_type.const_zero(),
-                &format!("{prefix}_zero_spanning_left_{index}"),
+            .build_select(
+                q_is_even,
+                build_interval_flip(cos_base, builder, constants, index)?,
+                cos_base,
+                &format!("edge_case_1_{index}"),
             )?
-            .into_int_value(),
+            .into_vector_value(),
         builder
-            .build_extract_element(
-                is_neg,
-                i32_type.const_int(1, false),
-                &format!("{prefix}_zero_spanning_right_{index}"),
+            .build_select(
+                builder.build_float_compare(
+                    FloatPredicate::ULE,
+                    nval,
+                    constants.float(1.0),
+                    &format!("nval_one_compare_{index}"),
+                )?,
+                builder
+                    .build_select(
+                        q_is_even,
+                        builder.build_insert_element(
+                            constants.float_vec([-1.0, 1.0]),
+                            build_vec_unary_intrinsic(
+                                builder,
+                                module,
+                                "llvm.vector.reduce.fmax.*",
+                                &format!("case_3_max_reduce_{index}"),
+                                cos_base,
+                            )?
+                            .into_float_value(),
+                            constants.int_32(1, false),
+                            &format!("out_val_case_2_{index}"),
+                        )?,
+                        builder.build_insert_element(
+                            constants.float_vec([-1.0, 1.0]),
+                            build_vec_unary_intrinsic(
+                                builder,
+                                module,
+                                "llvm.vector.reduce.fmin.*",
+                                &format!("case_3_min_reduce_{index}"),
+                                cos_base,
+                            )?
+                            .into_float_value(),
+                            constants.int_32(0, false),
+                            &format!("out_val_case_3_{index}"),
+                        )?,
+                        &format!("nval_cases_{index}"),
+                    )?
+                    .into_vector_value(),
+                constants.float_vec([-1.0, 1.0]),
+                &format!("out_val_edge_case_0_{index}"),
             )?
-            .into_int_value(),
-        &format!("{prefix}_zero_spanning_check_{index}"),
-    )?)
+            .into_vector_value(),
+        &format!("out_val_{index}"),
+    )?;
+    Ok(builder
+        .build_select(
+            build_check_interval_empty(input, builder, module, index)?,
+            constants.float_vec([f64::NAN; 2]).as_basic_value_enum(),
+            out,
+            &format!("reg_{index}"),
+        )?
+        .into_vector_value())
 }
 
 fn build_float_vec_powi<'ctx>(
@@ -1766,41 +1742,110 @@ fn build_float_vec_powi<'ctx>(
         .map(|v| v.into_vector_value())
 }
 
-fn build_interval_pow<'ctx, T: NumberType>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+fn build_interval_square<'ctx>(
+    input: VectorValue<'ctx>,
+    range: (f64, f64),
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    constants: &mut Constants<'ctx>,
+    index: usize,
+) -> Result<VectorValue<'ctx>, Error> {
+    let sqbase = builder.build_float_mul(input, input, &format!("pow_lhs_square_base_{index}"))?;
+    if range.0 >= 0.0 && range.1 >= 0.0 {
+        return Ok(sqbase);
+    } else if range.0 < 0.0 && range.1 < 0.0 {
+        return build_interval_flip(sqbase, builder, constants, index);
+    }
+    let is_neg = builder.build_float_compare(
+        FloatPredicate::ULT,
+        input,
+        constants.float_vec([0.0; 2]),
+        &format!("pow_square_case_zero_spanning_check_{index}"),
+    )?;
+    let is_spanning_zero = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.xor.*",
+        &format!("pow_square_case_zero_spanning_xor_{index}"),
+        is_neg,
+    )?
+    .into_int_value();
+    let all_neg = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("pow_square_case_zero_spanning_xor_{index}"),
+        is_neg,
+    )?
+    .into_int_value();
+    Ok(builder
+        .build_select(
+            is_spanning_zero,
+            builder.build_insert_element(
+                constants.float_vec([0.0; 2]),
+                build_vec_unary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.vector.reduce.fmax.*",
+                    &format!("pow_square_case_zero_spanning_max_{index}"),
+                    sqbase,
+                )?
+                .into_float_value(),
+                constants.int_32(1, false),
+                &format!("pow_square_insert_elem_{index}"),
+            )?,
+            builder
+                .build_select(
+                    all_neg,
+                    build_interval_flip(sqbase, builder, constants, index)?,
+                    sqbase,
+                    &format!("pow_square_case_base_neg_cases_{index}"),
+                )?
+                .into_vector_value(),
+            &format!("pow_square_case_{index}"),
+        )?
+        .into_vector_value())
+}
+
+fn build_interval_pow<'ctx>(
+    (lhs, rhs): (VectorValue<'ctx>, VectorValue<'ctx>),
+    (range_left, _range_right): ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
     index: usize,
     function: FunctionValue<'ctx>,
-    context: &'ctx Context,
+    constants: &mut Constants<'ctx>,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let i32_type = context.i32_type();
-    let flt_type = T::jit_type(context);
-    let all_joined = builder.build_shuffle_vector(
-        lhs,
-        rhs,
-        VectorType::const_vector(&[
-            i32_type.const_int(0, false),
-            i32_type.const_int(1, false),
-            i32_type.const_int(2, false),
-            i32_type.const_int(3, false),
-        ]),
-        &format!("pow_nan_check_concat_{index}"),
+    let context = module.get_context();
+    let is_any_nan = builder.build_or(
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.or.*",
+            &format!("pow_nan_check_{index}"),
+            builder.build_float_compare(
+                FloatPredicate::UNO,
+                lhs,
+                lhs,
+                &format!("pow_lane_wise_nan_check_{index}"),
+            )?,
+        )?
+        .into_int_value(),
+        build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.or.*",
+            &format!("pow_nan_check_{index}"),
+            builder.build_float_compare(
+                FloatPredicate::UNO,
+                rhs,
+                rhs,
+                &format!("pow_lane_wise_nan_check_{index}"),
+            )?,
+        )?
+        .into_int_value(),
+        &format!("pow_any_nan_check_{index}"),
     )?;
-    let is_any_nan = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.or.*",
-        &format!("pow_nan_check_{index}"),
-        builder.build_float_compare(
-            FloatPredicate::UNO,
-            all_joined,
-            all_joined,
-            &format!("pow_lane_wise_nan_check_{index}"),
-        )?,
-    )?
-    .into_int_value();
     let is_exponent_zero = build_vec_unary_intrinsic(
         builder,
         module,
@@ -1809,21 +1854,8 @@ fn build_interval_pow<'ctx, T: NumberType>(
         builder.build_float_compare(
             FloatPredicate::UEQ,
             rhs,
-            rhs.get_type().const_zero(),
+            constants.float_vec([0.0; 2]),
             &format!("pow_zero_check_{index}"),
-        )?,
-    )?
-    .into_int_value();
-    let is_square = build_vec_unary_intrinsic(
-        builder,
-        module,
-        "llvm.vector.reduce.and.*",
-        &format!("pow_square_check_reduce_{index}"),
-        builder.build_float_compare(
-            FloatPredicate::UEQ,
-            rhs,
-            VectorType::const_vector(&[flt_type.const_float(2.0), flt_type.const_float(2.0)]),
-            &format!("pow_square_check_{index}"),
         )?,
     )?
     .into_int_value();
@@ -1835,6 +1867,61 @@ fn build_interval_pow<'ctx, T: NumberType>(
         rhs,
     )?
     .into_vector_value();
+    // Create all the blocks up front before doing conditional branching.
+    let simple_bb = context.append_basic_block(function, &format!("pow_simple_case_bb_{index}"));
+    let test_square_bb =
+        context.append_basic_block(function, &format!("pow_square_test_bb_{index}"));
+    let square_bb = context.append_basic_block(function, &format!("pow_square_case_bb{index}"));
+    let test_integer_bb =
+        context.append_basic_block(function, &format!("pow_integer_case_test_bb_{index}"));
+    let integer_bb = context.append_basic_block(function, &format!("pow_integer_case_bb_{index}"));
+    let general_bb = context.append_basic_block(function, &format!("pow_general_exponent_{index}"));
+    let merge_bb =
+        context.append_basic_block(function, &format!("pow_merge_outer_cases_bb_{index}"));
+    builder.build_conditional_branch(
+        builder.build_or(
+            is_any_nan,
+            is_exponent_zero,
+            &format!("pow_simple_check_or_{index}"),
+        )?,
+        simple_bb,
+        test_square_bb,
+    )?;
+    let simple_out = {
+        builder.position_at_end(simple_bb);
+        let out = builder
+            .build_select(
+                is_any_nan,
+                constants.float_vec([f64::NAN; 2]),
+                constants.float_vec([1.0; 2]),
+                &format!("pow_simple_cases_{index}"),
+            )?
+            .into_vector_value();
+        builder.build_unconditional_branch(merge_bb)?;
+        builder.position_at_end(test_square_bb);
+        out
+    };
+    let is_square = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("pow_square_check_reduce_{index}"),
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            rhs,
+            constants.float_vec([2.0; 2]),
+            &format!("pow_square_check_{index}"),
+        )?,
+    )?
+    .into_int_value();
+    builder.build_conditional_branch(is_square, square_bb, test_integer_bb)?;
+    let square_out = {
+        builder.position_at_end(square_bb);
+        let out = build_interval_square(lhs, range_left, builder, module, constants, index)?;
+        builder.build_unconditional_branch(merge_bb)?;
+        builder.position_at_end(test_integer_bb);
+        out
+    };
     let is_exponent_singleton_integer = build_vec_unary_intrinsic(
         builder,
         module,
@@ -1843,53 +1930,43 @@ fn build_interval_pow<'ctx, T: NumberType>(
         builder.build_float_compare(
             FloatPredicate::UEQ,
             rhs_floor,
-            build_interval_flip(rhs, builder, i32_type, index)?,
+            build_interval_flip(rhs, builder, constants, index)?,
             &format!("pow_integer_check_compare_{index}"),
         )?,
     )?
     .into_int_value();
-    let everything = VectorType::const_vector(&[
-        flt_type.const_float(f64::NEG_INFINITY),
-        flt_type.const_float(f64::INFINITY),
-    ]);
-    let empty = VectorType::const_vector(&[
-        flt_type.const_float(f64::NAN),
-        flt_type.const_float(f64::NAN),
-    ]);
-    let integer_bb =
-        context.append_basic_block(function, &format!("pow_singleton_integer_exponent_{index}"));
-    let general_bb = context.append_basic_block(function, &format!("pow_general_exponent_{index}"));
-    let integer_rational_merge_bb =
-        context.append_basic_block(function, &format!("pow_outer_merge_{index}"));
     builder.build_conditional_branch(is_exponent_singleton_integer, integer_bb, general_bb)?;
-    let (integer_case, odd_even_merge_bb) = {
+    // We now go inside the integer case, and return the last inner block and
+    // let it shadow the integer case outside afterwards. Because LLVM wants to
+    // know the last inner most block of a phi. So shadowing is helpful.
+    let (integer_out, integer_bb) = {
         builder.position_at_end(integer_bb);
         let exponent = builder.build_float_to_signed_int(
             builder
                 .build_extract_element(
                     rhs_floor,
-                    i32_type.const_zero(),
+                    constants.int_32(0, false),
                     &format!("pow_extract_floor_{index}"),
                 )?
                 .into_float_value(),
-            i32_type,
+            context.i32_type(),
             &format!("pow_exponent_to_integer_convert_{index}"),
         )?;
         let is_odd = builder.build_and(
             exponent,
-            i32_type.const_int(1, false),
+            constants.int_32(1, false),
             &format!("pow_integer_exp_odd_check_{index}"),
         )?;
         let is_even = builder.build_int_compare(
             IntPredicate::EQ,
             is_odd,
-            i32_type.const_zero(),
+            constants.int_32(0, false),
             &format!("pow_integer_even_check_{index}"),
         )?;
         let is_neg = builder.build_int_compare(
             IntPredicate::SLT,
             exponent,
-            i32_type.const_zero(),
+            constants.int_32(0, false),
             &format!("pow_integer_neg_check_{index}"),
         )?;
         let is_base_zero = build_vec_unary_intrinsic(
@@ -1900,20 +1977,20 @@ fn build_interval_pow<'ctx, T: NumberType>(
             builder.build_float_compare(
                 FloatPredicate::UEQ,
                 lhs,
-                lhs.get_type().const_zero(),
+                constants.float_vec([0.0; 2]),
                 &format!("pow_integer_base_zero_check_{index}"),
             )?,
         )?
         .into_int_value();
         let even_bb = context.append_basic_block(function, &format!("pow_integer_even_bb_{index}"));
-        let else_bb = context.append_basic_block(function, &format!("pow_integer_else_bb_{index}"));
-        let even_merge_bb =
+        let odd_bb = context.append_basic_block(function, &format!("pow_integer_else_bb_{index}"));
+        let integer_merge_bb =
             context.append_basic_block(function, &format!("pow_odd_even_merge_{index}"));
-        builder.build_conditional_branch(is_even, even_bb, else_bb)?;
+        builder.build_conditional_branch(is_even, even_bb, odd_bb)?;
         let even_case = {
             builder.position_at_end(even_bb);
             let abs_powi = build_float_vec_powi(
-                build_interval_abs(lhs, builder, module, flt_type, i32_type, index)?,
+                build_interval_abs(lhs, range_left, builder, module, constants, index)?,
                 exponent,
                 builder,
                 module,
@@ -1925,8 +2002,8 @@ fn build_interval_pow<'ctx, T: NumberType>(
                     builder
                         .build_select(
                             is_base_zero,
-                            empty,
-                            build_interval_flip(abs_powi, builder, i32_type, index)?,
+                            constants.float_vec([f64::NAN; 2]),
+                            build_interval_flip(abs_powi, builder, constants, index)?,
                             &format!("pow_even_integer_zero_base_check_{index}"),
                         )?
                         .into_vector_value(),
@@ -1934,11 +2011,11 @@ fn build_interval_pow<'ctx, T: NumberType>(
                     &format!("pow_even_integer_case_{index}"),
                 )?
                 .into_vector_value();
-            builder.build_unconditional_branch(even_merge_bb)?;
+            builder.build_unconditional_branch(integer_merge_bb)?;
             out
         };
-        let else_case = {
-            builder.position_at_end(else_bb);
+        let odd_case = {
+            builder.position_at_end(odd_bb);
             let powi_base = build_float_vec_powi(
                 lhs,
                 exponent,
@@ -1952,7 +2029,7 @@ fn build_interval_pow<'ctx, T: NumberType>(
                     builder
                         .build_select(
                             is_base_zero,
-                            empty,
+                            constants.float_vec([f64::NAN; 2]),
                             builder
                                 .build_select(
                                     builder.build_and(
@@ -1961,11 +2038,11 @@ fn build_interval_pow<'ctx, T: NumberType>(
                                             builder
                                                 .build_extract_element(
                                                     lhs,
-                                                    i32_type.const_zero(),
+                                                    constants.int_32(0, false),
                                                     &format!("pow_odd_exp_extract_lower_{index}"),
                                                 )?
                                                 .into_float_value(),
-                                            flt_type.const_zero(),
+                                            constants.float(0.0),
                                             &format!("pow_odd_exp_lower_neg_check_{index}"),
                                         )?,
                                         builder.build_float_compare(
@@ -1973,17 +2050,17 @@ fn build_interval_pow<'ctx, T: NumberType>(
                                             builder
                                                 .build_extract_element(
                                                     lhs,
-                                                    i32_type.const_int(1, false),
+                                                    constants.int_32(1, false),
                                                     &format!("pow_odd_exp_extract_upper_{index}"),
                                                 )?
                                                 .into_float_value(),
-                                            flt_type.const_zero(),
+                                            constants.float(0.0),
                                             &format!("pow_odd_exp_upper_positive_check_{index}"),
                                         )?,
                                         &format!("pow_odd_exp_base_zero_spanning_check_{index}"),
                                     )?,
-                                    everything,
-                                    build_interval_flip(powi_base, builder, i32_type, index)?,
+                                    constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
+                                    build_interval_flip(powi_base, builder, constants, index)?,
                                     &format!("pow_odd_exp_case_{index}"),
                                 )?
                                 .into_vector_value(),
@@ -1994,357 +2071,283 @@ fn build_interval_pow<'ctx, T: NumberType>(
                     &format!("pow_odd_exp_neg_check_{index}"),
                 )?
                 .into_vector_value();
-            builder.build_unconditional_branch(even_merge_bb)?;
+            builder.build_unconditional_branch(integer_merge_bb)?;
             out
         };
-        builder.position_at_end(even_merge_bb);
+        builder.position_at_end(integer_merge_bb);
         let phi = builder.build_phi(lhs.get_type(), &format!("pow_integer_case_output_{index}"))?;
-        phi.add_incoming(&[(&even_case, even_bb), (&else_case, else_bb)]);
-        builder.build_unconditional_branch(integer_rational_merge_bb)?;
-        (phi.as_basic_value().into_vector_value(), even_merge_bb)
+        phi.add_incoming(&[(&even_case, even_bb), (&odd_case, odd_bb)]);
+        builder.build_unconditional_branch(merge_bb)?;
+        (phi.as_basic_value().into_vector_value(), integer_merge_bb)
     };
-    let general_case: VectorValue<'ctx> = {
+    let (general_out, general_bb): (VectorValue<'ctx>, BasicBlock<'ctx>) = {
         builder.position_at_end(general_bb);
         let lhs = build_vec_binary_intrinsic(
             builder,
             module,
             "llvm.minnum.*",
-            &format!("pow_general_domain_adjust_min_call_{index}"),
+            &format!("pow_general_domain_clip_min_call_{index}"),
             build_vec_binary_intrinsic(
                 builder,
                 module,
                 "llvm.maxnum.*",
-                &format!("pow_general_domain_adjust_max_call_{index}"),
+                &format!("pow_general_domain_clip_max_call_{index}"),
                 lhs,
-                lhs.get_type().const_zero(),
+                constants.float_vec([0.0; 2]),
             )?
             .into_vector_value(),
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::INFINITY),
-                flt_type.const_float(f64::INFINITY),
-            ]),
+            constants.float_vec([f64::INFINITY; 2]),
         )?
         .into_vector_value();
-        let pow_base = build_vec_binary_intrinsic(
-            builder,
-            module,
-            "llvm.pow.*",
-            &format!("pow_general_case_base_call_{index}"),
-            builder.build_shuffle_vector(
-                lhs,
-                lhs,
-                VectorType::const_vector(&[
-                    i32_type.const_int(0, false),
-                    i32_type.const_int(1, false),
-                    i32_type.const_int(2, false),
-                    i32_type.const_int(3, false),
-                ]),
-                &format!("pow_general_exp_base_val_lhs_{index}"),
-            )?,
-            builder.build_shuffle_vector(
-                rhs,
-                rhs,
-                VectorType::const_vector(&[
-                    i32_type.const_int(0, false),
-                    i32_type.const_int(1, false),
-                    i32_type.const_int(3, false),
-                    i32_type.const_int(2, false),
-                ]),
-                &format!("pow_general_exp_base_val_rhs_{index}"),
-            )?,
-        )?
-        .into_vector_value();
-        let other_vals = builder.build_insert_element(
-            builder.build_insert_element(
-                VectorType::const_vector(&[
-                    flt_type.const_float(f64::NAN),
-                    flt_type.const_float(f64::NAN),
-                    flt_type.const_float(f64::NAN),
-                    flt_type.const_float(f64::NAN),
-                ]),
-                build_vec_unary_intrinsic(
-                    builder,
-                    module,
-                    "llvm.vector.reduce.fmin.*",
-                    &format!("pow_general_min_of_2_and_3_{index}"),
-                    builder.build_shuffle_vector(
-                        pow_base,
-                        pow_base.get_type().get_undef(),
-                        VectorType::const_vector(&[
-                            i32_type.const_int(2, false),
-                            i32_type.const_int(3, false),
-                        ]),
-                        &format!("pow_general_extract_2_and_3_{index}"),
-                    )?,
-                )?
-                .into_float_value(),
-                i32_type.const_int(0, false),
-                &format!("pow_general_other_vals_compose_0_{index}"),
-            )?,
-            build_vec_unary_intrinsic(
-                builder,
-                module,
-                "llvm.vector.reduce.fmax.*",
-                &format!("pow_general_max_of_0_and_1_{index}"),
-                builder.build_shuffle_vector(
-                    pow_base,
-                    pow_base.get_type().get_undef(),
-                    VectorType::const_vector(&[
-                        i32_type.const_int(0, false),
-                        i32_type.const_int(1, false),
-                    ]),
-                    &format!("pow_general_extract_0_and_1_{index}"),
-                )?,
-            )?
-            .into_float_value(),
-            i32_type.const_int(1, false),
-            &format!("pow_general_other_vals_compose_1_{index}"),
-        )?;
-        debug_assert_eq!(pow_base.get_type(), other_vals.get_type());
+        let (a, b) = build_interval_unpack(lhs, builder, constants, "pow_general_case_", index)?;
+        let (c, d) = build_interval_unpack(rhs, builder, constants, "pow_general_case_", index)?;
         // Extract values from vector for ergonomic use later.
-        let (llo, lhi) =
-            build_interval_unpack(lhs, builder, i32_type, "pow_general_case_lhs", index)?;
-        let (rlo, rhi) =
-            build_interval_unpack(rhs, builder, i32_type, "pow_general_case_rhs", index)?;
         let rhi_is_neg = builder.build_float_compare(
             FloatPredicate::ULE,
-            rhi,
-            rhi.get_type().const_zero(),
+            d,
+            constants.float(0.0),
             &format!("pow_general_rhi_neg_check_{index}"),
         )?;
         let lhi_is_zero = builder.build_float_compare(
             FloatPredicate::UEQ,
-            lhi,
-            lhi.get_type().const_zero(),
+            b,
+            constants.float(0.0),
             &format!("pow_general_lhi_zero_check_{index}"),
         )?;
         let lhi_lt_one = builder.build_float_compare(
             FloatPredicate::ULT,
-            lhi,
-            flt_type.const_float(1.0),
+            b,
+            constants.float(1.0),
             &format!("pow_general_lhi_lt_one_check_{index}"),
         )?;
         let llo_gt_one = builder.build_float_compare(
             FloatPredicate::UGT,
-            llo,
-            flt_type.const_float(1.0),
+            a,
+            constants.float(1.0),
             &format!("pow_general_llo_gt_one_check_{index}"),
         )?;
         let rlo_gt_zero = builder.build_float_compare(
             FloatPredicate::UGT,
-            rlo,
-            flt_type.const_zero(),
+            c,
+            constants.float(0.0),
             &format!("pow_general_rlo_gt_zero_{index}"),
         )?;
-        let out = builder
+        let case_idx = builder
             .build_select(
                 rhi_is_neg,
                 builder
                     .build_select(
                         lhi_is_zero,
-                        builder.build_shuffle_vector(
-                            pow_base,
-                            other_vals,
-                            VectorType::const_vector(&[
-                                i32_type.const_int(6, false),
-                                i32_type.const_int(7, false),
-                            ]),
-                            &format!("pow_general_case_shuffle_6_7_{index}"),
-                        )?,
+                        constants.int_32(0, false),
                         builder
                             .build_select(
                                 lhi_lt_one,
-                                builder.build_shuffle_vector(
-                                    pow_base,
-                                    other_vals,
-                                    VectorType::const_vector(&[
-                                        i32_type.const_int(1, false),
-                                        i32_type.const_int(0, false),
-                                    ]),
-                                    &format!("pow_general_case_shuffle_1_0_{index}"),
-                                )?,
+                                constants.int_32(1, false),
                                 builder
                                     .build_select(
                                         llo_gt_one,
-                                        builder.build_shuffle_vector(
-                                            pow_base,
-                                            other_vals,
-                                            VectorType::const_vector(&[
-                                                i32_type.const_int(3, false),
-                                                i32_type.const_int(2, false),
-                                            ]),
-                                            &format!("pow_general_case_shuffle_3_2_{index}"),
-                                        )?,
-                                        builder.build_shuffle_vector(
-                                            pow_base,
-                                            other_vals,
-                                            VectorType::const_vector(&[
-                                                i32_type.const_int(3, false),
-                                                i32_type.const_int(0, false),
-                                            ]),
-                                            &format!("pow_general_case_shuffle_3_0_{index}"),
-                                        )?,
+                                        constants.int_32(2, false),
+                                        constants.int_32(3, false),
                                         &format!("pow_general_mask_choice_llo_gt_one_{index}"),
                                     )?
-                                    .into_vector_value(),
+                                    .into_int_value(),
                                 &format!("pow_general_mask_choice_lhi_lt_one_{index}"),
                             )?
-                            .into_vector_value(),
+                            .into_int_value(),
                         &format!("pow_general_mask_choice_lhi_is_zero_{index}"),
                     )?
-                    .into_vector_value(),
+                    .into_int_value(),
                 builder
                     .build_select(
                         rlo_gt_zero,
                         builder
                             .build_select(
                                 lhi_lt_one,
-                                builder.build_shuffle_vector(
-                                    pow_base,
-                                    other_vals,
-                                    VectorType::const_vector(&[
-                                        i32_type.const_int(2, false),
-                                        i32_type.const_int(3, false),
-                                    ]),
-                                    &format!("pow_general_case_shuffle_2_3_{index}"),
-                                )?,
+                                constants.int_32(4, false),
                                 builder
                                     .build_select(
                                         llo_gt_one,
-                                        builder.build_shuffle_vector(
-                                            pow_base,
-                                            other_vals,
-                                            VectorType::const_vector(&[
-                                                i32_type.const_int(0, false),
-                                                i32_type.const_int(1, false),
-                                            ]),
-                                            &format!("pow_general_case_shuffle_0_1_{index}"),
-                                        )?,
-                                        builder.build_shuffle_vector(
-                                            pow_base,
-                                            other_vals,
-                                            VectorType::const_vector(&[
-                                                i32_type.const_int(2, false),
-                                                i32_type.const_int(1, false),
-                                            ]),
-                                            &format!("pow_general_case_shuffle_2_1_{index}"),
-                                        )?,
+                                        constants.int_32(5, false),
+                                        constants.int_32(6, false),
                                         &format!("pow_general_mask_choice_llo_gt_one_{index}"),
                                     )?
-                                    .into_vector_value(),
+                                    .into_int_value(),
                                 &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
                             )?
-                            .into_vector_value(),
-                        builder.build_shuffle_vector(
-                            pow_base,
-                            other_vals,
-                            VectorType::const_vector(&[
-                                i32_type.const_int(4, false),
-                                i32_type.const_int(5, false),
-                            ]),
-                            &format!("pow_general_case_shuffle_4_5_{index}"),
-                        )?,
+                            .into_int_value(),
+                        constants.int_32(7, false),
                         &format!("pow_general_mask_choice_rlo_gt_zero_{index}"),
                     )?
-                    .into_vector_value(),
+                    .into_int_value(),
                 &format!("pow_general_mask_choice_rhi_is_neg_{index}"),
             )?
-            .into_vector_value();
-        builder.build_unconditional_branch(integer_rational_merge_bb)?;
-        out
-    };
-    builder.position_at_end(integer_rational_merge_bb);
-    let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
-    phi.add_incoming(&[
-        (&integer_case, odd_even_merge_bb),
-        (&general_case, general_bb),
-    ]);
-    let sqbase = builder.build_float_mul(lhs, lhs, &format!("pow_lhs_square_base_{index}"))?;
-    Ok(builder
-        .build_select(
-            is_any_nan,
-            empty,
-            builder
-                .build_select(
-                    is_exponent_zero,
-                    VectorType::const_vector(&[
-                        flt_type.const_float(1.0),
-                        flt_type.const_float(1.0),
-                    ]),
-                    builder
-                        .build_select(
-                            is_square,
-                            builder
-                                .build_select(
-                                    build_check_interval_spanning_zero(
-                                        lhs,
-                                        builder,
-                                        i32_type,
-                                        "pow_square_case",
-                                        index,
-                                    )?,
-                                    builder.build_insert_element(
-                                        sqbase.get_type().const_zero(),
-                                        build_vec_unary_intrinsic(
-                                            builder,
-                                            module,
-                                            "llvm.vector.reduce.fmax.*",
-                                            &format!("pow_square_case_zero_spanning_max_{index}"),
-                                            sqbase,
-                                        )?
-                                        .into_float_value(),
-                                        i32_type.const_int(1, false),
-                                        &format!("pow_square_insert_elem_{index}"),
-                                    )?,
-                                    builder
-                                        .build_select(
-                                            build_vec_unary_intrinsic(
-                                                builder,
-                                                module,
-                                                "llvm.vector.reduce.and.*",
-                                                &format!("pow_square_case_base_neg_reduce_{index}"),
-                                                builder.build_float_compare(
-                                                    FloatPredicate::ULT,
-                                                    lhs,
-                                                    sqbase.get_type().const_zero(),
-                                                    &format!(
-                                                        "pow_square_case_base_neg_check_{index}"
-                                                    ),
-                                                )?,
-                                            )?
-                                            .into_int_value(),
-                                            build_interval_flip(sqbase, builder, i32_type, index)?,
-                                            sqbase,
-                                            &format!("pow_square_case_base_neg_cases_{index}"),
-                                        )?
-                                        .into_vector_value(),
-                                    &format!("pow_square_case_{index}"),
-                                )?
-                                .into_vector_value(),
-                            phi.as_basic_value().into_vector_value(),
-                            &format!("pow_square_check_select_{index}"),
-                        )?
+            .into_int_value();
+        let default_bb =
+            context.append_basic_block(function, &format!("pow_general_switch_default_{index}"));
+        let switch_merge_bb =
+            context.append_basic_block(function, &format!("pow_general_switch_merge_{index}"));
+        let switch_bbs: [BasicBlock<'ctx>; 7] = std::array::from_fn(|i| {
+            context.append_basic_block(function, &format!("pow_general_switch_{i}_{index}"))
+        });
+        {
+            let cases: [(IntValue<'ctx>, BasicBlock<'ctx>); 7] =
+                std::array::from_fn(|i| (constants.int_32(i as u32, false), switch_bbs[i]));
+            builder.build_switch(case_idx, default_bb, &cases)?;
+        }
+        let case_outputs = {
+            let mut outputs = [constants.float_vec([0.0; 2]); 7];
+            for (i, bb) in switch_bbs.iter().enumerate() {
+                builder.position_at_end(*bb);
+                let name = &format!("pow_general_case_{i}_{index}");
+                outputs[i] = match i {
+                    0 => constants.float_vec([f64::NAN; 2]),
+                    1 => build_interval_flip(
+                        build_vec_binary_intrinsic(builder, module, "llvm.pow.*", name, lhs, rhs)?
+                            .into_vector_value(),
+                        builder,
+                        constants,
+                        index,
+                    )?,
+                    2 => build_vec_binary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.pow.*",
+                        name,
+                        build_interval_flip(lhs, builder, constants, index)?,
+                        rhs,
+                    )?
+                    .into_vector_value(),
+                    3 => build_vec_binary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.pow.*",
+                        name,
+                        build_interval_flip(lhs, builder, constants, index)?,
+                        builder.build_shuffle_vector(
+                            rhs,
+                            rhs.get_type().get_undef(),
+                            constants.i32_vec([0, 0], false),
+                            &format!("pow_general_case_3_rhs_shuffle_{index}"),
+                        )?,
+                    )?
+                    .into_vector_value(),
+                    4 => build_vec_binary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.pow.*",
+                        name,
+                        lhs,
+                        build_interval_flip(rhs, builder, constants, index)?,
+                    )?
+                    .into_vector_value(),
+                    5 => build_vec_binary_intrinsic(builder, module, "llvm.pow.*", name, lhs, rhs)?
                         .into_vector_value(),
-                    &format!("pow_zero_check_select_{index}"),
+                    6 => build_vec_binary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.pow.*",
+                        name,
+                        lhs,
+                        builder.build_shuffle_vector(
+                            rhs,
+                            rhs.get_type().get_undef(),
+                            constants.i32_vec([1, 1], false),
+                            &format!("pow_general_case_3_rhs_shuffle_{index}"),
+                        )?,
+                    )?
+                    .into_vector_value(),
+                    _ => panic!("Unreachable code. This is a bug"),
+                };
+                builder.build_unconditional_branch(switch_merge_bb)?;
+            }
+            outputs
+        };
+        builder.position_at_end(default_bb);
+        let default_out = build_interval_compose(
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmin.*",
+                &format!("pow_general_switch_default_reduce_{index}"),
+                build_vec_binary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.pow.*",
+                    &format!("pow_general_switch_default_out_{index}"),
+                    lhs,
+                    build_interval_flip(rhs, builder, constants, index)?,
                 )?
                 .into_vector_value(),
-            &format!("pow_nan_check_select_{index}"),
-        )?
-        .into_vector_value())
+            )?
+            .into_float_value(),
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmax.*",
+                &format!("pow_general_switch_default_reduce_{index}"),
+                build_vec_binary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.pow.*",
+                    &format!("pow_general_switch_default_out_{index}"),
+                    lhs,
+                    rhs,
+                )?
+                .into_vector_value(),
+            )?
+            .into_float_value(),
+            builder,
+            constants,
+            "pow_general_case",
+            index,
+        )?;
+        builder.build_unconditional_branch(switch_merge_bb)?;
+        builder.position_at_end(switch_merge_bb);
+        let phi = builder.build_phi(lhs.get_type(), &format!("pow_general_switch_phi_{index}"))?;
+        {
+            let incoming: [(&dyn BasicValue<'ctx>, BasicBlock<'ctx>); 7] =
+                std::array::from_fn(|i| (&case_outputs[i] as &dyn BasicValue<'ctx>, switch_bbs[i]));
+            phi.add_incoming(&incoming);
+        }
+        phi.add_incoming(&[(&default_out, default_bb)]);
+        let out = phi.as_basic_value().into_vector_value();
+        builder.build_unconditional_branch(merge_bb)?;
+        (out, switch_merge_bb)
+    };
+    builder.position_at_end(merge_bb);
+    let phi = builder.build_phi(lhs.get_type(), &format!("outer_branch_phi_{index}"))?;
+    phi.add_incoming(&[
+        (&simple_out, simple_bb),
+        (&square_out, square_bb),
+        (&integer_out, integer_bb),
+        (&general_out, general_bb),
+    ]);
+    Ok(phi.as_basic_value().into_vector_value())
 }
 
 fn build_interval_abs<'ctx>(
     input: VectorValue<'ctx>,
+    range: (f64, f64),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    flt_type: FloatType<'ctx>,
-    i32_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    if range.0 < 0.0 && range.1 < 0.0 {
+        return build_interval_negate(
+            input,
+            builder,
+            constants,
+            index,
+            &format!("intermediate_1_{index}"),
+        );
+    } else if range.0 >= 0.0 && range.1 >= 0.0 {
+        return Ok(input);
+    }
     let lt_zero = builder.build_float_compare(
         FloatPredicate::ULT,
         input,
-        VectorType::const_vector(&[flt_type.const_float(0.), flt_type.const_float(0.)]),
+        constants.float_vec([0.0; 2]),
         &format!("lt_zero_{index}"),
     )?;
     Ok(builder
@@ -2352,7 +2355,7 @@ fn build_interval_abs<'ctx>(
             builder
                 .build_extract_element(
                     lt_zero,
-                    i32_type.const_int(1, false),
+                    constants.int_32(1, false),
                     &format!("first_lt_zero_{index}"),
                 )?
                 .into_int_value(),
@@ -2360,7 +2363,7 @@ fn build_interval_abs<'ctx>(
             build_interval_negate(
                 input,
                 builder,
-                i32_type,
+                constants,
                 index,
                 &format!("intermediate_1_{index}"),
             )?,
@@ -2369,13 +2372,13 @@ fn build_interval_abs<'ctx>(
                     builder
                         .build_extract_element(
                             lt_zero,
-                            i32_type.const_int(0, false),
+                            constants.int_32(0, false),
                             &format!("first_lt_zero_{index}"),
                         )?
                         .into_int_value(),
                     // (0.0, max(abs(lo), abs(hi)))
                     builder.build_insert_element(
-                        input.get_type().const_zero(),
+                        constants.float_vec([0.0; 2]),
                         build_vec_unary_intrinsic(
                             builder,
                             module,
@@ -2391,7 +2394,7 @@ fn build_interval_abs<'ctx>(
                             .into_vector_value(),
                         )?
                         .into_float_value(),
-                        i32_type.const_int(1, false),
+                        constants.int_32(1, false),
                         &format!("intermediate_2_{index}"),
                     )?,
                     // (lo, hi),
@@ -2406,100 +2409,78 @@ fn build_interval_abs<'ctx>(
 
 fn build_interval_sqrt<'ctx>(
     input: VectorValue<'ctx>,
+    range: (f64, f64),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    flt_type: FloatType<'ctx>,
-    i32_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    Ok(builder
-        .build_select(
-            // Check each lane for NaN, then reduce to check if this interval is empty.
-            build_check_interval_empty(input, builder, module, index)?,
-            // The interval is empty, so return an emtpy (NaN) interval.
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::NAN),
-                flt_type.const_float(f64::NAN),
-            ])
-            .as_basic_value_enum(),
-            {
-                // Interval is not empty.
-                let lt_zero = builder.build_float_compare(
-                    FloatPredicate::ULT,
-                    input,
-                    VectorType::const_vector(&[flt_type.const_float(0.), flt_type.const_float(0.)]),
-                    &format!("lt_zero_{index}"),
-                )?;
-                let sqrt = build_vec_unary_intrinsic(
-                    builder,
-                    module,
-                    "llvm.sqrt.*",
-                    &format!("sqrt_call_{index}"),
-                    build_vec_unary_intrinsic(
-                        builder,
-                        module,
-                        "llvm.fabs.*",
-                        &format!("fabs_call_{index}"),
-                        input,
-                    )?
-                    .into_vector_value(),
-                )?
-                .into_vector_value();
-                /* This a nested if. First we check the sign of
-                 * the lower bound, then we check the sign of
-                 * the upper bound in the nested select
-                 * statement. Then we return different things.
-                 */
-                builder.build_select(
-                    // Check first element of vec.
-                    builder
-                        .build_extract_element(
-                            lt_zero,
-                            i32_type.const_int(0, false),
-                            &format!("first_lt_zero_{index}"),
-                        )?
-                        .into_int_value(),
-                    builder.build_select(
-                        builder
-                            .build_extract_element(
-                                lt_zero,
-                                i32_type.const_int(1, false),
-                                &format!("second_lt_zero_{index}"),
-                            )?
-                            .into_int_value(),
-                        VectorType::const_vector(&[
-                            flt_type.const_float(f64::NAN),
-                            flt_type.const_float(f64::NAN),
-                        ]),
-                        builder.build_float_mul(
-                            sqrt,
-                            VectorType::const_vector(&[
-                                flt_type.const_float(0.0),
-                                flt_type.const_float(1.0),
-                            ]),
-                            &format!("sqrt_domain_clipping_{index}"),
-                        )?,
-                        &format!("sqrt_edge_case_{index}"),
-                    )?,
-                    sqrt.as_basic_value_enum(),
-                    &format!("sqrt_branching_{index}"),
-                )?
-            },
-            &format!("reg_{index}"),
+    let sqrt = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.sqrt.*",
+        &format!("sqrt_call_{index}"),
+        input,
+    )?
+    .into_vector_value();
+    if range.1 < 0.0 && range.0 < 0.0 {
+        Ok(constants.float_vec([f64::NAN; 2]))
+    } else if range.1 >= 0.0 && range.0 >= 0.0 {
+        Ok(sqrt)
+    } else {
+        let is_neg = builder.build_float_compare(
+            FloatPredicate::ULT,
+            input,
+            constants.float_vec([0.0; 2]),
+            &format!("lt_zero_{index}"),
+        )?;
+        let all_neg = build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.and.*",
+            &format!("sqrt_all_neg_check_{index}"),
+            is_neg,
         )?
-        .into_vector_value())
+        .into_int_value();
+        let spanning_zero = build_vec_unary_intrinsic(
+            builder,
+            module,
+            "llvm.vector.reduce.xor.*",
+            &format!("sqrt_all_neg_check_{index}"),
+            is_neg,
+        )?
+        .into_int_value();
+        Ok(builder
+            .build_select(
+                all_neg,
+                constants.float_vec([f64::NAN; 2]).as_basic_value_enum(),
+                builder.build_select(
+                    spanning_zero,
+                    builder.build_insert_element(
+                        sqrt,
+                        constants.float(0.0),
+                        constants.int_32(0, false),
+                        &format!("sqrt_domain_clipping_{index}"),
+                    )?,
+                    sqrt,
+                    &format!("sqrt_branching_{index}"),
+                )?,
+                &format!("reg_{index}"),
+            )?
+            .into_vector_value())
+    }
 }
 
 fn build_interval_flip<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
-    i32_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     Ok(builder.build_shuffle_vector(
         input,
         input.get_type().get_undef(),
-        VectorType::const_vector(&[i32_type.const_int(1, false), i32_type.const_int(0, false)]),
+        constants.i32_vec([1, 0], false),
         &format!("out_val_case_2_{index}"),
     )?)
 }
@@ -2508,19 +2489,19 @@ fn build_interval_compose<'ctx>(
     lo: FloatValue<'ctx>,
     hi: FloatValue<'ctx>,
     builder: &'ctx Builder,
-    i32_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     suffix: &str,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     Ok(builder.build_insert_element(
         builder.build_insert_element(
-            lo.get_type().vec_type(2).const_zero(),
+            constants.float_vec([0.0; 2]),
             lo,
-            i32_type.const_int(0, false),
+            constants.int_32(0, false),
             &format!("interval_compose_{suffix}_lo_{index}"),
         )?,
         hi,
-        i32_type.const_int(1, false),
+        constants.int_32(1, false),
         &format!("interval_compose_{suffix}_hi_{index}"),
     )?)
 }
@@ -2528,21 +2509,21 @@ fn build_interval_compose<'ctx>(
 fn build_interval_unpack<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
-    i32_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     prefix: &str,
     index: usize,
 ) -> Result<(FloatValue<'ctx>, FloatValue<'ctx>), Error> {
     let lo = builder
         .build_extract_element(
             input,
-            i32_type.const_zero(),
+            constants.int_32(0, false),
             &format!("{prefix}_interval_unpack_left_{index}"),
         )?
         .into_float_value();
     let hi = builder
         .build_extract_element(
             input,
-            i32_type.const_int(1, false),
+            constants.int_32(1, false),
             &format!("{prefix}_interval_unpack_right_{index}"),
         )?
         .into_float_value();
@@ -2550,40 +2531,73 @@ fn build_interval_unpack<'ctx>(
 }
 
 fn build_interval_div<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
-    flt_type: FloatType<'ctx>,
+    function: FunctionValue<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     use crate::interval::IntervalClass::*;
-    let mask = builder.build_int_add(
-        builder.build_int_mul(
-            build_interval_classify(lhs, builder, module, i32_type, index)?,
-            i32_type.const_int(7, false),
-            &format!("interval_div_mask_imul_{index}"),
+    let (lhs, rhs) = inputs;
+    let ((llo, lhi), (rlo, rhi)) = ranges;
+    // Check for special case optimizations.
+    match (classify(llo, lhi), classify(rlo, rhi)) {
+        (Empty, _) | (_, Empty) | (_, SingletonZero) => {
+            return Ok(constants.float_vec([f64::NAN; 2]));
+        }
+        (SingletonZero, Spanning)
+        | (SingletonZero, NegativeZero)
+        | (SingletonZero, Negative)
+        | (SingletonZero, ZeroPositive)
+        | (SingletonZero, Positive) => return Ok(constants.float_vec([0.0; 2])),
+        (NegativeZero, Negative) | (Negative, Negative) => {
+            return Ok(builder.build_float_div(
+                build_interval_flip(lhs, builder, constants, index)?,
+                rhs,
+                &format!("div_neg_neg_special_case_{index}"),
+            )?);
+        }
+        (NegativeZero, Positive) | (Negative, Positive) => {
+            return Ok(builder.build_float_div(
+                lhs,
+                rhs,
+                &format!("div_neg_pos_special_case_{index}"),
+            )?);
+        }
+        (ZeroPositive, Negative) | (Positive, Negative) => {
+            return build_interval_flip(
+                builder.build_float_div(lhs, rhs, &format!("div_pos_neg_special_case_{index}"))?,
+                builder,
+                constants,
+                index,
+            );
+        }
+        (ZeroPositive, Positive) | (Positive, Positive) => {
+            return Ok(builder.build_float_div(
+                lhs,
+                build_interval_flip(rhs, builder, constants, index)?,
+                &format!("div_pos_pos_special_case_{index}"),
+            )?);
+        }
+        _ => {} // No special cases found.
+    }
+    let context = module.get_context();
+    let mask = builder.build_or(
+        builder.build_left_shift(
+            build_interval_classify(rhs, builder, module, constants, index)?,
+            constants.int_8(4, false),
+            &format!("interval_div_mask_shift_{index}"),
         )?,
-        build_interval_classify(rhs, builder, module, i32_type, index)?,
+        build_interval_classify(lhs, builder, module, constants, index)?,
         &format!("interval_div_mask_{index}"),
     )?;
     let straight = builder.build_float_div(lhs, rhs, &format!("interval_div_straight_{index}"))?;
     let cross = builder.build_float_div(
         lhs,
-        build_interval_flip(rhs, builder, i32_type, index)?,
+        build_interval_flip(rhs, builder, constants, index)?,
         &format!("interval_div_cross_{index}"),
-    )?;
-    let combos = builder.build_shuffle_vector(
-        straight,
-        cross,
-        VectorType::const_vector(&[
-            i32_type.const_int(0, false),
-            i32_type.const_int(1, false),
-            i32_type.const_int(2, false),
-            i32_type.const_int(3, false),
-        ]),
-        &format!("interval_div_concat_cases_{index}"),
     )?;
     const CASES: [&[(IntervalClass, IntervalClass)]; 12] = [
         // Spanning zero, so output includes everything.
@@ -2615,301 +2629,299 @@ fn build_interval_div<'ctx>(
         &[(ZeroPositive, ZeroPositive), (Positive, ZeroPositive)],
         &[(ZeroPositive, Positive), (Positive, Positive)],
     ];
-    let outputs: [VectorValue<'ctx>; 12] = [
-        VectorType::const_vector(&[
-            flt_type.const_float(f64::NEG_INFINITY),
-            flt_type.const_float(f64::INFINITY),
-        ]),
-        lhs.get_type().const_zero(),
-        builder.build_shuffle_vector(
-            combos,
-            combos.get_type().get_undef(),
-            VectorType::const_vector(&[i32_type.const_int(1, false), i32_type.const_int(2, false)]),
-            &format!("interval_div_case_spanning_negative_{index}"),
-        )?,
-        builder.build_shuffle_vector(
-            combos,
-            combos.get_type().get_undef(),
-            VectorType::const_vector(&[i32_type.const_int(0, false), i32_type.const_int(3, false)]),
-            &format!("interval_div_case_spanning_positive_{index}"),
-        )?,
-        build_interval_compose(
-            builder
-                .build_extract_element(
-                    combos,
-                    i32_type.const_int(3, false),
-                    &format!("interval_div_case_neg_neg_zero_intermediate_0_{index}"),
-                )?
-                .into_float_value(),
-            flt_type.const_float(f64::INFINITY),
-            builder,
-            i32_type,
-            "case_neg_neg_zero",
-            index,
-        )?,
-        builder.build_shuffle_vector(
-            combos,
-            combos.get_type().get_undef(),
-            VectorType::const_vector(&[i32_type.const_int(3, false), i32_type.const_int(2, false)]),
-            &format!("interval_div_case_neg_zero_neg_{index}"),
-        )?,
-        build_interval_compose(
-            flt_type.const_float(f64::NEG_INFINITY),
-            builder
-                .build_extract_element(
-                    combos,
-                    i32_type.const_int(1, false),
-                    &format!("interval_div_case_neg_zero_positive_upper_{index}"),
-                )?
-                .into_float_value(),
-            builder,
-            i32_type,
-            "interval_div_case_neg_zero_positive",
-            index,
-        )?,
-        straight,
-        build_interval_compose(
-            flt_type.const_float(f64::NEG_INFINITY),
-            builder
-                .build_extract_element(
-                    combos,
-                    i32_type.const_int(0, false),
-                    &format!("interval_div_case_zero_positive_neg_{index}"),
-                )?
-                .into_float_value(),
-            builder,
-            i32_type,
-            "interval_div_case_zero_positive_neg",
-            index,
-        )?,
-        build_interval_flip(straight, builder, i32_type, index)?,
-        build_interval_compose(
-            builder
-                .build_extract_element(
-                    combos,
-                    i32_type.const_int(2, false),
-                    &format!("interval_div_case_zero_positive_extract_{index}"),
-                )?
-                .into_float_value(),
-            flt_type.const_float(f64::INFINITY),
-            builder,
-            i32_type,
-            "interval_div_case_zero_positive",
-            index,
-        )?,
-        cross,
-    ];
-    CASES
+    let default_bb = context.append_basic_block(function, &format!("div_switch_default_{index}"));
+    let merge_bb = context.append_basic_block(function, &format!("div_switch_merge_{index}"));
+    let (cases, bbs) = {
+        let mut cases: Vec<(IntValue<'ctx>, BasicBlock<'ctx>)> = Vec::with_capacity(32);
+        let mut bbs = Vec::new();
+        for (i, group) in CASES.iter().enumerate() {
+            let bb = context.append_basic_block(function, &format!("div_siwtch_case_{i}_{index}"));
+            bbs.push(bb);
+            cases.extend(group.iter().map(|&(lcase, rcase)| {
+                (
+                    constants.int_8((class_mask(rcase) << 4) | class_mask(lcase), false),
+                    bb,
+                )
+            }));
+        }
+        (cases.into_boxed_slice(), bbs)
+    };
+    builder.build_switch(mask, default_bb, &cases)?;
+    let outputs = {
+        let mut outputs = [constants.float_vec([f64::NAN; 2]); CASES.len()];
+        for (i, bb) in bbs.iter().copied().enumerate() {
+            builder.position_at_end(bb);
+            outputs[i] = match i {
+                0 => constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
+                1 => constants.float_vec([0.0; 2]),
+                2 => builder.build_shuffle_vector(
+                    straight,
+                    cross,
+                    constants.i32_vec([1, 2], false),
+                    &format!("interval_div_case_spanning_negative_{index}"),
+                )?,
+                3 => builder.build_shuffle_vector(
+                    straight,
+                    cross,
+                    constants.i32_vec([0, 3], false),
+                    &format!("interval_div_case_spanning_positive_{index}"),
+                )?,
+                4 => build_interval_compose(
+                    builder
+                        .build_extract_element(
+                            cross,
+                            constants.int_32(1, false),
+                            &format!("interval_div_case_neg_neg_zero_intermediate_0_{index}"),
+                        )?
+                        .into_float_value(),
+                    constants.float(f64::INFINITY),
+                    builder,
+                    constants,
+                    "case_neg_neg_zero",
+                    index,
+                )?,
+                5 => builder.build_shuffle_vector(
+                    straight,
+                    cross,
+                    constants.i32_vec([3, 2], false),
+                    &format!("interval_div_case_neg_zero_neg_{index}"),
+                )?,
+                6 => build_interval_compose(
+                    constants.float(f64::NEG_INFINITY),
+                    builder
+                        .build_extract_element(
+                            straight,
+                            constants.int_32(1, false),
+                            &format!("interval_div_case_neg_zero_positive_upper_{index}"),
+                        )?
+                        .into_float_value(),
+                    builder,
+                    constants,
+                    "interval_div_case_neg_zero_positive",
+                    index,
+                )?,
+                7 => straight,
+                8 => build_interval_compose(
+                    constants.float(f64::NEG_INFINITY),
+                    builder
+                        .build_extract_element(
+                            straight,
+                            constants.int_32(0, false),
+                            &format!("interval_div_case_zero_positive_neg_{index}"),
+                        )?
+                        .into_float_value(),
+                    builder,
+                    constants,
+                    "interval_div_case_zero_positive_neg",
+                    index,
+                )?,
+                9 => build_interval_flip(straight, builder, constants, index)?,
+                10 => build_interval_compose(
+                    builder
+                        .build_extract_element(
+                            cross,
+                            constants.int_32(0, false),
+                            &format!("interval_div_case_zero_positive_extract_{index}"),
+                        )?
+                        .into_float_value(),
+                    constants.float(f64::INFINITY),
+                    builder,
+                    constants,
+                    "interval_div_case_zero_positive",
+                    index,
+                )?,
+                11 => cross,
+                _ => panic!("This should never happen as there are only 12 cases."),
+            };
+            builder.build_unconditional_branch(merge_bb)?;
+        }
+        outputs
+    };
+    builder.position_at_end(default_bb);
+    builder.build_unconditional_branch(merge_bb)?;
+    builder.position_at_end(merge_bb);
+    let phi = builder.build_phi(
+        constants.float_vec([f64::NAN; 2]).get_type(),
+        &format!("div_switch_phi_{index}"),
+    )?;
+    let incoming: Box<[_]> = outputs
         .iter()
-        .rev()
-        .zip(outputs.into_iter().rev())
-        .enumerate()
-        .try_fold(
-            VectorType::const_vector(&[
-                flt_type.const_float(f64::NAN),
-                flt_type.const_float(f64::NAN),
-            ]),
-            |acc, (i, (cases, out))| {
-                let (_, cond) = cases
-                    .iter()
-                    .enumerate()
-                    .map(|(j, (lcase, rcase))| -> Result<IntValue<'ctx>, Error> {
-                        Ok(builder.build_int_compare(
-                            IntPredicate::EQ,
-                            mask,
-                            i32_type.const_int((*lcase as u64) * 7 + (*rcase as u64), false),
-                            &format!("interval_div_case_{i}_subcase_{j}_{index}"),
-                        )?)
-                    })
-                    .enumerate()
-                    .reduce(|(_, acc), (j, current)| match (acc, current) {
-                        (Ok(acc), Ok(current)) => match builder.build_or(
-                            acc,
-                            current,
-                            &format!("interval_div_case_{i}_combine_{j}_{index}"),
-                        ) {
-                            Ok(result) => (j, Ok(result)),
-                            Err(e) => (j, Err(e.into())),
-                        },
-                        (Ok(_), Err(e)) | (Err(e), Ok(_)) | (Err(e), Err(_)) => (j, Err(e)),
-                    })
-                    .expect("Unable to combine all the cases when compiling interval division");
-                let cond = cond?;
-                Ok(builder
-                    .build_select(cond, out, acc, &format!("interval_div_case_{i}_choice"))?
-                    .into_vector_value())
-            },
-        )
+        .zip(bbs)
+        .map(|(out, bb)| (out as &dyn BasicValue<'ctx>, bb))
+        .collect();
+    phi.add_incoming(&[(&constants.float_vec([f64::NAN; 2]), default_bb)]);
+    phi.add_incoming(&incoming);
+    Ok(phi.as_basic_value().into_vector_value())
 }
 
-/**
-Classify an interval based on it's relation ship to zero:
+const fn class_mask(c: IntervalClass) -> u8 {
+    use IntervalClass::*;
+    match c {
+        Empty => 0b_1111,
+        Negative => 0b_0011,
+        NegativeZero => 0b_1001,
+        SingletonZero => 0b_1100,
+        Spanning => 0b_0001,
+        ZeroPositive => 0b_0100,
+        Positive => 0b_0000,
+    }
+}
 
-Empty = 0,
-Negative = 1,
-NegativeZero = 2,
-SingletonZero = 3,
-Spanning = 4,
-ZeroPositive = 5,
-Positive = 6,
- */
 fn build_interval_classify<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<IntValue<'ctx>, Error> {
+    let context = module.get_context();
+    let i8_type = context.i8_type();
     let (is_empty, is_neg, is_eq) = (
         build_check_interval_empty(input, builder, module, index)?,
         builder.build_float_compare(
             FloatPredicate::ULT,
             input,
-            input.get_type().const_zero(),
+            constants.float_vec([0.0; 2]),
             &format!("interval_classify_neg_check_{index}"),
         )?,
         builder.build_float_compare(
             FloatPredicate::UEQ,
             input,
-            input.get_type().const_zero(),
+            constants.float_vec([0.0; 2]),
             &format!("interval_classify_zero_check_{index}"),
         )?,
     );
-    let (lneg, rneg, leq, req) = (
+    let b0 = builder.build_int_z_extend(
         builder
             .build_extract_element(
                 is_neg,
-                i32_type.const_int(0, false),
-                &format!("interval_classify_left_neg_{index}"),
+                constants.int_32(0, false),
+                &format!("interval_classify_first_bit_{index}"),
             )?
             .into_int_value(),
-        builder
-            .build_extract_element(
-                is_neg,
-                i32_type.const_int(1, false),
-                &format!("interval_classify_right_neg_{index}"),
-            )?
-            .into_int_value(),
-        builder
-            .build_extract_element(
-                is_eq,
-                i32_type.const_int(0, false),
-                &format!("interval_classify_left_eq_{index}"),
-            )?
-            .into_int_value(),
-        builder
-            .build_extract_element(
-                is_eq,
-                i32_type.const_int(1, false),
-                &format!("interval_classify_right_eq_{index}"),
-            )?
-            .into_int_value(),
-    );
+        i8_type,
+        &format!("interval_classify_first_bit_extended_{index}"),
+    )?;
+    let mask = [
+        (
+            is_neg,
+            constants.int_32(1, false),
+            constants.int_8(1, false),
+            "first",
+        ),
+        (
+            is_eq,
+            constants.int_32(0, false),
+            constants.int_8(2, false),
+            "second",
+        ),
+        (
+            is_eq,
+            constants.int_32(1, false),
+            constants.int_8(3, false),
+            "third",
+        ),
+    ]
+    .into_iter()
+    .try_fold(b0, |acc, (v, i, shift, label)| {
+        let extracted = builder
+            .build_extract_element(v, i, &format!("interval_classify_{label}_bit_{index}"))?
+            .into_int_value();
+        let extended = builder.build_int_z_extend(
+            extracted,
+            i8_type,
+            &format!("interval_classify_{label}_bit_extended_{index}"),
+        )?;
+        let shifted = builder.build_left_shift(
+            extended,
+            shift,
+            &format!("interval_classify_{label}_bit_shifted_{index}"),
+        )?;
+        builder.build_or(
+            acc,
+            shifted,
+            &format!("interval_classify_{label}_bit_accumulated_{index}"),
+        )
+    })?;
     Ok(builder
         .build_select(
             is_empty,
-            i32_type.const_zero(),
-            builder
-                .build_select(
-                    lneg,
-                    builder
-                        .build_select(
-                            rneg,
-                            i32_type.const_int(1, false),
-                            builder
-                                .build_select(
-                                    req,
-                                    i32_type.const_int(2, false),
-                                    i32_type.const_int(4, false),
-                                    &format!("interval_classify_lneg_not_rneg_cases_{index}"),
-                                )?
-                                .into_int_value(),
-                            &format!("interval_classify_lneg_cases_{index}"),
-                        )?
-                        .into_int_value(),
-                    builder
-                        .build_select(
-                            leq,
-                            builder
-                                .build_select(
-                                    req,
-                                    i32_type.const_int(3, false),
-                                    i32_type.const_int(5, false),
-                                    &format!("interval_classify_leq_req_cases_{index}"),
-                                )?
-                                .into_int_value(),
-                            i32_type.const_int(6, false),
-                            &format!("interval_classify_leq_cases_{index}"),
-                        )?
-                        .into_int_value(),
-                    &format!("interval_classify_non_empty_cases_{index}"),
-                )?
-                .into_int_value(),
-            &format!("interval_classify_{index}"),
+            constants.int_8(0b_1111, false),
+            mask,
+            &format!("interval_classify_result_{index}"),
         )?
         .into_int_value())
 }
 
 fn build_interval_mul<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((f64, f64), (f64, f64)),
     builder: &'ctx Builder,
     module: &'ctx Module,
-    i32_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let straight = builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?;
-    let cross = builder.build_float_mul(
-        lhs,
-        build_interval_flip(rhs, builder, i32_type, index)?,
-        &format!("mul_cross_{index}"),
-    )?;
-    let concat = builder.build_shuffle_vector(
-        straight,
-        cross,
-        VectorType::const_vector(&[
-            i32_type.const_int(0, false),
-            i32_type.const_int(1, false),
-            i32_type.const_int(2, false),
-            i32_type.const_int(3, false),
-        ]),
-        &format!("mul_concat_candidates_{index}"),
-    )?;
-    build_interval_compose(
-        build_vec_unary_intrinsic(
+    let (lhs, rhs) = inputs;
+    let (range_left, range_right) = ranges;
+    if lhs == rhs {
+        build_interval_square(lhs, range_left, builder, module, constants, index)
+    } else if (range_left.0 == 0.0 && range_left.1 == 0.0)
+        || (range_right.0 == 0.0 && range_right.1 == 0.0)
+    {
+        Ok(constants.float_vec([0.0; 2]))
+    } else if range_left.0 == 1.0 && range_left.1 == 1.0 {
+        Ok(rhs)
+    } else if range_right.0 == 1.0 && range_right.1 == 1.0 {
+        Ok(lhs)
+    } else {
+        let straight = builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?;
+        let cross = builder.build_float_mul(
+            lhs,
+            build_interval_flip(rhs, builder, constants, index)?,
+            &format!("mul_cross_{index}"),
+        )?;
+        let concat = builder.build_shuffle_vector(
+            straight,
+            cross,
+            constants.i32_vec([0, 1, 2, 3], false),
+            &format!("mul_concat_candidates_{index}"),
+        )?;
+        build_interval_compose(
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmin.*",
+                &format!("mul_fmin_reduce_call_{index}"),
+                concat,
+            )?
+            .into_float_value(),
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.fmax.*",
+                &format!("mul_fmax_reduce_call_{index}"),
+                concat,
+            )?
+            .into_float_value(),
             builder,
-            module,
-            "llvm.vector.reduce.fmin.*",
-            &format!("mul_fmin_reduce_call_{index}"),
-            concat,
-        )?
-        .into_float_value(),
-        build_vec_unary_intrinsic(
-            builder,
-            module,
-            "llvm.vector.reduce.fmax.*",
-            &format!("mul_fmax_reduce_call_{index}"),
-            concat,
-        )?
-        .into_float_value(),
-        builder,
-        i32_type,
-        "interval_mul_compose",
-        index,
-    )
+            constants,
+            "interval_mul_compose",
+            index,
+        )
+    }
 }
 
 fn build_interval_negate<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
-    i32_type: IntType<'ctx>,
+    constants: &mut Constants<'ctx>,
     index: usize,
     name: &str,
 ) -> Result<VectorValue<'ctx>, Error> {
     Ok(builder.build_shuffle_vector(
         builder.build_float_neg(input, &format!("negate_{index}"))?,
         input.get_type().get_undef(),
-        VectorType::const_vector(&[i32_type.const_int(1, false), i32_type.const_int(0, false)]),
+        constants.i32_vec([1, 0], false),
         name,
     )?)
 }
@@ -2939,6 +2951,7 @@ fn build_float_rem_euclid<'ctx>(
     lhs: FloatValue<'ctx>,
     rhs: FloatValue<'ctx>,
     builder: &Builder<'ctx>,
+    constants: &mut Constants<'ctx>,
     name: &str,
     index: usize,
 ) -> Result<FloatValue<'ctx>, Error> {
@@ -2948,14 +2961,10 @@ fn build_float_rem_euclid<'ctx>(
             builder.build_float_compare(
                 FloatPredicate::ULT,
                 qval,
-                lhs.get_type().const_zero(),
+                constants.float(0.0),
                 &format!("rem_euclid_compare_{index}"),
             )?,
-            builder.build_float_add(
-                qval,
-                lhs.get_type().const_float(4.0),
-                &format!("rem_euclid_correction_{index}"),
-            )?,
+            builder.build_float_add(qval, rhs, &format!("rem_euclid_correction_{index}"))?,
             qval,
             name,
         )?
@@ -4571,7 +4580,21 @@ mod test {
     }
 
     #[test]
+    fn t_jit_interval_mul_with_self_optimization() {
+        let tree = deftree!(* 'x 'x).unwrap().compacted().unwrap();
+        assert_eq!(tree.symbols().len(), 1);
+        let context = JitContext::default();
+        let eval = tree.jit_compile_interval::<f64>(&context, "x").unwrap();
+        let mut outputs = vec![[f64::NAN; 2]];
+        eval.run(&[[-2.0, 3.0]], &mut outputs).unwrap();
+        let result = outputs[0];
+        assert_float_eq!(result[0], 0.0);
+        assert_float_eq!(result[1], 9.0);
+    }
+
+    #[test]
     fn t_jit_interval_random_circles_comparison() {
+        // Compare JIT and non-JIT evaluation results.
         const XRANGE: (f64, f64) = (0.0, 128.0);
         const YRANGE: (f64, f64) = (0.0, 128.0);
         let tree = test_util::random_circles(XRANGE, YRANGE, (2.56, 12.8), 100);
@@ -4610,7 +4633,6 @@ mod test {
                 .scalar()
                 .expect("Cannot retrieve scalar result from non-jit eval");
             let jit_result = jit_result[0];
-            dbg!(jit_result, result);
             assert_float_eq!(
                 jit_result[0],
                 result.0,
