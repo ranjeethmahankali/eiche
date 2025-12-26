@@ -411,6 +411,7 @@ impl Tree {
                     Pow if matches!(self.node(*rhs), Constant(Value::Scalar(2.0))) => {
                         build_interval_square(
                             regs[*lhs].into_vector_value(),
+                            ranges[*lhs].scalar()?,
                             builder,
                             &compiler.module,
                             &constants,
@@ -1671,12 +1672,18 @@ fn build_float_vec_powi<'ctx>(
 
 fn build_interval_square<'ctx>(
     input: VectorValue<'ctx>,
+    range: (f64, f64),
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     let sqbase = builder.build_float_mul(input, input, &format!("pow_lhs_square_base_{index}"))?;
+    if range.0 >= 0.0 && range.1 >= 0.0 {
+        return Ok(sqbase);
+    } else if range.0 < 0.0 && range.1 < 0.0 {
+        return build_interval_flip(sqbase, builder, constants, index);
+    }
     let is_neg = builder.build_float_compare(
         FloatPredicate::ULT,
         input,
@@ -1838,7 +1845,7 @@ fn build_interval_pow<'ctx>(
     builder.build_conditional_branch(is_square, square_bb, test_integer_bb)?;
     let square_out = {
         builder.position_at_end(square_bb);
-        let out = build_interval_square(lhs, builder, module, constants, index)?;
+        let out = build_interval_square(lhs, range_left, builder, module, constants, index)?;
         builder.build_unconditional_branch(merge_bb)?;
         builder.position_at_end(test_integer_bb);
         out
@@ -2721,7 +2728,7 @@ fn build_interval_mul<'ctx>(
     let (lhs, rhs) = inputs;
     let (range_left, range_right) = ranges;
     if lhs == rhs {
-        build_interval_square(lhs, builder, module, constants, index)
+        build_interval_square(lhs, range_left, builder, module, constants, index)
     } else if (range_left.0 == 0.0 && range_left.1 == 0.0)
         || (range_right.0 == 0.0 && range_right.1 == 0.0)
     {
