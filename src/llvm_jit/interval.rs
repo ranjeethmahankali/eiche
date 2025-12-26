@@ -81,9 +81,6 @@ struct Constants<'ctx> {
     i32_two: IntValue<'ctx>,
     i32_three: IntValue<'ctx>,
     i32_four: IntValue<'ctx>,
-    i32_five: IntValue<'ctx>,
-    i32_six: IntValue<'ctx>,
-    i32_seven: IntValue<'ctx>,
     // Floats.
     flt_zero: FloatValue<'ctx>,
     flt_one: FloatValue<'ctx>,
@@ -122,9 +119,6 @@ impl<'ctx> Constants<'ctx> {
             i32_two: i32_type.const_int(2, false),
             i32_three: i32_type.const_int(3, false),
             i32_four: i32_type.const_int(4, false),
-            i32_five: i32_type.const_int(5, false),
-            i32_six: i32_type.const_int(6, false),
-            i32_seven: i32_type.const_int(7, false),
             // Floats.
             flt_zero: flt_type.const_float(0.0),
             flt_one: flt_type.const_float(1.0),
@@ -2463,15 +2457,16 @@ fn build_interval_div<'ctx>(
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
     use crate::interval::IntervalClass::*;
-    let i32_type = module.get_context().i32_type();
+    let context = module.get_context();
+    let i8_type = context.i8_type();
     let (lhs, rhs) = inputs;
-    let mask = builder.build_int_add(
-        builder.build_int_mul(
-            build_interval_classify(lhs, builder, module, constants, index)?,
-            constants.i32_seven,
-            &format!("interval_div_mask_imul_{index}"),
+    let mask = builder.build_or(
+        builder.build_left_shift(
+            build_interval_classify(rhs, builder, module, constants, index)?,
+            constants.i32_four,
+            &format!("interval_div_mask_shift_{index}"),
         )?,
-        build_interval_classify(rhs, builder, module, constants, index)?,
+        build_interval_classify(lhs, builder, module, constants, index)?,
         &format!("interval_div_mask_{index}"),
     )?;
     let straight = builder.build_float_div(lhs, rhs, &format!("interval_div_straight_{index}"))?;
@@ -2604,7 +2599,10 @@ fn build_interval_div<'ctx>(
                     Ok(builder.build_int_compare(
                         IntPredicate::EQ,
                         mask,
-                        i32_type.const_int((*lcase as u64) * 7 + (*rcase as u64), false),
+                        i8_type.const_int(
+                            ((class_mask(*rcase) << 4) as u64) | (class_mask(*lcase) as u64),
+                            false,
+                        ),
                         &format!("interval_div_case_{i}_subcase_{j}_{index}"),
                     )?)
                 })
@@ -2628,17 +2626,19 @@ fn build_interval_div<'ctx>(
         })
 }
 
-/**
-Classify an interval based on it's relation ship to zero:
+const fn class_mask(c: IntervalClass) -> u8 {
+    use IntervalClass::*;
+    match c {
+        Empty => 0b_1111,
+        Negative => 0b_0011,
+        NegativeZero => 0b_1001,
+        SingletonZero => 0b_1100,
+        Spanning => 0b_0001,
+        ZeroPositive => 0b_0100,
+        Positive => 0b_0000,
+    }
+}
 
-Empty = 0,
-Negative = 1,
-NegativeZero = 2,
-SingletonZero = 3,
-Spanning = 4,
-ZeroPositive = 5,
-Positive = 6,
- */
 fn build_interval_classify<'ctx>(
     input: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -2646,6 +2646,8 @@ fn build_interval_classify<'ctx>(
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<IntValue<'ctx>, Error> {
+    let context = module.get_context();
+    let i8_type = context.i8_type();
     let (is_empty, is_neg, is_eq) = (
         build_check_interval_empty(input, builder, module, index)?,
         builder.build_float_compare(
@@ -2661,77 +2663,49 @@ fn build_interval_classify<'ctx>(
             &format!("interval_classify_zero_check_{index}"),
         )?,
     );
-    let (lneg, rneg, leq, req) = (
+    let b0 = builder.build_int_z_extend(
         builder
             .build_extract_element(
                 is_neg,
                 constants.i32_zero,
-                &format!("interval_classify_left_neg_{index}"),
+                &format!("interval_classify_first_bit_{index}"),
             )?
             .into_int_value(),
-        builder
-            .build_extract_element(
-                is_neg,
-                constants.i32_one,
-                &format!("interval_classify_right_neg_{index}"),
-            )?
-            .into_int_value(),
-        builder
-            .build_extract_element(
-                is_eq,
-                constants.i32_zero,
-                &format!("interval_classify_left_eq_{index}"),
-            )?
-            .into_int_value(),
-        builder
-            .build_extract_element(
-                is_eq,
-                constants.i32_one,
-                &format!("interval_classify_right_eq_{index}"),
-            )?
-            .into_int_value(),
-    );
+        i8_type,
+        &format!("interval_classify_first_bit_extended_{index}"),
+    )?;
+    let mask = [
+        (is_neg, constants.i32_one, constants.i32_one, "first"),
+        (is_eq, constants.i32_zero, constants.i32_two, "second"),
+        (is_eq, constants.i32_one, constants.i32_three, "third"),
+    ]
+    .into_iter()
+    .try_fold(b0, |acc, (v, i, shift, label)| {
+        let extracted = builder
+            .build_extract_element(v, i, &format!("interval_classify_{label}_bit_{index}"))?
+            .into_int_value();
+        let extended = builder.build_int_z_extend(
+            extracted,
+            i8_type,
+            &format!("interval_classify_{label}_bit_extended_{index}"),
+        )?;
+        let shifted = builder.build_left_shift(
+            extended,
+            shift,
+            &format!("interval_classify_{label}_bit_shifted_{index}"),
+        )?;
+        builder.build_or(
+            acc,
+            shifted,
+            &format!("interval_classify_{label}_bit_accumulated_{index}"),
+        )
+    })?;
     Ok(builder
         .build_select(
             is_empty,
-            constants.i32_zero,
-            builder
-                .build_select(
-                    lneg,
-                    builder
-                        .build_select(
-                            rneg,
-                            constants.i32_one,
-                            builder
-                                .build_select(
-                                    req,
-                                    constants.i32_two,
-                                    constants.i32_four,
-                                    &format!("interval_classify_lneg_not_rneg_cases_{index}"),
-                                )?
-                                .into_int_value(),
-                            &format!("interval_classify_lneg_cases_{index}"),
-                        )?
-                        .into_int_value(),
-                    builder
-                        .build_select(
-                            leq,
-                            builder
-                                .build_select(
-                                    req,
-                                    constants.i32_three,
-                                    constants.i32_five,
-                                    &format!("interval_classify_leq_req_cases_{index}"),
-                                )?
-                                .into_int_value(),
-                            constants.i32_six,
-                            &format!("interval_classify_leq_cases_{index}"),
-                        )?
-                        .into_int_value(),
-                    &format!("interval_classify_non_empty_cases_{index}"),
-                )?
-                .into_int_value(),
-            &format!("interval_classify_{index}"),
+            i8_type.const_int(0b_1111, false),
+            mask,
+            &format!("interval_classify_result_{index}"),
         )?
         .into_int_value())
 }

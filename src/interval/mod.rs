@@ -21,13 +21,13 @@ pub enum Interval {
 
 #[derive(Copy, Clone)]
 pub enum IntervalClass {
-    Empty = 0,
-    Negative = 1,
-    NegativeZero = 2,
-    SingletonZero = 3,
-    Spanning = 4,
-    ZeroPositive = 5,
-    Positive = 6,
+    Empty,
+    Negative,
+    NegativeZero,
+    SingletonZero,
+    Spanning,
+    ZeroPositive,
+    Positive,
 }
 
 impl Interval {
