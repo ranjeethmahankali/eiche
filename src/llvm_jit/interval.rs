@@ -513,8 +513,11 @@ impl Tree {
                     )?
                     .as_basic_value_enum(),
                     And => build_interval_and(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].boolean()?, ranges[*rhs].boolean()?),
                         builder,
                         &compiler.module,
                         &constants,
@@ -522,8 +525,11 @@ impl Tree {
                     )?
                     .as_basic_value_enum(),
                     Or => build_interval_or(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
+                        (
+                            regs[*lhs].into_vector_value(),
+                            regs[*rhs].into_vector_value(),
+                        ),
+                        (ranges[*lhs].boolean()?, ranges[*rhs].boolean()?),
                         builder,
                         &compiler.module,
                         &constants,
@@ -751,13 +757,20 @@ fn build_interval_choose<'ctx>(
 }
 
 fn build_interval_or<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((bool, bool), (bool, bool)),
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let (lhs, rhs) = inputs;
+    let ((llo, lhi), (rlo, rhi)) = ranges;
+    if (llo && lhi) || (rlo && rhi) {
+        return Ok(constants.interval_true_true);
+    } else if !llo && !lhi && !rlo && !rhi {
+        return Ok(constants.interval_false_false);
+    }
     let all_false = build_vec_unary_intrinsic(
         builder,
         module,
@@ -811,13 +824,20 @@ fn build_interval_or<'ctx>(
 }
 
 fn build_interval_and<'ctx>(
-    lhs: VectorValue<'ctx>,
-    rhs: VectorValue<'ctx>,
+    inputs: (VectorValue<'ctx>, VectorValue<'ctx>),
+    ranges: ((bool, bool), (bool, bool)),
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    let (lhs, rhs) = inputs;
+    let ((llo, lhi), (rlo, rhi)) = ranges;
+    if (!llo && !lhi) || (!rlo && !rhi) {
+        return Ok(constants.interval_false_false);
+    } else if llo && lhi && rlo && rhi {
+        return Ok(constants.interval_true_true);
+    }
     let all_true = build_vec_unary_intrinsic(
         builder,
         module,
@@ -940,6 +960,9 @@ fn build_interval_less<'ctx>(
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    if lhs == rhs {
+        return Ok(constants.interval_false_false);
+    }
     let InequalityFlags {
         either_empty,
         strictly_before,
@@ -1083,6 +1106,9 @@ fn build_interval_equal<'ctx>(
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    if lhs == rhs {
+        return Ok(constants.interval_true_true);
+    }
     let (no_overlap, matching_singleton) =
         build_interval_equality_flags(lhs, rhs, builder, module, constants, index)?;
     Ok(builder
@@ -1110,6 +1136,9 @@ fn build_interval_not_equal<'ctx>(
     constants: &Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
+    if lhs == rhs {
+        return Ok(constants.interval_false_false);
+    }
     let (no_overlap, matching_singleton) =
         build_interval_equality_flags(lhs, rhs, builder, module, constants, index)?;
     Ok(builder
