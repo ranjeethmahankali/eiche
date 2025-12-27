@@ -127,7 +127,7 @@ impl<'ctx> JitCompiler<'ctx> {
         let options = PassBuilderOptions::create();
         self.module
             .run_passes(
-                "mem2reg,instcombine,reassociate,gvn,instcombine,simplifycfg,adce,simplifycfg,instcombine",
+                "mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine",
                 &self.machine,
                 options,
             )
