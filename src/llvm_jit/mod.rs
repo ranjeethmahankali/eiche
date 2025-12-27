@@ -125,12 +125,9 @@ impl<'ctx> JitCompiler<'ctx> {
     /// Run optimization passes.
     fn run_passes(&self) -> Result<(), Error> {
         let options = PassBuilderOptions::create();
-        // self.module
-        //     .run_passes("default<O3>", &self.machine, options)
-        //     .map_err(|e| Error::JitCompilationError(e.to_string()))
         self.module
             .run_passes(
-                "mem2reg,adce,instcombine,gvn,reassociate,simplifycfg",
+                "mem2reg,instcombine,reassociate,gvn,instcombine,simplifycfg,adce,simplifycfg,instcombine",
                 &self.machine,
                 options,
             )
