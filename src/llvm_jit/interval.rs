@@ -640,7 +640,7 @@ impl Tree {
                 })?;
         }
         builder.build_return(None)?;
-        compiler.run_passes()?;
+        compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
         let engine = compiler
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
