@@ -1,5 +1,6 @@
 use super::{
     JitCompiler, JitContext, NumberType, build_float_binary_intrinsic, build_float_unary_intrinsic,
+    fast_math,
 };
 use crate::{
     BinaryOp::*,
@@ -121,86 +122,90 @@ impl Tree {
                     };
                     builder.build_load(float_type, ptr, &format!("val_{}", *label))?
                 }
-                Unary(op, input) => match op {
-                    Negate => builder
-                        .build_float_neg(regs[*input].into_float_value(), &format!("val_{ni}"))?
+                Unary(op, input) => {
+                    match op {
+                        Negate => fast_math(builder.build_float_neg(
+                            regs[*input].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?)
                         .as_basic_value_enum(),
-                    Sqrt => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.sqrt.*",
-                        "sqrt_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Abs => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.fabs.*",
-                        "abs_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Sin => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.sin.*",
-                        "sin_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Cos => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.cos.*",
-                        "cos_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Tan => {
-                        let sin = build_float_unary_intrinsic(
+                        Sqrt => fast_math(build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.sqrt.*",
+                            "sqrt_call",
+                            regs[*input].into_float_value(),
+                        )?),
+                        Abs => fast_math(build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.fabs.*",
+                            "abs_call",
+                            regs[*input].into_float_value(),
+                        )?),
+                        Sin => build_float_unary_intrinsic(
                             builder,
                             &compiler.module,
                             "llvm.sin.*",
                             "sin_call",
                             regs[*input].into_float_value(),
-                        )?;
-                        let cos = build_float_unary_intrinsic(
+                        )?,
+                        Cos => build_float_unary_intrinsic(
                             builder,
                             &compiler.module,
                             "llvm.cos.*",
                             "cos_call",
                             regs[*input].into_float_value(),
-                        )?;
-                        builder
-                            .build_float_div(
-                                sin.into_float_value(),
-                                cos.into_float_value(),
-                                &format!("val_{ni}"),
-                            )?
-                            .as_basic_value_enum()
+                        )?,
+                        Tan => {
+                            let sin = build_float_unary_intrinsic(
+                                builder,
+                                &compiler.module,
+                                "llvm.sin.*",
+                                "sin_call",
+                                regs[*input].into_float_value(),
+                            )?;
+                            let cos = build_float_unary_intrinsic(
+                                builder,
+                                &compiler.module,
+                                "llvm.cos.*",
+                                "cos_call",
+                                regs[*input].into_float_value(),
+                            )?;
+                            builder
+                                .build_float_div(
+                                    sin.into_float_value(),
+                                    cos.into_float_value(),
+                                    &format!("val_{ni}"),
+                                )?
+                                .as_basic_value_enum()
+                        }
+                        Log => build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.log.*",
+                            "log_call",
+                            regs[*input].into_float_value(),
+                        )?,
+                        Exp => build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.exp.*",
+                            "exp_call",
+                            regs[*input].into_float_value(),
+                        )?,
+                        Floor => build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.floor.*",
+                            "floor_call",
+                            regs[*input].into_float_value(),
+                        )?,
+                        Not => builder
+                            .build_not(regs[*input].into_int_value(), &format!("val_{ni}"))?
+                            .as_basic_value_enum(),
                     }
-                    Log => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.log.*",
-                        "log_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Exp => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.exp.*",
-                        "exp_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Floor => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.floor.*",
-                        "floor_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Not => builder
-                        .build_not(regs[*input].into_int_value(), &format!("val_{ni}"))?
-                        .as_basic_value_enum(),
-                },
+                }
                 Binary(op, lhs, rhs) => match op {
                     Add => builder
                         .build_float_add(
