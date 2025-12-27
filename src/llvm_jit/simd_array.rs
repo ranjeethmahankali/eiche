@@ -1162,6 +1162,7 @@ impl Tree {
             false,
         );
         let function = compiler.module.add_function(&func_name, fn_type, None);
+        compiler.set_attributes(function, context)?;
         let start_block = context.append_basic_block(function, "entry");
         let loop_block = context.append_basic_block(function, "loop");
         let end_block = context.append_basic_block(function, "end");

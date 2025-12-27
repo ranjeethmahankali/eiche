@@ -283,6 +283,7 @@ impl Tree {
             .void_type()
             .fn_type(&[iptr_type.into(), iptr_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
+        compiler.set_attributes(function, context)?;
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
         for (index, node) in self.nodes().iter().enumerate() {
