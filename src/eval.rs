@@ -10,7 +10,7 @@ use crate::{
         Value,
     },
 };
-use std::{collections::BTreeMap, fmt::Debug};
+use std::{collections::BTreeMap, fmt::Debug, ops::Rem};
 
 /// Size of a value type must be known at compile time.
 pub trait ValueType: Sized + Copy + Debug + Default {
@@ -86,7 +86,7 @@ impl ValueType for Value {
             Pow => Scalar(f64::powf(lhs.scalar()?, rhs.scalar()?)),
             Min => Scalar(f64::min(lhs.scalar()?, rhs.scalar()?)),
             Max => Scalar(f64::max(lhs.scalar()?, rhs.scalar()?)),
-            Remainder => Scalar(lhs.scalar()?.rem_euclid(rhs.scalar()?)),
+            Remainder => Scalar(lhs.scalar()?.rem(rhs.scalar()?)),
             // Boolean.
             Less => Bool(lhs.scalar()? < rhs.scalar()?),
             LessOrEqual => Bool(lhs.scalar()? <= rhs.scalar()?),
@@ -215,7 +215,7 @@ pub type ValueEvaluator = Evaluator<Value>;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{assert_float_eq, deftree, test::check_value_eval};
+    use crate::{assert_float_eq, deftree, test_util::check_value_eval};
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
 

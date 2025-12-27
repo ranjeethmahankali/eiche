@@ -1,16 +1,22 @@
 use crate::error::Error;
 use inkwell::{
     OptimizationLevel,
+    attributes::AttributeLoc,
     builder::{Builder, BuilderError},
     context::Context,
     execution_engine::FunctionLookupError,
+    intrinsics::Intrinsic,
     module::Module,
-    passes::PassManager,
+    passes::PassBuilderOptions,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
-    types::FloatType,
+    types::{BasicTypeEnum, FloatType, IntType},
+    values::{
+        BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, VectorValue,
+    },
 };
 use std::{
     cell::RefCell,
+    fmt::Debug,
     ops::{Add, AddAssign, Div, DivAssign, MulAssign, Neg, Sub, SubAssign},
     path::Path,
 };
@@ -38,16 +44,11 @@ impl Default for JitContext {
 }
 
 impl JitContext {
-    fn new_func_name<T: NumberType, const IS_ARRAY: bool>(&self) -> String {
+    fn new_func_name<T: NumberType>(&self, suffix: Option<&str>) -> String {
         let mut nf = self.numfuncs.borrow_mut();
         let idx = *nf;
         *nf += 1;
-        format!(
-            "func_{}_{}_{}",
-            idx,
-            T::type_str(),
-            if IS_ARRAY { "array" } else { "" }
-        )
+        format!("func_{}_{}_{}", idx, T::type_str(), suffix.unwrap_or(""))
     }
 }
 
@@ -93,24 +94,54 @@ impl<'ctx> JitCompiler<'ctx> {
         })
     }
 
+    fn set_attributes(
+        &self,
+        function: FunctionValue<'ctx>,
+        context: &Context,
+    ) -> Result<(), Error> {
+        function.add_attribute(
+            AttributeLoc::Function,
+            context.create_string_attribute(
+                "target-cpu",
+                self.machine
+                    .get_cpu()
+                    .to_str()
+                    .map_err(|e| Error::JitCompilationError(e.to_string()))?,
+            ),
+        );
+        function.add_attribute(
+            AttributeLoc::Function,
+            context.create_string_attribute(
+                "target-features",
+                self.machine
+                    .get_feature_string()
+                    .to_str()
+                    .map_err(|e| Error::JitCompilationError(e.to_string()))?,
+            ),
+        );
+        Ok(())
+    }
+
     /// Run optimization passes.
-    fn run_passes(&self) {
-        let fpm = PassManager::create(());
-        fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
-        fpm.add_gvn_pass();
-        fpm.add_cfg_simplification_pass();
-        fpm.add_basic_alias_analysis_pass();
-        fpm.add_promote_memory_to_register_pass();
-        fpm.run_on(&self.module);
+    fn run_passes(&self, passes: &str) -> Result<(), Error> {
+        let options = PassBuilderOptions::create();
+        self.module
+            .run_passes(passes, &self.machine, options)
+            .map_err(|e| Error::JitCompilationError(e.to_string()))
     }
 
     /// Write out the compiled assembly to file specified by `path`.
     #[allow(dead_code)]
-    pub fn write_asm(&self, path: &Path) {
+    pub fn write_asm<P: AsRef<Path>>(&self, path: P) {
         self.machine
-            .write_to_file(&self.module, FileType::Assembly, path)
+            .write_to_file(&self.module, FileType::Assembly, path.as_ref())
             .unwrap();
+    }
+
+    /// Write out the compiled LLVM IR to file specified by `path`.
+    #[allow(dead_code)]
+    pub fn write_ir<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
+        self.module.print_to_file(path).map_err(|e| e.to_string())
     }
 }
 
@@ -125,18 +156,25 @@ pub trait NumberType:
     + Sub<Output = Self>
     + SubAssign
     + MulAssign
+    + Debug
 {
     fn nan() -> Self;
 
     fn jit_type(context: &Context) -> FloatType<'_>;
 
+    fn jit_int_type(context: &Context) -> IntType<'_>;
+
     fn from_f64(val: f64) -> Self;
+
+    fn to_f64(&self) -> f64;
 
     fn min(a: Self, b: Self) -> Self;
 
     fn max(a: Self, b: Self) -> Self;
 
     fn type_str() -> &'static str;
+
+    fn is_nan(&self) -> bool;
 }
 
 impl NumberType for f32 {
@@ -162,6 +200,18 @@ impl NumberType for f32 {
 
     fn type_str() -> &'static str {
         "f32"
+    }
+
+    fn jit_int_type(context: &Context) -> IntType<'_> {
+        context.i32_type()
+    }
+
+    fn is_nan(&self) -> bool {
+        f32::is_nan(*self)
+    }
+
+    fn to_f64(&self) -> f64 {
+        *self as f64
     }
 }
 
@@ -189,6 +239,137 @@ impl NumberType for f64 {
     fn type_str() -> &'static str {
         "f64"
     }
+
+    fn jit_int_type(context: &Context) -> IntType<'_> {
+        context.i64_type()
+    }
+
+    fn is_nan(&self) -> bool {
+        f64::is_nan(*self)
+    }
+
+    fn to_f64(&self) -> f64 {
+        *self
+    }
+}
+
+fn fast_math<'ctx, T: BasicValue<'ctx>>(inst: T) -> T {
+    if let Some(inst) = inst.as_instruction_value() {
+        inst.set_fast_math_flags(inkwell::llvm_sys::LLVMFastMathAll);
+    }
+    inst
+}
+
+fn build_vec_unary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &str,
+    input: VectorValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(module, &[BasicTypeEnum::VectorType(input.get_type())])
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[BasicMetadataValueEnum::VectorValue(input)],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+fn build_vec_binary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &str,
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(
+            module,
+            &[
+                BasicTypeEnum::VectorType(lhs.get_type()),
+                BasicTypeEnum::VectorType(rhs.get_type()),
+            ],
+        )
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[
+                BasicMetadataValueEnum::VectorValue(lhs),
+                BasicMetadataValueEnum::VectorValue(rhs),
+            ],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+fn build_float_unary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &str,
+    input: FloatValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(module, &[BasicTypeEnum::FloatType(input.get_type())])
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[BasicMetadataValueEnum::FloatValue(input)],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
+}
+
+fn build_float_binary_intrinsic<'ctx>(
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    name: &'static str,
+    call_name: &str,
+    lhs: FloatValue<'ctx>,
+    rhs: FloatValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
+    let intrinsic_fn = intrinsic
+        .get_declaration(
+            module,
+            &[
+                BasicTypeEnum::FloatType(lhs.get_type()),
+                BasicTypeEnum::FloatType(rhs.get_type()),
+            ],
+        )
+        .ok_or(Error::CannotCompileIntrinsic(name))?;
+    builder
+        .build_call(
+            intrinsic_fn,
+            &[
+                BasicMetadataValueEnum::FloatValue(lhs),
+                BasicMetadataValueEnum::FloatValue(rhs),
+            ],
+            call_name,
+        )
+        .map_err(|_| Error::CannotCompileIntrinsic(name))?
+        .try_as_basic_value()
+        .left()
+        .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
 pub mod pruning_single;
@@ -196,3 +377,5 @@ pub mod single;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 pub mod simd_array;
+
+pub mod interval;

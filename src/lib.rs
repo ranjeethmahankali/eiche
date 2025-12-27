@@ -7,6 +7,7 @@ mod error;
 mod eval;
 mod fold;
 mod hash;
+mod interval;
 mod io;
 mod latex;
 mod macros;
@@ -25,21 +26,12 @@ pub mod llvm_jit;
 #[cfg(feature = "llvm-jit")]
 pub use llvm_jit::{
     JitContext,
+    interval::{JitIntervalFn, JitIntervalFnSync},
     simd_array::{JitSimdFn, NativeSimdFunc, SimdVec, Wide},
     single::{JitFn, JitFnSync},
 };
 
-#[cfg(feature = "intervals")]
-mod interval;
-
-#[cfg(feature = "intervals")]
-pub use interval::{
-    Interval, IntervalEvaluator,
-    pruning_eval::{PruningError, PruningState, ValuePruningEvaluator},
-};
-
-#[cfg(test)]
-mod test;
+pub mod test_util;
 
 pub use dedup::{Deduplicater, equivalent_trees};
 pub use derivative::{numerical_deriv, symbolic_deriv};
@@ -47,6 +39,10 @@ pub use dual::{Dual, DualEvaluator};
 pub use error::Error;
 pub use eval::ValueEvaluator;
 pub use fold::fold;
+pub use interval::{
+    Interval, IntervalEvaluator,
+    pruning_eval::{PruningError, PruningState, ValuePruningEvaluator},
+};
 pub use prune::Pruner;
 pub use reduce::reduce;
 pub use tree::{

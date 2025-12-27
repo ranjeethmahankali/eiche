@@ -460,6 +460,32 @@ impl Tree {
         }) {
             return Err(Error::DependentRootNodes);
         }
+        // Find nodes with incompatible input types.
+        if self.nodes.iter().any(|node| match node {
+            Constant(_) => false,
+            Symbol(_) => false,
+            Unary(op, input) => match op {
+                Negate | Sqrt | Abs | Sin | Cos | Tan | Log | Exp | Floor => {
+                    !is_node_scalar(&self.nodes, *input)
+                }
+                Not => is_node_scalar(&self.nodes, *input),
+            },
+            Binary(op, lhs, rhs) => match op {
+                Add | Subtract | Multiply | Divide | Pow | Min | Max | Remainder | Less
+                | LessOrEqual | Equal | NotEqual | Greater | GreaterOrEqual => {
+                    !is_node_scalar(&self.nodes, *lhs) || !is_node_scalar(&self.nodes, *rhs)
+                }
+                And | Or => is_node_scalar(&self.nodes, *lhs) || is_node_scalar(&self.nodes, *rhs),
+            },
+            Ternary(op, a, b, c) => match op {
+                Choose => {
+                    is_node_scalar(&self.nodes, *a)
+                        || (is_node_scalar(&self.nodes, *b) != is_node_scalar(&self.nodes, *c))
+                }
+            },
+        }) {
+            return Err(Error::TypeMismatch);
+        }
         // Maybe add more checks later.
         Ok(self)
     }
