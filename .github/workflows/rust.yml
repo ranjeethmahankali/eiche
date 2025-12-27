@@ -21,9 +21,7 @@ jobs:
       run: rustup update stable
     - uses: actions/checkout@v4
     - name: Install LLVM and Clang
-      uses: KyleMayes/install-llvm-action@v1
-      with:
-        version: "18.0"
+      run: sudo apt install llvm-18 llvm-18-dev llvm-18-tools lib libpolly-18-dev libzstd-dev
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run Clippy
