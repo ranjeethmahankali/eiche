@@ -968,22 +968,22 @@ fn build_interval_inequality_flags<'ctx>(
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
-    let masked_lhs = builder.build_float_mul(
+    let masked_lhs = fast_math(builder.build_float_mul(
         constants.float_vec([-1.0, 1.0]),
         lhs,
         &format!("less_sign_adjust_lhs_{index}"),
-    )?;
-    let masked_rhs = builder.build_float_mul(
+    )?);
+    let masked_rhs = fast_math(builder.build_float_mul(
         constants.float_vec([-1.0, 1.0]),
         build_interval_flip(rhs, builder, constants, index)?,
         &format!("less_equal_sign_adjust_rhs_{index}"),
-    )?;
-    let cross_compare = builder.build_float_compare(
+    )?);
+    let cross_compare = fast_math(builder.build_float_compare(
         FloatPredicate::ULT,
         masked_lhs,
         masked_rhs,
         &format!("less_equal_cross_compare_{index}"),
-    )?;
+    )?);
     let strictly_after = builder
         .build_extract_element(
             cross_compare,
@@ -998,12 +998,12 @@ fn build_interval_inequality_flags<'ctx>(
             &format!("less_equal_b_lt_c_check_{index}"),
         )?
         .into_int_value();
-    let touching = builder.build_float_compare(
+    let touching = fast_math(builder.build_float_compare(
         FloatPredicate::UEQ,
         masked_lhs,
         masked_rhs,
         &format!("less_equal_eq_comp_{index}"),
-    )?;
+    )?);
     Ok(InequalityFlags {
         either_empty,
         strictly_before,
@@ -1110,27 +1110,27 @@ fn build_interval_equality_flags<'ctx>(
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
-    let masked_lhs = builder.build_float_mul(
+    let masked_lhs = fast_math(builder.build_float_mul(
         constants.float_vec([-1.0, 1.0]),
         lhs,
         &format!("less_sign_adjust_lhs_{index}"),
-    )?;
-    let masked_rhs = builder.build_float_mul(
+    )?);
+    let masked_rhs = fast_math(builder.build_float_mul(
         constants.float_vec([-1.0, 1.0]),
         build_interval_flip(rhs, builder, constants, index)?,
         &format!("less_equal_sign_adjust_rhs_{index}"),
-    )?;
+    )?);
     let no_overlap = build_vec_unary_intrinsic(
         builder,
         module,
         "llvm.vector.reduce.or.*",
         &format!("equal_no_overlap_check_{index}"),
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::ULT,
             masked_lhs,
             masked_rhs,
             &format!("less_equal_cross_compare_{index}"),
-        )?,
+        )?),
     )?
     .into_int_value();
     // To determine if the interval is a singleton, we're checking the masked
@@ -1230,23 +1230,25 @@ fn build_interval_remainder<'ctx>(
     let div_result =
         build_interval_div(inputs, ranges, builder, module, function, constants, index)?;
     let (lhs, rhs) = inputs;
-    let mul_result = builder.build_float_mul(
-        build_vec_unary_intrinsic(
-            builder,
-            module,
-            "llvm.floor.*",
-            &format!("remainder_floor_call_{index}"),
-            div_result,
-        )?
-        .into_vector_value(),
-        rhs,
-        &format!("remainder_floor_mul_{index}"),
-    )?;
-    Ok(builder.build_float_sub(
+    let mul_result = fast_math(
+        builder.build_float_mul(
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.floor.*",
+                &format!("remainder_floor_call_{index}"),
+                div_result,
+            )?
+            .into_vector_value(),
+            rhs,
+            &format!("remainder_floor_mul_{index}"),
+        )?,
+    );
+    Ok(fast_math(builder.build_float_sub(
         lhs,
         build_interval_flip(mul_result, builder, constants, index)?,
         &format!("remainder_final_sub_{index}"),
-    )?)
+    )?))
 }
 
 fn build_interval_log<'ctx>(
@@ -1265,12 +1267,12 @@ fn build_interval_log<'ctx>(
     } else if range.0 < 0.0 && range.1 < 0.0 {
         return Ok(constants.float_vec([f64::NAN; 2]));
     }
-    let is_neg = builder.build_float_compare(
+    let is_neg = fast_math(builder.build_float_compare(
         FloatPredicate::ULE,
         input,
         constants.float_vec([0.0; 2]),
         &format!("log_neg_compare_{index}"),
-    )?;
+    )?);
     let log_base = build_vec_unary_intrinsic(builder, module, "llvm.log.*", "log_call", input)?
         .into_vector_value();
     Ok(builder
@@ -1321,24 +1323,26 @@ fn build_interval_tan<'ctx>(
             &format!("tan_width_rhs_{index}"),
         )?
         .into_float_value();
-    let width = builder.build_float_sub(
-        builder
-            .build_extract_element(
-                input,
-                constants.int_32(1, false),
-                &format!("tan_width_lhs_{index}"),
-            )?
-            .into_float_value(),
-        lo,
-        &format!("tan_width_{index}"),
-    )?;
+    let width = fast_math(
+        builder.build_float_sub(
+            builder
+                .build_extract_element(
+                    input,
+                    constants.int_32(1, false),
+                    &format!("tan_width_lhs_{index}"),
+                )?
+                .into_float_value(),
+            lo,
+            &format!("tan_width_{index}"),
+        )?,
+    );
     let out = builder.build_select(
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::UGE,
             width,
             constants.float(PI),
             &format!("tan_pi_compare_{index}"),
-        )?,
+        )?),
         constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
         {
             // Shift lo to an equivalent value in -pi/2 to pi/2.
