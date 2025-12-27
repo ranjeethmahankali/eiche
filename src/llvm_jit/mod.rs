@@ -7,7 +7,7 @@ use inkwell::{
     execution_engine::FunctionLookupError,
     intrinsics::Intrinsic,
     module::Module,
-    passes::PassManager,
+    passes::PassBuilderOptions,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
     types::{BasicTypeEnum, FloatType, IntType},
     values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, VectorValue},
@@ -121,16 +121,11 @@ impl<'ctx> JitCompiler<'ctx> {
     }
 
     /// Run optimization passes.
-    fn run_passes(&self) {
-        let fpm = PassManager::create(());
-        fpm.add_aggressive_dce_pass();
-        fpm.add_instruction_combining_pass();
-        fpm.add_gvn_pass();
-        fpm.add_reassociate_pass();
-        fpm.add_cfg_simplification_pass();
-        fpm.add_basic_alias_analysis_pass();
-        fpm.add_promote_memory_to_register_pass();
-        fpm.run_on(&self.module);
+    fn run_passes(&self) -> Result<(), Error> {
+        let options = PassBuilderOptions::create();
+        self.module
+            .run_passes("default<O3>", &self.machine, options)
+            .map_err(|e| Error::JitCompilationError(e.to_string()))
     }
 
     /// Write out the compiled assembly to file specified by `path`.

@@ -362,7 +362,7 @@ impl Tree {
             builder.build_store(dst, *reg)?;
         }
         builder.build_return(None)?;
-        compiler.run_passes();
+        compiler.run_passes()?;
         let engine = compiler
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
