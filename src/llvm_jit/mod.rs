@@ -10,7 +10,9 @@ use inkwell::{
     passes::PassBuilderOptions,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
     types::{BasicTypeEnum, FloatType, IntType},
-    values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, VectorValue},
+    values::{
+        BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, VectorValue,
+    },
 };
 use std::{
     cell::RefCell,
@@ -256,6 +258,13 @@ impl NumberType for f64 {
     fn to_f64(&self) -> f64 {
         *self
     }
+}
+
+fn fast_math<'ctx, T: BasicValue<'ctx>>(inst: T) -> T {
+    if let Some(inst) = inst.as_instruction_value() {
+        inst.set_fast_math_flags(inkwell::llvm_sys::LLVMFastMathAll);
+    }
+    inst
 }
 
 fn build_vec_unary_intrinsic<'ctx>(
