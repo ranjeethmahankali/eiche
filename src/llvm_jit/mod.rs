@@ -7,10 +7,12 @@ use inkwell::{
     execution_engine::FunctionLookupError,
     intrinsics::Intrinsic,
     module::Module,
-    passes::PassManager,
+    passes::PassBuilderOptions,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
     types::{BasicTypeEnum, FloatType, IntType},
-    values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, VectorValue},
+    values::{
+        BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, VectorValue,
+    },
 };
 use std::{
     cell::RefCell,
@@ -121,16 +123,11 @@ impl<'ctx> JitCompiler<'ctx> {
     }
 
     /// Run optimization passes.
-    fn run_passes(&self) {
-        let fpm = PassManager::create(());
-        fpm.add_aggressive_dce_pass();
-        fpm.add_instruction_combining_pass();
-        fpm.add_gvn_pass();
-        fpm.add_reassociate_pass();
-        fpm.add_cfg_simplification_pass();
-        fpm.add_basic_alias_analysis_pass();
-        fpm.add_promote_memory_to_register_pass();
-        fpm.run_on(&self.module);
+    fn run_passes(&self, passes: &str) -> Result<(), Error> {
+        let options = PassBuilderOptions::create();
+        self.module
+            .run_passes(passes, &self.machine, options)
+            .map_err(|e| Error::JitCompilationError(e.to_string()))
     }
 
     /// Write out the compiled assembly to file specified by `path`.
@@ -254,6 +251,13 @@ impl NumberType for f64 {
     fn to_f64(&self) -> f64 {
         *self
     }
+}
+
+fn fast_math<'ctx, T: BasicValue<'ctx>>(inst: T) -> T {
+    if let Some(inst) = inst.as_instruction_value() {
+        inst.set_fast_math_flags(inkwell::llvm_sys::LLVMFastMathAll);
+    }
+    inst
 }
 
 fn build_vec_unary_intrinsic<'ctx>(

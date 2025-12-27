@@ -1,5 +1,6 @@
 use super::{
     JitCompiler, JitContext, NumberType, build_float_binary_intrinsic, build_float_unary_intrinsic,
+    fast_math,
 };
 use crate::{
     BinaryOp::*,
@@ -121,200 +122,191 @@ impl Tree {
                     };
                     builder.build_load(float_type, ptr, &format!("val_{}", *label))?
                 }
-                Unary(op, input) => match op {
-                    Negate => builder
-                        .build_float_neg(regs[*input].into_float_value(), &format!("val_{ni}"))?
+                Unary(op, input) => {
+                    match op {
+                        Negate => fast_math(builder.build_float_neg(
+                            regs[*input].into_float_value(),
+                            &format!("val_{ni}"),
+                        )?)
                         .as_basic_value_enum(),
-                    Sqrt => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.sqrt.*",
-                        "sqrt_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Abs => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.fabs.*",
-                        "abs_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Sin => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.sin.*",
-                        "sin_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Cos => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.cos.*",
-                        "cos_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Tan => {
-                        let sin = build_float_unary_intrinsic(
+                        Sqrt => fast_math(build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.sqrt.*",
+                            "sqrt_call",
+                            regs[*input].into_float_value(),
+                        )?),
+                        Abs => fast_math(build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.fabs.*",
+                            "abs_call",
+                            regs[*input].into_float_value(),
+                        )?),
+                        Sin => fast_math(build_float_unary_intrinsic(
                             builder,
                             &compiler.module,
                             "llvm.sin.*",
                             "sin_call",
                             regs[*input].into_float_value(),
-                        )?;
-                        let cos = build_float_unary_intrinsic(
+                        )?),
+                        Cos => fast_math(build_float_unary_intrinsic(
                             builder,
                             &compiler.module,
                             "llvm.cos.*",
                             "cos_call",
                             regs[*input].into_float_value(),
-                        )?;
-                        builder
-                            .build_float_div(
+                        )?),
+                        Tan => {
+                            let sin = fast_math(build_float_unary_intrinsic(
+                                builder,
+                                &compiler.module,
+                                "llvm.sin.*",
+                                "sin_call",
+                                regs[*input].into_float_value(),
+                            )?);
+                            let cos = fast_math(build_float_unary_intrinsic(
+                                builder,
+                                &compiler.module,
+                                "llvm.cos.*",
+                                "cos_call",
+                                regs[*input].into_float_value(),
+                            )?);
+                            fast_math(builder.build_float_div(
                                 sin.into_float_value(),
                                 cos.into_float_value(),
                                 &format!("val_{ni}"),
-                            )?
+                            )?)
                             .as_basic_value_enum()
+                        }
+                        Log => fast_math(build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.log.*",
+                            "log_call",
+                            regs[*input].into_float_value(),
+                        )?),
+                        Exp => fast_math(build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.exp.*",
+                            "exp_call",
+                            regs[*input].into_float_value(),
+                        )?),
+                        Floor => fast_math(build_float_unary_intrinsic(
+                            builder,
+                            &compiler.module,
+                            "llvm.floor.*",
+                            "floor_call",
+                            regs[*input].into_float_value(),
+                        )?),
+                        Not => builder
+                            .build_not(regs[*input].into_int_value(), &format!("val_{ni}"))?
+                            .as_basic_value_enum(),
                     }
-                    Log => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.log.*",
-                        "log_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Exp => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.exp.*",
-                        "exp_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Floor => build_float_unary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.floor.*",
-                        "floor_call",
-                        regs[*input].into_float_value(),
-                    )?,
-                    Not => builder
-                        .build_not(regs[*input].into_int_value(), &format!("val_{ni}"))?
-                        .as_basic_value_enum(),
-                },
+                }
                 Binary(op, lhs, rhs) => match op {
-                    Add => builder
-                        .build_float_add(
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Subtract => builder
-                        .build_float_sub(
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Multiply => builder
-                        .build_float_mul(
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Divide => builder
-                        .build_float_div(
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
+                    Add => fast_math(builder.build_float_add(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    Subtract => fast_math(builder.build_float_sub(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    Multiply => fast_math(builder.build_float_mul(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    Divide => fast_math(builder.build_float_div(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
                     Pow if matches!(self.node(*rhs), Constant(Value::Scalar(2.0))) => {
                         let input = regs[*lhs].into_float_value();
-                        builder
-                            .build_float_mul(input, input, &format!("val_{ni}"))?
+                        fast_math(builder.build_float_mul(input, input, &format!("val_{ni}"))?)
                             .as_basic_value_enum()
                     }
-                    Pow => build_float_binary_intrinsic(
+                    Pow => fast_math(build_float_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.pow.*",
                         "pow_call",
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                    )?,
-                    Min => build_float_binary_intrinsic(
+                    )?),
+                    Min => fast_math(build_float_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.minnum.*",
                         "min_call",
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                    )?,
-                    Max => build_float_binary_intrinsic(
+                    )?),
+                    Max => fast_math(build_float_binary_intrinsic(
                         builder,
                         &compiler.module,
                         "llvm.maxnum.*",
                         "max_call",
                         regs[*lhs].into_float_value(),
                         regs[*rhs].into_float_value(),
-                    )?,
-                    Remainder => builder
-                        .build_float_rem(
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Less => builder
-                        .build_float_compare(
-                            FloatPredicate::ULT,
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    LessOrEqual => builder
-                        .build_float_compare(
-                            FloatPredicate::ULE,
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Equal => builder
-                        .build_float_compare(
-                            FloatPredicate::UEQ,
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    NotEqual => builder
-                        .build_float_compare(
-                            FloatPredicate::UNE,
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Greater => builder
-                        .build_float_compare(
-                            FloatPredicate::UGT,
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    GreaterOrEqual => builder
-                        .build_float_compare(
-                            FloatPredicate::UGE,
-                            regs[*lhs].into_float_value(),
-                            regs[*rhs].into_float_value(),
-                            &format!("val_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
+                    )?),
+                    Remainder => fast_math(builder.build_float_rem(
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    Less => fast_math(builder.build_float_compare(
+                        FloatPredicate::ULT,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    LessOrEqual => fast_math(builder.build_float_compare(
+                        FloatPredicate::ULE,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    Equal => fast_math(builder.build_float_compare(
+                        FloatPredicate::UEQ,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    NotEqual => fast_math(builder.build_float_compare(
+                        FloatPredicate::UNE,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    Greater => fast_math(builder.build_float_compare(
+                        FloatPredicate::UGT,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
+                    GreaterOrEqual => fast_math(builder.build_float_compare(
+                        FloatPredicate::UGE,
+                        regs[*lhs].into_float_value(),
+                        regs[*rhs].into_float_value(),
+                        &format!("val_{ni}"),
+                    )?)
+                    .as_basic_value_enum(),
                     And => builder
                         .build_and(
                             regs[*lhs].into_int_value(),
@@ -362,7 +354,7 @@ impl Tree {
             builder.build_store(dst, *reg)?;
         }
         builder.build_return(None)?;
-        compiler.run_passes();
+        compiler.run_passes("mem2reg,instcombine,reassociate,gvn,instcombine,slp-vectorizer,instcombine,simplifycfg,adce")?;
         let engine = compiler
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
@@ -575,7 +567,7 @@ mod test {
             &deftree!(- (sqrt (+ (pow 'x 2) (pow 'y 2))) 3).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.)],
             20,
-            0.,
+            1e-14,
             1e-6,
         );
     }
@@ -586,7 +578,7 @@ mod test {
             &deftree!(+ (+ 'x 3) (+ 'y 'z)).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             5,
-            0.,
+            1e-14,
             1e-5,
         );
     }
@@ -597,7 +589,7 @@ mod test {
             &deftree!(- (sqrt (+ (pow 'x 2) (+ (pow 'y 2) (pow 'z 2)))) 3).unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.), ('z', -5., 5.)],
             10,
-            0.,
+            1e-14,
             1e-6,
         )
     }
@@ -658,7 +650,7 @@ mod test {
             .unwrap(),
             &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
             20,
-            0.,
+            1e-14,
             1e-5,
         );
     }
@@ -721,7 +713,7 @@ mod test {
                 .unwrap(),
             &[('x', -5., 5.), ('y', -5., 5.)],
             100,
-            1e-14,
+            1e-13,
             1e-4,
         );
     }
@@ -818,7 +810,7 @@ mod sphere_test {
         }
         assert_eq!(val_eval.len(), val_jit.len());
         for (l, r) in val_eval.iter().zip(val_jit.iter()) {
-            assert_float_eq!(l, r, 1e-15);
+            assert_float_eq!(l, r, 1e-14);
         }
     }
 }

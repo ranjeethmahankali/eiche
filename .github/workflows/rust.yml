@@ -21,9 +21,7 @@ jobs:
       run: rustup update stable
     - uses: actions/checkout@v4
     - name: Install LLVM and Clang
-      uses: KyleMayes/install-llvm-action@v1
-      with:
-        version: "15.0"
+      run: sudo apt install llvm-18 llvm-18-dev llvm-18-tools libpolly-18-dev libzstd-dev
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Run Clippy
@@ -73,7 +71,7 @@ jobs:
       id: set-up-homebrew
       uses: Homebrew/actions/setup-homebrew@master
     - name: Install Homebrew Dependencies
-      run: brew install -f llvm@15 gmp
+      run: brew install -f llvm@18 gmp
     - name: Update Rust
       run: rustup update stable
     - uses: actions/checkout@v4

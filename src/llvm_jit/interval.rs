@@ -1,6 +1,6 @@
 use super::{
     JitContext, NumberType, build_float_unary_intrinsic, build_vec_binary_intrinsic,
-    build_vec_unary_intrinsic,
+    build_vec_unary_intrinsic, fast_math,
 };
 use crate::{
     BinaryOp::*,
@@ -604,6 +604,7 @@ impl Tree {
                     .as_basic_value_enum(),
                 },
             };
+            fast_math(reg);
             regs.push(reg);
         }
         // Compile instructions to copy the outputs to the out argument.
@@ -639,7 +640,7 @@ impl Tree {
                 })?;
         }
         builder.build_return(None)?;
-        compiler.run_passes();
+        compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
         let engine = compiler
             .module
             .create_jit_execution_engine(OptimizationLevel::Aggressive)
@@ -741,28 +742,33 @@ fn build_interval_choose<'ctx>(
                         iftrue.get_type().get_element_type(),
                         iffalse.get_type().get_element_type(),
                     ) {
-                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => builder
-                            .build_float_mul(
+                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => {
+                            let lmasked = fast_math(builder.build_float_mul(
                                 constants.float_vec([-1.0, 1.0]),
-                                build_vec_binary_intrinsic(
-                                    builder,
-                                    module,
-                                    "llvm.maxnum.*",
-                                    &format!("choose_max_call_{index}"),
-                                    builder.build_float_mul(
-                                        constants.float_vec([-1.0, 1.0]),
-                                        iftrue,
-                                        &format!("choose_true_branch_sign_change_{index}"),
-                                    )?,
-                                    builder.build_float_mul(
-                                        constants.float_vec([-1.0, 1.0]),
-                                        iffalse,
-                                        &format!("choose_false_branch_sign_change_{index}"),
-                                    )?,
-                                )?
-                                .into_vector_value(),
-                                &format!("choose_sign_revert_{index}"),
-                            )?,
+                                iftrue,
+                                &format!("choose_true_branch_sign_change_{index}"),
+                            )?);
+                            let rmasked = fast_math(builder.build_float_mul(
+                                constants.float_vec([-1.0, 1.0]),
+                                iffalse,
+                                &format!("choose_false_branch_sign_change_{index}"),
+                            )?);
+                            fast_math(
+                                builder.build_float_mul(
+                                    constants.float_vec([-1.0, 1.0]),
+                                    build_vec_binary_intrinsic(
+                                        builder,
+                                        module,
+                                        "llvm.maxnum.*",
+                                        &format!("choose_max_call_{index}"),
+                                        lmasked,
+                                        rmasked,
+                                    )?
+                                    .into_vector_value(),
+                                    &format!("choose_sign_revert_{index}"),
+                                )?,
+                            )
+                        }
                         (BasicTypeEnum::IntType(_), BasicTypeEnum::IntType(_)) => {
                             let combined = builder.build_shuffle_vector(
                                 iftrue,
@@ -962,22 +968,22 @@ fn build_interval_inequality_flags<'ctx>(
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
-    let masked_lhs = builder.build_float_mul(
+    let masked_lhs = fast_math(builder.build_float_mul(
         constants.float_vec([-1.0, 1.0]),
         lhs,
         &format!("less_sign_adjust_lhs_{index}"),
-    )?;
-    let masked_rhs = builder.build_float_mul(
+    )?);
+    let masked_rhs = fast_math(builder.build_float_mul(
         constants.float_vec([-1.0, 1.0]),
         build_interval_flip(rhs, builder, constants, index)?,
         &format!("less_equal_sign_adjust_rhs_{index}"),
-    )?;
-    let cross_compare = builder.build_float_compare(
+    )?);
+    let cross_compare = fast_math(builder.build_float_compare(
         FloatPredicate::ULT,
         masked_lhs,
         masked_rhs,
         &format!("less_equal_cross_compare_{index}"),
-    )?;
+    )?);
     let strictly_after = builder
         .build_extract_element(
             cross_compare,
@@ -992,12 +998,12 @@ fn build_interval_inequality_flags<'ctx>(
             &format!("less_equal_b_lt_c_check_{index}"),
         )?
         .into_int_value();
-    let touching = builder.build_float_compare(
+    let touching = fast_math(builder.build_float_compare(
         FloatPredicate::UEQ,
         masked_lhs,
         masked_rhs,
         &format!("less_equal_eq_comp_{index}"),
-    )?;
+    )?);
     Ok(InequalityFlags {
         either_empty,
         strictly_before,
@@ -1104,27 +1110,27 @@ fn build_interval_equality_flags<'ctx>(
         &format!("less_equal_either_empty_check_{index}"),
     )?;
     // Compare (-a, b) with (-d, c).
-    let masked_lhs = builder.build_float_mul(
+    let masked_lhs = fast_math(builder.build_float_mul(
         constants.float_vec([-1.0, 1.0]),
         lhs,
         &format!("less_sign_adjust_lhs_{index}"),
-    )?;
-    let masked_rhs = builder.build_float_mul(
+    )?);
+    let masked_rhs = fast_math(builder.build_float_mul(
         constants.float_vec([-1.0, 1.0]),
         build_interval_flip(rhs, builder, constants, index)?,
         &format!("less_equal_sign_adjust_rhs_{index}"),
-    )?;
+    )?);
     let no_overlap = build_vec_unary_intrinsic(
         builder,
         module,
         "llvm.vector.reduce.or.*",
         &format!("equal_no_overlap_check_{index}"),
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::ULT,
             masked_lhs,
             masked_rhs,
             &format!("less_equal_cross_compare_{index}"),
-        )?,
+        )?),
     )?
     .into_int_value();
     // To determine if the interval is a singleton, we're checking the masked
@@ -1224,23 +1230,25 @@ fn build_interval_remainder<'ctx>(
     let div_result =
         build_interval_div(inputs, ranges, builder, module, function, constants, index)?;
     let (lhs, rhs) = inputs;
-    let mul_result = builder.build_float_mul(
-        build_vec_unary_intrinsic(
-            builder,
-            module,
-            "llvm.floor.*",
-            &format!("remainder_floor_call_{index}"),
-            div_result,
-        )?
-        .into_vector_value(),
-        rhs,
-        &format!("remainder_floor_mul_{index}"),
-    )?;
-    Ok(builder.build_float_sub(
+    let mul_result = fast_math(
+        builder.build_float_mul(
+            build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.floor.*",
+                &format!("remainder_floor_call_{index}"),
+                div_result,
+            )?
+            .into_vector_value(),
+            rhs,
+            &format!("remainder_floor_mul_{index}"),
+        )?,
+    );
+    Ok(fast_math(builder.build_float_sub(
         lhs,
         build_interval_flip(mul_result, builder, constants, index)?,
         &format!("remainder_final_sub_{index}"),
-    )?)
+    )?))
 }
 
 fn build_interval_log<'ctx>(
@@ -1259,12 +1267,12 @@ fn build_interval_log<'ctx>(
     } else if range.0 < 0.0 && range.1 < 0.0 {
         return Ok(constants.float_vec([f64::NAN; 2]));
     }
-    let is_neg = builder.build_float_compare(
+    let is_neg = fast_math(builder.build_float_compare(
         FloatPredicate::ULE,
         input,
         constants.float_vec([0.0; 2]),
         &format!("log_neg_compare_{index}"),
-    )?;
+    )?);
     let log_base = build_vec_unary_intrinsic(builder, module, "llvm.log.*", "log_call", input)?
         .into_vector_value();
     Ok(builder
@@ -1315,52 +1323,58 @@ fn build_interval_tan<'ctx>(
             &format!("tan_width_rhs_{index}"),
         )?
         .into_float_value();
-    let width = builder.build_float_sub(
-        builder
-            .build_extract_element(
-                input,
-                constants.int_32(1, false),
-                &format!("tan_width_lhs_{index}"),
-            )?
-            .into_float_value(),
-        lo,
-        &format!("tan_width_{index}"),
-    )?;
+    let width = fast_math(
+        builder.build_float_sub(
+            builder
+                .build_extract_element(
+                    input,
+                    constants.int_32(1, false),
+                    &format!("tan_width_lhs_{index}"),
+                )?
+                .into_float_value(),
+            lo,
+            &format!("tan_width_{index}"),
+        )?,
+    );
     let out = builder.build_select(
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::UGE,
             width,
             constants.float(PI),
             &format!("tan_pi_compare_{index}"),
-        )?,
+        )?),
         constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
         {
             // Shift lo to an equivalent value in -pi/2 to pi/2.
-            let lo = builder.build_float_sub(
-                build_float_rem_euclid(
-                    builder.build_float_add(
+            let lo = fast_math(builder.build_float_sub(
+                fast_math(build_float_rem_euclid(
+                    fast_math(builder.build_float_add(
                         lo,
                         constants.float(FRAC_PI_2),
                         &format!("tan_pi_shift_add_{index}"),
-                    )?,
+                    )?),
                     constants.float(PI),
                     builder,
                     constants,
                     &format!("tan_rem_euclid_{index}"),
                     index,
-                )?,
+                )?),
                 constants.float(FRAC_PI_2),
                 &format!("tan_shifted_lo_{index}"),
-            )?;
-            let hi = builder.build_float_add(lo, width, &format!("tan_shifted_hi_{index}"))?;
+            )?);
+            let hi = fast_math(builder.build_float_add(
+                lo,
+                width,
+                &format!("tan_shifted_hi_{index}"),
+            )?);
             builder
                 .build_select(
-                    builder.build_float_compare(
+                    fast_math(builder.build_float_compare(
                         FloatPredicate::UGE,
                         hi,
                         constants.float(FRAC_PI_2),
                         &format!("tan_second_compare_{index}"),
-                    )?,
+                    )?),
                     constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
                     {
                         let sin = build_vec_unary_intrinsic(
@@ -1411,11 +1425,11 @@ fn build_interval_sin<'ctx>(
         module,
         "llvm.floor.*",
         &format!("intermediate_floor_{index}"),
-        builder.build_float_div(
+        fast_math(builder.build_float_div(
             input,
             constants.float_vec([FRAC_PI_2; 2]),
             &format!("div_pi_{index}"),
-        )?,
+        )?),
     )?
     .into_vector_value();
     let is_singleton = build_vec_unary_intrinsic(
@@ -1423,12 +1437,12 @@ fn build_interval_sin<'ctx>(
         module,
         "llvm.vector.reduce.and.*",
         &format!("sin_singleton_check_reduce_{index}"),
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::UEQ,
             input,
             build_interval_flip(input, builder, constants, index)?,
             &format!("sin_singleton_check_reduce_{index}"),
-        )?,
+        )?),
     )?
     .into_int_value();
     let qlo = builder
@@ -1449,25 +1463,25 @@ fn build_interval_sin<'ctx>(
         .build_select(
             is_singleton,
             constants.float(0.0),
-            builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
+            fast_math(builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?),
             &format!("nval_{index}"),
         )?
         .into_float_value();
-    let qval = build_float_rem_euclid(
+    let qval = fast_math(build_float_rem_euclid(
         qlo,
         constants.float(4.0),
         builder,
         constants,
         &format!("q_rem_euclid_val_{index}"),
         index,
-    )?;
-    let sin_base = build_vec_unary_intrinsic(
+    )?);
+    let sin_base = fast_math(build_vec_unary_intrinsic(
         builder,
         module,
         "llvm.sin.*",
         &format!("sin_base_{index}"),
         input,
-    )?
+    )?)
     .into_vector_value();
     // Below part matches the long if/else chain in the
     // plain interval implementation. Go through the pairs
@@ -1519,18 +1533,18 @@ fn build_interval_sin<'ctx>(
                 let mut conds = [constants.boolean(false), constants.boolean(false)];
                 for ((q, n), dst) in pairs.iter().zip(conds.iter_mut()) {
                     *dst = builder.build_and(
-                        builder.build_float_compare(
+                        fast_math(builder.build_float_compare(
                             FloatPredicate::UEQ,
                             qval,
                             constants.float(*q),
                             &format!("q_compare_{q}_{index}"),
-                        )?,
-                        builder.build_float_compare(
+                        )?),
+                        fast_math(builder.build_float_compare(
                             FloatPredicate::ULT,
                             nval,
                             constants.float(*n),
                             &format!("n_compare_{n}_{index}"),
-                        )?,
+                        )?),
                         &format!("and_q_n_{index}"),
                     )?;
                 }
@@ -1567,11 +1581,11 @@ fn build_interval_cos<'ctx>(
         module,
         "llvm.floor.*",
         &format!("intermediate_floor_{index}"),
-        builder.build_float_div(
+        fast_math(builder.build_float_div(
             input,
             constants.float_vec([PI; 2]),
             &format!("div_pi_{index}"),
-        )?,
+        )?),
     )?
     .into_vector_value();
     let is_singleton = build_vec_unary_intrinsic(
@@ -1579,12 +1593,12 @@ fn build_interval_cos<'ctx>(
         module,
         "llvm.vector.reduce.and.*",
         &format!("sin_singleton_check_reduce_{index}"),
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::UEQ,
             input,
             build_interval_flip(input, builder, constants, index)?,
             &format!("sin_singleton_check_reduce_{index}"),
-        )?,
+        )?),
     )?
     .into_int_value();
     let qlo = builder
@@ -1605,46 +1619,50 @@ fn build_interval_cos<'ctx>(
         .build_select(
             is_singleton,
             constants.float(0.0),
-            builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?,
+            fast_math(builder.build_float_sub(qhi, qlo, &format!("nval_sub_{index}"))?),
             &format!("nval_{index}"),
         )?
         .into_float_value();
-    let q_is_even = builder.build_float_compare(
-        FloatPredicate::UEQ,
-        qlo,
-        builder.build_float_mul(
-            constants.float(2.0),
-            build_float_unary_intrinsic(
-                builder,
-                module,
-                "llvm.floor.*",
-                &format!("intermediate_qval_floor_{index}"),
+    let q_is_even = fast_math(
+        builder.build_float_compare(
+            FloatPredicate::UEQ,
+            qlo,
+            fast_math(
                 builder.build_float_mul(
-                    qlo,
-                    constants.float(0.5),
-                    &format!("qval_half_mul_{index}"),
+                    constants.float(2.0),
+                    fast_math(build_float_unary_intrinsic(
+                        builder,
+                        module,
+                        "llvm.floor.*",
+                        &format!("intermediate_qval_floor_{index}"),
+                        fast_math(builder.build_float_mul(
+                            qlo,
+                            constants.float(0.5),
+                            &format!("qval_half_mul_{index}"),
+                        )?),
+                    )?)
+                    .into_float_value(),
+                    &format!("qval_doubling_{index}"),
                 )?,
-            )?
-            .into_float_value(),
-            &format!("qval_doubling_{index}"),
+            ),
+            &format!("qval_comparison_{index}"),
         )?,
-        &format!("qval_comparison_{index}"),
-    )?;
-    let cos_base = build_vec_unary_intrinsic(
+    );
+    let cos_base = fast_math(build_vec_unary_intrinsic(
         builder,
         module,
         "llvm.cos.*",
         &format!("sin_base_{index}"),
         input,
-    )?
+    )?)
     .into_vector_value();
     let out = builder.build_select(
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::UEQ,
             nval,
             constants.float(0.0),
             &format!("nval_zero_compare_{index}"),
-        )?,
+        )?),
         builder
             .build_select(
                 q_is_even,
@@ -1655,12 +1673,12 @@ fn build_interval_cos<'ctx>(
             .into_vector_value(),
         builder
             .build_select(
-                builder.build_float_compare(
+                fast_math(builder.build_float_compare(
                     FloatPredicate::ULE,
                     nval,
                     constants.float(1.0),
                     &format!("nval_one_compare_{index}"),
-                )?,
+                )?),
                 builder
                     .build_select(
                         q_is_even,
@@ -1727,20 +1745,22 @@ fn build_float_vec_powi<'ctx>(
             ],
         )
         .ok_or(Error::CannotCompileIntrinsic(NAME))?;
-    builder
-        .build_call(
-            intrinsic_fn,
-            &[
-                BasicMetadataValueEnum::VectorValue(base),
-                BasicMetadataValueEnum::IntValue(exp),
-            ],
-            call_name,
-        )
-        .map_err(|_| Error::CannotCompileIntrinsic(NAME))?
-        .try_as_basic_value()
-        .left()
-        .ok_or(Error::CannotCompileIntrinsic(NAME))
-        .map(|v| v.into_vector_value())
+    let out = fast_math(
+        builder
+            .build_call(
+                intrinsic_fn,
+                &[
+                    BasicMetadataValueEnum::VectorValue(base),
+                    BasicMetadataValueEnum::IntValue(exp),
+                ],
+                call_name,
+            )
+            .map_err(|_| Error::CannotCompileIntrinsic(NAME))?
+            .try_as_basic_value()
+            .left()
+            .ok_or(Error::CannotCompileIntrinsic(NAME))?,
+    );
+    Ok(out.into_vector_value())
 }
 
 fn build_interval_square<'ctx>(
@@ -1751,18 +1771,22 @@ fn build_interval_square<'ctx>(
     constants: &mut Constants<'ctx>,
     index: usize,
 ) -> Result<VectorValue<'ctx>, Error> {
-    let sqbase = builder.build_float_mul(input, input, &format!("pow_lhs_square_base_{index}"))?;
+    let sqbase = fast_math(builder.build_float_mul(
+        input,
+        input,
+        &format!("pow_lhs_square_base_{index}"),
+    )?);
     if range.0 >= 0.0 && range.1 >= 0.0 {
         return Ok(sqbase);
     } else if range.0 < 0.0 && range.1 < 0.0 {
         return build_interval_flip(sqbase, builder, constants, index);
     }
-    let is_neg = builder.build_float_compare(
+    let is_neg = fast_math(builder.build_float_compare(
         FloatPredicate::ULT,
         input,
         constants.float_vec([0.0; 2]),
         &format!("pow_square_case_zero_spanning_check_{index}"),
-    )?;
+    )?);
     let is_spanning_zero = build_vec_unary_intrinsic(
         builder,
         module,
@@ -1784,13 +1808,13 @@ fn build_interval_square<'ctx>(
             is_spanning_zero,
             builder.build_insert_element(
                 constants.float_vec([0.0; 2]),
-                build_vec_unary_intrinsic(
+                fast_math(build_vec_unary_intrinsic(
                     builder,
                     module,
                     "llvm.vector.reduce.fmax.*",
                     &format!("pow_square_case_zero_spanning_max_{index}"),
                     sqbase,
-                )?
+                )?)
                 .into_float_value(),
                 constants.int_32(1, false),
                 &format!("pow_square_insert_elem_{index}"),
@@ -1852,12 +1876,12 @@ fn build_interval_pow<'ctx>(
         module,
         "llvm.vector.reduce.and.*",
         &format!("pow_zero_check_reduce_{index}"),
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::UEQ,
             rhs,
             constants.float_vec([0.0; 2]),
             &format!("pow_zero_check_{index}"),
-        )?,
+        )?),
     )?
     .into_int_value();
     let rhs_floor = build_vec_unary_intrinsic(
@@ -1907,12 +1931,12 @@ fn build_interval_pow<'ctx>(
         module,
         "llvm.vector.reduce.and.*",
         &format!("pow_square_check_reduce_{index}"),
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::UEQ,
             rhs,
             constants.float_vec([2.0; 2]),
             &format!("pow_square_check_{index}"),
-        )?,
+        )?),
     )?
     .into_int_value();
     builder.build_conditional_branch(is_square, square_bb, test_integer_bb)?;
@@ -1928,103 +1952,109 @@ fn build_interval_pow<'ctx>(
         module,
         "llvm.vector.reduce.and.*",
         &format!("pow_integer_check_reduce_{index}"),
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::UEQ,
             rhs_floor,
             build_interval_flip(rhs, builder, constants, index)?,
             &format!("pow_integer_check_compare_{index}"),
-        )?,
+        )?),
     )?
     .into_int_value();
     builder.build_conditional_branch(is_exponent_singleton_integer, integer_bb, general_bb)?;
     // We now go inside the integer case, and return the last inner block and
     // let it shadow the integer case outside afterwards. Because LLVM wants to
     // know the last inner most block of a phi. So shadowing is helpful.
-    let (integer_out, integer_bb) = {
-        builder.position_at_end(integer_bb);
-        let exponent = builder.build_float_to_signed_int(
-            builder
-                .build_extract_element(
-                    rhs_floor,
-                    constants.int_32(0, false),
-                    &format!("pow_extract_floor_{index}"),
-                )?
-                .into_float_value(),
-            context.i32_type(),
-            &format!("pow_exponent_to_integer_convert_{index}"),
-        )?;
-        let is_odd = builder.build_and(
-            exponent,
-            constants.int_32(1, false),
-            &format!("pow_integer_exp_odd_check_{index}"),
-        )?;
-        let is_even = builder.build_int_compare(
-            IntPredicate::EQ,
-            is_odd,
-            constants.int_32(0, false),
-            &format!("pow_integer_even_check_{index}"),
-        )?;
-        let is_neg = builder.build_int_compare(
-            IntPredicate::SLT,
-            exponent,
-            constants.int_32(0, false),
-            &format!("pow_integer_neg_check_{index}"),
-        )?;
-        let is_base_zero = build_vec_unary_intrinsic(
-            builder,
-            module,
-            "llvm.vector.reduce.and.*",
-            &format!("pow_integer_base_zero_check_reduce_{index}"),
-            builder.build_float_compare(
-                FloatPredicate::UEQ,
-                lhs,
-                constants.float_vec([0.0; 2]),
-                &format!("pow_integer_base_zero_check_{index}"),
-            )?,
-        )?
-        .into_int_value();
-        let even_bb = context.append_basic_block(function, &format!("pow_integer_even_bb_{index}"));
-        let odd_bb = context.append_basic_block(function, &format!("pow_integer_else_bb_{index}"));
-        let integer_merge_bb =
-            context.append_basic_block(function, &format!("pow_odd_even_merge_{index}"));
-        builder.build_conditional_branch(is_even, even_bb, odd_bb)?;
-        let even_case = {
-            builder.position_at_end(even_bb);
-            let abs_powi = build_float_vec_powi(
-                build_interval_abs(lhs, range_left, builder, module, constants, index)?,
-                exponent,
-                builder,
-                module,
-                &format!("pow_even_integer_powi_call_{index}"),
-            )?;
-            let out = builder
-                .build_select(
-                    is_neg,
+    let (integer_out, integer_bb) =
+        {
+            builder.position_at_end(integer_bb);
+            let exponent = fast_math(
+                builder.build_float_to_signed_int(
                     builder
-                        .build_select(
-                            is_base_zero,
-                            constants.float_vec([f64::NAN; 2]),
-                            build_interval_flip(abs_powi, builder, constants, index)?,
-                            &format!("pow_even_integer_zero_base_check_{index}"),
+                        .build_extract_element(
+                            rhs_floor,
+                            constants.int_32(0, false),
+                            &format!("pow_extract_floor_{index}"),
                         )?
-                        .into_vector_value(),
-                    abs_powi,
-                    &format!("pow_even_integer_case_{index}"),
-                )?
-                .into_vector_value();
-            builder.build_unconditional_branch(integer_merge_bb)?;
-            out
-        };
-        let odd_case = {
-            builder.position_at_end(odd_bb);
-            let powi_base = build_float_vec_powi(
-                lhs,
+                        .into_float_value(),
+                    context.i32_type(),
+                    &format!("pow_exponent_to_integer_convert_{index}"),
+                )?,
+            );
+            let is_odd = builder.build_and(
                 exponent,
+                constants.int_32(1, false),
+                &format!("pow_integer_exp_odd_check_{index}"),
+            )?;
+            let is_even = builder.build_int_compare(
+                IntPredicate::EQ,
+                is_odd,
+                constants.int_32(0, false),
+                &format!("pow_integer_even_check_{index}"),
+            )?;
+            let is_neg = builder.build_int_compare(
+                IntPredicate::SLT,
+                exponent,
+                constants.int_32(0, false),
+                &format!("pow_integer_neg_check_{index}"),
+            )?;
+            let is_base_zero = build_vec_unary_intrinsic(
                 builder,
                 module,
-                &format!("pow_odd_exp_base_powi_call_{index}"),
-            )?;
-            let out = builder
+                "llvm.vector.reduce.and.*",
+                &format!("pow_integer_base_zero_check_reduce_{index}"),
+                fast_math(builder.build_float_compare(
+                    FloatPredicate::UEQ,
+                    lhs,
+                    constants.float_vec([0.0; 2]),
+                    &format!("pow_integer_base_zero_check_{index}"),
+                )?),
+            )?
+            .into_int_value();
+            let even_bb =
+                context.append_basic_block(function, &format!("pow_integer_even_bb_{index}"));
+            let odd_bb =
+                context.append_basic_block(function, &format!("pow_integer_else_bb_{index}"));
+            let integer_merge_bb =
+                context.append_basic_block(function, &format!("pow_odd_even_merge_{index}"));
+            builder.build_conditional_branch(is_even, even_bb, odd_bb)?;
+            let even_case = {
+                builder.position_at_end(even_bb);
+                let abs_powi = build_float_vec_powi(
+                    build_interval_abs(lhs, range_left, builder, module, constants, index)?,
+                    exponent,
+                    builder,
+                    module,
+                    &format!("pow_even_integer_powi_call_{index}"),
+                )?;
+                let out = builder
+                    .build_select(
+                        is_neg,
+                        builder
+                            .build_select(
+                                is_base_zero,
+                                constants.float_vec([f64::NAN; 2]),
+                                build_interval_flip(abs_powi, builder, constants, index)?,
+                                &format!("pow_even_integer_zero_base_check_{index}"),
+                            )?
+                            .into_vector_value(),
+                        abs_powi,
+                        &format!("pow_even_integer_case_{index}"),
+                    )?
+                    .into_vector_value();
+                builder.build_unconditional_branch(integer_merge_bb)?;
+                out
+            };
+            let odd_case =
+                {
+                    builder.position_at_end(odd_bb);
+                    let powi_base = build_float_vec_powi(
+                        lhs,
+                        exponent,
+                        builder,
+                        module,
+                        &format!("pow_odd_exp_base_powi_call_{index}"),
+                    )?;
+                    let out = builder
                 .build_select(
                     is_neg,
                     builder
@@ -2034,7 +2064,7 @@ fn build_interval_pow<'ctx>(
                             builder
                                 .build_select(
                                     builder.build_and(
-                                        builder.build_float_compare(
+                                        fast_math(builder.build_float_compare(
                                             FloatPredicate::ULT,
                                             builder
                                                 .build_extract_element(
@@ -2045,8 +2075,8 @@ fn build_interval_pow<'ctx>(
                                                 .into_float_value(),
                                             constants.float(0.0),
                                             &format!("pow_odd_exp_lower_neg_check_{index}"),
-                                        )?,
-                                        builder.build_float_compare(
+                                        )?),
+                                        fast_math(builder.build_float_compare(
                                             FloatPredicate::UGT,
                                             builder
                                                 .build_extract_element(
@@ -2057,7 +2087,7 @@ fn build_interval_pow<'ctx>(
                                                 .into_float_value(),
                                             constants.float(0.0),
                                             &format!("pow_odd_exp_upper_positive_check_{index}"),
-                                        )?,
+                                        )?),
                                         &format!("pow_odd_exp_base_zero_spanning_check_{index}"),
                                     )?,
                                     constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
@@ -2072,15 +2102,16 @@ fn build_interval_pow<'ctx>(
                     &format!("pow_odd_exp_neg_check_{index}"),
                 )?
                 .into_vector_value();
-            builder.build_unconditional_branch(integer_merge_bb)?;
-            out
+                    builder.build_unconditional_branch(integer_merge_bb)?;
+                    out
+                };
+            builder.position_at_end(integer_merge_bb);
+            let phi =
+                builder.build_phi(lhs.get_type(), &format!("pow_integer_case_output_{index}"))?;
+            phi.add_incoming(&[(&even_case, even_bb), (&odd_case, odd_bb)]);
+            builder.build_unconditional_branch(merge_bb)?;
+            (phi.as_basic_value().into_vector_value(), integer_merge_bb)
         };
-        builder.position_at_end(integer_merge_bb);
-        let phi = builder.build_phi(lhs.get_type(), &format!("pow_integer_case_output_{index}"))?;
-        phi.add_incoming(&[(&even_case, even_bb), (&odd_case, odd_bb)]);
-        builder.build_unconditional_branch(merge_bb)?;
-        (phi.as_basic_value().into_vector_value(), integer_merge_bb)
-    };
     let (general_out, general_bb): (VectorValue<'ctx>, BasicBlock<'ctx>) = {
         builder.position_at_end(general_bb);
         let lhs = build_vec_binary_intrinsic(
@@ -2103,36 +2134,36 @@ fn build_interval_pow<'ctx>(
         let (a, b) = build_interval_unpack(lhs, builder, constants, "pow_general_case_", index)?;
         let (c, d) = build_interval_unpack(rhs, builder, constants, "pow_general_case_", index)?;
         // Extract values from vector for ergonomic use later.
-        let rhi_is_neg = builder.build_float_compare(
+        let rhi_is_neg = fast_math(builder.build_float_compare(
             FloatPredicate::ULE,
             d,
             constants.float(0.0),
             &format!("pow_general_rhi_neg_check_{index}"),
-        )?;
-        let lhi_is_zero = builder.build_float_compare(
+        )?);
+        let lhi_is_zero = fast_math(builder.build_float_compare(
             FloatPredicate::UEQ,
             b,
             constants.float(0.0),
             &format!("pow_general_lhi_zero_check_{index}"),
-        )?;
-        let lhi_lt_one = builder.build_float_compare(
+        )?);
+        let lhi_lt_one = fast_math(builder.build_float_compare(
             FloatPredicate::ULT,
             b,
             constants.float(1.0),
             &format!("pow_general_lhi_lt_one_check_{index}"),
-        )?;
-        let llo_gt_one = builder.build_float_compare(
+        )?);
+        let llo_gt_one = fast_math(builder.build_float_compare(
             FloatPredicate::UGT,
             a,
             constants.float(1.0),
             &format!("pow_general_llo_gt_one_check_{index}"),
-        )?;
-        let rlo_gt_zero = builder.build_float_compare(
+        )?);
+        let rlo_gt_zero = fast_math(builder.build_float_compare(
             FloatPredicate::UGT,
             c,
             constants.float(0.0),
             &format!("pow_general_rlo_gt_zero_{index}"),
-        )?;
+        )?);
         let case_idx = builder
             .build_select(
                 rhi_is_neg,
@@ -2345,12 +2376,12 @@ fn build_interval_abs<'ctx>(
     } else if range.0 >= 0.0 && range.1 >= 0.0 {
         return Ok(input);
     }
-    let lt_zero = builder.build_float_compare(
+    let lt_zero = fast_math(builder.build_float_compare(
         FloatPredicate::ULT,
         input,
         constants.float_vec([0.0; 2]),
         &format!("lt_zero_{index}"),
-    )?;
+    )?);
     Ok(builder
         .build_select(
             builder
@@ -2429,12 +2460,12 @@ fn build_interval_sqrt<'ctx>(
     } else if range.1 >= 0.0 && range.0 >= 0.0 {
         Ok(sqrt)
     } else {
-        let is_neg = builder.build_float_compare(
+        let is_neg = fast_math(builder.build_float_compare(
             FloatPredicate::ULT,
             input,
             constants.float_vec([0.0; 2]),
             &format!("lt_zero_{index}"),
-        )?;
+        )?);
         let all_neg = build_vec_unary_intrinsic(
             builder,
             module,
@@ -2554,33 +2585,37 @@ fn build_interval_div<'ctx>(
         | (SingletonZero, ZeroPositive)
         | (SingletonZero, Positive) => return Ok(constants.float_vec([0.0; 2])),
         (NegativeZero, Negative) | (Negative, Negative) => {
-            return Ok(builder.build_float_div(
+            return Ok(fast_math(builder.build_float_div(
                 build_interval_flip(lhs, builder, constants, index)?,
                 rhs,
                 &format!("div_neg_neg_special_case_{index}"),
-            )?);
+            )?));
         }
         (NegativeZero, Positive) | (Negative, Positive) => {
-            return Ok(builder.build_float_div(
+            return Ok(fast_math(builder.build_float_div(
                 lhs,
                 rhs,
                 &format!("div_neg_pos_special_case_{index}"),
-            )?);
+            )?));
         }
         (ZeroPositive, Negative) | (Positive, Negative) => {
             return build_interval_flip(
-                builder.build_float_div(lhs, rhs, &format!("div_pos_neg_special_case_{index}"))?,
+                fast_math(builder.build_float_div(
+                    lhs,
+                    rhs,
+                    &format!("div_pos_neg_special_case_{index}"),
+                )?),
                 builder,
                 constants,
                 index,
             );
         }
         (ZeroPositive, Positive) | (Positive, Positive) => {
-            return Ok(builder.build_float_div(
+            return Ok(fast_math(builder.build_float_div(
                 lhs,
                 build_interval_flip(rhs, builder, constants, index)?,
                 &format!("div_pos_pos_special_case_{index}"),
-            )?);
+            )?));
         }
         _ => {} // No special cases found.
     }
@@ -2594,12 +2629,13 @@ fn build_interval_div<'ctx>(
         build_interval_classify(lhs, builder, module, constants, index)?,
         &format!("interval_div_mask_{index}"),
     )?;
-    let straight = builder.build_float_div(lhs, rhs, &format!("interval_div_straight_{index}"))?;
-    let cross = builder.build_float_div(
+    let straight =
+        fast_math(builder.build_float_div(lhs, rhs, &format!("interval_div_straight_{index}"))?);
+    let cross = fast_math(builder.build_float_div(
         lhs,
         build_interval_flip(rhs, builder, constants, index)?,
         &format!("interval_div_cross_{index}"),
-    )?;
+    )?);
     const CASES: [&[(IntervalClass, IntervalClass)]; 12] = [
         // Spanning zero, so output includes everything.
         &[
@@ -2779,18 +2815,18 @@ fn build_interval_classify<'ctx>(
     let i8_type = context.i8_type();
     let (is_empty, is_neg, is_eq) = (
         build_check_interval_empty(input, builder, module, index)?,
-        builder.build_float_compare(
+        fast_math(builder.build_float_compare(
             FloatPredicate::ULT,
             input,
             constants.float_vec([0.0; 2]),
             &format!("interval_classify_neg_check_{index}"),
-        )?,
-        builder.build_float_compare(
+        )?),
+        fast_math(builder.build_float_compare(
             FloatPredicate::UEQ,
             input,
             constants.float_vec([0.0; 2]),
             &format!("interval_classify_zero_check_{index}"),
-        )?,
+        )?),
     );
     let b0 = builder.build_int_z_extend(
         builder
@@ -2875,12 +2911,13 @@ fn build_interval_mul<'ctx>(
     } else if range_right.0 == 1.0 && range_right.1 == 1.0 {
         Ok(lhs)
     } else {
-        let straight = builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?;
-        let cross = builder.build_float_mul(
+        let straight =
+            fast_math(builder.build_float_mul(lhs, rhs, &format!("mul_straight_{index}"))?);
+        let cross = fast_math(builder.build_float_mul(
             lhs,
             build_interval_flip(rhs, builder, constants, index)?,
             &format!("mul_cross_{index}"),
-        )?;
+        )?);
         let concat = builder.build_shuffle_vector(
             straight,
             cross,
@@ -2920,7 +2957,7 @@ fn build_interval_negate<'ctx>(
     name: &str,
 ) -> Result<VectorValue<'ctx>, Error> {
     Ok(builder.build_shuffle_vector(
-        builder.build_float_neg(input, &format!("negate_{index}"))?,
+        fast_math(builder.build_float_neg(input, &format!("negate_{index}"))?),
         input.get_type().get_undef(),
         constants.i32_vec([1, 0], false),
         name,
@@ -2956,16 +2993,20 @@ fn build_float_rem_euclid<'ctx>(
     name: &str,
     index: usize,
 ) -> Result<FloatValue<'ctx>, Error> {
-    let qval = builder.build_float_rem(lhs, rhs, &format!("q_rem_val_{index}"))?;
+    let qval = fast_math(builder.build_float_rem(lhs, rhs, &format!("q_rem_val_{index}"))?);
     Ok(builder
         .build_select(
-            builder.build_float_compare(
+            fast_math(builder.build_float_compare(
                 FloatPredicate::ULT,
                 qval,
                 constants.float(0.0),
                 &format!("rem_euclid_compare_{index}"),
-            )?,
-            builder.build_float_add(qval, rhs, &format!("rem_euclid_correction_{index}"))?,
+            )?),
+            fast_math(builder.build_float_add(
+                qval,
+                rhs,
+                &format!("rem_euclid_correction_{index}"),
+            )?),
             qval,
             name,
         )?
@@ -4022,7 +4063,7 @@ mod test {
         eval.run(&[[0.0, 0.0]], &mut outputs).unwrap();
         assert_eq!(outputs[0], [0.0, 0.0]);
         eval.run(&[[PI, PI]], &mut outputs).unwrap();
-        assert!((outputs[0][0] - PI.tan()).abs() < 1e-10);
+        assert_float_eq!(outputs[0][0], PI.tan(), 1e-10);
         // Small monotonic intervals (no discontinuity crossing)
         for interval in [[0.1, 0.4], [-0.4, -0.1], [-0.5, 0.5]] {
             eval.run(&[interval], &mut outputs).unwrap();
