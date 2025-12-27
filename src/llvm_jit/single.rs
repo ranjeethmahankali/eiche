@@ -339,6 +339,9 @@ impl Tree {
                     )?,
                 },
             };
+            if let Some(inst) = reg.as_instruction_value() {
+                inst.set_fast_math_flags(inkwell::llvm_sys::LLVMFastMathAll);
+            }
             regs.push(reg);
         }
         // Copy the outputs.

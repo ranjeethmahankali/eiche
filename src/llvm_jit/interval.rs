@@ -24,8 +24,8 @@ use inkwell::{
     module::Module,
     types::{BasicTypeEnum, FloatType, VectorType},
     values::{
-        BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
-        VectorValue,
+        BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue,
+        InstructionValue, IntValue, VectorValue,
     },
 };
 use std::{
@@ -253,6 +253,12 @@ fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
         "Number of nodes and ranges must be equal. This is an assert not an error because this should never happen."
     );
     Ok(ranges.into_boxed_slice())
+}
+
+fn use_fast_math<'ctx>(inst: Option<InstructionValue<'ctx>>) {
+    if let Some(inst) = inst {
+        inst.set_fast_math_flags(inkwell::llvm_sys::LLVMFastMathAll);
+    }
 }
 
 impl Tree {
@@ -604,6 +610,7 @@ impl Tree {
                     .as_basic_value_enum(),
                 },
             };
+            use_fast_math(reg.as_instruction_value());
             regs.push(reg);
         }
         // Compile instructions to copy the outputs to the out argument.
@@ -678,6 +685,7 @@ fn build_interval_not<'ctx>(
                 input,
             )?
             .into_int_value();
+            use_fast_math(all_true.as_instruction());
             let mixed = build_vec_unary_intrinsic(
                 builder,
                 module,
@@ -686,6 +694,7 @@ fn build_interval_not<'ctx>(
                 input,
             )?
             .into_int_value();
+            use_fast_math(mixed.as_instruction());
             Ok(builder
                 .build_select(
                     all_true,
@@ -741,28 +750,33 @@ fn build_interval_choose<'ctx>(
                         iftrue.get_type().get_element_type(),
                         iffalse.get_type().get_element_type(),
                     ) {
-                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => builder
-                            .build_float_mul(
+                        (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_)) => {
+                            let lmasked = builder.build_float_mul(
+                                constants.float_vec([-1.0, 1.0]),
+                                iftrue,
+                                &format!("choose_true_branch_sign_change_{index}"),
+                            )?;
+                            use_fast_math(lmasked.as_instruction());
+                            let rmasked = builder.build_float_mul(
+                                constants.float_vec([-1.0, 1.0]),
+                                iffalse,
+                                &format!("choose_false_branch_sign_change_{index}"),
+                            )?;
+                            use_fast_math(rmasked.as_instruction());
+                            builder.build_float_mul(
                                 constants.float_vec([-1.0, 1.0]),
                                 build_vec_binary_intrinsic(
                                     builder,
                                     module,
                                     "llvm.maxnum.*",
                                     &format!("choose_max_call_{index}"),
-                                    builder.build_float_mul(
-                                        constants.float_vec([-1.0, 1.0]),
-                                        iftrue,
-                                        &format!("choose_true_branch_sign_change_{index}"),
-                                    )?,
-                                    builder.build_float_mul(
-                                        constants.float_vec([-1.0, 1.0]),
-                                        iffalse,
-                                        &format!("choose_false_branch_sign_change_{index}"),
-                                    )?,
+                                    lmasked,
+                                    rmasked,
                                 )?
                                 .into_vector_value(),
                                 &format!("choose_sign_revert_{index}"),
-                            )?,
+                            )?
+                        }
                         (BasicTypeEnum::IntType(_), BasicTypeEnum::IntType(_)) => {
                             let combined = builder.build_shuffle_vector(
                                 iftrue,
