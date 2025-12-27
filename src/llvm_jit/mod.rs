@@ -125,8 +125,8 @@ impl<'ctx> JitCompiler<'ctx> {
         let fpm = PassManager::create(());
         fpm.add_aggressive_dce_pass();
         fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
         fpm.add_gvn_pass();
+        fpm.add_reassociate_pass();
         fpm.add_cfg_simplification_pass();
         fpm.add_basic_alias_analysis_pass();
         fpm.add_promote_memory_to_register_pass();
