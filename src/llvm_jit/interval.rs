@@ -1346,13 +1346,13 @@ fn build_interval_tan<'ctx>(
         constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
         {
             // Shift lo to an equivalent value in -pi/2 to pi/2.
-            let lo = builder.build_float_sub(
+            let lo = fast_math(builder.build_float_sub(
                 build_float_rem_euclid(
-                    builder.build_float_add(
+                    fast_math(builder.build_float_add(
                         lo,
                         constants.float(FRAC_PI_2),
                         &format!("tan_pi_shift_add_{index}"),
-                    )?,
+                    )?),
                     constants.float(PI),
                     builder,
                     constants,
@@ -1361,16 +1361,20 @@ fn build_interval_tan<'ctx>(
                 )?,
                 constants.float(FRAC_PI_2),
                 &format!("tan_shifted_lo_{index}"),
-            )?;
-            let hi = builder.build_float_add(lo, width, &format!("tan_shifted_hi_{index}"))?;
+            )?);
+            let hi = fast_math(builder.build_float_add(
+                lo,
+                width,
+                &format!("tan_shifted_hi_{index}"),
+            )?);
             builder
                 .build_select(
-                    builder.build_float_compare(
+                    fast_math(builder.build_float_compare(
                         FloatPredicate::UGE,
                         hi,
                         constants.float(FRAC_PI_2),
                         &format!("tan_second_compare_{index}"),
-                    )?,
+                    )?),
                     constants.float_vec([f64::NEG_INFINITY, f64::INFINITY]),
                     {
                         let sin = build_vec_unary_intrinsic(
@@ -4032,7 +4036,7 @@ mod test {
         eval.run(&[[0.0, 0.0]], &mut outputs).unwrap();
         assert_eq!(outputs[0], [0.0, 0.0]);
         eval.run(&[[PI, PI]], &mut outputs).unwrap();
-        assert!((outputs[0][0] - PI.tan()).abs() < 1e-10);
+        assert_float_eq!(outputs[0][0], PI.tan(), 1e-10);
         // Small monotonic intervals (no discontinuity crossing)
         for interval in [[0.1, 0.4], [-0.4, -0.1], [-0.5, 0.5]] {
             eval.run(&[interval], &mut outputs).unwrap();
