@@ -1,6 +1,7 @@
 use crate::error::Error;
 use inkwell::{
     OptimizationLevel,
+    attributes::AttributeLoc,
     builder::{Builder, BuilderError},
     context::Context,
     execution_engine::FunctionLookupError,
@@ -9,7 +10,7 @@ use inkwell::{
     passes::PassManager,
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
     types::{BasicTypeEnum, FloatType, IntType},
-    values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, VectorValue},
+    values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, VectorValue},
 };
 use std::{
     cell::RefCell,
@@ -91,13 +92,41 @@ impl<'ctx> JitCompiler<'ctx> {
         })
     }
 
+    fn set_attributes(
+        &self,
+        function: FunctionValue<'ctx>,
+        context: &Context,
+    ) -> Result<(), Error> {
+        function.add_attribute(
+            AttributeLoc::Function,
+            context.create_string_attribute(
+                "target-cpu",
+                self.machine
+                    .get_cpu()
+                    .to_str()
+                    .map_err(|e| Error::JitCompilationError(e.to_string()))?,
+            ),
+        );
+        function.add_attribute(
+            AttributeLoc::Function,
+            context.create_string_attribute(
+                "target-features",
+                self.machine
+                    .get_feature_string()
+                    .to_str()
+                    .map_err(|e| Error::JitCompilationError(e.to_string()))?,
+            ),
+        );
+        Ok(())
+    }
+
     /// Run optimization passes.
     fn run_passes(&self) {
         let fpm = PassManager::create(());
         fpm.add_aggressive_dce_pass();
         fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
         fpm.add_gvn_pass();
+        fpm.add_reassociate_pass();
         fpm.add_cfg_simplification_pass();
         fpm.add_basic_alias_analysis_pass();
         fpm.add_promote_memory_to_register_pass();
