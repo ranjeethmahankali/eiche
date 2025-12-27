@@ -1059,6 +1059,17 @@ where
         }
     }
 
+    pub fn reserve(&mut self, n_samples: usize) {
+        let n = (n_samples / Self::SIMD_VEC_SIZE)
+            + if n_samples.is_multiple_of(Self::SIMD_VEC_SIZE) {
+                0
+            } else {
+                1
+            };
+        self.inputs.reserve(n * self.num_inputs);
+        self.outputs.reserve(n * self.num_outputs);
+    }
+
     pub fn reset_for_tree(&mut self, tree: &Tree) {
         self.num_samples = 0;
         self.num_inputs = tree.symbols().len();
@@ -1085,8 +1096,8 @@ where
         if sample.len() != self.num_inputs {
             return Err(Error::InputSizeMismatch(sample.len(), self.num_inputs));
         }
-        let index = self.num_samples % Self::SIMD_VEC_SIZE;
-        if index == 0 {
+        let lane = self.num_samples % Self::SIMD_VEC_SIZE;
+        if lane == 0 {
             self.inputs.extend(std::iter::repeat_n(
                 <Wide as SimdVec<T>>::nan(),
                 self.num_inputs,
@@ -1101,7 +1112,7 @@ where
             .iter_mut()
             .zip(sample.iter())
         {
-            <Wide as SimdVec<T>>::set(reg, *val, index);
+            <Wide as SimdVec<T>>::set(reg, *val, lane);
         }
         self.num_samples += 1;
         Ok(())
