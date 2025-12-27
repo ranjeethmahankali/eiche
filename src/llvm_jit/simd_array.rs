@@ -1059,15 +1059,23 @@ where
         }
     }
 
-    pub fn reserve(&mut self, n_samples: usize) {
-        let n = (n_samples / Self::SIMD_VEC_SIZE)
+    pub fn with_capacity(tree: &Tree, n_samples: usize) -> Self {
+        let n_simd = (n_samples / Self::SIMD_VEC_SIZE)
             + if n_samples.is_multiple_of(Self::SIMD_VEC_SIZE) {
                 0
             } else {
                 1
             };
-        self.inputs.reserve(n * self.num_inputs);
-        self.outputs.reserve(n * self.num_outputs);
+        let num_inputs = tree.symbols().len();
+        let num_outputs = tree.num_roots();
+        Self {
+            num_samples: 0,
+            num_inputs,
+            num_outputs,
+            inputs: Vec::with_capacity(n_simd * num_inputs),
+            outputs: Vec::with_capacity(n_simd * num_outputs),
+            phantom: PhantomData,
+        }
     }
 
     pub fn reset_for_tree(&mut self, tree: &Tree) {
