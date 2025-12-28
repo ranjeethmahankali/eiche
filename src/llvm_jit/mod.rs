@@ -373,6 +373,7 @@ fn build_float_binary_intrinsic<'ctx>(
 }
 
 pub mod interval;
+pub mod pruning;
 pub mod single;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
