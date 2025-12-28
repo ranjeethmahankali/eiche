@@ -193,22 +193,12 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     match (ldom > threshold, rdom > threshold) {
                         (true, true) => {
                             // branch | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            let b1 = branch_map
-                                .get(&(*lhs - ldom))
-                                .copied()
-                                .expect("This is a bug");
-                            let c1 = code_map
-                                .get(&(*lhs - ldom))
-                                .copied()
-                                .expect("This is a bug");
-                            let b2 = branch_map
-                                .get(&(*rhs - rdom))
-                                .copied()
-                                .expect("This is a bug");
-                            let c2 = code_map
-                                .get(&(*rhs - rdom))
-                                .copied()
-                                .expect("This is a bug");
+                            let lstart = *lhs - ldom;
+                            let rstart = *rhs - rdom;
+                            let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
+                            let c1 = code_map.get(&(&lstart)).copied().expect("This is a bug");
+                            let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
+                            let c2 = code_map.get(&rstart).copied().expect("This is a bug");
                             let b3 = branch_map.get(&ni).copied().expect("This is a bug");
                             let c3 = branch_map.get(&ni).copied().expect("This is a bug");
                             let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
