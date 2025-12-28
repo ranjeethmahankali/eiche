@@ -2288,7 +2288,9 @@ fn build_interval_pow<'ctx>(
                         )?,
                     )?
                     .into_vector_value(),
-                    _ => panic!("Unreachable code. This is a bug"),
+                    _ => unreachable!(
+                        "This is a bug. The index should not be anything but [0..6] inclusive"
+                    ),
                 };
                 builder.build_unconditional_branch(switch_merge_bb)?;
             }
@@ -2768,7 +2770,7 @@ fn build_interval_div<'ctx>(
                     index,
                 )?,
                 11 => cross,
-                _ => panic!("This should never happen as there are only 12 cases."),
+                _ => unreachable!("This should never happen as there are only 12 cases."),
             };
             builder.build_unconditional_branch(merge_bb)?;
         }

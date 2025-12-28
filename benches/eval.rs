@@ -373,7 +373,7 @@ fn b_circles_value_eval(c: &mut Criterion) {
                         .run()
                         .expect("Failed to run value evaluator");
                     *image.get_pixel_mut(x, y) = match outputs[0] {
-                        Value::Bool(_) => panic!("Expecting a scalar"),
+                        Value::Bool(_) => unreachable!("Expecting a scalar"),
                         Value::Scalar(val) => image::Luma([if val < 0. {
                             f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
                         } else {
@@ -423,7 +423,7 @@ fn b_circles_pruned_eval(c: &mut Criterion) {
                 match state {
                     PruningState::None => break,
                     PruningState::Valid(_, _) => {} // Keep going.
-                    PruningState::Failure(error) => panic!("Error during pruning: {error:?}"),
+                    PruningState::Failure(error) => unreachable!("Error during pruning: {error:?}"),
                 }
                 for norm in NORM_SAMPLES {
                     let mut sample = [0.; 2];
@@ -437,7 +437,7 @@ fn b_circles_pruned_eval(c: &mut Criterion) {
                         .expect("Failed to run the pruning evaluator");
                     let coords = sample.map(|c| c as u32);
                     *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
-                        Value::Bool(_) => panic!("Expecting a scalar"),
+                        Value::Bool(_) => unreachable!("Expecting a scalar"),
                         Value::Scalar(val) => image::Luma([if val < 0. {
                             f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
                         } else {
