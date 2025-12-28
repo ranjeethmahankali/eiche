@@ -46,7 +46,6 @@ enum Block {
     Merge {
         incoming: Vec<usize>,
         selector_node: usize,
-        token: usize,
     },
 }
 
