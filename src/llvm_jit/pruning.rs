@@ -1,5 +1,5 @@
 use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree};
-use std::ops::Range;
+use std::{collections::HashMap, marker::PhantomData, ops::Range};
 
 /*
 This is a vague sketch of how this should work. I am writing this before I write
@@ -14,6 +14,7 @@ Ops where pruning make sense declare their inputs as potential candidates for pr
 - LessOrEqual
 - Greater
 - GreaterOrequal
+- Choose
 
 Of these condidates, only nodes that dominate more nodes than a threshold should
 be considered for pruning.
@@ -38,8 +39,8 @@ later) and the incoming branches.
 
 #[derive(Debug)]
 pub struct Incoming {
-    branch: usize,
-    caes: usize,
+    block: usize,
+    case: usize,
 }
 
 #[derive(Debug)]
@@ -56,16 +57,9 @@ pub enum Block {
     },
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum Split {
-    Branch(usize),
-    Merge(usize),
-    Direct(usize),
-}
-
 pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error> {
     let (tree, ndom) = tree.control_dependence_sorted()?;
-    assert_eq!(
+    debug_assert_eq!(
         tree.len(),
         ndom.len(),
         "This should never happen, it is a bug in control dependence sorting"
@@ -103,8 +97,184 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
             (blocks, inst)
         },
     );
+    // Build index maps for later use.
+    let (branch_map, merge_map, code_map, _) = blocks.iter().enumerate().fold(
+        (
+            HashMap::<usize, usize>::new(),
+            HashMap::<usize, usize>::new(),
+            HashMap::<usize, usize>::new(),
+            0usize,
+        ),
+        |(mut bmap, mut mmap, mut cmap, mut inst), (bi, block)| {
+            match block {
+                Block::Branch { .. } => bmap.insert(inst, bi),
+                Block::Code { instructions } => {
+                    debug_assert_eq!(
+                        inst, instructions.start,
+                        "This should never break. This is a bug."
+                    );
+                    let old = std::mem::replace(&mut inst, instructions.end + 1);
+                    cmap.insert(old, bi)
+                }
+                Block::Merge { .. } => mmap.insert(inst, bi),
+            };
+            (bmap, mmap, cmap, inst)
+        },
+    );
+    // Build jumps and links between blocks.
     let mut blocks = blocks.into_boxed_slice();
+    // First build the trivial links between consecutive blocks. This represents
+    // the code flow when nothing is pruned.
+    for bi in 0..(blocks.len() - 1) {
+        let (left, right) = blocks.split_at_mut(bi + 1);
+        let (left, right) = (&mut left[bi], &mut right[0]);
+        match (left, right) {
+            (Block::Branch { .. }, Block::Branch { .. })
+            | (Block::Branch { .. }, Block::Merge { .. })
+            | (Block::Merge { .. }, Block::Merge { .. }) => {
+                unreachable!(
+                    "Two merge / branch blocks should never occur consecutively. This is a bug"
+                )
+            }
+            (Block::Code { .. }, Block::Merge { incoming, .. }) => {
+                incoming.push(Incoming { block: bi, case: 0 });
+            }
+            // The default case i.e. '0' in every branch just goes to the next block.
+            (Block::Branch { cases }, Block::Code { .. }) => {
+                cases.push(bi + 1);
+            }
+            // All other code blocks and merge blocks unconditionally branch to the next block.
+            (Block::Code { .. }, _) | (Block::Merge { .. }, _) => continue,
+        }
+    }
+    // Now build jumps and links for cases when instructions get pruned.
+    for (ni, node) in tree
+        .nodes()
+        .iter()
+        .zip(is_selector)
+        .enumerate()
+        .filter_map(|(ni, (node, flag))| if flag { Some((ni, node)) } else { None })
+    {
+        match node {
+            Constant(_) | Symbol(_) | Unary(_, _) => {
+                unreachable!("This should never happen. This is a bug")
+            }
+            Binary(op, lhs, rhs) => match op {
+                Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual | And
+                | Or => unreachable!("This should never happen. This is a bug"),
+                Min | Max => {
+                    let ldom = ndom[*lhs];
+                    let rdom = ndom[*rhs];
+                    match (ldom > threshold, rdom > threshold) {
+                        (true, true) => {
+                            // branch | ldom, lhs | branch | rdom, rhs | branch | op | merge
+                            let b1 = branch_map
+                                .get(&(*lhs - ldom))
+                                .copied()
+                                .expect("This is a bug");
+                            let c1 = code_map
+                                .get(&(*lhs - ldom))
+                                .copied()
+                                .expect("This is a bug");
+                            let b2 = branch_map
+                                .get(&(*rhs - rdom))
+                                .copied()
+                                .expect("This is a bug");
+                            let c2 = code_map
+                                .get(&(*rhs - rdom))
+                                .copied()
+                                .expect("This is a bug");
+                            let b3 = branch_map.get(&ni).copied().expect("This is a bug");
+                            let c3 = branch_map.get(&ni).copied().expect("This is a bug");
+                            let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
+                            link_min_max_prune_all(BlockGroup::new(
+                                &mut blocks,
+                                [b1, c1, b2, c2, b3, c3, merge],
+                            ));
+                        }
+                        (true, false) => {
+                            // branch | ldom, lhs | rdom, rhs | branch | op | merge
+                            todo!();
+                        }
+                        (false, true) => {
+                            // | ldom, lhs | branch | rdom, rhs | branch | op | merge
+                            todo!();
+                        }
+                        (false, false) => continue,
+                    }
+                }
+                Less | LessOrEqual | Greater | GreaterOrEqual => todo!(),
+            },
+            Ternary(op, _, _, _) => match op {
+                Choose => todo!(),
+            },
+        }
+    }
     Ok(blocks)
+}
+
+fn link_min_max_prune_all(blocks: BlockGroup<'_, 7>) {
+    let [bleft, cleft, bright, cright, bop, cop, merge] = blocks.indices;
+    if let [
+        Block::Branch { cases: left_cases },
+        Block::Code {
+            instructions: left_inst,
+        },
+        Block::Branch { cases: right_cases },
+        Block::Code {
+            instructions: right_inst,
+        },
+        Block::Branch { cases: op_cases },
+        Block::Code {
+            instructions: op_inst,
+        },
+        Block::Merge {
+            incoming: merge_incoming,
+            selector_node: merge_selector,
+        },
+        ..,
+    ] = blocks.blocks
+    {
+        let case = left_cases.len();
+        left_cases.push(cright);
+        merge_incoming.push(Incoming { block: bleft, case });
+    } else {
+        unreachable!("Wrong types of block. This is a bug");
+    }
+}
+
+struct BlockGroup<'a, const N: usize> {
+    blocks: [&'a mut Block; N],
+    indices: [usize; N],
+    phantom: PhantomData<&'a mut [Block]>,
+}
+
+impl<'a, const N: usize> BlockGroup<'a, N> {
+    fn new(slice: &'a mut [Block], indices: [usize; N]) -> Self {
+        assert!(
+            indices.windows(2).all(|window| window[0] < window[1]),
+            "The indices must be increasing"
+        );
+        assert!(
+            indices.iter().all(|i| *i < slice.len()),
+            "All indices must be within bounds"
+        );
+        let ptr = slice.as_mut_ptr();
+        Self {
+            // # SAFETY: The two asserts above ensure the indices are
+            // non-overlapping and within bounds. So this is safe.
+            blocks: unsafe { indices.map(|i| &mut *ptr.add(i)) },
+            phantom: PhantomData,
+            indices,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum Split {
+    Branch(usize),
+    Merge(usize),
+    Direct(usize),
 }
 
 fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, Box<[bool]>) {
@@ -240,7 +410,7 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, llvm_jit::pruning::make_layout};
+    use crate::{Node, deftree, llvm_jit::pruning::make_layout};
 
     #[test]
     fn t_min_sphere_layout() {
@@ -255,7 +425,6 @@ mod test {
         assert_eq!(is_selector.len(), tree.len());
         assert!(!is_selector.iter().take(tree.len() - 1).any(|b| *b));
         assert!(is_selector.last().unwrap());
-        assert_eq!(splits.len(), 4);
         assert_eq!(
             splits.as_ref(),
             &[
@@ -263,6 +432,38 @@ mod test {
                 Split::Branch(12,),
                 Split::Branch(24,),
                 Split::Merge(25,)
+            ]
+        );
+    }
+
+    #[test]
+    fn t_min_3_spheres_layout() {
+        let tree = deftree!(min (min
+                                  (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
+                                  (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
+                            (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5))
+        .unwrap();
+        let (tree, ndom) = tree
+            .control_dependence_sorted()
+            .expect("Dominator sorting failed");
+        let (splits, is_selector) = make_layout(&tree, 10, &ndom);
+        dbg!(&splits, &is_selector);
+        println!("{tree}");
+        assert_eq!(is_selector.len(), tree.len());
+        assert_eq!(is_selector.iter().filter(|b| **b).count(), 2);
+        for (i, _) in is_selector.iter().enumerate().filter(|(i, b)| **b) {
+            assert!(matches!(tree.node(i), Node::Binary(Min, _, _)));
+        }
+        assert_eq!(
+            splits.as_ref(),
+            &[
+                Split::Branch(0,),
+                Split::Branch(12,),
+                Split::Branch(24,),
+                Split::Merge(25,),
+                Split::Branch(25,),
+                Split::Branch(37,),
+                Split::Merge(38,)
             ]
         );
     }
