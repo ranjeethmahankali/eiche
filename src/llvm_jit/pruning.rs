@@ -38,9 +38,18 @@ later) and the incoming branches.
  */
 
 #[derive(Debug)]
-pub struct Incoming {
-    block: usize,
+pub enum PruningType {
+    None,
+    Left,
+    Right,
+    All,
+}
+
+#[derive(Debug)]
+pub struct Listener {
+    branch: usize,
     case: usize,
+    prune: PruningType,
 }
 
 #[derive(Debug)]
@@ -52,7 +61,8 @@ pub enum Block {
         instructions: Range<usize>,
     },
     Merge {
-        incoming: Vec<Incoming>,
+        listeners: Vec<Listener>,
+        incoming: Vec<usize>,
         selector_node: usize,
     },
 }
@@ -78,6 +88,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                 Split::Merge(p) => (
                     *p,
                     Some(Block::Merge {
+                        listeners: Default::default(),
                         incoming: Default::default(),
                         selector_node: *p - 1,
                     }),
@@ -136,9 +147,14 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     "Two merge / branch blocks should never occur consecutively. This is a bug"
                 )
             }
-            (Block::Code { .. }, Block::Merge { incoming, .. }) => {
-                incoming.push(Incoming { block: bi, case: 0 });
-            }
+            (
+                Block::Code { .. },
+                Block::Merge {
+                    listeners: _,
+                    incoming,
+                    ..
+                },
+            ) => incoming.push(bi),
             // The default case i.e. '0' in every branch just goes to the next block.
             (Block::Branch { cases }, Block::Code { .. }) => {
                 cases.push(bi + 1);
@@ -229,18 +245,39 @@ fn link_min_max_prune_all(blocks: BlockGroup<'_, 7>) {
             instructions: op_inst,
         },
         Block::Merge {
-            incoming: merge_incoming,
+            listeners,
             selector_node: merge_selector,
+            incoming,
         },
         ..,
     ] = blocks.blocks
     {
-        let case = left_cases.len();
-        left_cases.push(cright);
-        merge_incoming.push(Incoming { block: bleft, case });
+        link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
+        link_jump(bright, right_cases, merge, listeners, PruningType::Left);
+        todo!(
+            "
+Let merge know there is an incoming connecting from branch_right, and which output to choose when that happens.
+And also do the code path when right gets pruned."
+        );
     } else {
         unreachable!("Wrong types of block. This is a bug");
     }
+}
+
+fn link_jump(
+    branch: usize,
+    cases: &mut Vec<usize>,
+    target: usize,
+    listeners: &mut Vec<Listener>,
+    prune: PruningType,
+) {
+    let case = cases.len();
+    cases.push(target);
+    listeners.push(Listener {
+        branch,
+        case,
+        prune,
+    });
 }
 
 struct BlockGroup<'a, const N: usize> {
