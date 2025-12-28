@@ -36,11 +36,13 @@ cases and target blocks. The merge blocks should know their token (explained
 later) and the incoming branches.
  */
 
+#[derive(Debug)]
 pub struct Incoming {
     branch: usize,
     caes: usize,
 }
 
+#[derive(Debug)]
 pub enum Block {
     Branch {
         cases: Vec<usize>,
@@ -69,7 +71,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
         "This should never happen, it is a bug in control dependence sorting"
     );
     let (splits, is_selector) = make_layout(&tree, threshold, &ndom);
-    let blocks = splits.iter().fold(
+    let (blocks, _) = splits.iter().fold(
         (Vec::<Block>::new(), 0usize),
         |(mut blocks, mut inst), split| {
             let (pos, block) = match split {
@@ -101,7 +103,8 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
             (blocks, inst)
         },
     );
-    todo!();
+    let mut blocks = blocks.into_boxed_slice();
+    Ok(blocks)
 }
 
 fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, Box<[bool]>) {
@@ -248,7 +251,7 @@ mod test {
         let (tree, ndom) = tree
             .control_dependence_sorted()
             .expect("Dominator sorting failed");
-        let (splits, is_selector) = make_layout(&tree, 2, &ndom);
+        let (splits, is_selector) = make_layout(&tree, 10, &ndom);
         assert_eq!(is_selector.len(), tree.len());
         assert!(!is_selector.iter().take(tree.len() - 1).any(|b| *b));
         assert!(is_selector.last().unwrap());
@@ -262,5 +265,16 @@ mod test {
                 Split::Merge(25,)
             ]
         );
+    }
+
+    #[test]
+    fn t_min_sphere_blocks() {
+        let tree = deftree!(min
+                 (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
+                 (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
+        .unwrap();
+        let blocks = make_blocks(&tree, 10).expect("Unable to make blocks");
+        dbg!(blocks);
+        assert!(false);
     }
 }
