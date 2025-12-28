@@ -53,6 +53,12 @@ pub struct Listener {
 }
 
 #[derive(Debug)]
+pub struct Incoming {
+    block: usize,
+    output: usize,
+}
+
+#[derive(Debug)]
 pub enum Block {
     Branch {
         cases: Vec<usize>,
@@ -62,7 +68,7 @@ pub enum Block {
     },
     Merge {
         listeners: Vec<Listener>,
-        incoming: Vec<usize>,
+        incoming: Vec<Incoming>,
         selector_node: usize,
     },
 }
@@ -148,13 +154,16 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                 )
             }
             (
-                Block::Code { .. },
+                Block::Code { instructions },
                 Block::Merge {
                     listeners: _,
                     incoming,
                     ..
                 },
-            ) => incoming.push(bi),
+            ) => incoming.push(Incoming {
+                block: bi,
+                output: instructions.end - 1,
+            }),
             // The default case i.e. '0' in every branch just goes to the next block.
             (Block::Branch { cases }, Block::Code { .. }) => {
                 cases.push(bi + 1);
@@ -203,7 +212,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                             let b3 = branch_map.get(&ni).copied().expect("This is a bug");
                             let c3 = branch_map.get(&ni).copied().expect("This is a bug");
                             let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
-                            link_min_max_prune_all(BlockGroup::new(
+                            link_min_max_both_prunable(BlockGroup::new(
                                 &mut blocks,
                                 [b1, c1, b2, c2, b3, c3, merge],
                             ));
@@ -229,8 +238,8 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
     Ok(blocks)
 }
 
-fn link_min_max_prune_all(blocks: BlockGroup<'_, 7>) {
-    let [bleft, cleft, bright, cright, bop, cop, merge] = blocks.indices;
+fn link_min_max_both_prunable(blocks: BlockGroup<'_, 7>) {
+    let [bleft, _, bright, cright, bop, _, merge] = blocks.indices;
     if let [
         Block::Branch { cases: left_cases },
         Block::Code {
@@ -252,13 +261,20 @@ fn link_min_max_prune_all(blocks: BlockGroup<'_, 7>) {
         ..,
     ] = blocks.blocks
     {
+        debug_assert_eq!(op_inst.start, *merge_selector, "This is a bug");
+        // If lhs gets pruned.
         link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
-        link_jump(bright, right_cases, merge, listeners, PruningType::Left);
-        todo!(
-            "
-Let merge know there is an incoming connecting from branch_right, and which output to choose when that happens.
-And also do the code path when right gets pruned."
-        );
+        link_jump(bop, op_cases, merge, listeners, PruningType::Left);
+        incoming.push(Incoming {
+            block: bop,
+            output: right_inst.end - 1,
+        });
+        // If rhs gets pruned.
+        link_jump(bright, right_cases, merge, listeners, PruningType::Right);
+        incoming.push(Incoming {
+            block: bright,
+            output: left_inst.end - 1,
+        });
     } else {
         unreachable!("Wrong types of block. This is a bug");
     }
