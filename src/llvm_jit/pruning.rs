@@ -69,6 +69,38 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
         "This should never happen, it is a bug in control dependence sorting"
     );
     let (splits, is_selector) = make_layout(&tree, threshold, &ndom);
+    let blocks = splits.iter().fold(
+        (Vec::<Block>::new(), 0usize),
+        |(mut blocks, mut inst), split| {
+            let (pos, block) = match split {
+                Split::Branch(p) => (
+                    *p,
+                    Some(Block::Branch {
+                        cases: Default::default(),
+                    }),
+                ),
+                Split::Merge(p) => (
+                    *p,
+                    Some(Block::Merge {
+                        incoming: Default::default(),
+                        selector_node: *p - 1,
+                    }),
+                ),
+                Split::Direct(p) => (*p, None),
+            };
+            assert!(pos >= inst, "This is a bug");
+            if pos > inst {
+                blocks.push(Block::Code {
+                    instructions: inst..pos,
+                });
+                inst = pos;
+            }
+            if let Some(block) = block {
+                blocks.push(block);
+            }
+            (blocks, inst)
+        },
+    );
     todo!();
 }
 
@@ -205,10 +237,7 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        deftree,
-        llvm_jit::pruning::{make_blocks, make_layout},
-    };
+    use crate::{deftree, llvm_jit::pruning::make_layout};
 
     #[test]
     fn t_min_sphere_layout() {
