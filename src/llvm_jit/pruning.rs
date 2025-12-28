@@ -36,7 +36,12 @@ cases and target blocks. The merge blocks should know their token (explained
 later) and the incoming branches.
  */
 
-enum Block {
+pub struct Incoming {
+    branch: usize,
+    caes: usize,
+}
+
+pub enum Block {
     Branch {
         cases: Vec<usize>,
     },
@@ -44,19 +49,19 @@ enum Block {
         instructions: Range<usize>,
     },
     Merge {
-        incoming: Vec<usize>,
+        incoming: Vec<Incoming>,
         selector_node: usize,
     },
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum Split {
     Branch(usize),
     Merge(usize),
     Direct(usize),
 }
 
-fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error> {
+pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error> {
     let (tree, ndom) = tree.control_dependence_sorted()?;
     assert_eq!(
         tree.len(),
@@ -195,4 +200,38 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
         _ => false,
     });
     (splits.into_boxed_slice(), is_selector)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        deftree,
+        llvm_jit::pruning::{make_blocks, make_layout},
+    };
+
+    #[test]
+    fn t_min_sphere_layout() {
+        let tree = deftree!(min
+                 (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
+                 (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
+        .unwrap();
+        let (tree, ndom) = tree
+            .control_dependence_sorted()
+            .expect("Dominator sorting failed");
+        let (splits, is_selector) = make_layout(&tree, 2, &ndom);
+        assert_eq!(is_selector.len(), tree.len());
+        assert!(!is_selector.iter().take(tree.len() - 1).any(|b| *b));
+        assert!(is_selector.last().unwrap());
+        assert_eq!(splits.len(), 4);
+        assert_eq!(
+            splits.as_ref(),
+            &[
+                Split::Branch(0,),
+                Split::Branch(12,),
+                Split::Branch(24,),
+                Split::Merge(25,)
+            ]
+        );
+    }
 }
