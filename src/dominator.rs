@@ -105,9 +105,9 @@ impl DomTable {
         self.bits.len() / self.n_chunks
     }
 
-    pub fn counts(&self) -> Vec<usize> {
+    pub fn counts(&self) -> Box<[usize]> {
         let n_nodes = self.num_nodes();
-        let mut counts = vec![0usize; n_nodes];
+        let mut counts = vec![0usize; n_nodes].into_boxed_slice();
         for chunks in self.bits.chunks_exact(self.n_chunks) {
             let mut offset = 0usize;
             for chunk in chunks {
@@ -180,7 +180,7 @@ struct StackElement {
 
 impl Tree {
     /// Performs dominator sort on this tree. After this, each node will be
-    /// precended by a contiguous range of it's dependencies are dominatoed by
+    /// preceded by a contiguous range of it's dependencies are dominatoed by
     /// that node. This criteria also holds recursively for the nodes within
     /// that contiguous range. A vector containing the sizes of these dominated
     /// ranges is returned. i.e. for each node the entry in this vector
@@ -188,7 +188,7 @@ impl Tree {
     ///
     /// This concept is referred to as "Control Dependence Graph" in the
     /// compiler theory literature.
-    pub fn control_dependence_sorted(&self) -> Result<(Tree, Vec<usize>), Error> {
+    pub fn control_dependence_sorted(&self) -> Result<(Tree, Box<[usize]>), Error> {
         // Initialize data.
         let domtable = DomTable::from_tree(self);
         let domtree = DomTree::from_table(&domtable);
@@ -276,7 +276,7 @@ impl Tree {
         let tree = Tree::from_nodes(sorted, self.dims())?;
         let counts = {
             let oldcounts = domtable.counts();
-            let mut newcounts = vec![0usize; oldcounts.len()];
+            let mut newcounts = vec![0usize; oldcounts.len()].into_boxed_slice();
             for (i, count) in index_map.iter().zip(oldcounts.iter()) {
                 newcounts[*i] = *count;
             }
@@ -351,7 +351,7 @@ in the tree."
         assert_eq!(table.immediate_dominator(2), 3);
         assert_eq!(table.immediate_dominator(3), 3);
         // Check the counts.
-        assert_eq!(&table.counts(), &[0usize, 1, 2, 3]);
+        assert_eq!(table.counts().as_ref(), &[0usize, 1, 2, 3]);
         // Check sorting.
         let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
         validate_sorting(&sorted_tree, &subcounts);
