@@ -1,4 +1,4 @@
-use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, UnaryOp::*};
+use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree};
 use std::ops::Range;
 
 /*
@@ -64,7 +64,11 @@ fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error> {
         ndom.len(),
         "This should never happen, it is a bug in control dependence sorting"
     );
-    // Figure out the layout of the splits.
+    let (splits, is_selector) = make_layout(&tree, threshold, &ndom);
+    todo!();
+}
+
+fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, Box<[bool]>) {
     let mut splits: Vec<Split> = Vec::with_capacity(tree.len() / 2);
     let mut is_selector: Box<[bool]> = vec![false; tree.len()].into_boxed_slice();
     for (i, node) in tree.nodes().iter().enumerate() {
@@ -130,20 +134,66 @@ fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error> {
                         match (ttdom > threshold, ffdom > threshold) {
                             (true, true) => {
                                 // branch | ttdom, tt | branch | ffdom, ff | branch | choose | merge.
+                                splits.extend_from_slice(&[
+                                    Split::Branch(*tt - ttdom),
+                                    Split::Branch(*ff - ffdom),
+                                    Split::Branch(i),
+                                    Split::Merge(i + 1),
+                                ]);
+                                is_selector[i] = true;
                             }
                             (true, false) => {
                                 // branch | ttdom, tt | ffdom, ff | branch | choose | merge.
+                                splits.extend_from_slice(&[
+                                    Split::Branch(*tt - ttdom),
+                                    Split::Direct(*ff - ffdom),
+                                    Split::Branch(i),
+                                    Split::Merge(i + 1),
+                                ]);
+                                is_selector[i] = true;
                             }
                             (false, true) => {
                                 // | ttdom, tt | branch | ffdom, ff | branch | choose | merge.
+                                splits.extend_from_slice(&[
+                                    Split::Branch(*tt - ttdom),
+                                    Split::Branch(*ff - ffdom),
+                                    Split::Direct(i),
+                                    Split::Merge(i + 1),
+                                ]);
+                                is_selector[i] = true;
                             }
-                            (false, false) => todo!(),
+                            (false, false) => continue,
                         }
                     }
                 }
             },
         }
     }
-    assert_eq!(tree.len(), ndom.len());
-    todo!();
+    splits.sort_by(|a, b| match (a, b) {
+        (Split::Branch(a), Split::Branch(b))
+        | (Split::Merge(a), Split::Merge(b))
+        | (Split::Direct(a), Split::Direct(b)) => a.cmp(b),
+        (Split::Branch(a), Split::Merge(b))
+        | (Split::Direct(a), Split::Branch(b))
+        | (Split::Direct(a), Split::Merge(b)) => (*a, 1).cmp(&(*b, 0)), // Prefer b.
+        (Split::Branch(a), Split::Direct(b))
+        | (Split::Merge(a), Split::Branch(b))
+        | (Split::Merge(a), Split::Direct(b)) => (*a, 0).cmp(&(*b, 1)), // Prefer a.
+    });
+    splits.dedup_by(|a, b| match (a, b) {
+        (Split::Branch(a), Split::Branch(b))
+        | (Split::Merge(a), Split::Merge(b))
+        | (Split::Direct(a), Split::Direct(b)) => a == b,
+        (Split::Branch(_), Split::Merge(_)) | (Split::Merge(_), Split::Branch(_)) => false,
+        (Split::Branch(a), Split::Direct(b))
+        | (Split::Direct(a), Split::Branch(b))
+        | (Split::Merge(a), Split::Direct(b))
+        | (Split::Direct(a), Split::Merge(b))
+            if a == b =>
+        {
+            true
+        }
+        _ => false,
+    });
+    (splits.into_boxed_slice(), is_selector)
 }
