@@ -42,7 +42,6 @@ pub enum PruningType {
     None,
     Left,
     Right,
-    All,
 }
 
 #[derive(Debug)]
