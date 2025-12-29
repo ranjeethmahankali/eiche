@@ -1,4 +1,4 @@
-use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree};
+use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, Value};
 use std::{collections::HashMap, marker::PhantomData, ops::Range};
 
 /*
@@ -40,8 +40,10 @@ later) and the incoming branches.
 #[derive(Debug)]
 pub enum PruningType {
     None,
-    LeftOrTrue,
-    RightOrFalse,
+    Left,
+    Right,
+    AlwaysTrue,
+    AlwaysFalse,
 }
 
 #[derive(Debug)]
@@ -52,15 +54,16 @@ pub struct Listener {
 }
 
 #[derive(Debug)]
-pub struct Incoming {
-    block: usize,
-    output: usize,
+pub enum Incoming {
+    Reference { block: usize, output: usize },
+    Constant { block: usize },
 }
 
 #[derive(Debug)]
 pub enum Block {
     Branch {
         cases: Vec<usize>,
+        constants: Vec<Value>,
     },
     Code {
         instructions: Range<usize>,
@@ -88,6 +91,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     *p,
                     Some(Block::Branch {
                         cases: Default::default(),
+                        constants: Default::default(),
                     }),
                 ),
                 Split::Merge(p) => (
@@ -159,12 +163,12 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     incoming,
                     ..
                 },
-            ) => incoming.push(Incoming {
+            ) => incoming.push(Incoming::Reference {
                 block: bi,
                 output: instructions.end - 1,
             }),
             // The default case i.e. '0' in every branch just goes to the next block.
-            (Block::Branch { cases }, Block::Code { .. }) => {
+            (Block::Branch { cases, .. }, Block::Code { .. }) => {
                 cases.push(bi + 1);
             }
             // All other code blocks and merge blocks unconditionally branch to the next block.
@@ -230,7 +234,12 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                 Less | LessOrEqual | Greater | GreaterOrEqual => {
                     let n = ndom[ni];
                     debug_assert!(n > threshold, "This invariant should always hold.");
-                    // branch | ldom, lhs, rdom, rhs | branch | cond | merge
+                    // branch | cond-dom, cond | merge
+                    let start = ni - n;
+                    let branch = branch_map.get(&start).copied().expect("This is a bug");
+                    let code = code_map.get(&start).copied().expect("This is a bug");
+                    let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
+                    link_cond(BlockGroup::new(&mut blocks, [branch, code, merge]));
                 }
             },
             Ternary(op, _, _, _) => match op {
@@ -241,18 +250,61 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
     Ok(blocks)
 }
 
+fn link_cond(blocks: BlockGroup<'_, 3>) {
+    let [branch, code, merge] = blocks.indices;
+    if let [
+        Block::Branch { cases, constants },
+        Block::Code { instructions },
+        Block::Merge {
+            listeners,
+            incoming,
+            selector_node,
+        },
+    ] = blocks.blocks
+    {
+        debug_assert_eq!(
+            *selector_node,
+            instructions.end - 1,
+            "This invariant should always hold"
+        );
+        /* The path is the same whether this gets pruned with a True or
+         * False. The only thing that changes is the constant value used in
+         * place of the condition op.
+
+        bleft | cond-dom, cond | merge
+          │                        ↑
+          └────────────────────────┘
+         */
+        // If true:
+        link_jump(branch, cases, merge, listeners, PruningType::AlwaysTrue);
+        constants.push(Value::Bool(true));
+        link_jump(branch, cases, merge, listeners, PruningType::AlwaysFalse);
+        constants.push(Value::Bool(false));
+        incoming.push(Incoming::Constant { block: branch });
+        todo!("Do the incoming thing")
+    } else {
+        unreachable!("Wrong types of block. This is a bug");
+    }
+}
+
 fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
     let [bleft, _, bright, cright, bop, _, merge] = blocks.indices;
     if let [
-        Block::Branch { cases: left_cases },
+        Block::Branch {
+            cases: left_cases, ..
+        },
         Block::Code {
             instructions: left_inst,
         },
-        Block::Branch { cases: right_cases },
+        Block::Branch {
+            cases: right_cases, ..
+        },
         Block::Code {
             instructions: right_inst,
         },
-        Block::Branch { cases: op_cases },
+        Block::Branch {
+            cases: op_cases, ..
+        },
         Block::Code {
             instructions: op_inst,
         },
@@ -271,15 +323,9 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
           │                       ↑  │    ↑ │          ↑
           └───────────────────────┘  └────┘ └──────────┘
         */
-        link_jump(
-            bleft,
-            left_cases,
-            cright,
-            listeners,
-            PruningType::LeftOrTrue,
-        );
-        link_jump(bop, op_cases, merge, listeners, PruningType::LeftOrTrue);
-        incoming.push(Incoming {
+        link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
+        link_jump(bop, op_cases, merge, listeners, PruningType::Left);
+        incoming.push(Incoming::Reference {
             block: bop,
             output: right_inst.end - 1,
         });
@@ -289,14 +335,8 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
           │      ↑ │     ↑  │                           ↑
           └──────┘ └─────┘  └───────────────────────────┘
          */
-        link_jump(
-            bright,
-            right_cases,
-            merge,
-            listeners,
-            PruningType::RightOrFalse,
-        );
-        incoming.push(Incoming {
+        link_jump(bright, right_cases, merge, listeners, PruningType::Right);
+        incoming.push(Incoming::Reference {
             block: bright,
             output: left_inst.end - 1,
         });
@@ -308,12 +348,16 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
 fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
     let [bleft, _, cright, bop, _, merge] = blocks.indices;
     if let [
-        Block::Branch { cases: left_cases },
+        Block::Branch {
+            cases: left_cases, ..
+        },
         Block::Code { instructions: _ },
         Block::Code {
             instructions: right_inst,
         },
-        Block::Branch { cases: op_cases },
+        Block::Branch {
+            cases: op_cases, ..
+        },
         Block::Code {
             instructions: op_inst,
         },
@@ -332,15 +376,9 @@ fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
           │              ↑  │    ↑ │          ↑
           └──────────────┘  └────┘ └──────────┘
          */
-        link_jump(
-            bleft,
-            left_cases,
-            cright,
-            listeners,
-            PruningType::LeftOrTrue,
-        );
-        link_jump(bop, op_cases, merge, listeners, PruningType::LeftOrTrue);
-        incoming.push(Incoming {
+        link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
+        link_jump(bop, op_cases, merge, listeners, PruningType::Left);
+        incoming.push(Incoming::Reference {
             block: bop,
             output: right_inst.end - 1,
         });
@@ -353,11 +391,13 @@ fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
     let [_, bright, _, _, _, merge] = blocks.indices;
     if let [
         Block::Code { instructions: _ },
-        Block::Branch { cases: right_cases },
+        Block::Branch {
+            cases: right_cases, ..
+        },
         Block::Code {
             instructions: right_inst,
         },
-        Block::Branch { cases: _ },
+        Block::Branch { cases: _, .. },
         Block::Code {
             instructions: op_inst,
         },
@@ -376,14 +416,8 @@ fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
           │      ↑ │                            ↑
           └──────┘ └────────────────────────────┘
          */
-        link_jump(
-            bright,
-            right_cases,
-            merge,
-            listeners,
-            PruningType::RightOrFalse,
-        );
-        incoming.push(Incoming {
+        link_jump(bright, right_cases, merge, listeners, PruningType::Right);
+        incoming.push(Incoming::Reference {
             block: bright,
             output: right_inst.end - 1,
         });
@@ -491,14 +525,10 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
                     }
                 }
                 Less | LessOrEqual | Greater | GreaterOrEqual => {
-                    // branch | ldom, lhs, rdom, rhs | branch | cond | merge
+                    // branch | cond-dom, cond | merge
                     let n = ndom[i];
                     if n > threshold {
-                        splits.extend_from_slice(&[
-                            Split::Branch(i - n),
-                            Split::Branch(i),
-                            Split::Merge(i + 1),
-                        ]);
+                        splits.extend_from_slice(&[Split::Branch(i - n), Split::Merge(i + 1)]);
                         is_selector[i] = true;
                     }
                 }
