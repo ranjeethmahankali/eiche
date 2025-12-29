@@ -7,7 +7,7 @@ use inkwell::{
 
 use super::{JitContext, NumberType, interval, simd_array, single};
 use crate::{
-    BinaryOp::*,
+    BinaryOp::{self, *},
     Error,
     Node::*,
     TernaryOp::*,
@@ -949,30 +949,17 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                         Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual
                         | And | Or => {}
                         Min | Max | Less | LessOrEqual | Greater | GreaterOrEqual => {
-                            let interval::InequalityFlags {
-                                either_empty,
-                                strictly_before,
-                                strictly_after,
-                                touching,
-                            } = interval::build_interval_inequality_flags(
-                                regs[*lhs].into_vector_value(),
-                                regs[*rhs].into_vector_value(),
-                                builder,
-                                &compiler.module,
-                                &mut constants,
-                                selector_node,
+                            build_binary_notify_listeners(
+                                interval::build_interval_inequality_flags(
+                                    regs[*lhs].into_vector_value(),
+                                    regs[*rhs].into_vector_value(),
+                                    builder,
+                                    &compiler.module,
+                                    &mut constants,
+                                    selector_node,
+                                )?,
+                                *op,
                             )?;
-                            match op {
-                                Min => todo!(),
-                                Max => todo!(),
-                                Less => todo!(),
-                                LessOrEqual => todo!(),
-                                Greater => todo!(),
-                                GreaterOrEqual => todo!(),
-                                _ => unreachable!(
-                                    "We already checked, this should never happen, this is a bug."
-                                ),
-                            }
                         }
                     },
                     Ternary(op, _, _, _) => todo!(),
@@ -982,6 +969,27 @@ fn compile_pruning_func<'ctx, T: NumberType>(
         }
     }
     todo!();
+}
+
+fn build_binary_notify_listeners<'ctx>(
+    flags: interval::InequalityFlags<'ctx>,
+    op: BinaryOp,
+) -> Result<(), Error> {
+    let interval::InequalityFlags {
+        either_empty,
+        strictly_before,
+        strictly_after,
+        touching,
+    } = flags;
+    match op {
+        Min => todo!(),
+        Max => todo!(),
+        Less => todo!(),
+        LessOrEqual => todo!(),
+        Greater => todo!(),
+        GreaterOrEqual => todo!(),
+        _ => unreachable!("We already checked, this should never happen, this is a bug."),
+    }
 }
 
 fn build_branch_forwarding_outputs<'ctx>(
