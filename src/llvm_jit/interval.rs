@@ -970,14 +970,14 @@ fn build_interval_and<'ctx>(
         .into_vector_value())
 }
 
-struct InequalityFlags<'ctx> {
+pub struct InequalityFlags<'ctx> {
     either_empty: IntValue<'ctx>,
     strictly_before: IntValue<'ctx>,
     strictly_after: IntValue<'ctx>,
     touching: VectorValue<'ctx>,
 }
 
-fn build_interval_inequality_flags<'ctx>(
+pub fn build_interval_inequality_flags<'ctx>(
     lhs: VectorValue<'ctx>,
     rhs: VectorValue<'ctx>,
     builder: &'ctx Builder,
