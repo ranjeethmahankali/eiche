@@ -1,7 +1,7 @@
 use inkwell::{
     AddressSpace,
     basic_block::BasicBlock,
-    values::{BasicValueEnum, IntValue},
+    values::{BasicValueEnum, IntValue, PointerValue},
 };
 
 use super::{JitContext, NumberType, interval, simd_array, single};
@@ -793,7 +793,7 @@ fn compile_pruning_func<'ctx, T: NumberType>(
             })
             .collect()
     };
-    let signals = {
+    let signal_ptrs = {
         let signals_arg = function
             .get_nth_param(2)
             .ok_or(Error::JitCompilationError(
@@ -809,18 +809,31 @@ fn compile_pruning_func<'ctx, T: NumberType>(
             .enumerate()
             .try_fold(
                 Vec::with_capacity(blocks.len()),
-                |mut signals, (bi, _block)| -> Result<Vec<IntValue>, Error> {
-                    let ptr = unsafe {
+                |mut signals, (bi, _block)| -> Result<Vec<PointerValue>, Error> {
+                    signals.push(unsafe {
                         builder.build_gep(
                             context.i32_type(),
                             signals_arg,
                             &[constants.int_32(bi as u32, false)],
                             &format!("signal_ptr_{bi}"),
                         )?
-                    };
+                    });
+                    Ok(signals)
+                },
+            )?
+            .into_boxed_slice()
+    };
+    let signals = {
+        signal_ptrs
+            .iter()
+            .copied()
+            .enumerate()
+            .try_fold(
+                Vec::with_capacity(blocks.len()),
+                |mut signals, (i, ptr)| -> Result<Vec<IntValue>, Error> {
                     signals.push(
                         builder
-                            .build_load(context.i32_type(), ptr, &format!("load_signal_{bi}"))?
+                            .build_load(context.i32_type(), ptr, &format!("load_signal_{i}"))?
                             .into_int_value(),
                     );
                     Ok(signals)
@@ -835,6 +848,7 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                 let cases: Box<[(IntValue, BasicBlock)]> = cases
                     .iter()
                     .enumerate()
+                    .skip(1)
                     .map(|(case, target)| {
                         (
                             constants.int_32(case as u32, false),
