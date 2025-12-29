@@ -130,7 +130,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                         inst, instructions.start,
                         "This should never break. This is a bug."
                     );
-                    let old = std::mem::replace(&mut inst, instructions.end + 1);
+                    let old = std::mem::replace(&mut inst, instructions.end);
                     cmap.insert(old, bi)
                 }
                 Block::Merge { .. } => mmap.insert(inst, bi),
@@ -190,30 +190,38 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                 Min | Max => {
                     let ldom = ndom[*lhs];
                     let rdom = ndom[*rhs];
+                    let lstart = *lhs - ldom;
+                    let rstart = *rhs - rdom;
+                    let c1 = code_map.get(&(&lstart)).copied().expect("This is a bug");
+                    let c2 = code_map.get(&rstart).copied().expect("This is a bug");
+                    let b3 = branch_map.get(&ni).copied().expect("This is a bug");
+                    let c3 = code_map.get(&ni).copied().expect("This is a bug");
+                    let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
                     match (ldom > threshold, rdom > threshold) {
                         (true, true) => {
                             // branch | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            let lstart = *lhs - ldom;
-                            let rstart = *rhs - rdom;
                             let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
-                            let c1 = code_map.get(&(&lstart)).copied().expect("This is a bug");
                             let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
-                            let c2 = code_map.get(&rstart).copied().expect("This is a bug");
-                            let b3 = branch_map.get(&ni).copied().expect("This is a bug");
-                            let c3 = branch_map.get(&ni).copied().expect("This is a bug");
-                            let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
-                            link_min_max_both_prunable(BlockGroup::new(
+                            link_bin_op_both_prunable(BlockGroup::new(
                                 &mut blocks,
                                 [b1, c1, b2, c2, b3, c3, merge],
                             ));
                         }
                         (true, false) => {
                             // branch | ldom, lhs | rdom, rhs | branch | op | merge
-                            todo!();
+                            let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
+                            link_bin_op_left_prunable(BlockGroup::new(
+                                &mut blocks,
+                                [b1, c1, c2, b3, c3, merge],
+                            ));
                         }
                         (false, true) => {
                             // | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            todo!();
+                            let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
+                            link_bin_op_right_prunable(BlockGroup::new(
+                                &mut blocks,
+                                [c1, b2, c2, b3, c3, merge],
+                            ));
                         }
                         (false, false) => continue,
                     }
@@ -228,7 +236,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
     Ok(blocks)
 }
 
-fn link_min_max_both_prunable(blocks: BlockGroup<'_, 7>) {
+fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
     let [bleft, _, bright, cright, bop, _, merge] = blocks.indices;
     if let [
         Block::Branch { cases: left_cases },
@@ -252,18 +260,103 @@ fn link_min_max_both_prunable(blocks: BlockGroup<'_, 7>) {
     ] = blocks.blocks
     {
         debug_assert_eq!(op_inst.start, *merge_selector, "This is a bug");
-        // If lhs gets pruned.
+        /* If lhs gets pruned: (consecutive branching is already done).
+
+        bleft | cleft | bright | cright | bop | cop | merge
+          │                       ↑  │    ↑ │          ↑
+          └───────────────────────┘  └────┘ └──────────┘
+        */
         link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
         link_jump(bop, op_cases, merge, listeners, PruningType::Left);
         incoming.push(Incoming {
             block: bop,
             output: right_inst.end - 1,
         });
-        // If rhs gets pruned.
+        /* If rhs gets pruned: (consecutive branching is already done).
+
+        bleft | cleft | bright | cright | bop | cop | merge
+          │      ↑ │     ↑  │                           ↑
+          └──────┘ └─────┘  └───────────────────────────┘
+         */
         link_jump(bright, right_cases, merge, listeners, PruningType::Right);
         incoming.push(Incoming {
             block: bright,
             output: left_inst.end - 1,
+        });
+    } else {
+        unreachable!("Wrong types of block. This is a bug");
+    }
+}
+
+fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
+    let [bleft, _, cright, bop, _, merge] = blocks.indices;
+    if let [
+        Block::Branch { cases: left_cases },
+        Block::Code { instructions: _ },
+        Block::Code {
+            instructions: right_inst,
+        },
+        Block::Branch { cases: op_cases },
+        Block::Code {
+            instructions: op_inst,
+        },
+        Block::Merge {
+            listeners,
+            selector_node: merge_selector,
+            incoming,
+        },
+        ..,
+    ] = blocks.blocks
+    {
+        debug_assert_eq!(op_inst.start, *merge_selector, "This is a bug");
+        /* Only lhs is prunable and it gets pruned.
+
+        bleft | cleft | cright | bop | cop | merge
+          │              ↑  │    ↑ │          ↑
+          └──────────────┘  └────┘ └──────────┘
+         */
+        link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
+        link_jump(bop, op_cases, merge, listeners, PruningType::Left);
+        incoming.push(Incoming {
+            block: bop,
+            output: right_inst.end - 1,
+        });
+    } else {
+        unreachable!("Wrong types of block. This is a bug");
+    }
+}
+
+fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
+    let [_, bright, _, _, _, merge] = blocks.indices;
+    if let [
+        Block::Code { instructions: _ },
+        Block::Branch { cases: right_cases },
+        Block::Code {
+            instructions: right_inst,
+        },
+        Block::Branch { cases: _ },
+        Block::Code {
+            instructions: op_inst,
+        },
+        Block::Merge {
+            listeners,
+            selector_node: merge_selector,
+            incoming,
+        },
+        ..,
+    ] = blocks.blocks
+    {
+        debug_assert_eq!(op_inst.start, *merge_selector, "This is a bug");
+        /* Only rhs is purnable and it gets pruned.
+
+        cleft | bright | cright | bop | cop | merge
+          │      ↑ │                            ↑
+          └──────┘ └────────────────────────────┘
+         */
+        link_jump(bright, right_cases, merge, listeners, PruningType::Right);
+        incoming.push(Incoming {
+            block: bright,
+            output: right_inst.end - 1,
         });
     } else {
         unreachable!("Wrong types of block. This is a bug");
@@ -296,11 +389,13 @@ impl<'a, const N: usize> BlockGroup<'a, N> {
     fn new(slice: &'a mut [Block], indices: [usize; N]) -> Self {
         assert!(
             indices.windows(2).all(|window| window[0] < window[1]),
-            "The indices must be increasing"
+            "The indices must be increasing: {:?}",
+            indices
         );
         assert!(
             indices.iter().all(|i| *i < slice.len()),
-            "All indices must be within bounds"
+            "All indices must be within bounds: {:?}",
+            indices
         );
         let ptr = slice.as_mut_ptr();
         Self {
