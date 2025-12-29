@@ -694,7 +694,7 @@ mod test {
         println!("{tree}");
         assert_eq!(is_selector.len(), tree.len());
         assert_eq!(is_selector.iter().filter(|b| **b).count(), 2);
-        for (i, _) in is_selector.iter().enumerate().filter(|(i, b)| **b) {
+        for (i, _) in is_selector.iter().enumerate().filter(|(_i, b)| **b) {
             assert!(matches!(tree.node(i), Node::Binary(Min, _, _)));
         }
         assert_eq!(
@@ -740,6 +740,15 @@ mod test {
             .unwrap()
             .compacted()
             .unwrap();
+        let blocks = make_blocks(&tree, 0).unwrap();
+        println!("{tree}");
+        dbg!(blocks);
+        assert!(false);
+    }
+
+    #[test]
+    fn t_simple_choose() {
+        let tree = deftree!(if (< 'x 0) 'a 'b).unwrap().compacted().unwrap();
         let blocks = make_blocks(&tree, 0).unwrap();
         println!("{tree}");
         dbg!(blocks);
