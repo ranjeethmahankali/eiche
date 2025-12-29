@@ -2,7 +2,7 @@ use inkwell::{
     AddressSpace, IntPredicate,
     basic_block::BasicBlock,
     builder::Builder,
-    values::{BasicValueEnum, IntValue, PointerValue},
+    values::{BasicValue, BasicValueEnum, IntValue, PointerValue},
 };
 
 use super::{JitContext, NumberType, interval, simd_array, single};
@@ -13,6 +13,7 @@ use crate::{
     TernaryOp::*,
     Tree, Value,
     llvm_jit::{JitCompiler, interval::BuildArgs},
+    tree::is_node_scalar,
 };
 use std::{collections::HashMap, ffi::c_void, marker::PhantomData, ops::Range};
 
@@ -50,6 +51,10 @@ Maybe in a separate pass, or maybe in the same pass as above... The list of
 blocks should be populated with data. The branch blocks should know all the
 cases and target blocks. The merge blocks should know their token (explained
 later) and the incoming branches.
+
+Once this entire datastructure, i.e. a list of cross referencing blocks is
+built, that can be used to compile LLVM functions that use instruction pruning
+to skip instructions based on interval evaluations.
  */
 
 #[derive(Debug)]
@@ -69,9 +74,9 @@ pub struct Listener {
 }
 
 #[derive(Debug)]
-pub enum Incoming {
-    Reference { block: usize, output: usize },
-    Constant { block: usize },
+pub struct Incoming {
+    block: usize,
+    output: Option<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -188,9 +193,9 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     incoming,
                     ..
                 },
-            ) => incoming.push(Incoming::Reference {
+            ) => incoming.push(Incoming {
                 block: bi,
-                output: instructions.end - 1,
+                output: Some(instructions.end - 1),
             }),
             // The default case i.e. '0' in every branch just goes to the next block.
             (Block::Branch { cases, .. }, Block::Code { .. }) => {
@@ -361,7 +366,10 @@ fn link_cond(blocks: BlockGroup<'_, 3>) {
             PruningType::AlwaysFalse,
             Some(Value::Bool(false)),
         );
-        incoming.push(Incoming::Constant { block: branch });
+        incoming.push(Incoming {
+            block: branch,
+            output: None,
+        });
     } else {
         unreachable!("Wrong types of block. This is a bug");
     }
@@ -412,9 +420,9 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
             None,
         );
         link_jump(bop, op_cases, merge, listeners, PruningType::Left, None);
-        incoming.push(Incoming::Reference {
+        incoming.push(Incoming {
             block: bop,
-            output: right_inst.end - 1,
+            output: Some(right_inst.end - 1),
         });
         /* If rhs gets pruned: (consecutive branching is already done).
 
@@ -430,9 +438,9 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
             PruningType::Right,
             None,
         );
-        incoming.push(Incoming::Reference {
+        incoming.push(Incoming {
             block: bright,
-            output: left_inst.end - 1,
+            output: Some(left_inst.end - 1),
         });
     } else {
         unreachable!("Wrong types of block. This is a bug");
@@ -479,9 +487,9 @@ fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
             None,
         );
         link_jump(bop, op_cases, merge, listeners, PruningType::Left, None);
-        incoming.push(Incoming::Reference {
+        incoming.push(Incoming {
             block: bop,
-            output: right_inst.end - 1,
+            output: Some(right_inst.end - 1),
         });
     } else {
         unreachable!("Wrong types of block. This is a bug");
@@ -525,9 +533,9 @@ fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
             PruningType::Right,
             None,
         );
-        incoming.push(Incoming::Reference {
+        incoming.push(Incoming {
             block: bright,
-            output: right_inst.end - 1,
+            output: Some(right_inst.end - 1),
         });
     } else {
         unreachable!("Wrong types of block. This is a bug");
@@ -913,7 +921,42 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                 selector_node,
             } => {
                 builder.position_at_end(bbs[bi]);
-                todo!("Merge the incoming values");
+                // Merge incoming values into a phi and overwrite the output of `selector_node`.
+                let phi = builder.build_phi(
+                    match is_node_scalar(tree.nodes(), selector_node) {
+                        true => interval_type,
+                        false => context.bool_type().vec_type(2),
+                    },
+                    &format!("merge_block_phi_{selector_node}"),
+                )?;
+                let incoming: Box<[(&dyn BasicValue, BasicBlock)]> = incoming
+                    .iter()
+                    .map(|Incoming { block, output }| match output {
+                        Some(output) => (&regs[*output] as &dyn BasicValue, bbs[*block]),
+                        None => match branch_outputs.get(&(*block, bi)) {
+                            Some(output) => (output as &dyn BasicValue, bbs[*block]),
+                            None => unreachable!(
+                                "This CFG edge has neither a forwarding constant, nor a previously computed value. This is a bug."
+                            ),
+                        },
+                    }).collect();
+                phi.add_incoming(&incoming);
+                regs[selector_node] = phi.as_basic_value();
+                // Notify the listeners about the current interval.
+                match tree.node(selector_node) {
+                    Constant(_) | Symbol(_) | Unary(_, _) => {}
+                    Binary(op, _, _) => match op {
+                        Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual
+                        | And | Or => {}
+                        Min => todo!(),
+                        Max => todo!(),
+                        Less => todo!(),
+                        LessOrEqual => todo!(),
+                        Greater => todo!(),
+                        GreaterOrEqual => todo!(),
+                    },
+                    Ternary(op, _, _, _) => todo!(),
+                }
                 todo!("Notify listeners about the current interval");
             }
         }
