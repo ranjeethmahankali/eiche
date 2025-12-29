@@ -40,8 +40,8 @@ later) and the incoming branches.
 #[derive(Debug)]
 pub enum PruningType {
     None,
-    Left,
-    Right,
+    LeftOrTrue,
+    RightOrFalse,
 }
 
 #[derive(Debug)]
@@ -271,8 +271,14 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
           │                       ↑  │    ↑ │          ↑
           └───────────────────────┘  └────┘ └──────────┘
         */
-        link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
-        link_jump(bop, op_cases, merge, listeners, PruningType::Left);
+        link_jump(
+            bleft,
+            left_cases,
+            cright,
+            listeners,
+            PruningType::LeftOrTrue,
+        );
+        link_jump(bop, op_cases, merge, listeners, PruningType::LeftOrTrue);
         incoming.push(Incoming {
             block: bop,
             output: right_inst.end - 1,
@@ -283,7 +289,13 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
           │      ↑ │     ↑  │                           ↑
           └──────┘ └─────┘  └───────────────────────────┘
          */
-        link_jump(bright, right_cases, merge, listeners, PruningType::Right);
+        link_jump(
+            bright,
+            right_cases,
+            merge,
+            listeners,
+            PruningType::RightOrFalse,
+        );
         incoming.push(Incoming {
             block: bright,
             output: left_inst.end - 1,
@@ -320,8 +332,14 @@ fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
           │              ↑  │    ↑ │          ↑
           └──────────────┘  └────┘ └──────────┘
          */
-        link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
-        link_jump(bop, op_cases, merge, listeners, PruningType::Left);
+        link_jump(
+            bleft,
+            left_cases,
+            cright,
+            listeners,
+            PruningType::LeftOrTrue,
+        );
+        link_jump(bop, op_cases, merge, listeners, PruningType::LeftOrTrue);
         incoming.push(Incoming {
             block: bop,
             output: right_inst.end - 1,
@@ -358,7 +376,13 @@ fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
           │      ↑ │                            ↑
           └──────┘ └────────────────────────────┘
          */
-        link_jump(bright, right_cases, merge, listeners, PruningType::Right);
+        link_jump(
+            bright,
+            right_cases,
+            merge,
+            listeners,
+            PruningType::RightOrFalse,
+        );
         incoming.push(Incoming {
             block: bright,
             output: right_inst.end - 1,
