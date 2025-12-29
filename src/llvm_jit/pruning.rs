@@ -736,7 +736,7 @@ mod test {
 
     #[test]
     fn t_simple_cond() {
-        let tree = deftree!(if (< 'x 0) 'x (- 'x))
+        let tree = deftree!(if (< 'x 0) (+ 'x 1) (- 'x 1))
             .unwrap()
             .compacted()
             .unwrap();
@@ -748,7 +748,10 @@ mod test {
 
     #[test]
     fn t_simple_choose() {
-        let tree = deftree!(if (< 'x 0) 'a 'b).unwrap().compacted().unwrap();
+        let tree = deftree!(if (< 'x 0) (- 'a 1) (- 'b 2))
+            .unwrap()
+            .compacted()
+            .unwrap();
         let blocks = make_blocks(&tree, 0).unwrap();
         println!("{tree}");
         dbg!(blocks);
