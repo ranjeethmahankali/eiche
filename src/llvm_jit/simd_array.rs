@@ -1209,7 +1209,7 @@ impl Tree {
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
         for (node_index, node) in self.nodes().iter().copied().enumerate() {
             let reg = build_op::<T>(
-                CompileInfo {
+                BuildArgs {
                     nodes: self.nodes(),
                     symbols,
                     context,
@@ -1274,7 +1274,7 @@ impl Tree {
     }
 }
 
-pub struct CompileInfo<'a, 'ctx> {
+pub struct BuildArgs<'a, 'ctx> {
     nodes: &'a [Node],
     symbols: &'a str,
     context: &'ctx Context,
@@ -1287,7 +1287,7 @@ pub struct CompileInfo<'a, 'ctx> {
 }
 
 pub fn build_op<'a, 'ctx, T>(
-    comp: CompileInfo<'a, 'ctx>,
+    comp: BuildArgs<'a, 'ctx>,
     builder: &'ctx Builder<'ctx>,
     module: &'ctx Module,
 ) -> Result<BasicValueEnum<'ctx>, Error>
@@ -1295,7 +1295,7 @@ where
     T: NumberType,
     Wide: SimdVec<T>,
 {
-    let CompileInfo {
+    let BuildArgs {
         nodes,
         symbols,
         context,

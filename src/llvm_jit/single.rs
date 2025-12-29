@@ -65,7 +65,7 @@ where
 
 unsafe impl<'ctx, T> Sync for JitFnSync<'ctx, T> where T: NumberType {}
 
-pub struct CompileInfo<'a, 'ctx> {
+pub struct BuildArgs<'a, 'ctx> {
     nodes: &'a [Node],
     params: &'a str,
     float_type: FloatType<'ctx>,
@@ -105,7 +105,7 @@ impl Tree {
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
         for (ni, node) in self.nodes().iter().copied().enumerate() {
             let reg = build_op(
-                CompileInfo {
+                BuildArgs {
                     nodes: self.nodes(),
                     params,
                     float_type,
@@ -160,11 +160,11 @@ impl Tree {
 }
 
 pub fn build_op<'a, 'ctx>(
-    comp: CompileInfo<'a, 'ctx>,
+    comp: BuildArgs<'a, 'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
 ) -> Result<BasicValueEnum<'ctx>, Error> {
-    let CompileInfo {
+    let BuildArgs {
         nodes,
         params,
         float_type,

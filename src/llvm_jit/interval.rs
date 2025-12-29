@@ -255,7 +255,7 @@ fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
     Ok(ranges.into_boxed_slice())
 }
 
-pub struct CompileInfo<'a, 'ctx> {
+pub struct BuildArgs<'a, 'ctx> {
     nodes: &'a [Node],
     params: &'a str,
     ranges: &'a [Interval],
@@ -296,7 +296,7 @@ impl Tree {
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
         for (index, node) in self.nodes().iter().copied().enumerate() {
             let reg = build_op::<T>(
-                CompileInfo {
+                BuildArgs {
                     nodes: self.nodes(),
                     params,
                     ranges: ranges.as_ref(),
@@ -365,11 +365,11 @@ impl Tree {
 }
 
 pub fn build_op<'ctx, 'a, T: NumberType>(
-    comp: CompileInfo<'a, 'ctx>,
+    comp: BuildArgs<'a, 'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
 ) -> Result<BasicValueEnum<'ctx>, Error> {
-    let CompileInfo {
+    let BuildArgs {
         nodes,
         params,
         ranges,
