@@ -383,10 +383,7 @@ pub fn build_op<'ctx, 'a, T: NumberType>(
         index,
     } = comp;
     let reg = match node {
-        Constant(value) => match value {
-            Value::Bool(flag) => constants.bool_vec([flag; 2]).as_basic_value_enum(),
-            Value::Scalar(value) => constants.float_vec([value; 2]).as_basic_value_enum(),
-        },
+        Constant(value) => build_const(constants, value),
         Symbol(label) => {
             let inputs = function
                 .get_first_param()
@@ -676,6 +673,13 @@ pub fn build_op<'ctx, 'a, T: NumberType>(
         },
     };
     Ok(reg)
+}
+
+pub fn build_const<'ctx>(constants: &mut Constants<'ctx>, value: Value) -> BasicValueEnum<'ctx> {
+    match value {
+        Value::Bool(flag) => constants.bool_vec([flag; 2]).as_basic_value_enum(),
+        Value::Scalar(value) => constants.float_vec([value; 2]).as_basic_value_enum(),
+    }
 }
 
 fn build_interval_not<'ctx>(

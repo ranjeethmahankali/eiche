@@ -1,6 +1,7 @@
 use inkwell::{
-    AddressSpace,
+    AddressSpace, IntPredicate,
     basic_block::BasicBlock,
+    builder::Builder,
     values::{BasicValueEnum, IntValue, PointerValue},
 };
 
@@ -841,10 +842,24 @@ fn compile_pruning_func<'ctx, T: NumberType>(
             )?
             .into_boxed_slice()
     };
+    let mut branch_outputs = HashMap::<(usize, usize), BasicValueEnum>::new();
     for (bi, block) in blocks.into_iter().enumerate() {
-        builder.position_at_end(bbs[bi]);
         match block {
             Block::Branch { cases } => {
+                let signal = signals[branch_signal_map[bi]];
+                // Some of these cases may be trying to forward a constant value
+                // to their target branch. So we create those constant
+                // valuesnow, in the appropriate basic block.
+                build_branch_forwarding_outputs(
+                    &mut constants,
+                    &cases,
+                    &mut branch_outputs,
+                    builder,
+                    bi,
+                    signal,
+                )?;
+                // Now switch to the target branches.
+                builder.position_at_end(bbs[bi]);
                 let cases: Box<[(IntValue, BasicBlock)]> = cases
                     .iter()
                     .enumerate()
@@ -856,13 +871,10 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                         )
                     })
                     .collect();
-                builder.build_switch(
-                    signals[branch_signal_map[bi]],
-                    bbs[bi + 1],
-                    cases.as_ref(),
-                )?;
+                builder.build_switch(signal, bbs[bi + 1], cases.as_ref())?;
             }
             Block::Code { instructions } => {
+                builder.position_at_end(bbs[bi]);
                 for (index, node) in tree.nodes()[instructions].iter().copied().enumerate() {
                     let reg = interval::build_op::<T>(
                         BuildArgs {
@@ -886,15 +898,89 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                 if let Some(newbb) = builder.get_insert_block() {
                     bbs[bi] = newbb;
                 }
+                // Every code blocks unconditionally branches to the block that
+                // comes right after it, except for the last code block, because
+                // it has nowhere to go to.
+                if let Some(next_bb) = bbs.get(bi + 1).copied() {
+                    builder.build_unconditional_branch(next_bb)?;
+                }
             }
             Block::Merge {
                 listeners,
                 incoming,
                 selector_node,
-            } => todo!(),
+            } => {
+                builder.position_at_end(bbs[bi]);
+                todo!();
+            }
         }
     }
     todo!();
+}
+
+fn build_branch_forwarding_outputs<'ctx>(
+    constants: &mut interval::Constants<'ctx>,
+    cases: &[Case],
+    dst: &mut HashMap<(usize, usize), BasicValueEnum<'ctx>>,
+    builder: &'ctx Builder,
+    branch_index: usize,
+    signal: IntValue<'ctx>,
+) -> Result<(), Error> {
+    let mut prev: Option<(usize, usize, BasicValueEnum)> = None;
+    for (case, target, value) in cases.iter().enumerate().filter_map(
+        |(
+            i,
+            Case {
+                target_block,
+                output,
+            },
+        )| { output.map(|output| (i, *target_block, output)) },
+    ) {
+        match prev {
+            Some((_, prev_target, prev_bv)) => {
+                if prev_target == target {
+                    // Fold another select
+                    let case_eq = builder.build_int_compare(
+                        IntPredicate::EQ,
+                        signal,
+                        constants.int_32(case as u32, false),
+                        &format!("branch_{branch_index}_case_{case}_forwarding_comparison"),
+                    )?;
+                    let next_bv = match value {
+                        Value::Bool(flag) => builder.build_select(
+                            case_eq,
+                            constants.boolean(flag),
+                            prev_bv.into_int_value(),
+                            &format!("branch_{branch_index}_case_{case}_forwarding_comparison"),
+                        )?,
+                        Value::Scalar(val) => builder.build_select(
+                            case_eq,
+                            constants.float(val),
+                            prev_bv.into_float_value(),
+                            &format!("branch_{branch_index}_case_{case}_forwarding_comparison"),
+                        )?,
+                    };
+                    prev = Some((case, target, next_bv));
+                } else {
+                    let conflict = dst.insert((branch_index, prev_target), prev_bv);
+                    assert!(
+                        conflict.is_none(),
+                        "We tried to insert two different forwarding values for the same CFG edge"
+                    );
+                    prev = Some((case, target, interval::build_const(constants, value)));
+                }
+            }
+            None => prev = Some((case, target, interval::build_const(constants, value))),
+        }
+    }
+    if let Some((_, target, bv)) = prev {
+        let conflict = dst.insert((branch_index, target), bv);
+        assert!(
+            conflict.is_none(),
+            "We tried to insert two different forwarding values for the same CFG edge"
+        );
+    }
+    Ok(())
 }
 
 impl Tree {
