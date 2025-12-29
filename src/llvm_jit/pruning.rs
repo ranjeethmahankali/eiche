@@ -2,7 +2,7 @@ use inkwell::{
     AddressSpace, IntPredicate,
     basic_block::BasicBlock,
     builder::Builder,
-    values::{BasicValue, BasicValueEnum, IntValue, PointerValue},
+    values::{BasicValue, BasicValueEnum, IntValue, PointerValue, VectorValue},
 };
 
 use super::{JitContext, NumberType, interval, simd_array, single};
@@ -376,7 +376,7 @@ fn link_cond(blocks: BlockGroup<'_, 3>) {
 }
 
 fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
-    let [bleft, _, bright, cright, bop, _, merge] = blocks.indices;
+    let [bleft, _cleft, bright, cright, bop, _cop, merge] = blocks.indices;
     if let [
         Block::Branch {
             cases: left_cases, ..
@@ -448,7 +448,7 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
 }
 
 fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
-    let [bleft, _, cright, bop, _, merge] = blocks.indices;
+    let [bleft, _cleft, cright, bop, _cop, merge] = blocks.indices;
     if let [
         Block::Branch {
             cases: left_cases, ..
@@ -497,7 +497,7 @@ fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
 }
 
 fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
-    let [_, bright, _, _, _, merge] = blocks.indices;
+    let [_cleft, bright, _cright, _bop, _cop, merge] = blocks.indices;
     if let [
         Block::Code {
             instructions: left_inst,
@@ -948,7 +948,7 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                         Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual
                         | And | Or => {}
                         Min | Max | Less | LessOrEqual | Greater | GreaterOrEqual => {
-                            build_binary_notify_listeners(
+                            build_notify_listeners_binary_op(
                                 interval::build_interval_inequality_flags(
                                     regs[*lhs].into_vector_value(),
                                     regs[*rhs].into_vector_value(),
@@ -967,16 +967,21 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                             )?;
                         }
                     },
-                    Ternary(op, _, _, _) => todo!(),
+                    Ternary(op, a, b, c) => match op {
+                        Choose => todo!("Notify the listeners of choose op"),
+                    },
                 }
-                todo!("Notify listeners about the current interval");
             }
         }
     }
     todo!();
 }
 
-fn build_binary_notify_listeners<'ctx>(
+fn build_notify_listeners_choose<'ctx>(cond: VectorValue<'ctx>) {
+    // let always_true =
+}
+
+fn build_notify_listeners_binary_op<'ctx>(
     flags: interval::InequalityFlags<'ctx>,
     op: BinaryOp,
     listeners: &[Listener],
@@ -1036,6 +1041,7 @@ fn build_binary_notify_listeners<'ctx>(
         strictly_after,
         &format!("bin_op_listener_strict_after_{index}"),
     )?;
+    // Function to get the condition for different combinations of ops and types of pruning.
     let prune_cond_fn = |op: BinaryOp, prune: PruningType| -> IntValue<'ctx> {
         match (op, prune) {
             (Min, PruningType::Right)
@@ -1058,7 +1064,9 @@ fn build_binary_notify_listeners<'ctx>(
             ),
         }
     };
-    // The listeners are already grouped by branch based on how that list is constructed.
+    // If multiple listeners are from the same source branch they will appear
+    // consecutively. This is based on how they are constructed. This will cause
+    // the conditions to be folded into a build_select.
     if let (Some(branch), value) = listeners.iter().try_fold(
         (None, constants.int_32(0, false)),
         |(prev_branch, value): (Option<usize>, IntValue),
@@ -1070,7 +1078,7 @@ fn build_binary_notify_listeners<'ctx>(
          -> Result<(Option<usize>, IntValue), Error> {
             match prev_branch {
                 Some(prev_branch) if prev_branch != *branch => {
-                    builder.build_store(signal_ptrs[branch_signal_map[*branch]], value)?;
+                    builder.build_store(signal_ptrs[branch_signal_map[prev_branch]], value)?;
                     let next_value = builder
                         .build_select(
                             prune_cond_fn(op, *prune),
