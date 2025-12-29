@@ -295,7 +295,7 @@ impl Tree {
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
         for (index, node) in self.nodes().iter().copied().enumerate() {
-            let reg = build_interval_op::<T>(
+            let reg = build_op::<T>(
                 CompileInfo {
                     nodes: self.nodes(),
                     params,
@@ -364,7 +364,7 @@ impl Tree {
     }
 }
 
-pub fn build_interval_op<'ctx, 'a, T: NumberType>(
+pub fn build_op<'ctx, 'a, T: NumberType>(
     comp: CompileInfo<'a, 'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,

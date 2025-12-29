@@ -159,7 +159,7 @@ impl Tree {
     }
 }
 
-fn build_op<'a, 'ctx>(
+pub fn build_op<'a, 'ctx>(
     comp: CompileInfo<'a, 'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
