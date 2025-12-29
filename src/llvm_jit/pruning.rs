@@ -913,7 +913,8 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                 selector_node,
             } => {
                 builder.position_at_end(bbs[bi]);
-                todo!();
+                todo!("Merge the incoming values");
+                todo!("Notify listeners about the current interval");
             }
         }
     }
