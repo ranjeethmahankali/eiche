@@ -228,7 +228,11 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                         ),
                     }
                 }
-                Less | LessOrEqual | Greater | GreaterOrEqual => todo!(),
+                Less | LessOrEqual | Greater | GreaterOrEqual => {
+                    let n = ndom[ni];
+                    debug_assert!(n > threshold, "This invariant should always hold.");
+                    // branch | ldom, lhs, rdom, rhs | branch | cond | merge
+                }
             },
             Ternary(op, _, _, _) => match op {
                 Choose => todo!(),
@@ -464,6 +468,7 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
                     }
                 }
                 Less | LessOrEqual | Greater | GreaterOrEqual => {
+                    // branch | ldom, lhs, rdom, rhs | branch | cond | merge
                     let n = ndom[i];
                     if n > threshold {
                         splits.extend_from_slice(&[
