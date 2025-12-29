@@ -83,7 +83,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
         "This should never happen, it is a bug in control dependence sorting"
     );
     let (splits, is_selector) = make_layout(&tree, threshold, &ndom);
-    let (blocks, _) = splits.iter().fold(
+    let (mut blocks, inst) = splits.iter().fold(
         (Vec::<Block>::new(), 0usize),
         |(mut blocks, mut inst), split| {
             let (pos, block) = match split {
@@ -117,6 +117,12 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
             (blocks, inst)
         },
     );
+    // Push any remaining instructions as the last code block.
+    if inst < tree.len() {
+        blocks.push(Block::Code {
+            instructions: inst..tree.len(),
+        });
+    }
     // Build index maps for later use.
     let (branch_map, merge_map, code_map, _) = blocks.iter().enumerate().fold(
         (
@@ -251,7 +257,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
 }
 
 fn link_cond(blocks: BlockGroup<'_, 3>) {
-    let [branch, code, merge] = blocks.indices;
+    let [branch, _code, merge] = blocks.indices;
     if let [
         Block::Branch { cases, constants },
         Block::Code { instructions },
@@ -281,7 +287,6 @@ fn link_cond(blocks: BlockGroup<'_, 3>) {
         link_jump(branch, cases, merge, listeners, PruningType::AlwaysFalse);
         constants.push(Value::Bool(false));
         incoming.push(Incoming::Constant { block: branch });
-        todo!("Do the incoming thing")
     } else {
         unreachable!("Wrong types of block. This is a bug");
     }
@@ -645,7 +650,6 @@ mod test {
             .control_dependence_sorted()
             .expect("Dominator sorting failed");
         let (splits, is_selector) = make_layout(&tree, 10, &ndom);
-        dbg!(&splits, &is_selector);
         println!("{tree}");
         assert_eq!(is_selector.len(), tree.len());
         assert_eq!(is_selector.iter().filter(|b| **b).count(), 2);
@@ -685,6 +689,18 @@ mod test {
                             (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5))
         .unwrap();
         let blocks = make_blocks(&tree, 10).expect("Unable to make blocks");
+        dbg!(blocks);
+        assert!(false);
+    }
+
+    #[test]
+    fn t_simple_cond() {
+        let tree = deftree!(if (< 'x 0) 'x (- 'x))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        let blocks = make_blocks(&tree, 0).unwrap();
+        println!("{tree}");
         dbg!(blocks);
         assert!(false);
     }
