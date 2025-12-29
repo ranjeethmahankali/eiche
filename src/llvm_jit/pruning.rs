@@ -616,4 +616,16 @@ mod test {
         dbg!(blocks);
         assert!(false);
     }
+
+    #[test]
+    fn t_min_3_spheres_blocks() {
+        let tree = deftree!(min (min
+                                  (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
+                                  (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
+                            (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5))
+        .unwrap();
+        let blocks = make_blocks(&tree, 10).expect("Unable to make blocks");
+        dbg!(blocks);
+        assert!(false);
+    }
 }
