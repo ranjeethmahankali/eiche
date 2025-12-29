@@ -765,7 +765,8 @@ fn compile_pruning_func<'ctx, T: NumberType>(
         .fn_type(&[iptr_type.into(), iptr_type.into()], false);
     let function = compiler.module.add_function(&func_name, fn_type, None);
     compiler.set_attributes(function, context)?;
-    builder.position_at_end(context.append_basic_block(function, "entry"));
+    let entry_bb = context.append_basic_block(function, "entry");
+    builder.position_at_end(entry_bb);
     let mut regs = Vec::<BasicValueEnum>::with_capacity(tree.len());
     let blocks = make_blocks(tree, threshold)?;
     let mut bbs: Box<[BasicBlock<'ctx>]> = blocks
@@ -857,6 +858,7 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                     builder,
                     bi,
                     signal,
+                    &bbs,
                 )?;
                 // Now switch to the target branches.
                 builder.position_at_end(bbs[bi]);
@@ -925,6 +927,7 @@ fn build_branch_forwarding_outputs<'ctx>(
     builder: &'ctx Builder,
     branch_index: usize,
     signal: IntValue<'ctx>,
+    bbs: &[BasicBlock<'ctx>],
 ) -> Result<(), Error> {
     let mut prev: Option<(usize, usize, BasicValueEnum)> = None;
     for (case, target, value) in cases.iter().enumerate().filter_map(
@@ -939,7 +942,6 @@ fn build_branch_forwarding_outputs<'ctx>(
         match prev {
             Some((_, prev_target, prev_bv)) => {
                 if prev_target == target {
-                    // Fold another select
                     let case_eq = builder.build_int_compare(
                         IntPredicate::EQ,
                         signal,
@@ -967,10 +969,14 @@ fn build_branch_forwarding_outputs<'ctx>(
                         conflict.is_none(),
                         "We tried to insert two different forwarding values for the same CFG edge"
                     );
+                    builder.position_at_end(bbs[target]);
                     prev = Some((case, target, interval::build_const(constants, value)));
                 }
             }
-            None => prev = Some((case, target, interval::build_const(constants, value))),
+            None => {
+                builder.position_at_end(bbs[target]);
+                prev = Some((case, target, interval::build_const(constants, value)));
+            }
         }
     }
     if let Some((_, target, bv)) = prev {
