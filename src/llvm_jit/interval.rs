@@ -255,10 +255,12 @@ fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
     Ok(ranges.into_boxed_slice())
 }
 
-pub struct CompilationData<'a, 'ctx> {
+pub struct CompileInfo<'a, 'ctx> {
     nodes: &'a [Node],
     params: &'a str,
     ranges: &'a [Interval],
+    regs: &'a [BasicValueEnum<'ctx>],
+    constants: &'a mut Constants<'ctx>,
     interval_type: VectorType<'ctx>,
     function: FunctionValue<'ctx>,
     node: Node,
@@ -294,10 +296,12 @@ impl Tree {
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
         for (index, node) in self.nodes().iter().copied().enumerate() {
             let reg = build_interval_op::<T>(
-                CompilationData {
+                CompileInfo {
                     nodes: self.nodes(),
                     params,
                     ranges: ranges.as_ref(),
+                    regs: &regs,
+                    constants: &mut constants,
                     interval_type,
                     function,
                     node,
@@ -305,8 +309,6 @@ impl Tree {
                 },
                 builder,
                 &compiler.module,
-                &mut constants,
-                &regs,
             )?;
             regs.push(fast_math(reg));
         }
@@ -363,19 +365,16 @@ impl Tree {
 }
 
 pub fn build_interval_op<'ctx, 'a, T: NumberType>(
-    comp: CompilationData<'a, 'ctx>,
+    comp: CompileInfo<'a, 'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    constants: &mut Constants<'ctx>,
-    regs: &[BasicValueEnum<'ctx>],
-) -> Result<BasicValueEnum<'ctx>, Error>
-where
-    'a: 'ctx,
-{
-    let CompilationData {
+) -> Result<BasicValueEnum<'ctx>, Error> {
+    let CompileInfo {
         nodes,
         params,
         ranges,
+        regs,
+        constants,
         interval_type,
         function,
         node,
