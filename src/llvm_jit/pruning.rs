@@ -945,7 +945,7 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                 // Notify the listeners about the current interval.
                 match tree.node(selector_node) {
                     Constant(_) | Symbol(_) | Unary(_, _) => {}
-                    Binary(op, _, _) => match op {
+                    Binary(op, lhs, rhs) => match op {
                         Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual
                         | And | Or => {}
                         Min => todo!(),
