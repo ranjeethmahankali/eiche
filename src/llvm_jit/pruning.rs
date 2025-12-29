@@ -223,7 +223,9 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                                 [c1, b2, c2, b3, c3, merge],
                             ));
                         }
-                        (false, false) => continue,
+                        (false, false) => unreachable!(
+                            "We only iterate over selector nodes, this should never happen."
+                        ),
                     }
                 }
                 Less | LessOrEqual | Greater | GreaterOrEqual => todo!(),
