@@ -278,7 +278,6 @@ impl Tree {
             // Only support scalar output trees.
             return Err(Error::TypeMismatch);
         }
-        let num_roots = self.num_roots();
         let ranges = compute_ranges(self)?;
         let func_name = context.new_func_name::<T>(Some("interval"));
         let context = &context.inner;
@@ -319,7 +318,7 @@ impl Tree {
                 "Cannot read output address".to_string(),
             ))?
             .into_pointer_value();
-        for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
+        for (i, reg) in regs[(self.len() - self.num_roots())..].iter().enumerate() {
             // # SAFETY: This is unit tested a lot. If this fails, we segfault.
             let dst = unsafe {
                 builder.build_gep(
@@ -358,7 +357,7 @@ impl Tree {
         Ok(JitIntervalFn {
             func,
             num_inputs: params.len(),
-            num_outputs: num_roots,
+            num_outputs: self.num_roots(),
             _phantom: PhantomData,
         })
     }
