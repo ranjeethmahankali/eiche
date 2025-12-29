@@ -14,10 +14,9 @@ use crate::{
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
     builder::Builder,
-    context::Context,
     execution_engine::JitFunction,
     module::Module,
-    types::{FloatType, IntType},
+    types::FloatType,
     values::{BasicValue, BasicValueEnum, FunctionValue},
 };
 use std::{ffi::c_void, marker::PhantomData};
@@ -66,6 +65,16 @@ where
 
 unsafe impl<'ctx, T> Sync for JitFnSync<'ctx, T> where T: NumberType {}
 
+pub struct CompileInfo<'a, 'ctx> {
+    nodes: &'a [Node],
+    params: &'a str,
+    float_type: FloatType<'ctx>,
+    function: FunctionValue<'ctx>,
+    regs: &'a [BasicValueEnum<'ctx>],
+    node: Node,
+    index: usize,
+}
+
 impl Tree {
     /// JIT compile a tree and return a native evaluator.
     pub fn jit_compile<'ctx, T>(
@@ -87,7 +96,6 @@ impl Tree {
         let builder = &compiler.builder;
         let float_type = T::jit_type(context);
         let float_ptr_type = context.ptr_type(AddressSpace::default());
-        let bool_type = context.bool_type();
         let fn_type = context
             .void_type()
             .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
@@ -95,19 +103,19 @@ impl Tree {
         compiler.set_attributes(function, context)?;
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
-        for (ni, node) in self.nodes().iter().enumerate() {
+        for (ni, node) in self.nodes().iter().copied().enumerate() {
             let reg = build_op(
-                self.nodes(),
-                params,
-                context,
+                CompileInfo {
+                    nodes: self.nodes(),
+                    params,
+                    float_type,
+                    function,
+                    regs: &regs,
+                    node,
+                    index: ni,
+                },
                 builder,
                 &compiler.module,
-                float_type,
-                bool_type,
-                function,
-                &regs,
-                ni,
-                *node,
             )?;
             regs.push(reg);
         }
@@ -151,22 +159,25 @@ impl Tree {
     }
 }
 
-fn build_op<'ctx, 'a>(
-    nodes: &[Node],
-    params: &str,
-    context: &'ctx Context,
+fn build_op<'a, 'ctx>(
+    comp: CompileInfo<'a, 'ctx>,
     builder: &'ctx Builder,
     module: &'ctx Module,
-    float_type: FloatType<'ctx>,
-    bool_type: IntType<'ctx>,
-    function: FunctionValue<'ctx>,
-    regs: &[BasicValueEnum<'ctx>],
-    ni: usize,
-    node: Node,
 ) -> Result<BasicValueEnum<'ctx>, Error> {
+    let CompileInfo {
+        nodes,
+        params,
+        float_type,
+        function,
+        regs,
+        node,
+        index,
+    } = comp;
     Ok(match node {
         Constant(val) => match val {
-            Bool(val) => bool_type
+            Bool(val) => module
+                .get_context()
+                .bool_type()
                 .const_int(if val { 1 } else { 0 }, false)
                 .as_basic_value_enum(),
             Scalar(val) => float_type.const_float(val).as_basic_value_enum(),
@@ -184,7 +195,7 @@ fn build_op<'ctx, 'a>(
                     builder.build_gep(
                         float_type,
                         inputs,
-                        &[context.i64_type().const_int(
+                        &[module.get_context().i64_type().const_int(
                             params.chars().position(|c| c == label).ok_or(
                                 Error::JitCompilationError("Cannot find symbol".to_string()),
                             )? as u64,
@@ -197,7 +208,7 @@ fn build_op<'ctx, 'a>(
         }
         Unary(op, input) => match op {
             Negate => fast_math(
-                builder.build_float_neg(regs[input].into_float_value(), &format!("val_{ni}"))?,
+                builder.build_float_neg(regs[input].into_float_value(), &format!("val_{index}"))?,
             )
             .as_basic_value_enum(),
             Sqrt => fast_math(build_float_unary_intrinsic(
@@ -246,7 +257,7 @@ fn build_op<'ctx, 'a>(
                 fast_math(builder.build_float_div(
                     sin.into_float_value(),
                     cos.into_float_value(),
-                    &format!("val_{ni}"),
+                    &format!("val_{index}"),
                 )?)
                 .as_basic_value_enum()
             }
@@ -272,37 +283,37 @@ fn build_op<'ctx, 'a>(
                 regs[input].into_float_value(),
             )?),
             Not => builder
-                .build_not(regs[input].into_int_value(), &format!("val_{ni}"))?
+                .build_not(regs[input].into_int_value(), &format!("val_{index}"))?
                 .as_basic_value_enum(),
         },
         Binary(op, lhs, rhs) => match op {
             Add => fast_math(builder.build_float_add(
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             Subtract => fast_math(builder.build_float_sub(
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             Multiply => fast_math(builder.build_float_mul(
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             Divide => fast_math(builder.build_float_div(
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             Pow if matches!(&nodes[rhs], Constant(Value::Scalar(2.0))) => {
                 let input = regs[lhs].into_float_value();
-                fast_math(builder.build_float_mul(input, input, &format!("val_{ni}"))?)
+                fast_math(builder.build_float_mul(input, input, &format!("val_{index}"))?)
                     .as_basic_value_enum()
             }
             Pow => fast_math(build_float_binary_intrinsic(
@@ -332,63 +343,63 @@ fn build_op<'ctx, 'a>(
             Remainder => fast_math(builder.build_float_rem(
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             Less => fast_math(builder.build_float_compare(
                 FloatPredicate::ULT,
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             LessOrEqual => fast_math(builder.build_float_compare(
                 FloatPredicate::ULE,
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             Equal => fast_math(builder.build_float_compare(
                 FloatPredicate::UEQ,
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             NotEqual => fast_math(builder.build_float_compare(
                 FloatPredicate::UNE,
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             Greater => fast_math(builder.build_float_compare(
                 FloatPredicate::UGT,
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             GreaterOrEqual => fast_math(builder.build_float_compare(
                 FloatPredicate::UGE,
                 regs[lhs].into_float_value(),
                 regs[rhs].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?)
             .as_basic_value_enum(),
             And => builder
                 .build_and(
                     regs[lhs].into_int_value(),
                     regs[rhs].into_int_value(),
-                    &format!("val_{ni}"),
+                    &format!("val_{index}"),
                 )?
                 .as_basic_value_enum(),
             Or => builder
                 .build_or(
                     regs[lhs].into_int_value(),
                     regs[rhs].into_int_value(),
-                    &format!("val_{ni}"),
+                    &format!("val_{index}"),
                 )?
                 .as_basic_value_enum(),
         },
@@ -397,7 +408,7 @@ fn build_op<'ctx, 'a>(
                 regs[a].into_int_value(),
                 regs[b].into_float_value(),
                 regs[c].into_float_value(),
-                &format!("val_{ni}"),
+                &format!("val_{index}"),
             )?,
         },
     })
