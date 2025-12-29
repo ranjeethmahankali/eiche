@@ -784,29 +784,54 @@ fn compile_pruning_func<'ctx, T: NumberType>(
             )
         })
         .collect();
-    for (bi, block) in blocks.into_iter().enumerate() {
-        builder.position_at_end(bbs[bi]);
-        match block {
-            Block::Branch { cases } => {
-                let signals = function
-                    .get_nth_param(2)
-                    .ok_or(Error::JitCompilationError(
-                        "Cannot read output address".to_string(),
-                    ))?
-                    .into_pointer_value();
-                let signal = {
+    let branch_signal_map: Box<[usize]> = {
+        blocks
+            .iter()
+            .scan(0usize, |idx, block| match block {
+                Block::Branch { .. } => Some(std::mem::replace(idx, *idx + 1)),
+                Block::Code { .. } | Block::Merge { .. } => Some(*idx),
+            })
+            .collect()
+    };
+    let signals = {
+        let signals_arg = function
+            .get_nth_param(2)
+            .ok_or(Error::JitCompilationError(
+                "Cannot read output address".to_string(),
+            ))?
+            .into_pointer_value();
+        blocks
+            .iter()
+            .filter(|block| match block {
+                Block::Branch { .. } => true,
+                Block::Code { .. } | Block::Merge { .. } => false,
+            })
+            .enumerate()
+            .try_fold(
+                Vec::with_capacity(blocks.len()),
+                |mut signals, (bi, _block)| -> Result<Vec<IntValue>, Error> {
                     let ptr = unsafe {
                         builder.build_gep(
                             context.i32_type(),
-                            signals,
+                            signals_arg,
                             &[constants.int_32(bi as u32, false)],
                             &format!("signal_ptr_{bi}"),
                         )?
                     };
-                    builder
-                        .build_load(context.i32_type(), ptr, &format!("load_signal_{bi}"))?
-                        .into_int_value()
-                };
+                    signals.push(
+                        builder
+                            .build_load(context.i32_type(), ptr, &format!("load_signal_{bi}"))?
+                            .into_int_value(),
+                    );
+                    Ok(signals)
+                },
+            )?
+            .into_boxed_slice()
+    };
+    for (bi, block) in blocks.into_iter().enumerate() {
+        builder.position_at_end(bbs[bi]);
+        match block {
+            Block::Branch { cases } => {
                 let cases: Box<[(IntValue, BasicBlock)]> = cases
                     .iter()
                     .enumerate()
@@ -817,7 +842,11 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                         )
                     })
                     .collect();
-                builder.build_switch(signal, bbs[bi + 1], cases.as_ref())?;
+                builder.build_switch(
+                    signals[branch_signal_map[bi]],
+                    bbs[bi + 1],
+                    cases.as_ref(),
+                )?;
             }
             Block::Code { instructions } => {
                 for (index, node) in tree.nodes()[instructions].iter().copied().enumerate() {
