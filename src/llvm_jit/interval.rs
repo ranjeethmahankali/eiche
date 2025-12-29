@@ -604,8 +604,7 @@ impl Tree {
                     .as_basic_value_enum(),
                 },
             };
-            fast_math(reg);
-            regs.push(reg);
+            regs.push(fast_math(reg));
         }
         // Compile instructions to copy the outputs to the out argument.
         let outputs = function
