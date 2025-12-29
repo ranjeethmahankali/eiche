@@ -682,6 +682,82 @@ pub fn build_const<'ctx>(constants: &mut Constants<'ctx>, value: Value) -> Basic
     }
 }
 
+fn build_interval_precedes<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    constants: &mut Constants<'ctx>,
+    index: usize,
+) -> Result<IntValue<'ctx>, Error> {
+    let either_empty = builder.build_or(
+        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(rhs, builder, module, index)?,
+        &format!("interval_precedes_either_empty_{index}"),
+    )?;
+    let precedes = builder.build_float_compare(
+        FloatPredicate::ULE,
+        builder
+            .build_extract_element(
+                lhs,
+                constants.int_32(1, false),
+                &format!("precedes_lhi_extract_{index}"),
+            )?
+            .into_float_value(),
+        builder
+            .build_extract_element(
+                rhs,
+                constants.int_32(0, false),
+                &format!("precedes_lhi_extract_{index}"),
+            )?
+            .into_float_value(),
+        &format!("precedes_lhi_rlo_compare_{index}"),
+    )?;
+    Ok(builder.build_or(
+        either_empty,
+        precedes,
+        &format!("precedes_or_empty_check_{index}"),
+    )?)
+}
+
+fn build_interval_strict_precedes<'ctx>(
+    lhs: VectorValue<'ctx>,
+    rhs: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    constants: &mut Constants<'ctx>,
+    index: usize,
+) -> Result<IntValue<'ctx>, Error> {
+    let either_empty = builder.build_or(
+        build_check_interval_empty(lhs, builder, module, index)?,
+        build_check_interval_empty(rhs, builder, module, index)?,
+        &format!("interval_precedes_either_empty_{index}"),
+    )?;
+    let precedes = builder.build_float_compare(
+        FloatPredicate::ULT,
+        builder
+            .build_extract_element(
+                lhs,
+                constants.int_32(1, false),
+                &format!("precedes_lhi_extract_{index}"),
+            )?
+            .into_float_value(),
+        builder
+            .build_extract_element(
+                rhs,
+                constants.int_32(0, false),
+                &format!("precedes_lhi_extract_{index}"),
+            )?
+            .into_float_value(),
+        &format!("precedes_lhi_rlo_compare_{index}"),
+    )?;
+    Ok(builder.build_or(
+        either_empty,
+        precedes,
+        &format!("precedes_or_empty_check_{index}"),
+    )?)
+}
+
 fn build_interval_not<'ctx>(
     input: VectorValue<'ctx>,
     range: (bool, bool),
