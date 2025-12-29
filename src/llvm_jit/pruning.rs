@@ -57,7 +57,7 @@ built, that can be used to compile LLVM functions that use instruction pruning
 to skip instructions based on interval evaluations.
  */
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum PruningType {
     None,
     Left,
@@ -958,6 +958,12 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                                     selector_node,
                                 )?,
                                 *op,
+                                &listeners,
+                                &branch_signal_map,
+                                builder,
+                                &mut constants,
+                                selector_node,
+                                &signal_ptrs,
                             )?;
                         }
                     },
@@ -973,6 +979,12 @@ fn compile_pruning_func<'ctx, T: NumberType>(
 fn build_binary_notify_listeners<'ctx>(
     flags: interval::InequalityFlags<'ctx>,
     op: BinaryOp,
+    listeners: &[Listener],
+    branch_signal_map: &[usize],
+    builder: &'ctx Builder,
+    constants: &mut interval::Constants<'ctx>,
+    index: usize,
+    signal_ptrs: &[PointerValue<'ctx>],
 ) -> Result<(), Error> {
     let interval::InequalityFlags {
         either_empty,
@@ -980,15 +992,112 @@ fn build_binary_notify_listeners<'ctx>(
         strictly_after,
         touching,
     } = flags;
-    match op {
-        Min => todo!(),
-        Max => todo!(),
-        Less => todo!(),
-        LessOrEqual => todo!(),
-        Greater => todo!(),
-        GreaterOrEqual => todo!(),
-        _ => unreachable!("We already checked, this should never happen, this is a bug."),
+    let not_empty = builder.build_not(
+        either_empty,
+        &format!("bin_op_listener_not_empty_check_{index}"),
+    )?;
+    let before = builder.build_and(
+        not_empty,
+        builder.build_or(
+            builder
+                .build_extract_element(
+                    touching,
+                    constants.int_32(1, false),
+                    &format!("bin_op_listener_touching_left_check_{index}"),
+                )?
+                .into_int_value(),
+            strictly_before,
+            &format!("bin_op_listener_before_or_touching_{index}"),
+        )?,
+        &format!("bin_op_listener_right_prune_check_check_{index}"),
+    )?;
+    let after = builder.build_and(
+        not_empty,
+        builder.build_or(
+            builder
+                .build_extract_element(
+                    touching,
+                    constants.int_32(0, false),
+                    &format!("bin_op_listener_touching_left_check_{index}"),
+                )?
+                .into_int_value(),
+            strictly_after,
+            &format!("bin_op_listener_before_or_touching_{index}"),
+        )?,
+        &format!("bin_op_listener_right_prune_check_check_{index}"),
+    )?;
+    let strictly_before = builder.build_and(
+        not_empty,
+        strictly_before,
+        &format!("bin_op_listener_strict_before_{index}"),
+    )?;
+    let strictly_after = builder.build_and(
+        not_empty,
+        strictly_after,
+        &format!("bin_op_listener_strict_after_{index}"),
+    )?;
+    let prune_cond_fn = |op: BinaryOp, prune: PruningType| -> IntValue<'ctx> {
+        match (op, prune) {
+            (Min, PruningType::Right)
+            | (Max, PruningType::Left)
+            | (LessOrEqual, PruningType::AlwaysTrue)
+            | (Greater, PruningType::AlwaysFalse) => before,
+            (Min, PruningType::Left)
+            | (Max, PruningType::Right)
+            | (Less, PruningType::AlwaysFalse)
+            | (GreaterOrEqual, PruningType::AlwaysTrue) => after,
+            (Less, PruningType::AlwaysTrue) | (GreaterOrEqual, PruningType::AlwaysFalse) => {
+                strictly_before
+            }
+            (Greater, PruningType::AlwaysTrue) | (LessOrEqual, PruningType::AlwaysFalse) => {
+                strictly_after
+            }
+            _ => unreachable!(
+                "Incompatible pruning type for the selector node: {:?}; {:?}. This is a bug.",
+                op, prune
+            ),
+        }
+    };
+    // The listeners are already grouped by branch based on how that list is constructed.
+    if let (Some(branch), value) = listeners.iter().try_fold(
+        (None, constants.int_32(0, false)),
+        |(prev_branch, value): (Option<usize>, IntValue),
+         Listener {
+             branch,
+             case,
+             prune,
+         }|
+         -> Result<(Option<usize>, IntValue), Error> {
+            match prev_branch {
+                Some(prev_branch) if prev_branch != *branch => {
+                    builder.build_store(signal_ptrs[branch_signal_map[*branch]], value)?;
+                    let next_value = builder
+                        .build_select(
+                            prune_cond_fn(op, *prune),
+                            constants.int_32(*case, false),
+                            constants.int_32(0, false),
+                            &format!("listener_fold_expr_{index}"),
+                        )?
+                        .into_int_value();
+                    Ok((Some(*branch), next_value))
+                }
+                _ => {
+                    let next_value = builder
+                        .build_select(
+                            prune_cond_fn(op, *prune),
+                            constants.int_32(*case, false),
+                            value,
+                            &format!("listener_fold_expr_{index}"),
+                        )?
+                        .into_int_value();
+                    Ok((Some(*branch), next_value))
+                }
+            }
+        },
+    )? {
+        builder.build_store(signal_ptrs[branch_signal_map[branch]], value)?;
     }
+    Ok(())
 }
 
 fn build_branch_forwarding_outputs<'ctx>(
