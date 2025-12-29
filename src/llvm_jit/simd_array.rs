@@ -13,7 +13,7 @@ use inkwell::{
     context::Context,
     execution_engine::JitFunction,
     module::Module,
-    types::{FloatType, IntType, VectorType},
+    types::{FloatType, VectorType},
     values::{BasicValue, BasicValueEnum, IntValue, PointerValue},
 };
 use std::{ffi::c_void, marker::PhantomData, mem::size_of};
@@ -1205,22 +1205,23 @@ impl Tree {
         builder.position_at_end(loop_block);
         let phi = builder.build_phi(i64_type, "counter_phi")?;
         phi.add_incoming(&[(&i64_type.const_int(0, false), start_block)]);
-        let index = phi.as_basic_value().into_int_value();
+        let loop_index = phi.as_basic_value().into_int_value();
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
-        for (ni, node) in self.nodes().iter().copied().enumerate() {
+        for (node_index, node) in self.nodes().iter().copied().enumerate() {
             let reg = build_op::<T>(
-                self.nodes(),
-                symbols,
-                context,
-                &compiler.module,
+                CompileInfo {
+                    nodes: self.nodes(),
+                    symbols,
+                    context,
+                    fvec_type,
+                    inputs,
+                    loop_index,
+                    regs: regs.as_ref(),
+                    node_index,
+                    node,
+                },
                 builder,
-                i64_type,
-                fvec_type,
-                inputs,
-                index,
-                &regs,
-                ni,
-                node,
+                &compiler.module,
             )?;
             regs.push(reg);
         }
@@ -1234,7 +1235,7 @@ impl Tree {
         for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
             let offset = builder.build_int_add(
                 builder.build_int_mul(
-                    index,
+                    loop_index,
                     i64_type.const_int(num_roots as u64, false),
                     "offset_mul",
                 )?,
@@ -1249,7 +1250,7 @@ impl Tree {
             builder.build_store(dst, *reg)?;
         }
         // Check to see if the loop should go on.
-        let next = builder.build_int_add(index, i64_type.const_int(1, false), "increment")?;
+        let next = builder.build_int_add(loop_index, i64_type.const_int(1, false), "increment")?;
         phi.add_incoming(&[(&next, loop_block)]);
         let cmp = builder.build_int_compare(IntPredicate::ULT, next, eval_len, "loop-check")?;
         builder.build_conditional_branch(cmp, loop_block, end_block)?;
@@ -1273,24 +1274,38 @@ impl Tree {
     }
 }
 
-fn build_op<'a, 'ctx, T>(
+pub struct CompileInfo<'a, 'ctx> {
     nodes: &'a [Node],
     symbols: &'a str,
     context: &'ctx Context,
-    module: &'ctx Module,
-    builder: &'ctx Builder<'ctx>,
-    i64_type: IntType<'ctx>,
     fvec_type: VectorType<'ctx>,
     inputs: PointerValue<'ctx>,
-    index: IntValue<'ctx>,
-    regs: &Vec<BasicValueEnum<'ctx>>,
-    ni: usize,
+    loop_index: IntValue<'ctx>,
+    regs: &'a [BasicValueEnum<'ctx>],
+    node_index: usize,
     node: Node,
+}
+
+pub fn build_op<'a, 'ctx, T>(
+    comp: CompileInfo<'a, 'ctx>,
+    builder: &'ctx Builder<'ctx>,
+    module: &'ctx Module,
 ) -> Result<BasicValueEnum<'ctx>, Error>
 where
     T: NumberType,
     Wide: SimdVec<T>,
 {
+    let CompileInfo {
+        nodes,
+        symbols,
+        context,
+        fvec_type,
+        inputs,
+        loop_index,
+        regs,
+        node_index: ni,
+        node,
+    } = comp;
     Ok(match node {
         Constant(val) => match val {
             Bool(val) => <Wide as SimdVec<T>>::const_bool(val, context),
@@ -1299,11 +1314,14 @@ where
         Symbol(label) => {
             let offset = builder.build_int_add(
                 builder.build_int_mul(
-                    index,
-                    i64_type.const_int(symbols.len() as u64, false),
+                    loop_index,
+                    module
+                        .get_context()
+                        .i64_type()
+                        .const_int(symbols.len() as u64, false),
                     &format!("input_offset_mul_{label}"),
                 )?,
-                i64_type.const_int(
+                module.get_context().i64_type().const_int(
                     symbols
                         .chars()
                         .position(|c| c == label)
