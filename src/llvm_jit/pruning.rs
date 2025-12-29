@@ -228,7 +228,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     let rdom = ndom[*rhs];
                     let lstart = *lhs - ldom;
                     let rstart = *rhs - rdom;
-                    let c1 = code_map.get(&(&lstart)).copied().expect("This is a bug");
+                    let c1 = code_map.get(&lstart).copied().expect("This is a bug");
                     let c2 = code_map.get(&rstart).copied().expect("This is a bug");
                     let b3 = branch_map.get(&ni).copied().expect("This is a bug");
                     let c3 = code_map.get(&ni).copied().expect("This is a bug");
@@ -282,7 +282,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     let rdom = ndom[*rhs];
                     let lstart = *lhs - ldom;
                     let rstart = *rhs - rdom;
-                    let c1 = code_map.get(&(&lstart)).copied().expect("This is a bug");
+                    let c1 = code_map.get(&lstart).copied().expect("This is a bug");
                     let c2 = code_map.get(&rstart).copied().expect("This is a bug");
                     let b3 = branch_map.get(&ni).copied().expect("This is a bug");
                     let c3 = code_map.get(&ni).copied().expect("This is a bug");
@@ -499,14 +499,14 @@ fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
 fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
     let [_, bright, _, _, _, merge] = blocks.indices;
     if let [
-        Block::Code { instructions: _ },
+        Block::Code {
+            instructions: left_inst,
+        },
         Block::Branch {
             cases: right_cases, ..
         },
-        Block::Code {
-            instructions: right_inst,
-        },
-        Block::Branch { cases: _, .. },
+        Block::Code { instructions: _ },
+        Block::Branch { .. },
         Block::Code {
             instructions: op_inst,
         },
@@ -519,7 +519,7 @@ fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
     ] = blocks.blocks
     {
         debug_assert_eq!(op_inst.start, *merge_selector, "This is a bug");
-        /* Only rhs is purnable and it gets pruned.
+        /* Only rhs is prunable and it gets pruned.
 
         cleft | bright | cright | bop | cop | merge
           │      ↑ │                            ↑
@@ -535,7 +535,7 @@ fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
         );
         incoming.push(Incoming {
             block: bright,
-            output: Some(right_inst.end - 1),
+            output: Some(left_inst.end - 1),
         });
     } else {
         unreachable!("Wrong types of block. This is a bug");
@@ -682,9 +682,9 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
                             (false, true) => {
                                 // | ttdom, tt | branch | ffdom, ff | branch | choose | merge.
                                 splits.extend_from_slice(&[
-                                    Split::Branch(*tt - ttdom),
+                                    Split::Direct(*tt - ttdom),
                                     Split::Branch(*ff - ffdom),
-                                    Split::Direct(i),
+                                    Split::Branch(i),
                                     Split::Merge(i + 1),
                                 ]);
                                 is_selector[i] = true;
@@ -855,6 +855,7 @@ fn compile_pruning_func<'ctx, T: NumberType>(
     for (bi, block) in blocks.into_iter().enumerate() {
         match block {
             Block::Branch { cases } => {
+                builder.position_at_end(bbs[bi]);
                 let signal = signals[branch_signal_map[bi]];
                 // Some of these cases may be trying to forward a constant value
                 // to their target branch. So we create those constant
@@ -866,10 +867,8 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                     builder,
                     bi,
                     signal,
-                    &bbs,
                 )?;
                 // Now switch to the target branches.
-                builder.position_at_end(bbs[bi]);
                 let cases: Box<[(IntValue, BasicBlock)]> = cases
                     .iter()
                     .enumerate()
@@ -999,7 +998,6 @@ fn build_branch_forwarding_outputs<'ctx>(
     builder: &'ctx Builder,
     branch_index: usize,
     signal: IntValue<'ctx>,
-    bbs: &[BasicBlock<'ctx>],
 ) -> Result<(), Error> {
     let mut prev: Option<(usize, usize, BasicValueEnum)> = None;
     for (case, target, value) in cases.iter().enumerate().filter_map(
@@ -1041,12 +1039,10 @@ fn build_branch_forwarding_outputs<'ctx>(
                         conflict.is_none(),
                         "We tried to insert two different forwarding values for the same CFG edge"
                     );
-                    builder.position_at_end(bbs[target]);
                     prev = Some((case, target, interval::build_const(constants, value)));
                 }
             }
             None => {
-                builder.position_at_end(bbs[target]);
                 prev = Some((case, target, interval::build_const(constants, value)));
             }
         }
