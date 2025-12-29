@@ -248,8 +248,49 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     link_cond(BlockGroup::new(&mut blocks, [branch, code, merge]));
                 }
             },
-            Ternary(op, _, _, _) => match op {
-                Choose => todo!(),
+            Ternary(op, _, lhs, rhs) => match op {
+                Choose => {
+                    // Code duplication with this being the same as Min / Max. But this is OK for now.
+                    let ldom = ndom[*lhs];
+                    let rdom = ndom[*rhs];
+                    let lstart = *lhs - ldom;
+                    let rstart = *rhs - rdom;
+                    let c1 = code_map.get(&(&lstart)).copied().expect("This is a bug");
+                    let c2 = code_map.get(&rstart).copied().expect("This is a bug");
+                    let b3 = branch_map.get(&ni).copied().expect("This is a bug");
+                    let c3 = code_map.get(&ni).copied().expect("This is a bug");
+                    let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
+                    match (ldom > threshold, rdom > threshold) {
+                        (true, true) => {
+                            // branch | ldom, lhs | branch | rdom, rhs | branch | op | merge
+                            let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
+                            let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
+                            link_bin_op_both_prunable(BlockGroup::new(
+                                &mut blocks,
+                                [b1, c1, b2, c2, b3, c3, merge],
+                            ));
+                        }
+                        (true, false) => {
+                            // branch | ldom, lhs | rdom, rhs | branch | op | merge
+                            let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
+                            link_bin_op_left_prunable(BlockGroup::new(
+                                &mut blocks,
+                                [b1, c1, c2, b3, c3, merge],
+                            ));
+                        }
+                        (false, true) => {
+                            // | ldom, lhs | branch | rdom, rhs | branch | op | merge
+                            let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
+                            link_bin_op_right_prunable(BlockGroup::new(
+                                &mut blocks,
+                                [c1, b2, c2, b3, c3, merge],
+                            ));
+                        }
+                        (false, false) => unreachable!(
+                            "We only iterate over selector nodes, this should never happen."
+                        ),
+                    }
+                }
             },
         }
     }
