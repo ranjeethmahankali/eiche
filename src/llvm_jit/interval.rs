@@ -77,7 +77,7 @@ where
 
 unsafe impl<'ctx, T> Sync for JitIntervalFnSync<'ctx, T> where T: NumberType {}
 
-struct Constants<'ctx> {
+pub struct Constants<'ctx> {
     ctx: &'ctx Context,
     flt_type: FloatType<'ctx>,
     cache: HashMap<u64, BasicValueEnum<'ctx>>,
@@ -255,30 +255,23 @@ fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
     Ok(ranges.into_boxed_slice())
 }
 
-struct CompilationData<'a, 'ctx> {
+pub struct CompilationData<'a, 'ctx> {
     nodes: &'a [Node],
-    index: usize,
-    node: Node,
     params: &'a str,
     ranges: &'a [Interval],
-    module: &'a Module<'ctx>,
-    builder: &'a Builder<'ctx>,
     interval_type: VectorType<'ctx>,
-    constants: &'a mut Constants<'ctx>,
     function: FunctionValue<'ctx>,
-    regs: &'a [BasicValueEnum<'ctx>],
+    node: Node,
+    index: usize,
 }
 
 impl Tree {
     /// JIT compile the tree for interval evaluations.
-    pub fn jit_compile_interval<'ctx, T>(
+    pub fn jit_compile_interval<'ctx, T: NumberType>(
         &'ctx self,
         context: &'ctx JitContext,
         params: &str,
-    ) -> Result<JitIntervalFn<'ctx, T>, Error>
-    where
-        T: NumberType,
-    {
+    ) -> Result<JitIntervalFn<'ctx, T>, Error> {
         if !self.is_scalar() {
             // Only support scalar output trees.
             return Err(Error::TypeMismatch);
@@ -300,30 +293,20 @@ impl Tree {
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
         for (index, node) in self.nodes().iter().copied().enumerate() {
-            // let comp = CompilationData {
-            //     nodes: self.nodes(),
-            //     index,
-            //     node,
-            //     params,
-            //     ranges: &ranges,
-            //     module: &compiler.module,
-            //     builder,
-            //     interval_type,
-            //     constants: &mut constants,
-            //     function,
-            //     regs: &regs,
-            // };
             let reg = build_interval_op::<T>(
-                self.nodes(),
-                params,
-                &ranges,
-                &compiler.module,
+                CompilationData {
+                    nodes: self.nodes(),
+                    params,
+                    ranges: ranges.as_ref(),
+                    interval_type,
+                    function,
+                    node,
+                    index,
+                },
                 builder,
-                interval_type,
+                &compiler.module,
                 &mut constants,
-                function,
                 &regs,
-                index,
             )?;
             regs.push(fast_math(reg));
         }
@@ -380,18 +363,24 @@ impl Tree {
 }
 
 pub fn build_interval_op<'ctx, 'a, T: NumberType>(
-    nodes: &[Node],
-    params: &str,
-    ranges: &[Interval],
+    comp: CompilationData<'a, 'ctx>,
+    builder: &'ctx Builder,
     module: &'ctx Module,
-    builder: &'ctx Builder<'ctx>,
-    interval_type: VectorType<'ctx>,
     constants: &mut Constants<'ctx>,
-    function: FunctionValue<'ctx>,
     regs: &[BasicValueEnum<'ctx>],
-    index: usize,
-) -> Result<BasicValueEnum<'ctx>, Error> {
-    let node = nodes[index];
+) -> Result<BasicValueEnum<'ctx>, Error>
+where
+    'a: 'ctx,
+{
+    let CompilationData {
+        nodes,
+        params,
+        ranges,
+        interval_type,
+        function,
+        node,
+        index,
+    } = comp;
     let reg = match node {
         Constant(value) => match value {
             Value::Bool(flag) => constants.bool_vec([flag; 2]).as_basic_value_enum(),
