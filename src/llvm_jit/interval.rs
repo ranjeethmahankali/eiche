@@ -36,7 +36,10 @@ use std::{
     marker::PhantomData,
 };
 
-pub type NativeIntervalFunc = unsafe extern "C" fn(*const c_void, *mut c_void);
+pub type NativeIntervalFunc = unsafe extern "C" fn(
+    *const c_void, // Inputs
+    *mut c_void,   // Outputs
+);
 
 #[derive(Clone)]
 pub struct JitIntervalFn<'ctx, T>
@@ -84,7 +87,7 @@ pub struct Constants<'ctx> {
 }
 
 impl<'ctx> Constants<'ctx> {
-    fn create<T: NumberType>(context: &'ctx Context) -> Self {
+    pub fn create<T: NumberType>(context: &'ctx Context) -> Self {
         Self {
             ctx: context,
             flt_type: T::jit_type(context),
@@ -92,7 +95,7 @@ impl<'ctx> Constants<'ctx> {
         }
     }
 
-    fn int_32(&mut self, val: u32, signed: bool) -> IntValue<'ctx> {
+    pub fn int_32(&mut self, val: u32, signed: bool) -> IntValue<'ctx> {
         let hash = {
             let mut s: DefaultHasher = Default::default();
             "int_32".hash(&mut s);
@@ -113,7 +116,7 @@ impl<'ctx> Constants<'ctx> {
         }
     }
 
-    fn int_8(&mut self, val: u8, signed: bool) -> IntValue<'ctx> {
+    pub fn int_8(&mut self, val: u8, signed: bool) -> IntValue<'ctx> {
         let hash = {
             let mut s: DefaultHasher = Default::default();
             "int_8".hash(&mut s);
@@ -134,7 +137,7 @@ impl<'ctx> Constants<'ctx> {
         }
     }
 
-    fn float(&mut self, val: f64) -> FloatValue<'ctx> {
+    pub fn float(&mut self, val: f64) -> FloatValue<'ctx> {
         let hash = {
             let mut s: DefaultHasher = Default::default();
             "float".hash(&mut s);
@@ -149,7 +152,7 @@ impl<'ctx> Constants<'ctx> {
         }
     }
 
-    fn boolean(&mut self, val: bool) -> IntValue<'ctx> {
+    pub fn boolean(&mut self, val: bool) -> IntValue<'ctx> {
         let hash = {
             let mut s: DefaultHasher = Default::default();
             "bool".hash(&mut s);
@@ -169,7 +172,7 @@ impl<'ctx> Constants<'ctx> {
         }
     }
 
-    fn i32_vec<const N: usize>(&mut self, vals: [u32; N], signed: bool) -> VectorValue<'ctx> {
+    pub fn i32_vec<const N: usize>(&mut self, vals: [u32; N], signed: bool) -> VectorValue<'ctx> {
         let hash = {
             let mut s: DefaultHasher = Default::default();
             "i32_vec".hash(&mut s);
@@ -190,7 +193,7 @@ impl<'ctx> Constants<'ctx> {
         }
     }
 
-    fn float_vec<const N: usize>(&mut self, vals: [f64; N]) -> VectorValue<'ctx> {
+    pub fn float_vec<const N: usize>(&mut self, vals: [f64; N]) -> VectorValue<'ctx> {
         // It is ok even if the user asks for a NAN as long as they consistently
         // use a single constant NAN, e.g. f64::NAN. Because the bit
         // representation of that will be the same and produce the same hash.
@@ -213,7 +216,7 @@ impl<'ctx> Constants<'ctx> {
         }
     }
 
-    fn bool_vec<const N: usize>(&mut self, vals: [bool; N]) -> VectorValue<'ctx> {
+    pub fn bool_vec<const N: usize>(&mut self, vals: [bool; N]) -> VectorValue<'ctx> {
         let hash = {
             let mut s: DefaultHasher = Default::default();
             "bool_vec".hash(&mut s);
@@ -235,7 +238,7 @@ impl<'ctx> Constants<'ctx> {
     }
 }
 
-fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
+pub fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
     let mut ranges = Vec::with_capacity(tree.len());
     for node in tree.nodes().iter() {
         let out = match node {
@@ -256,15 +259,15 @@ fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
 }
 
 pub struct BuildArgs<'a, 'ctx> {
-    nodes: &'a [Node],
-    params: &'a str,
-    ranges: &'a [Interval],
-    regs: &'a [BasicValueEnum<'ctx>],
-    constants: &'a mut Constants<'ctx>,
-    interval_type: VectorType<'ctx>,
-    function: FunctionValue<'ctx>,
-    node: Node,
-    index: usize,
+    pub nodes: &'a [Node],
+    pub params: &'a str,
+    pub ranges: &'a [Interval],
+    pub regs: &'a [BasicValueEnum<'ctx>],
+    pub constants: &'a mut Constants<'ctx>,
+    pub interval_type: VectorType<'ctx>,
+    pub function: FunctionValue<'ctx>,
+    pub node: Node,
+    pub index: usize,
 }
 
 impl Tree {

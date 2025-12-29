@@ -77,14 +77,11 @@ pub struct BuildArgs<'a, 'ctx> {
 
 impl Tree {
     /// JIT compile a tree and return a native evaluator.
-    pub fn jit_compile<'ctx, T>(
+    pub fn jit_compile<'ctx, T: NumberType>(
         &'ctx self,
         context: &'ctx JitContext,
         params: &str,
-    ) -> Result<JitFn<'ctx, T>, Error>
-    where
-        T: NumberType,
-    {
+    ) -> Result<JitFn<'ctx, T>, Error> {
         if !self.is_scalar() {
             // Only support scalar output trees.
             return Err(Error::TypeMismatch);

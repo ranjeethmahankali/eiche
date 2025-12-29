@@ -1,5 +1,19 @@
-use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, Value};
-use std::{collections::HashMap, marker::PhantomData, ops::Range};
+use inkwell::{
+    AddressSpace,
+    basic_block::BasicBlock,
+    values::{BasicValueEnum, IntValue},
+};
+
+use super::{JitContext, NumberType, interval, simd_array, single};
+use crate::{
+    BinaryOp::*,
+    Error,
+    Node::*,
+    TernaryOp::*,
+    Tree, Value,
+    llvm_jit::{JitCompiler, interval::BuildArgs},
+};
+use std::{collections::HashMap, ffi::c_void, marker::PhantomData, ops::Range};
 
 /*
 This is a vague sketch of how this should work. I am writing this before I write
@@ -49,7 +63,7 @@ pub enum PruningType {
 #[derive(Debug)]
 pub struct Listener {
     branch: usize,
-    case: usize,
+    case: u32,
     prune: PruningType,
 }
 
@@ -59,11 +73,16 @@ pub enum Incoming {
     Constant { block: usize },
 }
 
+#[derive(Debug, Default)]
+pub struct Case {
+    target_block: usize,
+    output: Option<Value>,
+}
+
 #[derive(Debug)]
 pub enum Block {
     Branch {
-        cases: Vec<usize>,
-        constants: Vec<Value>,
+        cases: Vec<Case>,
     },
     Code {
         instructions: Range<usize>,
@@ -91,7 +110,6 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
                     *p,
                     Some(Block::Branch {
                         cases: Default::default(),
-                        constants: Default::default(),
                     }),
                 ),
                 Split::Merge(p) => (
@@ -175,7 +193,10 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
             }),
             // The default case i.e. '0' in every branch just goes to the next block.
             (Block::Branch { cases, .. }, Block::Code { .. }) => {
-                cases.push(bi + 1);
+                cases.push(Case {
+                    target_block: bi + 1,
+                    output: None,
+                });
             }
             // All other code blocks and merge blocks unconditionally branch to the next block.
             (Block::Code { .. }, _) | (Block::Merge { .. }, _) => continue,
@@ -300,7 +321,7 @@ pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error>
 fn link_cond(blocks: BlockGroup<'_, 3>) {
     let [branch, _code, merge] = blocks.indices;
     if let [
-        Block::Branch { cases, constants },
+        Block::Branch { cases },
         Block::Code { instructions },
         Block::Merge {
             listeners,
@@ -323,10 +344,22 @@ fn link_cond(blocks: BlockGroup<'_, 3>) {
           └────────────────────────┘
          */
         // If true:
-        link_jump(branch, cases, merge, listeners, PruningType::AlwaysTrue);
-        constants.push(Value::Bool(true));
-        link_jump(branch, cases, merge, listeners, PruningType::AlwaysFalse);
-        constants.push(Value::Bool(false));
+        link_jump(
+            branch,
+            cases,
+            merge,
+            listeners,
+            PruningType::AlwaysTrue,
+            Some(Value::Bool(true)),
+        );
+        link_jump(
+            branch,
+            cases,
+            merge,
+            listeners,
+            PruningType::AlwaysFalse,
+            Some(Value::Bool(false)),
+        );
         incoming.push(Incoming::Constant { block: branch });
     } else {
         unreachable!("Wrong types of block. This is a bug");
@@ -369,8 +402,15 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
           │                       ↑  │    ↑ │          ↑
           └───────────────────────┘  └────┘ └──────────┘
         */
-        link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
-        link_jump(bop, op_cases, merge, listeners, PruningType::Left);
+        link_jump(
+            bleft,
+            left_cases,
+            cright,
+            listeners,
+            PruningType::Left,
+            None,
+        );
+        link_jump(bop, op_cases, merge, listeners, PruningType::Left, None);
         incoming.push(Incoming::Reference {
             block: bop,
             output: right_inst.end - 1,
@@ -381,7 +421,14 @@ fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
           │      ↑ │     ↑  │                           ↑
           └──────┘ └─────┘  └───────────────────────────┘
          */
-        link_jump(bright, right_cases, merge, listeners, PruningType::Right);
+        link_jump(
+            bright,
+            right_cases,
+            merge,
+            listeners,
+            PruningType::Right,
+            None,
+        );
         incoming.push(Incoming::Reference {
             block: bright,
             output: left_inst.end - 1,
@@ -422,8 +469,15 @@ fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
           │              ↑  │    ↑ │          ↑
           └──────────────┘  └────┘ └──────────┘
          */
-        link_jump(bleft, left_cases, cright, listeners, PruningType::Left);
-        link_jump(bop, op_cases, merge, listeners, PruningType::Left);
+        link_jump(
+            bleft,
+            left_cases,
+            cright,
+            listeners,
+            PruningType::Left,
+            None,
+        );
+        link_jump(bop, op_cases, merge, listeners, PruningType::Left, None);
         incoming.push(Incoming::Reference {
             block: bop,
             output: right_inst.end - 1,
@@ -462,7 +516,14 @@ fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
           │      ↑ │                            ↑
           └──────┘ └────────────────────────────┘
          */
-        link_jump(bright, right_cases, merge, listeners, PruningType::Right);
+        link_jump(
+            bright,
+            right_cases,
+            merge,
+            listeners,
+            PruningType::Right,
+            None,
+        );
         incoming.push(Incoming::Reference {
             block: bright,
             output: right_inst.end - 1,
@@ -474,16 +535,20 @@ fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
 
 fn link_jump(
     branch: usize,
-    cases: &mut Vec<usize>,
+    cases: &mut Vec<Case>,
     target: usize,
     listeners: &mut Vec<Listener>,
     prune: PruningType,
+    output: Option<Value>,
 ) {
     let case = cases.len();
-    cases.push(target);
+    cases.push(Case {
+        target_block: target,
+        output,
+    });
     listeners.push(Listener {
         branch,
-        case,
+        case: case as u32,
         prune,
     });
 }
@@ -649,6 +714,155 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
         _ => false,
     });
     (splits.into_boxed_slice(), is_selector)
+}
+
+type NativePruningFunc = unsafe extern "C" fn(
+    *const c_void, // Inputs
+    *mut c_void,   // Outputs
+    *mut u32,      // Signals - tells future pruned evaluations how to skip and jump.
+);
+
+type NativeSingleFunc = unsafe extern "C" fn(
+    *const c_void, // Inputs,
+    *const u32,    // Signals,
+    *mut c_void,
+);
+
+pub type NativeSimdFunc = unsafe extern "C" fn(
+    *const c_void, // Inputs
+    *const u32,    // Signals,
+    *mut c_void,   // Outputs
+    u64,           // Number of evals.
+);
+
+pub type NativeIntervalFunc = unsafe extern "C" fn(
+    *const c_void, // Inputs
+    *const u32,    // Signals,
+    *mut c_void,   // Outputs
+);
+
+fn compile_pruning_func<'ctx, T: NumberType>(
+    tree: &Tree,
+    threshold: usize,
+    context: &'ctx JitContext,
+    params: &str,
+) -> Result<(), Error> {
+    if !tree.is_scalar() {
+        // Only support scalar output trees.
+        return Err(Error::TypeMismatch);
+    }
+    let ranges = interval::compute_ranges(tree)?;
+    let func_name = context.new_func_name::<T>(Some("interval"));
+    let context = &context.inner;
+    let compiler = JitCompiler::new(context)?;
+    let builder = &compiler.builder;
+    let interval_type = T::jit_type(context).vec_type(2);
+    let iptr_type = context.ptr_type(AddressSpace::default());
+    let mut constants = interval::Constants::create::<T>(context);
+    let fn_type = context
+        .void_type()
+        .fn_type(&[iptr_type.into(), iptr_type.into()], false);
+    let function = compiler.module.add_function(&func_name, fn_type, None);
+    compiler.set_attributes(function, context)?;
+    builder.position_at_end(context.append_basic_block(function, "entry"));
+    let mut regs = Vec::<BasicValueEnum>::with_capacity(tree.len());
+    let blocks = make_blocks(tree, threshold)?;
+    let mut bbs: Box<[BasicBlock<'ctx>]> = blocks
+        .iter()
+        .enumerate()
+        .map(|(bi, block)| {
+            context.append_basic_block(
+                function,
+                &format!(
+                    "{}_block_{bi}",
+                    match block {
+                        Block::Branch { .. } => "branch",
+                        Block::Code { .. } => "code",
+                        Block::Merge { .. } => "merge",
+                    }
+                ),
+            )
+        })
+        .collect();
+    for (bi, block) in blocks.into_iter().enumerate() {
+        builder.position_at_end(bbs[bi]);
+        match block {
+            Block::Branch { cases } => {
+                let signals = function
+                    .get_nth_param(2)
+                    .ok_or(Error::JitCompilationError(
+                        "Cannot read output address".to_string(),
+                    ))?
+                    .into_pointer_value();
+                let signal = {
+                    let ptr = unsafe {
+                        builder.build_gep(
+                            context.i32_type(),
+                            signals,
+                            &[constants.int_32(bi as u32, false)],
+                            &format!("signal_ptr_{bi}"),
+                        )?
+                    };
+                    builder
+                        .build_load(context.i32_type(), ptr, &format!("load_signal_{bi}"))?
+                        .into_int_value()
+                };
+                let cases: Box<[(IntValue, BasicBlock)]> = cases
+                    .iter()
+                    .enumerate()
+                    .map(|(case, target)| {
+                        (
+                            constants.int_32(case as u32, false),
+                            bbs[target.target_block],
+                        )
+                    })
+                    .collect();
+                builder.build_switch(signal, bbs[bi + 1], cases.as_ref())?;
+            }
+            Block::Code { instructions } => {
+                for (index, node) in tree.nodes()[instructions].iter().copied().enumerate() {
+                    let reg = interval::build_op::<T>(
+                        BuildArgs {
+                            nodes: tree.nodes(),
+                            params,
+                            ranges: &ranges,
+                            regs: &regs,
+                            constants: &mut constants,
+                            interval_type,
+                            function,
+                            node,
+                            index,
+                        },
+                        builder,
+                        &compiler.module,
+                    )?;
+                    regs.push(reg);
+                }
+                // It is possible while building the instruction we created
+                // another basic block. So we ask the builder and overwrite.
+                if let Some(newbb) = builder.get_insert_block() {
+                    bbs[bi] = newbb;
+                }
+            }
+            Block::Merge {
+                listeners,
+                incoming,
+                selector_node,
+            } => todo!(),
+        }
+    }
+    todo!();
+}
+
+impl Tree {
+    pub fn jit_compile_pruning<'ctx, T: NumberType>(
+        &'ctx self,
+        threshold: usize,
+        context: &'ctx JitContext,
+        params: &str,
+    ) -> Result<(), Error> {
+        todo!();
+    }
 }
 
 #[cfg(test)]
