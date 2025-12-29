@@ -948,12 +948,32 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                     Binary(op, lhs, rhs) => match op {
                         Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual
                         | And | Or => {}
-                        Min => todo!(),
-                        Max => todo!(),
-                        Less => todo!(),
-                        LessOrEqual => todo!(),
-                        Greater => todo!(),
-                        GreaterOrEqual => todo!(),
+                        Min | Max | Less | LessOrEqual | Greater | GreaterOrEqual => {
+                            let interval::InequalityFlags {
+                                either_empty,
+                                strictly_before,
+                                strictly_after,
+                                touching,
+                            } = interval::build_interval_inequality_flags(
+                                regs[*lhs].into_vector_value(),
+                                regs[*rhs].into_vector_value(),
+                                builder,
+                                &compiler.module,
+                                &mut constants,
+                                selector_node,
+                            )?;
+                            match op {
+                                Min => todo!(),
+                                Max => todo!(),
+                                Less => todo!(),
+                                LessOrEqual => todo!(),
+                                Greater => todo!(),
+                                GreaterOrEqual => todo!(),
+                                _ => unreachable!(
+                                    "We already checked, this should never happen, this is a bug."
+                                ),
+                            }
+                        }
                     },
                     Ternary(op, _, _, _) => todo!(),
                 }
