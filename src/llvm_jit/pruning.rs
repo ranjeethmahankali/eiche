@@ -736,21 +736,21 @@ type NativePruningIntervalFunc = unsafe extern "C" fn(
 
 type NativeSingleFunc = unsafe extern "C" fn(
     *const c_void, // Inputs,
+    *mut c_void,   // Outputs,
     *const u32,    // Signals,
-    *mut c_void,
 );
 
 pub type NativeSimdFunc = unsafe extern "C" fn(
     *const c_void, // Inputs
-    *const u32,    // Signals,
     *mut c_void,   // Outputs
+    *const u32,    // Signals,
     u64,           // Number of evals.
 );
 
 pub type NativeIntervalFunc = unsafe extern "C" fn(
     *const c_void, // Inputs
-    *const u32,    // Signals,
     *mut c_void,   // Outputs
+    *const u32,    // Signals,
 );
 
 pub struct JitPruner<'ctx, T: NumberType> {
@@ -830,18 +830,56 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         // We don't need to check whether the tree has a scalar output. Because
         // we already checked it when we made this pruner.
         let func_name = self.context.new_func_name::<T>(Some("pruning"));
-        let context = &self.context.inner;
-        let compiler = JitCompiler::new(context)?;
+        let ctx = &self.context.inner;
+        let compiler = JitCompiler::new(ctx)?;
         let builder = &compiler.builder;
-        let flt_type = T::jit_type(context);
-        let ptr_type = context.ptr_type(AddressSpace::default());
-        let fn_type = context
+        let flt_type = T::jit_type(ctx);
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let mut constants = interval::Constants::create::<T>(ctx);
+        let fn_type = ctx
             .void_type()
             .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
-        compiler.set_attributes(function, context)?;
-        builder.position_at_end(context.append_basic_block(function, "entry"));
+        compiler.set_attributes(function, ctx)?;
+        builder.position_at_end(ctx.append_basic_block(function, "entry"));
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.tree.len());
+        let BlockInfo {
+            basic_blocks: mut bbs,
+            signal_ptrs,
+            signals,
+            branch_signal_map,
+        } = BlockInfo::from_blocks(
+            &self.blocks,
+            function
+                .get_nth_param(2)
+                .ok_or(Error::JitCompilationError(
+                    "Cannot read signals address".to_string(),
+                ))?
+                .into_pointer_value(),
+            function,
+            ctx,
+            builder,
+            &mut constants,
+        )?;
+        let mut branch_outputs = HashMap::<(usize, usize), BasicValueEnum>::new();
+        if let Some(first_bb) = bbs.first().copied() {
+            builder.build_unconditional_branch(first_bb)?;
+        }
+        for (bi, block) in self.blocks.iter().enumerate() {
+            builder.position_at_end(bbs[bi]);
+            match block {
+                Block::Branch { cases } => {
+                    let signal = signals[branch_signal_map[bi]];
+                    todo!();
+                }
+                Block::Code { instructions } => todo!(),
+                Block::Merge {
+                    listeners,
+                    incoming,
+                    selector_node,
+                } => todo!(),
+            }
+        }
         todo!("Compile a pruned evaluator for single values.");
     }
 }
@@ -896,9 +934,9 @@ impl Tree {
             builder.build_unconditional_branch(first_bb)?;
         }
         for (bi, block) in blocks.iter().enumerate() {
+            builder.position_at_end(bbs[bi]);
             match block {
                 Block::Branch { cases } => {
-                    builder.position_at_end(bbs[bi]);
                     let signal = signals[branch_signal_map[bi]];
                     // Some of these cases may be trying to forward a constant value
                     // to their target branch. So we create those constant
@@ -926,7 +964,6 @@ impl Tree {
                     builder.build_switch(signal, bbs[bi + 1], cases.as_ref())?;
                 }
                 Block::Code { instructions } => {
-                    builder.position_at_end(bbs[bi]);
                     for (index, node) in self.nodes()[instructions.start..instructions.end]
                         .iter()
                         .copied()
@@ -969,7 +1006,6 @@ impl Tree {
                     incoming,
                     selector_node,
                 } => {
-                    builder.position_at_end(bbs[bi]);
                     // Merge incoming values into a phi and overwrite the output of `selector_node`.
                     let phi = builder.build_phi(
                         match is_node_scalar(self.nodes(), *selector_node) {
