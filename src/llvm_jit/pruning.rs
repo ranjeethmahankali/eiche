@@ -1066,6 +1066,12 @@ impl Tree {
                             )?,
                         },
                     }
+                    // Every code blocks unconditionally branches to the block that
+                    // comes right after it, except for the last code block, because
+                    // it has nowhere to go to.
+                    if let Some(next_bb) = bbs.get(bi + 1).copied() {
+                        builder.build_unconditional_branch(next_bb)?;
+                    }
                 }
             }
         }
@@ -1103,6 +1109,10 @@ impl Tree {
                 })?;
         }
         builder.build_return(None)?;
+        compiler
+            .module
+            .verify()
+            .map_err(|e| Error::JitCompilationError(e.to_string()))?;
         compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
         let engine = compiler
             .module
