@@ -874,7 +874,7 @@ impl Tree {
                     // valuesnow, in the appropriate basic block.
                     build_branch_forwarding_outputs(
                         &mut constants,
-                        &cases,
+                        cases,
                         &mut branch_outputs,
                         builder,
                         bi,
@@ -974,7 +974,7 @@ impl Tree {
                                         *selector_node,
                                     )?,
                                     *op,
-                                    &listeners,
+                                    listeners,
                                     &branch_signal_map,
                                     builder,
                                     &mut constants,
@@ -990,7 +990,7 @@ impl Tree {
                                 &compiler.module,
                                 &mut constants,
                                 *selector_node,
-                                &listeners,
+                                listeners,
                                 &signal_ptrs,
                                 &branch_signal_map,
                             )?,
