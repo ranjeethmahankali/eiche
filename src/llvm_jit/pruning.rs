@@ -1,7 +1,7 @@
 use inkwell::{
     AddressSpace, IntPredicate, OptimizationLevel,
     basic_block::BasicBlock,
-    builder::{self, Builder},
+    builder::Builder,
     execution_engine::JitFunction,
     module::Module,
     values::{BasicValue, BasicValueEnum, IntValue, PointerValue, VectorValue},
