@@ -658,9 +658,9 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
             },
             Ternary(op, cond, tt, ff) => match op {
                 Choose => {
-                    if is_selector[*cond] {
-                        let ttdom = ndom[*tt];
-                        let ffdom = ndom[*ff];
+                    let ttdom = ndom[*tt];
+                    let ffdom = ndom[*ff];
+                    if is_selector[*cond] || ttdom > threshold || ffdom > threshold {
                         match (ttdom > threshold, ffdom > threshold) {
                             (true, true) => {
                                 // branch | ttdom, tt | branch | ffdom, ff | branch | choose | merge.
@@ -1427,20 +1427,12 @@ fn build_branch_forwarding_outputs<'ctx>(
                         constants.int_32(case as u32, false),
                         &format!("branch_{branch_index}_case_{case}_forwarding_comparison"),
                     )?;
-                    let next_bv = match value {
-                        Value::Bool(flag) => builder.build_select(
-                            case_eq,
-                            constants.boolean(flag),
-                            prev_bv.into_int_value(),
-                            &format!("branch_{branch_index}_case_{case}_forwarding_comparison"),
-                        )?,
-                        Value::Scalar(val) => builder.build_select(
-                            case_eq,
-                            constants.float(val),
-                            prev_bv.into_float_value(),
-                            &format!("branch_{branch_index}_case_{case}_forwarding_comparison"),
-                        )?,
-                    };
+                    let next_bv = builder.build_select(
+                        case_eq,
+                        interval::build_const(constants, value),
+                        prev_bv,
+                        &format!("branch_{branch_index}_case_{case}_forwarding_comparison"),
+                    )?;
                     prev = Some((case, target, next_bv));
                 } else {
                     let conflict = dst.insert((branch_index, prev_target), prev_bv);
@@ -1506,7 +1498,6 @@ mod test {
             .control_dependence_sorted()
             .expect("Dominator sorting failed");
         let (splits, is_selector) = make_layout(&tree, 10, &ndom);
-        println!("{tree}");
         assert_eq!(is_selector.len(), tree.len());
         assert_eq!(is_selector.iter().filter(|b| **b).count(), 2);
         for (i, _) in is_selector.iter().enumerate().filter(|(_i, b)| **b) {
@@ -1529,8 +1520,8 @@ mod test {
     #[test]
     fn t_min_sphere_blocks() {
         let tree = deftree!(min
-                 (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
-                 (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
         .unwrap();
         let blocks = make_blocks(&tree, 10).expect("Unable to make blocks");
         assert_eq!(blocks.len(), 7);
@@ -1550,12 +1541,66 @@ mod test {
     #[test]
     fn t_min_sphere_prune() {
         let tree = deftree!(min
-                 (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
-                 (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
         .unwrap();
         let context = JitContext::default();
         let prune_eval = tree
             .jit_compile_pruner::<f64>("xy", &context, 10)
+            .expect("Cannot compile a JIT pruning evaluator");
+        let mut signals = vec![0u32; prune_eval.num_signals()].into_boxed_slice();
+        {
+            // Case 1: To the left side close to the second sphere.
+            let mut outputs = [[f64::NAN; 2]];
+            prune_eval
+                .run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+                .expect("Unable to run pruning eval");
+            // Check the interval output.
+            for (actual, expected) in outputs[0].iter().zip([-1.5, -0.08578643762690485]) {
+                assert_float_eq!(*actual, expected);
+            }
+            // Check the pruning signals.
+            assert_eq!(signals.as_ref(), &[1, 0, 1]);
+        }
+        {
+            // Case 2: To the right side close to the first sphere.
+            let mut outputs = [[f64::NAN; 2]];
+            signals.fill(0); // Reset the signals.
+            prune_eval
+                .run(&[[1.0, 2.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+                .expect("Unable to run pruning eval");
+            // Check the interval output.
+            for (actual, expected) in outputs[0].iter().zip([-1.5, -0.08578643762690485]) {
+                assert_float_eq!(*actual, expected);
+            }
+            // Check the pruning signals.
+            assert_eq!(signals.as_ref(), &[0, 1, 0]);
+        }
+        {
+            // Case 3: In the middle, nothing should get pruned.
+            let mut outputs = [[f64::NAN; 2]];
+            signals.fill(0); // Reset the signals.
+            prune_eval
+                .run(&[[-0.5, 0.5], [-1.0, 1.0]], &mut outputs, &mut signals)
+                .expect("Unable to run pruning eval");
+            // Check the interval output.
+            for (actual, expected) in outputs[0].iter().zip([-1.0, 0.30277563773199456]) {
+                assert_float_eq!(*actual, expected);
+            }
+            // Check the pruning signals.
+            assert_eq!(signals.as_ref(), &[0, 0, 0]);
+        }
+    }
+
+    #[test]
+    fn t_sphere_choose_prune() {
+        let tree = deftree!(if (< (max (+ (log (pow 'x 2)) (log (pow 'y 2))) 1) 1.5)
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
+        .unwrap();
+        let context = JitContext::default();
+        let prune_eval = tree
+            .jit_compile_pruner::<f64>("xy", &context, 8)
             .expect("Cannot compile a JIT pruning evaluator");
         let mut signals = vec![0u32; prune_eval.num_signals()].into_boxed_slice();
         {
