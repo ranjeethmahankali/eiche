@@ -757,8 +757,64 @@ pub struct JitPruningFn<'ctx, T: NumberType> {
     args: String,
     tree: Tree,
     blocks: Box<[Block]>,
-    num_signals: usize,
+    n_signals: usize,
     _phantom: PhantomData<T>,
+}
+
+impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
+    pub fn num_signals(&self) -> usize {
+        self.n_signals
+    }
+
+    pub fn num_inputs(&self) -> usize {
+        self.args.len()
+    }
+
+    pub fn num_outputs(&self) -> usize {
+        self.tree.num_roots()
+    }
+
+    pub fn run(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &mut [u32],
+    ) -> Result<(), Error> {
+        let n_inputs = self.num_inputs();
+        let n_outputs = self.num_outputs();
+        let n_signals = self.num_signals();
+        if inputs.len() != n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), n_inputs));
+        } else if outputs.len() != n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), n_outputs));
+        } else if signals.len() != n_signals {
+            return Err(Error::OutputSizeMismatch(signals.len(), n_signals));
+        }
+        // # SAFETY: We just checked the sizes of the slices, so we're fine.
+        unsafe { self.run_unchecked(inputs, outputs, signals) };
+        Ok(())
+    }
+
+    /// Same as [`run`], but without bounds checking.
+    ///
+    /// # SAFETY
+    ///
+    /// The caller is responsible for making sure the length of the `inputs`,
+    /// `outputs`, and `signals` slices are correct.
+    pub unsafe fn run_unchecked(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &mut [u32],
+    ) {
+        unsafe {
+            self.func.call(
+                inputs.as_ptr().cast(),
+                outputs.as_mut_ptr().cast(),
+                signals.as_mut_ptr().cast(),
+            )
+        }
+    }
 }
 
 impl Tree {
@@ -778,11 +834,11 @@ impl Tree {
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
         let interval_type = T::jit_type(context).vec_type(2);
-        let iptr_type = context.ptr_type(AddressSpace::default());
+        let ptr_type = context.ptr_type(AddressSpace::default());
         let mut constants = interval::Constants::create::<T>(context);
         let fn_type = context
             .void_type()
-            .fn_type(&[iptr_type.into(), iptr_type.into()], false);
+            .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
         compiler.set_attributes(function, context)?;
         let entry_bb = context.append_basic_block(function, "entry");
@@ -819,7 +875,7 @@ impl Tree {
             let signals_arg = function
                 .get_nth_param(2)
                 .ok_or(Error::JitCompilationError(
-                    "Cannot read output address".to_string(),
+                    "Cannot read signals address".to_string(),
                 ))?
                 .into_pointer_value();
             blocks
@@ -864,6 +920,9 @@ impl Tree {
                 .into_boxed_slice()
         };
         let mut branch_outputs = HashMap::<(usize, usize), BasicValueEnum>::new();
+        if let Some(first_bb) = bbs.first().copied() {
+            builder.build_unconditional_branch(first_bb)?;
+        }
         for (bi, block) in blocks.iter().enumerate() {
             match block {
                 Block::Branch { cases } => {
@@ -1049,7 +1108,7 @@ impl Tree {
             args: params.to_string(),
             tree: self,
             blocks,
-            num_signals: signals.len(),
+            n_signals: signals.len(),
             _phantom: PhantomData,
         })
     }
@@ -1312,7 +1371,9 @@ fn build_branch_forwarding_outputs<'ctx>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{Node, deftree, llvm_jit::pruning::make_layout};
+    use crate::{
+        Node, assert_float_eq, deftree, interval::pruning_eval, llvm_jit::pruning::make_layout,
+    };
 
     #[test]
     fn t_min_sphere_layout() {
@@ -1388,5 +1449,31 @@ mod test {
         assert_eq!(n_branch, 3);
         assert_eq!(n_code, 3);
         assert_eq!(n_merge, 1);
+    }
+
+    #[test]
+    fn t_min_sphere_prune() {
+        let tree = deftree!(min
+                 (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
+                 (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
+        .unwrap();
+        let context = JitContext::default();
+        let prune_eval = tree
+            .jit_compile_pruning::<f64>("xy", &context, 10)
+            .expect("Cannot compile a JIT pruning evaluator");
+        let mut signals = vec![0u32; prune_eval.num_signals()].into_boxed_slice();
+        {
+            // Case 1.
+            let mut outputs = [[f64::NAN; 2]];
+            prune_eval
+                .run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+                .expect("Unable to run pruning eval");
+            // Check the interval output.
+            for (actual, expected) in outputs[0].iter().zip([-1.5, -0.08578643762690485]) {
+                assert_float_eq!(*actual, expected);
+            }
+            // Check the pruning signals.
+            assert_eq!(signals.as_ref(), &[1, 0, 1]);
+        }
     }
 }

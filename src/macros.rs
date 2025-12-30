@@ -123,7 +123,7 @@ macro_rules! assert_float_eq {
         let a = $a;
         let b = $b;
         let eps = $eps;
-        let error = f64::abs(a - b);
+        let error = (a - b).abs();
         if error > eps {
             eprintln!("{:?}", $debug);
         }
