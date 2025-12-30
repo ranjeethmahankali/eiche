@@ -994,12 +994,6 @@ impl Tree {
                     if let Some(newbb) = builder.get_insert_block() {
                         bbs[bi] = newbb;
                     }
-                    // Every code blocks unconditionally branches to the block that
-                    // comes right after it, except for the last code block, because
-                    // it has nowhere to go to.
-                    if let Some(next_bb) = bbs.get(bi + 1).copied() {
-                        builder.build_unconditional_branch(next_bb)?;
-                    }
                 }
                 Block::Merge {
                     listeners,
@@ -1027,7 +1021,20 @@ impl Tree {
                     }).collect();
                     phi.add_incoming(&incoming);
                     regs[*selector_node] = phi.as_basic_value();
-                    // Notify the listeners about the current interval.
+                    /*
+                    Notify the listeners about the current interval. This needs
+                    to be done in the code block where we compute the selector
+                    node, since that is the only way we know we computed both
+                    intervals, and have some meaningful pruning info to report
+                    to the listeners. That is just another way of saying, only
+                    nodes that don't get pruned during this run are even
+                    candidates for checking. Doesn't make sense to check the
+                    nodes that were already pruned.
+                     */
+                    builder.position_at_end(match bbs.get(bi - 1) {
+                        Some(bb) => *bb,
+                        None => unreachable!("This means the first block in the sequence is a merge block. This is a bug."),
+                    });
                     match self.node(*selector_node) {
                         Constant(_) | Symbol(_) | Unary(_, _) => {}
                         Binary(op, lhs, rhs) => match op {
@@ -1066,14 +1073,33 @@ impl Tree {
                             )?,
                         },
                     }
-                    // Every code blocks unconditionally branches to the block that
-                    // comes right after it, except for the last code block, because
-                    // it has nowhere to go to.
-                    if let Some(next_bb) = bbs.get(bi + 1).copied() {
-                        builder.build_unconditional_branch(next_bb)?;
-                    }
+                    // We reset the builder position after our little excursion
+                    // to another block to notify the listeners.
+                    builder.position_at_end(bbs[bi]);
                 }
             }
+        }
+        // Now do all the unconditional branching.
+        for (bi, nbs) in blocks.windows(2).enumerate() {
+            match (&nbs[0], &nbs[1]) {
+                (Block::Branch { .. }, Block::Branch { .. })
+                | (Block::Branch { .. }, Block::Merge { .. })
+                | (Block::Merge { .. }, Block::Merge { .. }) => {
+                    unreachable!("Invalid block layout")
+                }
+                (Block::Branch { .. }, Block::Code { .. }) => {} // Nothing to do.
+                (Block::Code { .. }, Block::Branch { .. })
+                | (Block::Code { .. }, Block::Code { .. })
+                | (Block::Code { .. }, Block::Merge { .. })
+                | (Block::Merge { .. }, Block::Branch { .. })
+                | (Block::Merge { .. }, Block::Code { .. }) => {
+                    builder.position_at_end(bbs[bi]);
+                    builder.build_unconditional_branch(bbs[bi + 1])?;
+                }
+            }
+        }
+        if let Some(last_bb) = bbs.last().copied() {
+            builder.position_at_end(last_bb);
         }
         // We're done building all the blocks / instructions. Now we build the logic
         // for writing the outputs to the output pointer.
@@ -1542,6 +1568,17 @@ mod test {
         assert_eq!(n_branch, 3);
         assert_eq!(n_code, 3);
         assert_eq!(n_merge, 1);
+    }
+
+    #[test]
+    fn t_min_tiny() {
+        let tree = deftree!(min (+ 'x 1) (- 'x 1)).unwrap();
+        println!("{tree}");
+        let context = JitContext::default();
+        let prune_eval = tree
+            .jit_compile_pruner::<f64>("xy", &context, 0)
+            .expect("Cannot compile a JIT pruning evaluator");
+        assert!(false);
     }
 
     #[test]
