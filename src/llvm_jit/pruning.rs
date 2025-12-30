@@ -2,9 +2,10 @@ use inkwell::{
     AddressSpace, IntPredicate, OptimizationLevel,
     basic_block::BasicBlock,
     builder::Builder,
+    context::Context,
     execution_engine::JitFunction,
     module::Module,
-    values::{BasicValue, BasicValueEnum, IntValue, PointerValue, VectorValue},
+    values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue, VectorValue},
 };
 
 use super::{JitContext, NumberType, build_vec_unary_intrinsic, interval, simd_array, single};
@@ -758,6 +759,7 @@ pub struct JitPruner<'ctx, T: NumberType> {
     tree: Tree,
     blocks: Box<[Block]>,
     n_signals: usize,
+    context: &'ctx JitContext,
     _phantom: PhantomData<T>,
 }
 
@@ -765,6 +767,7 @@ pub struct JitPruningFn<'ctx, T: NumberType> {
     func: JitFunction<'ctx, NativeSingleFunc>,
     n_inputs: usize,
     n_outputs: usize,
+    n_signals: usize,
     _phantom: PhantomData<T>,
 }
 
@@ -824,6 +827,21 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
     }
 
     pub fn compile_eval(&self) -> Result<JitPruningFn<'ctx, T>, Error> {
+        // We don't need to check whether the tree has a scalar output. Because
+        // we already checked it when we made this pruner.
+        let func_name = self.context.new_func_name::<T>(Some("pruning"));
+        let context = &self.context.inner;
+        let compiler = JitCompiler::new(context)?;
+        let builder = &compiler.builder;
+        let flt_type = T::jit_type(context);
+        let ptr_type = context.ptr_type(AddressSpace::default());
+        let fn_type = context
+            .void_type()
+            .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
+        let function = compiler.module.add_function(&func_name, fn_type, None);
+        compiler.set_attributes(function, context)?;
+        builder.position_at_end(context.append_basic_block(function, "entry"));
+        let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.tree.len());
         todo!("Compile a pruned evaluator for single values.");
     }
 }
@@ -840,96 +858,39 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let ranges = interval::compute_ranges(&self)?;
-        let func_name = context.new_func_name::<T>(Some("interval"));
-        let context = &context.inner;
-        let compiler = JitCompiler::new(context)?;
+        let func_name = context.new_func_name::<T>(Some("pruner"));
+        let ctx = &context.inner;
+        let compiler = JitCompiler::new(ctx)?;
         let builder = &compiler.builder;
-        let interval_type = T::jit_type(context).vec_type(2);
-        let ptr_type = context.ptr_type(AddressSpace::default());
-        let mut constants = interval::Constants::create::<T>(context);
-        let fn_type = context
+        let interval_type = T::jit_type(ctx).vec_type(2);
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let mut constants = interval::Constants::create::<T>(ctx);
+        let fn_type = ctx
             .void_type()
             .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
-        compiler.set_attributes(function, context)?;
-        let entry_bb = context.append_basic_block(function, "entry");
-        builder.position_at_end(entry_bb);
+        compiler.set_attributes(function, ctx)?;
+        builder.position_at_end(ctx.append_basic_block(function, "entry"));
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
         let blocks = make_blocks(&self, pruning_threshold)?;
-        let mut bbs: Box<[BasicBlock<'ctx>]> = blocks
-            .iter()
-            .enumerate()
-            .map(|(bi, block)| {
-                context.append_basic_block(
-                    function,
-                    &format!(
-                        "{}_block_{bi}",
-                        match block {
-                            Block::Branch { .. } => "branch",
-                            Block::Code { .. } => "code",
-                            Block::Merge { .. } => "merge",
-                        }
-                    ),
-                )
-            })
-            .collect();
-        let branch_signal_map: Box<[usize]> = {
-            blocks
-                .iter()
-                .scan(0usize, |idx, block| match block {
-                    Block::Branch { .. } => Some(std::mem::replace(idx, *idx + 1)),
-                    Block::Code { .. } | Block::Merge { .. } => Some(*idx),
-                })
-                .collect()
-        };
-        let signal_ptrs = {
-            let signals_arg = function
+        let BlockInfo {
+            basic_blocks: mut bbs,
+            signal_ptrs,
+            signals,
+            branch_signal_map,
+        } = BlockInfo::from_blocks(
+            &blocks,
+            function
                 .get_nth_param(2)
                 .ok_or(Error::JitCompilationError(
                     "Cannot read signals address".to_string(),
                 ))?
-                .into_pointer_value();
-            blocks
-                .iter()
-                .filter(|block| match block {
-                    Block::Branch { .. } => true,
-                    Block::Code { .. } | Block::Merge { .. } => false,
-                })
-                .enumerate()
-                .try_fold(
-                    Vec::with_capacity(blocks.len()),
-                    |mut signals, (bi, _block)| -> Result<Vec<PointerValue>, Error> {
-                        signals.push(unsafe {
-                            builder.build_gep(
-                                context.i32_type(),
-                                signals_arg,
-                                &[constants.int_32(bi as u32, false)],
-                                &format!("signal_ptr_{bi}"),
-                            )?
-                        });
-                        Ok(signals)
-                    },
-                )?
-                .into_boxed_slice()
-        };
-        let signals = {
-            signal_ptrs
-                .iter()
-                .copied()
-                .enumerate()
-                .try_fold(
-                    Vec::with_capacity(blocks.len()),
-                    |mut signals, (i, ptr)| -> Result<Vec<IntValue>, Error> {
-                        signals.push(
-                            builder
-                                .build_load(context.i32_type(), ptr, &format!("load_signal_{i}"))?
-                                .into_int_value(),
-                        );
-                        Ok(signals)
-                    },
-                )?
-                .into_boxed_slice()
-        };
+                .into_pointer_value(),
+            function,
+            ctx,
+            builder,
+            &mut constants,
+        )?;
         let mut branch_outputs = HashMap::<(usize, usize), BasicValueEnum>::new();
         if let Some(first_bb) = bbs.first().copied() {
             builder.build_unconditional_branch(first_bb)?;
@@ -990,6 +951,9 @@ impl Tree {
                     }
                     // It is possible while building the instruction we created
                     // another basic block. So we ask the builder and overwrite.
+                    // This needs to be done because any future phi nodes need
+                    // to know accurately the block where a value is coming
+                    // from.
                     if let Some(newbb) = builder.get_insert_block() {
                         bbs[bi] = newbb;
                     }
@@ -1010,7 +974,7 @@ impl Tree {
                     let phi = builder.build_phi(
                         match is_node_scalar(self.nodes(), *selector_node) {
                             true => interval_type,
-                            false => context.bool_type().vec_type(2),
+                            false => ctx.bool_type().vec_type(2),
                         },
                         &format!("merge_block_phi_{selector_node}"),
                     )?;
@@ -1120,7 +1084,94 @@ impl Tree {
             tree: self,
             blocks,
             n_signals: signals.len(),
+            context,
             _phantom: PhantomData,
+        })
+    }
+}
+
+struct BlockInfo<'ctx> {
+    basic_blocks: Box<[BasicBlock<'ctx>]>,
+    signal_ptrs: Box<[PointerValue<'ctx>]>,
+    signals: Box<[IntValue<'ctx>]>,
+    branch_signal_map: Box<[usize]>,
+}
+
+impl<'ctx> BlockInfo<'ctx> {
+    fn from_blocks(
+        blocks: &[Block],
+        signals_arg: PointerValue<'ctx>,
+        function: FunctionValue<'ctx>,
+        context: &'ctx Context,
+        builder: &'ctx Builder,
+        constants: &mut interval::Constants<'ctx>,
+    ) -> Result<BlockInfo<'ctx>, Error> {
+        let basic_blocks: Box<[BasicBlock<'ctx>]> = blocks
+            .iter()
+            .enumerate()
+            .map(|(bi, block)| {
+                context.append_basic_block(
+                    function,
+                    &format!(
+                        "{}_block_{bi}",
+                        match block {
+                            Block::Branch { .. } => "branch",
+                            Block::Code { .. } => "code",
+                            Block::Merge { .. } => "merge",
+                        }
+                    ),
+                )
+            })
+            .collect();
+        let branch_signal_map: Box<[usize]> = {
+            blocks
+                .iter()
+                .scan(0usize, |idx, block| match block {
+                    Block::Branch { .. } => Some(std::mem::replace(idx, *idx + 1)),
+                    Block::Code { .. } | Block::Merge { .. } => Some(usize::MAX),
+                })
+                .collect()
+        };
+        let (signal_ptrs, signals) = {
+            let (ptrs, signals) = blocks
+                .iter()
+                .filter(|block| match block {
+                    Block::Branch { .. } => true,
+                    Block::Code { .. } | Block::Merge { .. } => false,
+                })
+                .enumerate()
+                .try_fold(
+                    (
+                        Vec::with_capacity(blocks.len()),
+                        Vec::with_capacity(blocks.len()),
+                    ),
+                    |(mut signal_ptrs, mut signals),
+                     (si, _block)|
+                     -> Result<(Vec<PointerValue>, Vec<IntValue>), Error> {
+                        let ptr = unsafe {
+                            builder.build_gep(
+                                context.i32_type(),
+                                signals_arg,
+                                &[constants.int_32(si as u32, false)],
+                                &format!("signal_ptr_{si}"),
+                            )?
+                        };
+                        signal_ptrs.push(ptr);
+                        signals.push(
+                            builder
+                                .build_load(context.i32_type(), ptr, &format!("load_signal_{si}"))?
+                                .into_int_value(),
+                        );
+                        Ok((signal_ptrs, signals))
+                    },
+                )?;
+            (ptrs.into_boxed_slice(), signals.into_boxed_slice())
+        };
+        Ok(BlockInfo {
+            basic_blocks,
+            signal_ptrs,
+            signals,
+            branch_signal_map,
         })
     }
 }

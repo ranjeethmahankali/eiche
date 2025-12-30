@@ -91,11 +91,11 @@ impl Tree {
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
-        let float_type = T::jit_type(context);
-        let float_ptr_type = context.ptr_type(AddressSpace::default());
+        let flt_type = T::jit_type(context);
+        let ptr_type = context.ptr_type(AddressSpace::default());
         let fn_type = context
             .void_type()
-            .fn_type(&[float_ptr_type.into(), float_ptr_type.into()], false);
+            .fn_type(&[ptr_type.into(), ptr_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
         compiler.set_attributes(function, context)?;
         builder.position_at_end(context.append_basic_block(function, "entry"));
@@ -105,7 +105,7 @@ impl Tree {
                 BuildArgs {
                     nodes: self.nodes(),
                     params,
-                    float_type,
+                    float_type: flt_type,
                     function,
                     regs: &regs,
                     node,
@@ -128,7 +128,7 @@ impl Tree {
             // offset calculation looks pretty solid, and is thoroughly tested.
             let dst = unsafe {
                 builder.build_gep(
-                    float_type,
+                    flt_type,
                     outputs,
                     &[context.i64_type().const_int(i as u64, false)],
                     &format!("output_{i}"),
