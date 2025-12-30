@@ -126,6 +126,9 @@ impl<'ctx> JitCompiler<'ctx> {
     fn run_passes(&self, passes: &str) -> Result<(), Error> {
         let options = PassBuilderOptions::create();
         self.module
+            .verify()
+            .map_err(|e| Error::JitCompilationError(e.to_string()))?;
+        self.module
             .run_passes(passes, &self.machine, options)
             .map_err(|e| Error::JitCompilationError(e.to_string()))
     }
