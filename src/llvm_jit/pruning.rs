@@ -752,193 +752,199 @@ pub type NativeIntervalFunc = unsafe extern "C" fn(
     *mut c_void,   // Outputs
 );
 
-struct JitPruningIntervalFn<'ctx, T: NumberType> {
+pub struct JitPruningFn<'ctx, T: NumberType> {
     func: JitFunction<'ctx, NativePruningIntervalFunc>,
-    num_inputs: usize,
+    args: String,
+    tree: Tree,
+    blocks: Box<[Block]>,
     num_signals: usize,
-    num_outputs: usize,
     _phantom: PhantomData<T>,
 }
 
-fn compile_pruning_func<'ctx, T: NumberType>(
-    tree: &Tree,
-    threshold: usize,
-    context: &'ctx JitContext,
-    params: &str,
-) -> Result<JitPruningIntervalFn<'ctx, T>, Error> {
-    if !tree.is_scalar() {
-        // Only support scalar output trees.
-        return Err(Error::TypeMismatch);
-    }
-    let ranges = interval::compute_ranges(tree)?;
-    let func_name = context.new_func_name::<T>(Some("interval"));
-    let context = &context.inner;
-    let compiler = JitCompiler::new(context)?;
-    let builder = &compiler.builder;
-    let interval_type = T::jit_type(context).vec_type(2);
-    let iptr_type = context.ptr_type(AddressSpace::default());
-    let mut constants = interval::Constants::create::<T>(context);
-    let fn_type = context
-        .void_type()
-        .fn_type(&[iptr_type.into(), iptr_type.into()], false);
-    let function = compiler.module.add_function(&func_name, fn_type, None);
-    compiler.set_attributes(function, context)?;
-    let entry_bb = context.append_basic_block(function, "entry");
-    builder.position_at_end(entry_bb);
-    let mut regs = Vec::<BasicValueEnum>::with_capacity(tree.len());
-    let blocks = make_blocks(tree, threshold)?;
-    let mut bbs: Box<[BasicBlock<'ctx>]> = blocks
-        .iter()
-        .enumerate()
-        .map(|(bi, block)| {
-            context.append_basic_block(
-                function,
-                &format!(
-                    "{}_block_{bi}",
-                    match block {
-                        Block::Branch { .. } => "branch",
-                        Block::Code { .. } => "code",
-                        Block::Merge { .. } => "merge",
-                    }
-                ),
-            )
-        })
-        .collect();
-    let branch_signal_map: Box<[usize]> = {
-        blocks
+impl Tree {
+    pub fn jit_compile_pruning<'ctx, T: NumberType>(
+        self,
+        params: &str,
+        context: &'ctx JitContext,
+        pruning_threshold: usize,
+    ) -> Result<JitPruningFn<'ctx, T>, Error> {
+        if !self.is_scalar() {
+            // Only support scalar output trees.
+            return Err(Error::TypeMismatch);
+        }
+        let ranges = interval::compute_ranges(&self)?;
+        let func_name = context.new_func_name::<T>(Some("interval"));
+        let context = &context.inner;
+        let compiler = JitCompiler::new(context)?;
+        let builder = &compiler.builder;
+        let interval_type = T::jit_type(context).vec_type(2);
+        let iptr_type = context.ptr_type(AddressSpace::default());
+        let mut constants = interval::Constants::create::<T>(context);
+        let fn_type = context
+            .void_type()
+            .fn_type(&[iptr_type.into(), iptr_type.into()], false);
+        let function = compiler.module.add_function(&func_name, fn_type, None);
+        compiler.set_attributes(function, context)?;
+        let entry_bb = context.append_basic_block(function, "entry");
+        builder.position_at_end(entry_bb);
+        let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
+        let blocks = make_blocks(&self, pruning_threshold)?;
+        let mut bbs: Box<[BasicBlock<'ctx>]> = blocks
             .iter()
-            .scan(0usize, |idx, block| match block {
-                Block::Branch { .. } => Some(std::mem::replace(idx, *idx + 1)),
-                Block::Code { .. } | Block::Merge { .. } => Some(*idx),
-            })
-            .collect()
-    };
-    let signal_ptrs = {
-        let signals_arg = function
-            .get_nth_param(2)
-            .ok_or(Error::JitCompilationError(
-                "Cannot read output address".to_string(),
-            ))?
-            .into_pointer_value();
-        blocks
-            .iter()
-            .filter(|block| match block {
-                Block::Branch { .. } => true,
-                Block::Code { .. } | Block::Merge { .. } => false,
-            })
             .enumerate()
-            .try_fold(
-                Vec::with_capacity(blocks.len()),
-                |mut signals, (bi, _block)| -> Result<Vec<PointerValue>, Error> {
-                    signals.push(unsafe {
-                        builder.build_gep(
-                            context.i32_type(),
-                            signals_arg,
-                            &[constants.int_32(bi as u32, false)],
-                            &format!("signal_ptr_{bi}"),
-                        )?
-                    });
-                    Ok(signals)
-                },
-            )?
-            .into_boxed_slice()
-    };
-    let signals = {
-        signal_ptrs
-            .iter()
-            .copied()
-            .enumerate()
-            .try_fold(
-                Vec::with_capacity(blocks.len()),
-                |mut signals, (i, ptr)| -> Result<Vec<IntValue>, Error> {
-                    signals.push(
-                        builder
-                            .build_load(context.i32_type(), ptr, &format!("load_signal_{i}"))?
-                            .into_int_value(),
-                    );
-                    Ok(signals)
-                },
-            )?
-            .into_boxed_slice()
-    };
-    let mut branch_outputs = HashMap::<(usize, usize), BasicValueEnum>::new();
-    for (bi, block) in blocks.into_iter().enumerate() {
-        match block {
-            Block::Branch { cases } => {
-                builder.position_at_end(bbs[bi]);
-                let signal = signals[branch_signal_map[bi]];
-                // Some of these cases may be trying to forward a constant value
-                // to their target branch. So we create those constant
-                // valuesnow, in the appropriate basic block.
-                build_branch_forwarding_outputs(
-                    &mut constants,
-                    &cases,
-                    &mut branch_outputs,
-                    builder,
-                    bi,
-                    signal,
-                )?;
-                // Now switch to the target branches.
-                let cases: Box<[(IntValue, BasicBlock)]> = cases
-                    .iter()
-                    .enumerate()
-                    .skip(1)
-                    .map(|(case, target)| {
-                        (
-                            constants.int_32(case as u32, false),
-                            bbs[target.target_block],
-                        )
-                    })
-                    .collect();
-                builder.build_switch(signal, bbs[bi + 1], cases.as_ref())?;
-            }
-            Block::Code { instructions } => {
-                builder.position_at_end(bbs[bi]);
-                for (index, node) in tree.nodes()[instructions].iter().copied().enumerate() {
-                    let reg = interval::build_op::<T>(
-                        BuildArgs {
-                            nodes: tree.nodes(),
-                            params,
-                            ranges: &ranges,
-                            regs: &regs,
-                            constants: &mut constants,
-                            interval_type,
-                            function,
-                            node,
-                            index,
-                        },
-                        builder,
-                        &compiler.module,
-                    )?;
-                    regs.push(reg);
-                }
-                // It is possible while building the instruction we created
-                // another basic block. So we ask the builder and overwrite.
-                if let Some(newbb) = builder.get_insert_block() {
-                    bbs[bi] = newbb;
-                }
-                // Every code blocks unconditionally branches to the block that
-                // comes right after it, except for the last code block, because
-                // it has nowhere to go to.
-                if let Some(next_bb) = bbs.get(bi + 1).copied() {
-                    builder.build_unconditional_branch(next_bb)?;
-                }
-            }
-            Block::Merge {
-                listeners,
-                incoming,
-                selector_node,
-            } => {
-                builder.position_at_end(bbs[bi]);
-                // Merge incoming values into a phi and overwrite the output of `selector_node`.
-                let phi = builder.build_phi(
-                    match is_node_scalar(tree.nodes(), selector_node) {
-                        true => interval_type,
-                        false => context.bool_type().vec_type(2),
+            .map(|(bi, block)| {
+                context.append_basic_block(
+                    function,
+                    &format!(
+                        "{}_block_{bi}",
+                        match block {
+                            Block::Branch { .. } => "branch",
+                            Block::Code { .. } => "code",
+                            Block::Merge { .. } => "merge",
+                        }
+                    ),
+                )
+            })
+            .collect();
+        let branch_signal_map: Box<[usize]> = {
+            blocks
+                .iter()
+                .scan(0usize, |idx, block| match block {
+                    Block::Branch { .. } => Some(std::mem::replace(idx, *idx + 1)),
+                    Block::Code { .. } | Block::Merge { .. } => Some(*idx),
+                })
+                .collect()
+        };
+        let signal_ptrs = {
+            let signals_arg = function
+                .get_nth_param(2)
+                .ok_or(Error::JitCompilationError(
+                    "Cannot read output address".to_string(),
+                ))?
+                .into_pointer_value();
+            blocks
+                .iter()
+                .filter(|block| match block {
+                    Block::Branch { .. } => true,
+                    Block::Code { .. } | Block::Merge { .. } => false,
+                })
+                .enumerate()
+                .try_fold(
+                    Vec::with_capacity(blocks.len()),
+                    |mut signals, (bi, _block)| -> Result<Vec<PointerValue>, Error> {
+                        signals.push(unsafe {
+                            builder.build_gep(
+                                context.i32_type(),
+                                signals_arg,
+                                &[constants.int_32(bi as u32, false)],
+                                &format!("signal_ptr_{bi}"),
+                            )?
+                        });
+                        Ok(signals)
                     },
-                    &format!("merge_block_phi_{selector_node}"),
-                )?;
-                let incoming: Box<[(&dyn BasicValue, BasicBlock)]> = incoming
+                )?
+                .into_boxed_slice()
+        };
+        let signals = {
+            signal_ptrs
+                .iter()
+                .copied()
+                .enumerate()
+                .try_fold(
+                    Vec::with_capacity(blocks.len()),
+                    |mut signals, (i, ptr)| -> Result<Vec<IntValue>, Error> {
+                        signals.push(
+                            builder
+                                .build_load(context.i32_type(), ptr, &format!("load_signal_{i}"))?
+                                .into_int_value(),
+                        );
+                        Ok(signals)
+                    },
+                )?
+                .into_boxed_slice()
+        };
+        let mut branch_outputs = HashMap::<(usize, usize), BasicValueEnum>::new();
+        for (bi, block) in blocks.iter().enumerate() {
+            match block {
+                Block::Branch { cases } => {
+                    builder.position_at_end(bbs[bi]);
+                    let signal = signals[branch_signal_map[bi]];
+                    // Some of these cases may be trying to forward a constant value
+                    // to their target branch. So we create those constant
+                    // valuesnow, in the appropriate basic block.
+                    build_branch_forwarding_outputs(
+                        &mut constants,
+                        &cases,
+                        &mut branch_outputs,
+                        builder,
+                        bi,
+                        signal,
+                    )?;
+                    // Now switch to the target branches.
+                    let cases: Box<[(IntValue, BasicBlock)]> = cases
+                        .iter()
+                        .enumerate()
+                        .skip(1)
+                        .map(|(case, target)| {
+                            (
+                                constants.int_32(case as u32, false),
+                                bbs[target.target_block],
+                            )
+                        })
+                        .collect();
+                    builder.build_switch(signal, bbs[bi + 1], cases.as_ref())?;
+                }
+                Block::Code { instructions } => {
+                    builder.position_at_end(bbs[bi]);
+                    for (index, node) in self.nodes()[instructions.start..instructions.end]
+                        .iter()
+                        .copied()
+                        .enumerate()
+                    {
+                        let reg = interval::build_op::<T>(
+                            BuildArgs {
+                                nodes: self.nodes(),
+                                params,
+                                ranges: &ranges,
+                                regs: &regs,
+                                constants: &mut constants,
+                                interval_type,
+                                function,
+                                node,
+                                index,
+                            },
+                            builder,
+                            &compiler.module,
+                        )?;
+                        regs.push(reg);
+                    }
+                    // It is possible while building the instruction we created
+                    // another basic block. So we ask the builder and overwrite.
+                    if let Some(newbb) = builder.get_insert_block() {
+                        bbs[bi] = newbb;
+                    }
+                    // Every code blocks unconditionally branches to the block that
+                    // comes right after it, except for the last code block, because
+                    // it has nowhere to go to.
+                    if let Some(next_bb) = bbs.get(bi + 1).copied() {
+                        builder.build_unconditional_branch(next_bb)?;
+                    }
+                }
+                Block::Merge {
+                    listeners,
+                    incoming,
+                    selector_node,
+                } => {
+                    builder.position_at_end(bbs[bi]);
+                    // Merge incoming values into a phi and overwrite the output of `selector_node`.
+                    let phi = builder.build_phi(
+                        match is_node_scalar(self.nodes(), *selector_node) {
+                            true => interval_type,
+                            false => context.bool_type().vec_type(2),
+                        },
+                        &format!("merge_block_phi_{selector_node}"),
+                    )?;
+                    let incoming: Box<[(&dyn BasicValue, BasicBlock)]> = incoming
                     .iter()
                     .map(|Incoming { block, output }| match output {
                         Some(output) => (&regs[*output] as &dyn BasicValue, bbs[*block]),
@@ -949,100 +955,104 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                             ),
                         },
                     }).collect();
-                phi.add_incoming(&incoming);
-                regs[selector_node] = phi.as_basic_value();
-                // Notify the listeners about the current interval.
-                match tree.node(selector_node) {
-                    Constant(_) | Symbol(_) | Unary(_, _) => {}
-                    Binary(op, lhs, rhs) => match op {
-                        Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual
-                        | And | Or => {}
-                        Min | Max | Less | LessOrEqual | Greater | GreaterOrEqual => {
-                            build_notify_listeners_binary_op(
-                                interval::build_interval_inequality_flags(
-                                    regs[*lhs].into_vector_value(),
-                                    regs[*rhs].into_vector_value(),
+                    phi.add_incoming(&incoming);
+                    regs[*selector_node] = phi.as_basic_value();
+                    // Notify the listeners about the current interval.
+                    match self.node(*selector_node) {
+                        Constant(_) | Symbol(_) | Unary(_, _) => {}
+                        Binary(op, lhs, rhs) => match op {
+                            Add | Subtract | Multiply | Divide | Pow | Remainder | Equal
+                            | NotEqual | And | Or => {}
+                            Min | Max | Less | LessOrEqual | Greater | GreaterOrEqual => {
+                                build_notify_listeners_binary_op(
+                                    interval::build_interval_inequality_flags(
+                                        regs[*lhs].into_vector_value(),
+                                        regs[*rhs].into_vector_value(),
+                                        builder,
+                                        &compiler.module,
+                                        &mut constants,
+                                        *selector_node,
+                                    )?,
+                                    *op,
+                                    &listeners,
+                                    &branch_signal_map,
                                     builder,
-                                    &compiler.module,
                                     &mut constants,
-                                    selector_node,
-                                )?,
-                                *op,
-                                &listeners,
-                                &branch_signal_map,
+                                    *selector_node,
+                                    &signal_ptrs,
+                                )?;
+                            }
+                        },
+                        Ternary(op, a, _b, _c) => match op {
+                            Choose => build_notify_listeners_choose(
+                                regs[*a].into_vector_value(),
                                 builder,
+                                &compiler.module,
                                 &mut constants,
-                                selector_node,
+                                *selector_node,
+                                &listeners,
                                 &signal_ptrs,
-                            )?;
-                        }
-                    },
-                    Ternary(op, a, _b, _c) => match op {
-                        Choose => build_notify_listeners_choose(
-                            regs[*a].into_vector_value(),
-                            builder,
-                            &compiler.module,
-                            &mut constants,
-                            selector_node,
-                            &listeners,
-                            &signal_ptrs,
-                            &branch_signal_map,
-                        )?,
-                    },
+                                &branch_signal_map,
+                            )?,
+                        },
+                    }
                 }
             }
         }
+        // We're done building all the blocks / instructions. Now we build the logic
+        // for writing the outputs to the output pointer.
+        let outputs_arg = function
+            .get_nth_param(1)
+            .ok_or(Error::JitCompilationError(
+                "Cannot read output address".to_string(),
+            ))?
+            .into_pointer_value();
+        for (i, reg) in regs[(self.len() - self.num_roots())..].iter().enumerate() {
+            // # SAFETY: This is unit tested a lot. If this fails, we segfault.
+            let dst = unsafe {
+                builder.build_gep(
+                    interval_type,
+                    outputs_arg,
+                    &[constants.int_32(i as u32, false)],
+                    &format!("output_ptr_{i}"),
+                )?
+            };
+            let store_inst = builder.build_store(dst, reg.into_vector_value())?;
+            /*
+            Rust arrays only guarantee alignment with the size of T, where as
+            LLVM load / store instructions expect alignment with the vector size
+            (double the size of T). This mismatch can cause a segfault. So we
+            manually set the alignment for this store instruction.
+            */
+            store_inst
+                .set_alignment(std::mem::size_of::<T>() as u32)
+                .map_err(|e| {
+                    Error::JitCompilationError(format!(
+                        "Cannot set alignment when storing output: {e}"
+                    ))
+                })?;
+        }
+        builder.build_return(None)?;
+        compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
+        let engine = compiler
+            .module
+            .create_jit_execution_engine(OptimizationLevel::Aggressive)
+            .map_err(|_| Error::CannotCreateJitModule)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
+        let func: JitFunction<'ctx, NativePruningIntervalFunc> =
+            unsafe { engine.get_function(&func_name)? };
+        Ok(JitPruningFn {
+            func,
+            args: params.to_string(),
+            tree: self,
+            blocks,
+            num_signals: signals.len(),
+            _phantom: PhantomData,
+        })
     }
-    // We're done building all the blocks / instructions. Now we build the logic
-    // for writing the outputs to the output pointer.
-    let outputs_arg = function
-        .get_nth_param(1)
-        .ok_or(Error::JitCompilationError(
-            "Cannot read output address".to_string(),
-        ))?
-        .into_pointer_value();
-    for (i, reg) in regs[(tree.len() - tree.num_roots())..].iter().enumerate() {
-        // # SAFETY: This is unit tested a lot. If this fails, we segfault.
-        let dst = unsafe {
-            builder.build_gep(
-                interval_type,
-                outputs_arg,
-                &[constants.int_32(i as u32, false)],
-                &format!("output_ptr_{i}"),
-            )?
-        };
-        let store_inst = builder.build_store(dst, reg.into_vector_value())?;
-        /*
-        Rust arrays only guarantee alignment with the size of T, where as
-        LLVM load / store instructions expect alignment with the vector size
-        (double the size of T). This mismatch can cause a segfault. So we
-        manually set the alignment for this store instruction.
-        */
-        store_inst
-            .set_alignment(std::mem::size_of::<T>() as u32)
-            .map_err(|e| {
-                Error::JitCompilationError(format!("Cannot set alignment when storing output: {e}"))
-            })?;
-    }
-    builder.build_return(None)?;
-    compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
-    let engine = compiler
-        .module
-        .create_jit_execution_engine(OptimizationLevel::Aggressive)
-        .map_err(|_| Error::CannotCreateJitModule)?;
-    // SAFETY: The signature is correct, and well tested. The function
-    // pointer should never be invalidated, because we allocated a dedicated
-    // execution engine, with it's own block of executable memory, that will
-    // live as long as the function wrapper lives.
-    let func: JitFunction<'ctx, NativePruningIntervalFunc> =
-        unsafe { engine.get_function(&func_name)? };
-    Ok(JitPruningIntervalFn {
-        func,
-        num_inputs: params.len(),
-        num_signals: signals.len(),
-        num_outputs: tree.num_roots(),
-        _phantom: PhantomData,
-    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1297,17 +1307,6 @@ fn build_branch_forwarding_outputs<'ctx>(
         );
     }
     Ok(())
-}
-
-impl Tree {
-    pub fn jit_compile_pruning<'ctx, T: NumberType>(
-        &'ctx self,
-        threshold: usize,
-        context: &'ctx JitContext,
-        params: &str,
-    ) -> Result<(), Error> {
-        todo!();
-    }
 }
 
 #[cfg(test)]
