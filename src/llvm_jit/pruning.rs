@@ -752,7 +752,7 @@ pub type NativeIntervalFunc = unsafe extern "C" fn(
     *mut c_void,   // Outputs
 );
 
-pub struct JitPruningFn<'ctx, T: NumberType> {
+pub struct JitPruner<'ctx, T: NumberType> {
     func: JitFunction<'ctx, NativePruningIntervalFunc>,
     args: String,
     tree: Tree,
@@ -761,7 +761,7 @@ pub struct JitPruningFn<'ctx, T: NumberType> {
     _phantom: PhantomData<T>,
 }
 
-impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
+impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
     pub fn num_signals(&self) -> usize {
         self.n_signals
     }
@@ -823,7 +823,7 @@ impl Tree {
         params: &str,
         context: &'ctx JitContext,
         pruning_threshold: usize,
-    ) -> Result<JitPruningFn<'ctx, T>, Error> {
+    ) -> Result<JitPruner<'ctx, T>, Error> {
         if !self.is_scalar() {
             // Only support scalar output trees.
             return Err(Error::TypeMismatch);
@@ -1103,7 +1103,7 @@ impl Tree {
         // live as long as the function wrapper lives.
         let func: JitFunction<'ctx, NativePruningIntervalFunc> =
             unsafe { engine.get_function(&func_name)? };
-        Ok(JitPruningFn {
+        Ok(JitPruner {
             func,
             args: params.to_string(),
             tree: self,
@@ -1371,9 +1371,7 @@ fn build_branch_forwarding_outputs<'ctx>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        Node, assert_float_eq, deftree, interval::pruning_eval, llvm_jit::pruning::make_layout,
-    };
+    use crate::{Node, assert_float_eq, deftree, llvm_jit::pruning::make_layout};
 
     #[test]
     fn t_min_sphere_layout() {
