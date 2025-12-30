@@ -296,13 +296,7 @@ fn build_vec_binary_intrinsic<'ctx>(
 ) -> Result<BasicValueEnum<'ctx>, Error> {
     let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
     let intrinsic_fn = intrinsic
-        .get_declaration(
-            module,
-            &[
-                BasicTypeEnum::VectorType(lhs.get_type()),
-                BasicTypeEnum::VectorType(rhs.get_type()),
-            ],
-        )
+        .get_declaration(module, &[BasicTypeEnum::VectorType(lhs.get_type())])
         .ok_or(Error::CannotCompileIntrinsic(name))?;
     builder
         .build_call(
@@ -352,13 +346,7 @@ fn build_float_binary_intrinsic<'ctx>(
 ) -> Result<BasicValueEnum<'ctx>, Error> {
     let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
     let intrinsic_fn = intrinsic
-        .get_declaration(
-            module,
-            &[
-                BasicTypeEnum::FloatType(lhs.get_type()),
-                BasicTypeEnum::FloatType(rhs.get_type()),
-            ],
-        )
+        .get_declaration(module, &[BasicTypeEnum::FloatType(lhs.get_type())])
         .ok_or(Error::CannotCompileIntrinsic(name))?;
     builder
         .build_call(
