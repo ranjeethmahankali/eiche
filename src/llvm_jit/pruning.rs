@@ -1,7 +1,8 @@
 use inkwell::{
-    AddressSpace, IntPredicate,
+    AddressSpace, IntPredicate, OptimizationLevel,
     basic_block::BasicBlock,
     builder::{self, Builder},
+    execution_engine::JitFunction,
     module::Module,
     values::{BasicValue, BasicValueEnum, IntValue, PointerValue, VectorValue},
 };
@@ -756,7 +757,7 @@ fn compile_pruning_func<'ctx, T: NumberType>(
     threshold: usize,
     context: &'ctx JitContext,
     params: &str,
-) -> Result<(), Error> {
+) -> Result<JitFunction<'ctx, NativePruningFunc>, Error> {
     if !tree.is_scalar() {
         // Only support scalar output trees.
         return Err(Error::TypeMismatch);
@@ -984,6 +985,48 @@ fn compile_pruning_func<'ctx, T: NumberType>(
             }
         }
     }
+    // We're done building all the blocks / instructions. Now we build the logic
+    // for writing the outputs to the output pointer.
+    let outputs_arg = function
+        .get_nth_param(1)
+        .ok_or(Error::JitCompilationError(
+            "Cannot read output address".to_string(),
+        ))?
+        .into_pointer_value();
+    for (i, reg) in regs[(tree.len() - tree.num_roots())..].iter().enumerate() {
+        // # SAFETY: This is unit tested a lot. If this fails, we segfault.
+        let dst = unsafe {
+            builder.build_gep(
+                interval_type,
+                outputs_arg,
+                &[constants.int_32(i as u32, false)],
+                &format!("output_ptr_{i}"),
+            )?
+        };
+        let store_inst = builder.build_store(dst, reg.into_vector_value())?;
+        /*
+        Rust arrays only guarantee alignment with the size of T, where as
+        LLVM load / store instructions expect alignment with the vector size
+        (double the size of T). This mismatch can cause a segfault. So we
+        manually set the alignment for this store instruction.
+        */
+        store_inst
+            .set_alignment(std::mem::size_of::<T>() as u32)
+            .map_err(|e| {
+                Error::JitCompilationError(format!("Cannot set alignment when storing output: {e}"))
+            })?;
+    }
+    builder.build_return(None)?;
+    compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
+    let engine = compiler
+        .module
+        .create_jit_execution_engine(OptimizationLevel::Aggressive)
+        .map_err(|_| Error::CannotCreateJitModule)?;
+    // SAFETY: The signature is correct, and well tested. The function
+    // pointer should never be invalidated, because we allocated a dedicated
+    // execution engine, with it's own block of executable memory, that will
+    // live as long as the function wrapper lives.
+    let func: JitFunction<'ctx, NativePruningFunc> = unsafe { engine.get_function(&func_name)? };
     todo!();
 }
 
