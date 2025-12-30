@@ -1463,7 +1463,7 @@ mod test {
             .expect("Cannot compile a JIT pruning evaluator");
         let mut signals = vec![0u32; prune_eval.num_signals()].into_boxed_slice();
         {
-            // Case 1.
+            // Case 1: To the left side close to the second sphere.
             let mut outputs = [[f64::NAN; 2]];
             prune_eval
                 .run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
@@ -1474,6 +1474,34 @@ mod test {
             }
             // Check the pruning signals.
             assert_eq!(signals.as_ref(), &[1, 0, 1]);
+        }
+        {
+            // Case 2: To the right side close to the first sphere.
+            let mut outputs = [[f64::NAN; 2]];
+            signals.fill(0); // Reset the signals.
+            prune_eval
+                .run(&[[1.0, 2.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+                .expect("Unable to run pruning eval");
+            // Check the interval output.
+            for (actual, expected) in outputs[0].iter().zip([-1.5, -0.08578643762690485]) {
+                assert_float_eq!(*actual, expected);
+            }
+            // Check the pruning signals.
+            assert_eq!(signals.as_ref(), &[0, 1, 0]);
+        }
+        {
+            // Case 3: In the middle, nothing should get pruned.
+            let mut outputs = [[f64::NAN; 2]];
+            signals.fill(0); // Reset the signals.
+            prune_eval
+                .run(&[[-0.5, 0.5], [-1.0, 1.0]], &mut outputs, &mut signals)
+                .expect("Unable to run pruning eval");
+            // Check the interval output.
+            for (actual, expected) in outputs[0].iter().zip([-1.0, 0.30277563773199456]) {
+                assert_float_eq!(*actual, expected);
+            }
+            // Check the pruning signals.
+            assert_eq!(signals.as_ref(), &[0, 0, 0]);
         }
     }
 }
