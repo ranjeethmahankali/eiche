@@ -1,11 +1,12 @@
 use inkwell::{
     AddressSpace, IntPredicate,
     basic_block::BasicBlock,
-    builder::Builder,
+    builder::{self, Builder},
+    module::Module,
     values::{BasicValue, BasicValueEnum, IntValue, PointerValue, VectorValue},
 };
 
-use super::{JitContext, NumberType, interval, simd_array, single};
+use super::{JitContext, NumberType, build_vec_unary_intrinsic, interval, simd_array, single};
 use crate::{
     BinaryOp::{self, *},
     Error,
@@ -967,8 +968,17 @@ fn compile_pruning_func<'ctx, T: NumberType>(
                             )?;
                         }
                     },
-                    Ternary(op, a, b, c) => match op {
-                        Choose => todo!("Notify the listeners of choose op"),
+                    Ternary(op, a, _b, _c) => match op {
+                        Choose => build_notify_listeners_choose(
+                            regs[*a].into_vector_value(),
+                            builder,
+                            &compiler.module,
+                            &mut constants,
+                            selector_node,
+                            &listeners,
+                            &signal_ptrs,
+                            &branch_signal_map,
+                        )?,
                     },
                 }
             }
@@ -977,8 +987,74 @@ fn compile_pruning_func<'ctx, T: NumberType>(
     todo!();
 }
 
-fn build_notify_listeners_choose<'ctx>(cond: VectorValue<'ctx>) {
-    // let always_true =
+fn build_notify_listeners_choose<'ctx>(
+    cond: VectorValue<'ctx>,
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    constants: &mut interval::Constants<'ctx>,
+    index: usize,
+    listeners: &[Listener],
+    signal_ptrs: &[PointerValue<'ctx>],
+    branch_signal_map: &[usize],
+) -> Result<(), Error> {
+    let always_true = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("notify_listener_always_true_{index}"),
+        cond,
+    )?
+    .into_int_value();
+    let always_false = build_vec_unary_intrinsic(
+        builder,
+        module,
+        "llvm.vector.reduce.and.*",
+        &format!("notify_listener_always_false_{index}"),
+        builder.build_not(cond, &format!("notify_listener_always_false_flip_{index}"))?,
+    )?
+    .into_int_value();
+    // If multiple listeners are from the same source branch they will appear
+    // consecutively. This is based on how they are constructed. This will cause
+    // the conditions to be folded into a build_select.
+    if let (Some(branch), value) = listeners.iter().try_fold(
+        (None, constants.int_32(0, false)),
+        |(prev_branch, value): (Option<usize>, IntValue),
+         Listener {
+             branch,
+             case,
+             prune,
+         }|
+         -> Result<(Option<usize>, IntValue), Error> {
+            let cond = match prune {
+                PruningType::Left => always_false,
+                PruningType::Right => always_true,
+                _ => unreachable!(
+                    "Incompatible pruning type for the Choose node: {:?}. This is a bug.",
+                    prune
+                ),
+            };
+            let current = constants.int_32(*case, false);
+            let fallback = match prev_branch {
+                Some(prev_branch) if prev_branch != *branch => {
+                    builder.build_store(signal_ptrs[branch_signal_map[prev_branch]], value)?;
+                    constants.int_32(0, false)
+                }
+                _ => value,
+            };
+            let next_value = builder
+                .build_select(
+                    cond,
+                    current,
+                    fallback,
+                    &format!("listener_fold_expr_{index}"),
+                )?
+                .into_int_value();
+            Ok((Some(*branch), next_value))
+        },
+    )? {
+        builder.build_store(signal_ptrs[branch_signal_map[branch]], value)?;
+    }
+    Ok(())
 }
 
 fn build_notify_listeners_binary_op<'ctx>(
@@ -1041,29 +1117,6 @@ fn build_notify_listeners_binary_op<'ctx>(
         strictly_after,
         &format!("bin_op_listener_strict_after_{index}"),
     )?;
-    // Function to get the condition for different combinations of ops and types of pruning.
-    let prune_cond_fn = |op: BinaryOp, prune: PruningType| -> IntValue<'ctx> {
-        match (op, prune) {
-            (Min, PruningType::Right)
-            | (Max, PruningType::Left)
-            | (LessOrEqual, PruningType::AlwaysTrue)
-            | (Greater, PruningType::AlwaysFalse) => before,
-            (Min, PruningType::Left)
-            | (Max, PruningType::Right)
-            | (Less, PruningType::AlwaysFalse)
-            | (GreaterOrEqual, PruningType::AlwaysTrue) => after,
-            (Less, PruningType::AlwaysTrue) | (GreaterOrEqual, PruningType::AlwaysFalse) => {
-                strictly_before
-            }
-            (Greater, PruningType::AlwaysTrue) | (LessOrEqual, PruningType::AlwaysFalse) => {
-                strictly_after
-            }
-            _ => unreachable!(
-                "Incompatible pruning type for the selector node: {:?}; {:?}. This is a bug.",
-                op, prune
-            ),
-        }
-    };
     // If multiple listeners are from the same source branch they will appear
     // consecutively. This is based on how they are constructed. This will cause
     // the conditions to be folded into a build_select.
@@ -1076,31 +1129,43 @@ fn build_notify_listeners_binary_op<'ctx>(
              prune,
          }|
          -> Result<(Option<usize>, IntValue), Error> {
-            match prev_branch {
+            let cond = match (op, prune) {
+                (Min, PruningType::Right)
+                | (Max, PruningType::Left)
+                | (LessOrEqual, PruningType::AlwaysTrue)
+                | (Greater, PruningType::AlwaysFalse) => before,
+                (Min, PruningType::Left)
+                | (Max, PruningType::Right)
+                | (Less, PruningType::AlwaysFalse)
+                | (GreaterOrEqual, PruningType::AlwaysTrue) => after,
+                (Less, PruningType::AlwaysTrue) | (GreaterOrEqual, PruningType::AlwaysFalse) => {
+                    strictly_before
+                }
+                (Greater, PruningType::AlwaysTrue) | (LessOrEqual, PruningType::AlwaysFalse) => {
+                    strictly_after
+                }
+                _ => unreachable!(
+                    "Incompatible pruning type for the selector node: {:?}; {:?}. This is a bug.",
+                    op, prune
+                ),
+            };
+            let current = constants.int_32(*case, false);
+            let fallback = match prev_branch {
                 Some(prev_branch) if prev_branch != *branch => {
                     builder.build_store(signal_ptrs[branch_signal_map[prev_branch]], value)?;
-                    let next_value = builder
-                        .build_select(
-                            prune_cond_fn(op, *prune),
-                            constants.int_32(*case, false),
-                            constants.int_32(0, false),
-                            &format!("listener_fold_expr_{index}"),
-                        )?
-                        .into_int_value();
-                    Ok((Some(*branch), next_value))
+                    constants.int_32(0, false)
                 }
-                _ => {
-                    let next_value = builder
-                        .build_select(
-                            prune_cond_fn(op, *prune),
-                            constants.int_32(*case, false),
-                            value,
-                            &format!("listener_fold_expr_{index}"),
-                        )?
-                        .into_int_value();
-                    Ok((Some(*branch), next_value))
-                }
-            }
+                _ => value,
+            };
+            let next_value = builder
+                .build_select(
+                    cond,
+                    current,
+                    fallback,
+                    &format!("listener_fold_expr_{index}"),
+                )?
+                .into_int_value();
+            Ok((Some(*branch), next_value))
         },
     )? {
         builder.build_store(signal_ptrs[branch_signal_map[branch]], value)?;
