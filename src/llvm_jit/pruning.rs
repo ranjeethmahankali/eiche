@@ -1376,43 +1376,17 @@ mod test {
                  (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
         .unwrap();
         let blocks = make_blocks(&tree, 10).expect("Unable to make blocks");
-        dbg!(blocks);
-        assert!(false);
-    }
-
-    #[test]
-    fn t_min_3_spheres_blocks() {
-        let tree = deftree!(min (min
-                                  (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)
-                                  (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5))
-                            (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5))
-        .unwrap();
-        let blocks = make_blocks(&tree, 10).expect("Unable to make blocks");
-        dbg!(blocks);
-        assert!(false);
-    }
-
-    #[test]
-    fn t_simple_cond() {
-        let tree = deftree!(if (< 'x 0) (+ 'x 1) (- 'x 1))
-            .unwrap()
-            .compacted()
-            .unwrap();
-        let blocks = make_blocks(&tree, 0).unwrap();
-        println!("{tree}");
-        dbg!(blocks);
-        assert!(false);
-    }
-
-    #[test]
-    fn t_simple_choose() {
-        let tree = deftree!(if (< 'x 0) (- 'a 1) (- 'b 2))
-            .unwrap()
-            .compacted()
-            .unwrap();
-        let blocks = make_blocks(&tree, 0).unwrap();
-        println!("{tree}");
-        dbg!(blocks);
-        assert!(false);
+        assert_eq!(blocks.len(), 7);
+        let (n_branch, n_code, n_merge) = blocks.iter().fold(
+            (0usize, 0usize, 0usize),
+            |(nb, nc, nm), block| match block {
+                Block::Branch { .. } => (nb + 1, nc, nm),
+                Block::Code { .. } => (nb, nc + 1, nm),
+                Block::Merge { .. } => (nb, nc, nm + 1),
+            },
+        );
+        assert_eq!(n_branch, 3);
+        assert_eq!(n_code, 3);
+        assert_eq!(n_merge, 1);
     }
 }
