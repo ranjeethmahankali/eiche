@@ -1045,6 +1045,7 @@ fn compile_pruning_func<'ctx, T: NumberType>(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_notify_listeners_choose<'ctx>(
     cond: VectorValue<'ctx>,
     builder: &'ctx Builder,
@@ -1115,6 +1116,7 @@ fn build_notify_listeners_choose<'ctx>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_notify_listeners_binary_op<'ctx>(
     flags: interval::InequalityFlags<'ctx>,
     op: BinaryOp,
