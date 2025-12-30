@@ -727,7 +727,7 @@ fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, 
     (splits.into_boxed_slice(), is_selector)
 }
 
-type NativePruningFunc = unsafe extern "C" fn(
+type NativePruningIntervalFunc = unsafe extern "C" fn(
     *const c_void, // Inputs
     *mut c_void,   // Outputs
     *mut u32,      // Signals - tells future pruned evaluations how to skip and jump.
@@ -752,12 +752,20 @@ pub type NativeIntervalFunc = unsafe extern "C" fn(
     *mut c_void,   // Outputs
 );
 
+struct JitPruningIntervalFn<'ctx, T: NumberType> {
+    func: JitFunction<'ctx, NativePruningIntervalFunc>,
+    num_inputs: usize,
+    num_signals: usize,
+    num_outputs: usize,
+    _phantom: PhantomData<T>,
+}
+
 fn compile_pruning_func<'ctx, T: NumberType>(
     tree: &Tree,
     threshold: usize,
     context: &'ctx JitContext,
     params: &str,
-) -> Result<JitFunction<'ctx, NativePruningFunc>, Error> {
+) -> Result<JitPruningIntervalFn<'ctx, T>, Error> {
     if !tree.is_scalar() {
         // Only support scalar output trees.
         return Err(Error::TypeMismatch);
@@ -1026,8 +1034,15 @@ fn compile_pruning_func<'ctx, T: NumberType>(
     // pointer should never be invalidated, because we allocated a dedicated
     // execution engine, with it's own block of executable memory, that will
     // live as long as the function wrapper lives.
-    let func: JitFunction<'ctx, NativePruningFunc> = unsafe { engine.get_function(&func_name)? };
-    todo!();
+    let func: JitFunction<'ctx, NativePruningIntervalFunc> =
+        unsafe { engine.get_function(&func_name)? };
+    Ok(JitPruningIntervalFn {
+        func,
+        num_inputs: params.len(),
+        num_signals: signals.len(),
+        num_outputs: tree.num_roots(),
+        _phantom: PhantomData,
+    })
 }
 
 fn build_notify_listeners_choose<'ctx>(
