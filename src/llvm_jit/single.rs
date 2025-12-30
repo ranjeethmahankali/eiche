@@ -58,8 +58,8 @@ where
     T: NumberType,
 {
     func: NativeFunc,
-    num_inputs: usize,
-    num_outputs: usize,
+    n_inputs: usize,
+    n_outputs: usize,
     _phantom: PhantomData<&'ctx JitFn<'ctx, T>>,
 }
 
@@ -457,8 +457,8 @@ where
             // execution engine that owns the block of executable memory to
             // which the function pointer points.
             func: unsafe { self.func.as_raw() },
-            num_inputs: self.num_inputs,
-            num_outputs: self.num_outputs,
+            n_inputs: self.num_inputs,
+            n_outputs: self.num_outputs,
             _phantom: PhantomData,
         }
     }
@@ -469,8 +469,8 @@ where
     T: NumberType,
 {
     pub fn run(&self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
-        if (inputs.len() != self.num_inputs) || (outputs.len() != self.num_outputs) {
-            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
+        if (inputs.len() != self.n_inputs) || (outputs.len() != self.n_outputs) {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
         }
         // SAFETY: We just checked above.
         let _: () = unsafe { self.run_unchecked(inputs, outputs) };

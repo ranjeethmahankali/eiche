@@ -761,6 +761,13 @@ pub struct JitPruner<'ctx, T: NumberType> {
     _phantom: PhantomData<T>,
 }
 
+pub struct JitPruningFn<'ctx, T: NumberType> {
+    func: JitFunction<'ctx, NativeSingleFunc>,
+    n_inputs: usize,
+    n_outputs: usize,
+    _phantom: PhantomData<T>,
+}
+
 impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
     pub fn num_signals(&self) -> usize {
         self.n_signals
@@ -815,10 +822,14 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             )
         }
     }
+
+    pub fn compile_eval(&self) -> Result<JitPruningFn<'ctx, T>, Error> {
+        todo!("Compile a pruned evaluator for single values.");
+    }
 }
 
 impl Tree {
-    pub fn jit_compile_pruning<'ctx, T: NumberType>(
+    pub fn jit_compile_pruner<'ctx, T: NumberType>(
         self,
         params: &str,
         context: &'ctx JitContext,
@@ -1457,7 +1468,7 @@ mod test {
         .unwrap();
         let context = JitContext::default();
         let prune_eval = tree
-            .jit_compile_pruning::<f64>("xy", &context, 10)
+            .jit_compile_pruner::<f64>("xy", &context, 10)
             .expect("Cannot compile a JIT pruning evaluator");
         let mut signals = vec![0u32; prune_eval.num_signals()].into_boxed_slice();
         {
