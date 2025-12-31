@@ -357,4 +357,111 @@ mod test {
             }
         );
     }
+
+    #[test]
+    fn t_min_nested() {
+        let tree = Tree::from_nodes(
+            vec![
+                Symbol('x'),                  // 0
+                Constant(Value::Scalar(1.0)), // 1
+                Binary(Add, 0, 1),            // 2
+                Symbol('y'),                  // 3
+                Constant(Value::Scalar(2.0)), // 4
+                Binary(Add, 3, 4),            // 5
+                Binary(Min, 2, 5),            // 6
+                Symbol('z'),                  // 7
+                Constant(Value::Scalar(3.0)), // 8
+                Binary(Add, 7, 8),            // 9
+                Binary(Min, 6, 9),            // 10
+            ],
+            (1, 1),
+        )
+        .unwrap();
+        let cfg = ControlFlow::from_tree(&tree, 0).expect("Unable to build control flow");
+        assert_eq!(
+            cfg,
+            ControlFlow {
+                interrupts: vec![
+                    Interrupt::Jump {
+                        before: 0,
+                        target: 6,
+                    },
+                    Interrupt::Jump {
+                        before: 0,
+                        target: 2,
+                    },
+                    Interrupt::Land {
+                        after: 2,
+                        source: 0,
+                    },
+                    Interrupt::Jump {
+                        before: 3,
+                        target: 5,
+                    },
+                    Interrupt::Land {
+                        after: 5,
+                        source: 3,
+                    },
+                    Interrupt::Diverge {
+                        before: 6,
+                        choice: Choice::Node(5,),
+                    },
+                    Interrupt::Diverge {
+                        before: 6,
+                        choice: Choice::Node(2,),
+                    },
+                    Interrupt::Converge { after: 6 },
+                    Interrupt::Land {
+                        after: 6,
+                        source: 0,
+                    },
+                    Interrupt::Jump {
+                        before: 7,
+                        target: 9,
+                    },
+                    Interrupt::Land {
+                        after: 9,
+                        source: 7,
+                    },
+                    Interrupt::Diverge {
+                        before: 10,
+                        choice: Choice::Node(9,),
+                    },
+                    Interrupt::Diverge {
+                        before: 10,
+                        choice: Choice::Node(6,),
+                    },
+                    Interrupt::Converge { after: 10 },
+                ]
+                .into_boxed_slice(),
+                criteria: vec![
+                    Criteria {
+                        start: 0,
+                        end: 2,
+                        owner: 6,
+                        kind: PruneKind::Left,
+                    },
+                    Criteria {
+                        start: 0,
+                        end: 6,
+                        owner: 10,
+                        kind: PruneKind::Left,
+                    },
+                    Criteria {
+                        start: 3,
+                        end: 5,
+                        owner: 6,
+                        kind: PruneKind::Right,
+                    },
+                    Criteria {
+                        start: 7,
+                        end: 9,
+                        owner: 10,
+                        kind: PruneKind::Right,
+                    },
+                ]
+                .into_boxed_slice(),
+            }
+        );
+    }
 }
