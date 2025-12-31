@@ -1,34 +1,225 @@
-use inkwell::{
-    AddressSpace, IntPredicate, OptimizationLevel,
-    basic_block::BasicBlock,
-    builder::Builder,
-    context::Context,
-    execution_engine::JitFunction,
-    module::Module,
-    values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue, VectorValue},
-};
+use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, Value};
+use std::ffi::c_void;
 
-use super::{JitContext, NumberType, build_vec_unary_intrinsic, interval, simd_array, single};
-use crate::{
-    BinaryOp::{self, *},
-    Error,
-    Node::*,
-    TernaryOp::*,
-    Tree, Value,
-    llvm_jit::{JitCompiler, interval::BuildArgs},
-    tree::is_node_scalar,
-};
-use std::{collections::HashMap, ffi::c_void, marker::PhantomData, ops::Range};
-
-enum Interruption {
-    Jump { before: usize },
-    Land { after: usize },
-    Choice { before: usize },
-    Merge { after: usize },
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Choice {
+    Node(usize),
+    Constant(Value),
 }
 
-fn build_interruptions(tree: &Tree) -> Box<[Interruption]> {
-    todo!();
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Interrupt {
+    Jump { before: usize, target: usize },
+    Land { after: usize, source: usize },
+    Diverge { before: usize, choice: Choice },
+    Converge { after: usize },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PruneKind {
+    Left,
+    Right,
+    AlwaysTrue,
+    AlwaysFalse,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Criteria {
+    start: usize,
+    end: usize,
+    owner: usize,
+    kind: PruneKind,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ControlFlow {
+    interrupts: Box<[Interrupt]>,
+    criteria: Box<[Criteria]>,
+}
+
+impl ControlFlow {
+    fn from_tree(tree: &Tree, threshold: usize) -> Result<ControlFlow, Error> {
+        let (tree, ndom) = tree.control_dependence_sorted()?;
+        let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
+        let mut skippable = vec![false; tree.len()].into_boxed_slice();
+        let mut criteria = Vec::<Criteria>::new();
+        for (ni, node) in tree.nodes().iter().enumerate() {
+            match node {
+                Binary(Min | Max, lhs, rhs) => {
+                    let ldom = ndom[*lhs];
+                    let rdom = ndom[*rhs];
+                    let lskip = ldom > threshold;
+                    let rskip = rdom > threshold;
+                    if lskip {
+                        make_skip(
+                            *lhs - ldom,
+                            *lhs,
+                            ni,
+                            PruneKind::Left,
+                            &mut skippable[*lhs],
+                            &mut interrupts,
+                            &mut criteria,
+                        );
+                        interrupts.push(Interrupt::Diverge {
+                            before: ni,
+                            choice: Choice::Node(*rhs),
+                        });
+                    }
+                    if rskip {
+                        make_skip(
+                            *rhs - rdom,
+                            *rhs,
+                            ni,
+                            PruneKind::Right,
+                            &mut skippable[*rhs],
+                            &mut interrupts,
+                            &mut criteria,
+                        );
+                        interrupts.push(Interrupt::Diverge {
+                            before: ni,
+                            choice: Choice::Node(*lhs),
+                        });
+                    }
+                    if lskip || rskip {
+                        interrupts.push(Interrupt::Converge { after: ni });
+                    }
+                }
+                Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
+                    let dom = ndom[ni];
+                    let start = ni - dom;
+                    if dom > threshold {
+                        interrupts.push(Interrupt::Diverge {
+                            before: start,
+                            choice: Choice::Constant(Value::Bool(true)),
+                        });
+                        interrupts.push(Interrupt::Diverge {
+                            before: start,
+                            choice: Choice::Constant(Value::Bool(false)),
+                        });
+                        interrupts.push(Interrupt::Converge { after: ni });
+                    }
+                }
+                Ternary(Choose, _cond, tt, ff) => {
+                    let ttdom = ndom[*tt];
+                    let ffdom = ndom[*ff];
+                    let tskip = ttdom > threshold;
+                    let fskip = ffdom > threshold;
+                    if tskip {
+                        make_skip(
+                            *tt - ttdom,
+                            *tt,
+                            ni,
+                            PruneKind::Left,
+                            &mut skippable[*tt],
+                            &mut interrupts,
+                            &mut criteria,
+                        );
+                        interrupts.push(Interrupt::Diverge {
+                            before: ni,
+                            choice: Choice::Node(*ff),
+                        });
+                    }
+                    if fskip {
+                        make_skip(
+                            *ff - ffdom,
+                            *ff,
+                            ni,
+                            PruneKind::Left,
+                            &mut skippable[*ff],
+                            &mut interrupts,
+                            &mut criteria,
+                        );
+                        interrupts.push(Interrupt::Diverge {
+                            before: ni,
+                            choice: Choice::Node(*tt),
+                        });
+                    }
+                    if tskip || fskip {
+                        interrupts.push(Interrupt::Converge { after: ni });
+                    }
+                }
+                _ => continue,
+            }
+        }
+        interrupts.sort_by(|a, b| match (a, b) {
+            (
+                Interrupt::Jump {
+                    before: lb,
+                    target: lt,
+                },
+                Interrupt::Jump {
+                    before: rb,
+                    target: rt,
+                },
+            ) => (*lb, std::cmp::Reverse(*lt)).cmp(&(*rb, std::cmp::Reverse(*rt))),
+            (Interrupt::Jump { before, .. }, Interrupt::Land { after, .. }) => {
+                (*before, 0).cmp(&(*after, 1)) // If the positions are the same, jump should come first.
+            }
+            (Interrupt::Jump { before: lb, .. }, Interrupt::Diverge { before: rb, .. })
+            | (Interrupt::Diverge { before: lb, .. }, Interrupt::Jump { before: rb, .. })
+            | (Interrupt::Diverge { before: lb, .. }, Interrupt::Diverge { before: rb, .. }) => {
+                lb.cmp(rb)
+            }
+            (Interrupt::Jump { before, .. }, Interrupt::Converge { after }) => before.cmp(after),
+            (Interrupt::Land { after, .. }, Interrupt::Jump { before, .. }) => after.cmp(before),
+            (
+                Interrupt::Land {
+                    after: la,
+                    source: ls,
+                },
+                Interrupt::Land {
+                    after: ra,
+                    source: rs,
+                },
+            ) => (*la, *ls).cmp(&(*ra, *rs)),
+            (Interrupt::Land { after, .. }, Interrupt::Diverge { before, .. })
+            | (Interrupt::Converge { after }, Interrupt::Jump { before, .. }) => after.cmp(before),
+            (Interrupt::Land { after: la, .. }, Interrupt::Converge { after: ra })
+            | (Interrupt::Converge { after: la }, Interrupt::Land { after: ra, .. })
+            | (Interrupt::Converge { after: la }, Interrupt::Converge { after: ra }) => la.cmp(ra),
+            (Interrupt::Diverge { before, .. }, Interrupt::Land { after, .. }) => before.cmp(after),
+            (Interrupt::Diverge { before, .. }, Interrupt::Converge { after }) => {
+                (*before, 0).cmp(&(*after, 1))
+            }
+            (Interrupt::Converge { after }, Interrupt::Diverge { before, .. }) => {
+                (*after, 1).cmp(&(*before, 0))
+            }
+        });
+        criteria.sort_by(|a, b| (a.start, a.end, a.owner).cmp(&(b.start, b.end, b.owner)));
+        Ok(ControlFlow {
+            interrupts: interrupts.into_boxed_slice(),
+            criteria: criteria.into_boxed_slice(),
+        })
+    }
+}
+
+fn make_skip(
+    start: usize,
+    end: usize,
+    owner: usize,
+    kind: PruneKind,
+    skippable: &mut bool,
+    interrupts: &mut Vec<Interrupt>,
+    criteria: &mut Vec<Criteria>,
+) {
+    if !std::mem::replace(skippable, true) {
+        interrupts.extend_from_slice(&[
+            Interrupt::Jump {
+                before: start,
+                target: end,
+            },
+            Interrupt::Land {
+                after: end,
+                source: start,
+            },
+        ]);
+    }
+    criteria.push(Criteria {
+        start,
+        end,
+        owner,
+        kind,
+    });
 }
 
 /*
@@ -71,674 +262,6 @@ built, that can be used to compile LLVM functions that use instruction pruning
 to skip instructions based on interval evaluations.
  */
 
-#[derive(Debug, Copy, Clone)]
-pub enum PruningType {
-    None,
-    Left,
-    Right,
-    AlwaysTrue,
-    AlwaysFalse,
-}
-
-#[derive(Debug)]
-pub struct Listener {
-    branch: usize,
-    case: u32,
-    prune: PruningType,
-}
-
-#[derive(Debug)]
-pub struct Incoming {
-    block: usize,
-    output: Option<usize>,
-}
-
-#[derive(Debug, Default)]
-pub struct Case {
-    target_block: usize,
-    output: Option<Value>,
-}
-
-#[derive(Debug)]
-pub enum Block {
-    Branch {
-        cases: Vec<Case>,
-    },
-    Code {
-        instructions: Range<usize>,
-    },
-    Merge {
-        listeners: Vec<Listener>,
-        incoming: Vec<Incoming>,
-        selector_node: usize,
-    },
-}
-
-pub fn make_blocks(tree: &Tree, threshold: usize) -> Result<Box<[Block]>, Error> {
-    let (tree, ndom) = tree.control_dependence_sorted()?;
-    debug_assert_eq!(
-        tree.len(),
-        ndom.len(),
-        "This should never happen, it is a bug in control dependence sorting"
-    );
-    let (splits, is_selector) = make_layout(&tree, threshold, &ndom);
-    let (mut blocks, inst) = splits.iter().fold(
-        (Vec::<Block>::new(), 0usize),
-        |(mut blocks, mut inst), split| {
-            let (pos, block) = match split {
-                Split::Branch(p) => (
-                    *p,
-                    Some(Block::Branch {
-                        cases: Default::default(),
-                    }),
-                ),
-                Split::Merge(p) => (
-                    *p,
-                    Some(Block::Merge {
-                        listeners: Default::default(),
-                        incoming: Default::default(),
-                        selector_node: *p - 1,
-                    }),
-                ),
-                Split::Direct(p) => (*p, None),
-            };
-            assert!(pos >= inst, "This is a bug");
-            if pos > inst {
-                blocks.push(Block::Code {
-                    instructions: inst..pos,
-                });
-                inst = pos;
-            }
-            if let Some(block) = block {
-                blocks.push(block);
-            }
-            (blocks, inst)
-        },
-    );
-    // Push any remaining instructions as the last code block.
-    if inst < tree.len() {
-        blocks.push(Block::Code {
-            instructions: inst..tree.len(),
-        });
-    }
-    // Build index maps for later use.
-    let (branch_map, merge_map, code_map, _) = blocks.iter().enumerate().fold(
-        (
-            HashMap::<usize, usize>::new(),
-            HashMap::<usize, usize>::new(),
-            HashMap::<usize, usize>::new(),
-            0usize,
-        ),
-        |(mut bmap, mut mmap, mut cmap, mut inst), (bi, block)| {
-            match block {
-                Block::Branch { .. } => bmap.insert(inst, bi),
-                Block::Code { instructions } => {
-                    debug_assert_eq!(
-                        inst, instructions.start,
-                        "This should never break. This is a bug."
-                    );
-                    let old = std::mem::replace(&mut inst, instructions.end);
-                    cmap.insert(old, bi)
-                }
-                Block::Merge { .. } => mmap.insert(inst, bi),
-            };
-            (bmap, mmap, cmap, inst)
-        },
-    );
-    // Build jumps and links between blocks.
-    let mut blocks = blocks.into_boxed_slice();
-    // First build the trivial links between consecutive blocks. This represents
-    // the code flow when nothing is pruned.
-    for bi in 0..(blocks.len() - 1) {
-        let (left, right) = blocks.split_at_mut(bi + 1);
-        let (left, right) = (&mut left[bi], &mut right[0]);
-        match (left, right) {
-            (Block::Branch { .. }, Block::Branch { .. })
-            | (Block::Branch { .. }, Block::Merge { .. })
-            | (Block::Merge { .. }, Block::Merge { .. }) => {
-                unreachable!(
-                    "Two merge / branch blocks should never occur consecutively. This is a bug"
-                )
-            }
-            (
-                Block::Code { instructions },
-                Block::Merge {
-                    listeners: _,
-                    incoming,
-                    ..
-                },
-            ) => incoming.push(Incoming {
-                block: bi,
-                output: Some(instructions.end - 1),
-            }),
-            // The default case i.e. '0' in every branch just goes to the next block.
-            (Block::Branch { cases, .. }, Block::Code { .. }) => {
-                cases.push(Case {
-                    target_block: bi + 1,
-                    output: None,
-                });
-            }
-            // All other code blocks and merge blocks unconditionally branch to the next block.
-            (Block::Code { .. }, _) | (Block::Merge { .. }, _) => continue,
-        }
-    }
-    // Now build jumps and links for cases when instructions get pruned.
-    for (ni, node) in tree
-        .nodes()
-        .iter()
-        .zip(is_selector)
-        .enumerate()
-        .filter_map(|(ni, (node, flag))| if flag { Some((ni, node)) } else { None })
-    {
-        match node {
-            Constant(_) | Symbol(_) | Unary(_, _) => {
-                unreachable!("This should never happen. This is a bug")
-            }
-            Binary(op, lhs, rhs) => match op {
-                Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual | And
-                | Or => unreachable!("This should never happen. This is a bug"),
-                Min | Max => {
-                    let ldom = ndom[*lhs];
-                    let rdom = ndom[*rhs];
-                    let lstart = *lhs - ldom;
-                    let rstart = *rhs - rdom;
-                    let c1 = code_map.get(&lstart).copied().expect("This is a bug");
-                    let c2 = code_map.get(&rstart).copied().expect("This is a bug");
-                    let b3 = branch_map.get(&ni).copied().expect("This is a bug");
-                    let c3 = code_map.get(&ni).copied().expect("This is a bug");
-                    let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
-                    match (ldom > threshold, rdom > threshold) {
-                        (true, true) => {
-                            // branch | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
-                            let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
-                            link_bin_op_both_prunable(BlockGroup::new(
-                                &mut blocks,
-                                [b1, c1, b2, c2, b3, c3, merge],
-                            ));
-                        }
-                        (true, false) => {
-                            // branch | ldom, lhs | rdom, rhs | branch | op | merge
-                            let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
-                            link_bin_op_left_prunable(BlockGroup::new(
-                                &mut blocks,
-                                [b1, c1, c2, b3, c3, merge],
-                            ));
-                        }
-                        (false, true) => {
-                            // | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
-                            link_bin_op_right_prunable(BlockGroup::new(
-                                &mut blocks,
-                                [c1, b2, c2, b3, c3, merge],
-                            ));
-                        }
-                        (false, false) => unreachable!(
-                            "We only iterate over selector nodes, this should never happen."
-                        ),
-                    }
-                }
-                Less | LessOrEqual | Greater | GreaterOrEqual => {
-                    let n = ndom[ni];
-                    debug_assert!(n > threshold, "This invariant should always hold.");
-                    // branch | cond-dom, cond | merge
-                    let start = ni - n;
-                    let branch = branch_map.get(&start).copied().expect("This is a bug");
-                    let code = code_map.get(&start).copied().expect("This is a bug");
-                    let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
-                    link_cond(BlockGroup::new(&mut blocks, [branch, code, merge]));
-                }
-            },
-            Ternary(op, _, lhs, rhs) => match op {
-                Choose => {
-                    // Code duplication with this being the same as Min / Max. But this is OK for now.
-                    let ldom = ndom[*lhs];
-                    let rdom = ndom[*rhs];
-                    let lstart = *lhs - ldom;
-                    let rstart = *rhs - rdom;
-                    let c1 = code_map.get(&lstart).copied().expect("This is a bug");
-                    let c2 = code_map.get(&rstart).copied().expect("This is a bug");
-                    let b3 = branch_map.get(&ni).copied().expect("This is a bug");
-                    let c3 = code_map.get(&ni).copied().expect("This is a bug");
-                    let merge = merge_map.get(&(ni + 1)).copied().expect("This is a bug");
-                    match (ldom > threshold, rdom > threshold) {
-                        (true, true) => {
-                            // branch | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
-                            let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
-                            link_bin_op_both_prunable(BlockGroup::new(
-                                &mut blocks,
-                                [b1, c1, b2, c2, b3, c3, merge],
-                            ));
-                        }
-                        (true, false) => {
-                            // branch | ldom, lhs | rdom, rhs | branch | op | merge
-                            let b1 = branch_map.get(&lstart).copied().expect("This is a bug");
-                            link_bin_op_left_prunable(BlockGroup::new(
-                                &mut blocks,
-                                [b1, c1, c2, b3, c3, merge],
-                            ));
-                        }
-                        (false, true) => {
-                            // | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            let b2 = branch_map.get(&rstart).copied().expect("This is a bug");
-                            link_bin_op_right_prunable(BlockGroup::new(
-                                &mut blocks,
-                                [c1, b2, c2, b3, c3, merge],
-                            ));
-                        }
-                        (false, false) => unreachable!(
-                            "We only iterate over selector nodes, this should never happen."
-                        ),
-                    }
-                }
-            },
-        }
-    }
-    Ok(blocks)
-}
-
-fn link_cond(blocks: BlockGroup<'_, 3>) {
-    let [branch, _code, merge] = blocks.indices;
-    if let [
-        Block::Branch { cases },
-        Block::Code { instructions },
-        Block::Merge {
-            listeners,
-            incoming,
-            selector_node,
-        },
-    ] = blocks.blocks
-    {
-        debug_assert_eq!(
-            *selector_node,
-            instructions.end - 1,
-            "This invariant should always hold"
-        );
-        /* The path is the same whether this gets pruned with a True or
-         * False. The only thing that changes is the constant value used in
-         * place of the condition op.
-
-        bleft | cond-dom, cond | merge
-          │                        ↑
-          └────────────────────────┘
-         */
-        // If true:
-        link_jump(
-            branch,
-            cases,
-            merge,
-            listeners,
-            PruningType::AlwaysTrue,
-            Some(Value::Bool(true)),
-        );
-        link_jump(
-            branch,
-            cases,
-            merge,
-            listeners,
-            PruningType::AlwaysFalse,
-            Some(Value::Bool(false)),
-        );
-        incoming.push(Incoming {
-            block: branch,
-            output: None,
-        });
-    } else {
-        unreachable!("Wrong types of block. This is a bug");
-    }
-}
-
-fn link_bin_op_both_prunable(blocks: BlockGroup<'_, 7>) {
-    let [bleft, _cleft, bright, cright, bop, _cop, merge] = blocks.indices;
-    if let [
-        Block::Branch {
-            cases: left_cases, ..
-        },
-        Block::Code {
-            instructions: left_inst,
-        },
-        Block::Branch {
-            cases: right_cases, ..
-        },
-        Block::Code {
-            instructions: right_inst,
-        },
-        Block::Branch {
-            cases: op_cases, ..
-        },
-        Block::Code {
-            instructions: op_inst,
-        },
-        Block::Merge {
-            listeners,
-            selector_node: merge_selector,
-            incoming,
-        },
-        ..,
-    ] = blocks.blocks
-    {
-        debug_assert_eq!(op_inst.start, *merge_selector, "This is a bug");
-        /* If lhs gets pruned: (consecutive branching is already done).
-
-        bleft | cleft | bright | cright | bop | cop | merge
-          │                       ↑  │    ↑ │          ↑
-          └───────────────────────┘  └────┘ └──────────┘
-        */
-        link_jump(
-            bleft,
-            left_cases,
-            cright,
-            listeners,
-            PruningType::Left,
-            None,
-        );
-        link_jump(bop, op_cases, merge, listeners, PruningType::Left, None);
-        incoming.push(Incoming {
-            block: bop,
-            output: Some(right_inst.end - 1),
-        });
-        /* If rhs gets pruned: (consecutive branching is already done).
-
-        bleft | cleft | bright | cright | bop | cop | merge
-          │      ↑ │     ↑  │                           ↑
-          └──────┘ └─────┘  └───────────────────────────┘
-         */
-        link_jump(
-            bright,
-            right_cases,
-            merge,
-            listeners,
-            PruningType::Right,
-            None,
-        );
-        incoming.push(Incoming {
-            block: bright,
-            output: Some(left_inst.end - 1),
-        });
-    } else {
-        unreachable!("Wrong types of block. This is a bug");
-    }
-}
-
-fn link_bin_op_left_prunable(blocks: BlockGroup<'_, 6>) {
-    let [bleft, _cleft, cright, bop, _cop, merge] = blocks.indices;
-    if let [
-        Block::Branch {
-            cases: left_cases, ..
-        },
-        Block::Code { instructions: _ },
-        Block::Code {
-            instructions: right_inst,
-        },
-        Block::Branch {
-            cases: op_cases, ..
-        },
-        Block::Code {
-            instructions: op_inst,
-        },
-        Block::Merge {
-            listeners,
-            selector_node: merge_selector,
-            incoming,
-        },
-        ..,
-    ] = blocks.blocks
-    {
-        debug_assert_eq!(op_inst.start, *merge_selector, "This is a bug");
-        /* Only lhs is prunable and it gets pruned.
-
-        bleft | cleft | cright | bop | cop | merge
-          │              ↑  │    ↑ │          ↑
-          └──────────────┘  └────┘ └──────────┘
-         */
-        link_jump(
-            bleft,
-            left_cases,
-            cright,
-            listeners,
-            PruningType::Left,
-            None,
-        );
-        link_jump(bop, op_cases, merge, listeners, PruningType::Left, None);
-        incoming.push(Incoming {
-            block: bop,
-            output: Some(right_inst.end - 1),
-        });
-    } else {
-        unreachable!("Wrong types of block. This is a bug");
-    }
-}
-
-fn link_bin_op_right_prunable(blocks: BlockGroup<'_, 6>) {
-    let [_cleft, bright, _cright, _bop, _cop, merge] = blocks.indices;
-    if let [
-        Block::Code {
-            instructions: left_inst,
-        },
-        Block::Branch {
-            cases: right_cases, ..
-        },
-        Block::Code { instructions: _ },
-        Block::Branch { .. },
-        Block::Code {
-            instructions: op_inst,
-        },
-        Block::Merge {
-            listeners,
-            selector_node: merge_selector,
-            incoming,
-        },
-        ..,
-    ] = blocks.blocks
-    {
-        debug_assert_eq!(op_inst.start, *merge_selector, "This is a bug");
-        /* Only rhs is prunable and it gets pruned.
-
-        cleft | bright | cright | bop | cop | merge
-          │      ↑ │                            ↑
-          └──────┘ └────────────────────────────┘
-         */
-        link_jump(
-            bright,
-            right_cases,
-            merge,
-            listeners,
-            PruningType::Right,
-            None,
-        );
-        incoming.push(Incoming {
-            block: bright,
-            output: Some(left_inst.end - 1),
-        });
-    } else {
-        unreachable!("Wrong types of block. This is a bug");
-    }
-}
-
-fn link_jump(
-    branch: usize,
-    cases: &mut Vec<Case>,
-    target: usize,
-    listeners: &mut Vec<Listener>,
-    prune: PruningType,
-    output: Option<Value>,
-) {
-    let case = cases.len();
-    cases.push(Case {
-        target_block: target,
-        output,
-    });
-    listeners.push(Listener {
-        branch,
-        case: case as u32,
-        prune,
-    });
-}
-
-struct BlockGroup<'a, const N: usize> {
-    blocks: [&'a mut Block; N],
-    indices: [usize; N],
-    phantom: PhantomData<&'a mut [Block]>,
-}
-
-impl<'a, const N: usize> BlockGroup<'a, N> {
-    fn new(slice: &'a mut [Block], indices: [usize; N]) -> Self {
-        assert!(
-            indices.windows(2).all(|window| window[0] < window[1]),
-            "The indices must be increasing: {:?}",
-            indices
-        );
-        assert!(
-            indices.iter().all(|i| *i < slice.len()),
-            "All indices must be within bounds: {:?}",
-            indices
-        );
-        let ptr = slice.as_mut_ptr();
-        Self {
-            // # SAFETY: The two asserts above ensure the indices are
-            // non-overlapping and within bounds. So this is safe.
-            blocks: unsafe { indices.map(|i| &mut *ptr.add(i)) },
-            phantom: PhantomData,
-            indices,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum Split {
-    Branch(usize),
-    Merge(usize),
-    Direct(usize),
-}
-
-fn make_layout(tree: &Tree, threshold: usize, ndom: &[usize]) -> (Box<[Split]>, Box<[bool]>) {
-    let mut splits: Vec<Split> = Vec::with_capacity(tree.len() / 2);
-    let mut is_selector: Box<[bool]> = vec![false; tree.len()].into_boxed_slice();
-    for (i, node) in tree.nodes().iter().enumerate() {
-        match node {
-            Constant(_) | Symbol(_) | Unary(_, _) => continue,
-            Binary(op, lhs, rhs) => match op {
-                Add | Subtract | Multiply | Divide | Pow | Remainder | Equal | NotEqual | And
-                | Or => continue,
-                Min | Max => {
-                    let ldom = ndom[*lhs];
-                    let rdom = ndom[*rhs];
-                    match (ldom > threshold, rdom > threshold) {
-                        (true, true) => {
-                            // branch | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            splits.extend_from_slice(&[
-                                Split::Branch(*lhs - ldom),
-                                Split::Branch(*rhs - rdom),
-                                Split::Branch(i),
-                                Split::Merge(i + 1),
-                            ]);
-                            is_selector[i] = true;
-                        }
-                        (true, false) => {
-                            // branch | ldom, lhs | rdom, rhs | branch | op | merge
-                            splits.extend_from_slice(&[
-                                Split::Branch(*lhs - ldom),
-                                Split::Direct(*rhs - rdom),
-                                Split::Branch(i),
-                                Split::Merge(i + 1),
-                            ]);
-                            is_selector[i] = true;
-                        }
-                        (false, true) => {
-                            // | ldom, lhs | branch | rdom, rhs | branch | op | merge
-                            splits.extend_from_slice(&[
-                                Split::Direct(*lhs - ldom),
-                                Split::Branch(*rhs - rdom),
-                                Split::Branch(i),
-                                Split::Merge(i + 1),
-                            ]);
-                            is_selector[i] = true;
-                        }
-                        (false, false) => continue,
-                    }
-                }
-                Less | LessOrEqual | Greater | GreaterOrEqual => {
-                    // branch | cond-dom, cond | merge
-                    let n = ndom[i];
-                    if n > threshold {
-                        splits.extend_from_slice(&[Split::Branch(i - n), Split::Merge(i + 1)]);
-                        is_selector[i] = true;
-                    }
-                }
-            },
-            Ternary(op, cond, tt, ff) => match op {
-                Choose => {
-                    let ttdom = ndom[*tt];
-                    let ffdom = ndom[*ff];
-                    if is_selector[*cond] || ttdom > threshold || ffdom > threshold {
-                        match (ttdom > threshold, ffdom > threshold) {
-                            (true, true) => {
-                                // branch | ttdom, tt | branch | ffdom, ff | branch | choose | merge.
-                                splits.extend_from_slice(&[
-                                    Split::Branch(*tt - ttdom),
-                                    Split::Branch(*ff - ffdom),
-                                    Split::Branch(i),
-                                    Split::Merge(i + 1),
-                                ]);
-                                is_selector[i] = true;
-                            }
-                            (true, false) => {
-                                // branch | ttdom, tt | ffdom, ff | branch | choose | merge.
-                                splits.extend_from_slice(&[
-                                    Split::Branch(*tt - ttdom),
-                                    Split::Direct(*ff - ffdom),
-                                    Split::Branch(i),
-                                    Split::Merge(i + 1),
-                                ]);
-                                is_selector[i] = true;
-                            }
-                            (false, true) => {
-                                // | ttdom, tt | branch | ffdom, ff | branch | choose | merge.
-                                splits.extend_from_slice(&[
-                                    Split::Direct(*tt - ttdom),
-                                    Split::Branch(*ff - ffdom),
-                                    Split::Branch(i),
-                                    Split::Merge(i + 1),
-                                ]);
-                                is_selector[i] = true;
-                            }
-                            (false, false) => continue,
-                        }
-                    }
-                }
-            },
-        }
-    }
-    splits.sort_by(|a, b| match (a, b) {
-        (Split::Branch(a), Split::Branch(b))
-        | (Split::Merge(a), Split::Merge(b))
-        | (Split::Direct(a), Split::Direct(b)) => a.cmp(b),
-        (Split::Branch(a), Split::Merge(b))
-        | (Split::Direct(a), Split::Branch(b))
-        | (Split::Direct(a), Split::Merge(b)) => (*a, 1).cmp(&(*b, 0)), // Prefer b.
-        (Split::Branch(a), Split::Direct(b))
-        | (Split::Merge(a), Split::Branch(b))
-        | (Split::Merge(a), Split::Direct(b)) => (*a, 0).cmp(&(*b, 1)), // Prefer a.
-    });
-    splits.dedup_by(|a, b| match (a, b) {
-        (Split::Branch(a), Split::Branch(b))
-        | (Split::Merge(a), Split::Merge(b))
-        | (Split::Direct(a), Split::Direct(b)) => a == b,
-        (Split::Branch(_), Split::Merge(_)) | (Split::Merge(_), Split::Branch(_)) => false,
-        (Split::Branch(a), Split::Direct(b))
-        | (Split::Direct(a), Split::Branch(b))
-        | (Split::Merge(a), Split::Direct(b))
-        | (Split::Direct(a), Split::Merge(b))
-            if a == b =>
-        {
-            true
-        }
-        _ => false,
-    });
-    (splits.into_boxed_slice(), is_selector)
-}
-
 type NativePruningIntervalFunc = unsafe extern "C" fn(
     *const c_void, // Inputs
     *mut c_void,   // Outputs
@@ -764,23 +287,74 @@ pub type NativeIntervalFunc = unsafe extern "C" fn(
     *const u32,    // Signals,
 );
 
-pub struct JitPruner<'ctx, T: NumberType> {
-    func: JitFunction<'ctx, NativePruningIntervalFunc>,
-    args: String,
-    tree: Tree,
-    blocks: Box<[Block]>,
-    n_signals: usize,
-    context: &'ctx JitContext,
-    _phantom: PhantomData<T>,
-}
-
-pub struct JitPruningFn<'ctx, T: NumberType> {
-    func: JitFunction<'ctx, NativeSingleFunc>,
-    n_inputs: usize,
-    n_outputs: usize,
-    n_signals: usize,
-    _phantom: PhantomData<T>,
-}
-
 #[cfg(test)]
-mod test {}
+mod test {
+    use super::*;
+    use crate::{deftree, llvm_jit::pruning::ControlFlow};
+
+    #[test]
+    fn t_min_tiny() {
+        let tree = Tree::from_nodes(
+            vec![
+                Symbol('x'),
+                Constant(Value::Scalar(1.0)),
+                Binary(Add, 0, 1),
+                Symbol('y'),
+                Constant(Value::Scalar(2.0)),
+                Binary(Add, 3, 4),
+                Binary(Min, 2, 5),
+            ],
+            (1, 1),
+        )
+        .expect("Cannot create tree");
+        let cfg = ControlFlow::from_tree(&tree, 0).expect("Cannot compute control flow");
+        assert_eq!(
+            cfg,
+            ControlFlow {
+                interrupts: vec![
+                    Interrupt::Jump {
+                        before: 0,
+                        target: 2,
+                    },
+                    Interrupt::Land {
+                        after: 2,
+                        source: 0,
+                    },
+                    Interrupt::Jump {
+                        before: 3,
+                        target: 5,
+                    },
+                    Interrupt::Land {
+                        after: 5,
+                        source: 3,
+                    },
+                    Interrupt::Diverge {
+                        before: 6,
+                        choice: Choice::Node(5,),
+                    },
+                    Interrupt::Diverge {
+                        before: 6,
+                        choice: Choice::Node(2,),
+                    },
+                    Interrupt::Converge { after: 6 },
+                ]
+                .into_boxed_slice(),
+                criteria: vec![
+                    Criteria {
+                        start: 0,
+                        end: 2,
+                        owner: 6,
+                        kind: PruneKind::Left,
+                    },
+                    Criteria {
+                        start: 3,
+                        end: 5,
+                        owner: 6,
+                        kind: PruneKind::Right,
+                    },
+                ]
+                .into_boxed_slice(),
+            }
+        );
+    }
+}
