@@ -34,6 +34,8 @@ enum Interrupt {
         before_node: usize,
         target: usize,
         alternate: Alternate,
+        owner: usize,
+        trigger: PruneKind,
     },
     Land {
         after_node: usize,
@@ -42,189 +44,155 @@ enum Interrupt {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
 enum PruneKind {
-    Left,
-    Right,
-    AlwaysTrue,
-    AlwaysFalse,
+    None = 0,
+    Left = 1,
+    Right = 2,
+    AlwaysTrue = 3,
+    AlwaysFalse = 4,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct Notification {
-    receiver: usize,
-    sender_node: usize,
-    message: PruneKind,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct ControlFlow {
-    interrupts: Box<[Interrupt]>,
-    criteria: Box<[Notification]>,
-}
-
-impl ControlFlow {
-    fn from_tree(tree: &Tree, threshold: usize) -> Result<ControlFlow, Error> {
-        let (tree, ndom) = tree.control_dependence_sorted()?;
-        let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
-        let mut criteria = Vec::<Notification>::new();
-        let mut land_map: Vec<Option<usize>> = vec![None; tree.len()];
-        for (ni, node) in tree.nodes().iter().enumerate() {
-            match node {
-                Binary(Min | Max, lhs, rhs) => {
-                    let ldom = ndom[*lhs];
-                    let rdom = ndom[*rhs];
-                    let lskip = ldom > threshold;
-                    let rskip = rdom > threshold;
+fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Error> {
+    let (tree, ndom) = tree.control_dependence_sorted()?;
+    let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
+    let mut land_map: Vec<Option<usize>> = vec![None; tree.len()];
+    for (ni, node) in tree.nodes().iter().enumerate() {
+        match node {
+            Binary(Min | Max, lhs, rhs) => {
+                let ldom = ndom[*lhs];
+                let rdom = ndom[*rhs];
+                let lskip = ldom > threshold;
+                let rskip = rdom > threshold;
+                if lskip {
+                    let l = push_land(&mut interrupts, *lhs, &mut land_map);
+                    let j = push_interrupt(
+                        &mut interrupts,
+                        Interrupt::Jump {
+                            before_node: *lhs - ldom,
+                            target: l,
+                            alternate: Alternate::None,
+                            owner: ni,
+                            trigger: PruneKind::Left,
+                        },
+                    );
+                }
+                if rskip {
+                    let l = push_land(&mut interrupts, *rhs, &mut land_map);
+                    let j = push_interrupt(
+                        &mut interrupts,
+                        Interrupt::Jump {
+                            before_node: *rhs - rdom,
+                            target: l,
+                            alternate: Alternate::None,
+                            owner: ni,
+                            trigger: PruneKind::Right,
+                        },
+                    );
+                }
+                if lskip || rskip {
+                    let merge = push_land(&mut interrupts, ni, &mut land_map);
                     if lskip {
-                        let l = push_land(&mut interrupts, *lhs, &mut land_map);
                         let j = push_interrupt(
                             &mut interrupts,
                             Interrupt::Jump {
-                                before_node: *lhs - ldom,
-                                target: l,
-                                alternate: Alternate::None,
+                                before_node: ni,
+                                target: merge,
+                                alternate: Alternate::Node(*rhs),
+                                owner: ni,
+                                trigger: PruneKind::Left,
                             },
                         );
-                        criteria.push(Notification {
-                            receiver: j,
-                            sender_node: ni,
-                            message: PruneKind::Left,
-                        });
                     }
                     if rskip {
-                        let l = push_land(&mut interrupts, *rhs, &mut land_map);
                         let j = push_interrupt(
                             &mut interrupts,
                             Interrupt::Jump {
-                                before_node: *rhs - rdom,
-                                target: l,
-                                alternate: Alternate::None,
+                                before_node: ni,
+                                target: merge,
+                                alternate: Alternate::Node(*lhs),
+                                owner: ni,
+                                trigger: PruneKind::Right,
                             },
                         );
-                        criteria.push(Notification {
-                            receiver: j,
-                            sender_node: ni,
-                            message: PruneKind::Right,
-                        });
-                    }
-                    if lskip || rskip {
-                        let merge = push_land(&mut interrupts, ni, &mut land_map);
-                        if lskip {
-                            let j = push_interrupt(
-                                &mut interrupts,
-                                Interrupt::Jump {
-                                    before_node: ni,
-                                    target: merge,
-                                    alternate: Alternate::Node(*rhs),
-                                },
-                            );
-                            criteria.push(Notification {
-                                receiver: j,
-                                sender_node: ni,
-                                message: PruneKind::Left,
-                            });
-                        }
-                        if rskip {
-                            let j = push_interrupt(
-                                &mut interrupts,
-                                Interrupt::Jump {
-                                    before_node: ni,
-                                    target: merge,
-                                    alternate: Alternate::Node(*lhs),
-                                },
-                            );
-                            criteria.push(Notification {
-                                receiver: j,
-                                sender_node: ni,
-                                message: PruneKind::Right,
-                            });
-                        }
                     }
                 }
-                Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
-                    let dom = ndom[ni];
-                    let start = ni - dom;
-                    if dom > threshold {}
-                }
-                Ternary(Choose, _cond, tt, ff) => {
-                    let ttdom = ndom[*tt];
-                    let ffdom = ndom[*ff];
-                    let tskip = ttdom > threshold;
-                    let fskip = ffdom > threshold;
-                    if tskip {}
-                    if fskip {}
-                    if tskip || fskip {}
-                    todo!();
-                }
-                _ => continue,
             }
-        }
-        let mut numbered: Vec<(usize, Interrupt)> =
-            interrupts.iter().cloned().enumerate().collect();
-        numbered.sort_by(|(_, a), (_, b)| -> std::cmp::Ordering {
-            match (a, b) {
-                (
-                    Interrupt::Jump {
-                        before_node: lbn,
-                        target: lt,
-                        alternate: la,
-                    },
-                    Interrupt::Jump {
-                        before_node: rbn,
-                        target: rt,
-                        alternate: ra,
-                    },
-                ) => {
-                    let (lt, rt) = match (&interrupts[*lt], &interrupts[*rt]) {
-                        (
-                            Interrupt::Land { after_node: la },
-                            Interrupt::Land { after_node: ra },
-                        ) => (la, ra),
-                        _ => unreachable!("This is a bug"),
-                    };
-                    (lbn, std::cmp::Reverse(lt), la).cmp(&(rbn, std::cmp::Reverse(rt), ra))
-                }
-                (Interrupt::Jump { before_node, .. }, Interrupt::Land { after_node }) => {
-                    (before_node, 0).cmp(&(after_node, 1))
-                }
-                (Interrupt::Land { after_node }, Interrupt::Jump { before_node, .. }) => {
-                    (after_node, 1).cmp(&(before_node, 0))
-                }
-                (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => {
-                    la.cmp(&ra)
-                }
+            Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
+                let dom = ndom[ni];
+                let start = ni - dom;
+                if dom > threshold {}
             }
-        });
-        let idxmap = numbered.iter().enumerate().fold(
-            vec![0usize; numbered.len()],
-            |mut idxmap, (inew, (iold, _))| {
-                idxmap[*iold] = inew;
-                idxmap
-            },
-        );
-        interrupts.clear();
-        interrupts.extend(numbered.drain(..).map(|(_, i)| match i {
-            Interrupt::Jump {
-                before_node,
-                target,
-                alternate,
-            } => Interrupt::Jump {
-                before_node,
-                target: idxmap[target],
-                alternate,
-            },
-            Interrupt::Land { after_node } => Interrupt::Land { after_node },
-        }));
-        for c in criteria.iter_mut() {
-            c.receiver = idxmap[c.receiver];
+            Ternary(Choose, _cond, tt, ff) => {
+                let ttdom = ndom[*tt];
+                let ffdom = ndom[*ff];
+                let tskip = ttdom > threshold;
+                let fskip = ffdom > threshold;
+                if tskip {}
+                if fskip {}
+                if tskip || fskip {}
+                todo!();
+            }
+            _ => continue,
         }
-        criteria.sort_by(|a, b| {
-            (a.sender_node, a.message, a.receiver).cmp(&(b.sender_node, b.message, b.receiver))
-        });
-        Ok(ControlFlow {
-            interrupts: interrupts.into_boxed_slice(),
-            criteria: criteria.into_boxed_slice(),
-        })
     }
+    let mut numbered: Vec<(usize, Interrupt)> = interrupts.iter().cloned().enumerate().collect();
+    numbered.sort_by(|(_, a), (_, b)| -> std::cmp::Ordering {
+        match (a, b) {
+            (
+                Interrupt::Jump {
+                    before_node: lbn,
+                    target: lt,
+                    alternate: la,
+                    ..
+                },
+                Interrupt::Jump {
+                    before_node: rbn,
+                    target: rt,
+                    alternate: ra,
+                    ..
+                },
+            ) => {
+                let (lt, rt) = match (&interrupts[*lt], &interrupts[*rt]) {
+                    (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => {
+                        (la, ra)
+                    }
+                    _ => unreachable!("This is a bug"),
+                };
+                (lbn, std::cmp::Reverse(lt), la).cmp(&(rbn, std::cmp::Reverse(rt), ra))
+            }
+            (Interrupt::Jump { before_node, .. }, Interrupt::Land { after_node }) => {
+                (before_node, 0).cmp(&(after_node, 1))
+            }
+            (Interrupt::Land { after_node }, Interrupt::Jump { before_node, .. }) => {
+                (after_node, 1).cmp(&(before_node, 0))
+            }
+            (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => la.cmp(&ra),
+        }
+    });
+    let idxmap = numbered.iter().enumerate().fold(
+        vec![0usize; numbered.len()],
+        |mut idxmap, (inew, (iold, _))| {
+            idxmap[*iold] = inew;
+            idxmap
+        },
+    );
+    interrupts.clear();
+    interrupts.extend(numbered.drain(..).map(|(_, i)| match i {
+        Interrupt::Jump {
+            before_node,
+            target,
+            alternate,
+            owner,
+            trigger,
+        } => Interrupt::Jump {
+            before_node,
+            target: idxmap[target],
+            alternate,
+            owner,
+            trigger,
+        },
+        Interrupt::Land { after_node } => Interrupt::Land { after_node },
+    }));
+    Ok(interrupts.into_boxed_slice())
 }
 
 enum Block {
@@ -361,7 +329,7 @@ pub type NativeIntervalFunc = unsafe extern "C" fn(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{deftree, llvm_jit::pruning::ControlFlow};
+    use crate::deftree;
 
     #[test]
     fn t_min_tiny() {
@@ -378,7 +346,7 @@ mod test {
             (1, 1),
         )
         .expect("Cannot create tree");
-        let cfg = ControlFlow::from_tree(&tree, 0).expect("Cannot compute control flow");
+        let cfg = make_interrupts(&tree, 0).expect("Cannot compute control flow");
         dbg!(&cfg);
         assert_eq!(cfg, todo!(),);
     }
@@ -402,7 +370,7 @@ mod test {
             (1, 1),
         )
         .unwrap();
-        let cfg = ControlFlow::from_tree(&tree, 0).expect("Unable to build control flow");
+        let cfg = make_interrupts(&tree, 0).expect("Unable to build control flow");
         dbg!(&cfg);
         assert_eq!(cfg, todo!());
     }
@@ -427,7 +395,7 @@ mod test {
             (1, 1),
         )
         .unwrap();
-        let cfg = ControlFlow::from_tree(&tree, 0).expect("Unable to build control flow");
+        let cfg = make_interrupts(&tree, 0).expect("Unable to build control flow");
         dbg!(tree.nodes(), cfg);
         assert!(false);
     }
