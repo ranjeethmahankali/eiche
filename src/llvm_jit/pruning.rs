@@ -8,7 +8,7 @@ use inkwell::{
     basic_block::BasicBlock,
     builder::Builder,
     types::IntType,
-    values::{BasicValue, BasicValueEnum, PointerValue},
+    values::{BasicValue, BasicValueEnum, IntValue, PointerValue},
 };
 use std::{ffi::c_void, ops::Range};
 
@@ -108,7 +108,7 @@ impl Tree {
                         }
                     }
                 }
-                Block::Branch(range) => {
+                Block::Branch(jumps) => {
                     let si = block_signal_map[bi];
                     let signal = builder
                         .build_load(
@@ -117,7 +117,15 @@ impl Tree {
                             &format!("load_signal_{si}"),
                         )?
                         .into_int_value();
-                    todo!();
+                    let cases: Box<[_]> = case_iter(jumps.iter().cloned())
+                        .map(|(case, j)| {
+                            (
+                                constants.int_32(case as u32, false),
+                                bbs[find_code_block(&blocks, j.target)],
+                            )
+                        })
+                        .collect();
+                    builder.build_switch(signal, bbs[bi + 1], &cases)?;
                 }
                 Block::Merge(_) => todo!(),
             }
@@ -126,7 +134,47 @@ impl Tree {
     }
 }
 
-fn build_cases<'ctx>(jumps: &[Jump], dst: &mut Vec<(&dyn BasicValue, BasicBlock)>) {}
+fn find_code_block(blocks: &[Block], inst: usize) -> usize {
+    use std::cmp::Ordering::*;
+    match blocks.binary_search_by(|block| match block {
+        Block::Code(range) => match (range.start.cmp(&inst), range.end.cmp(&inst)) {
+            (Less, Less) | (Less, Equal) | (_, Equal) => Less,
+            (Less, Greater) | (Equal, Greater) | (Equal, Less) => Equal,
+            (Greater, _) => Greater,
+        },
+        Block::Branch(jumps) => jumps
+            .iter()
+            .find_map(|j| {
+                Some(match j.before_node.cmp(&inst) {
+                    Less | Equal => Less,
+                    Greater => Greater,
+                })
+            })
+            .expect("Empty jump list"),
+        Block::Merge(after) => match after.cmp(&inst) {
+            Less => Less,
+            Equal | Greater => Greater,
+        },
+    }) {
+        Ok(found) => found,
+        Err(_) => unreachable!("This should never happen, this is a bug"),
+    }
+}
+
+fn case_iter<'ctx>(jumps: impl Iterator<Item = Jump>) -> impl Iterator<Item = (usize, Jump)> {
+    jumps
+        .scan(None, |target: &mut Option<Jump>, j| match target {
+            None => {
+                *target = Some(j.clone());
+                Some(Some(j))
+            }
+            Some(prev) if prev.target == j.target && prev.alternate == j.alternate => Some(None),
+            Some(prev) => Some(Some(std::mem::replace(prev, j))),
+        })
+        .filter_map(|v| v)
+        .enumerate()
+        .map(|(i, j)| (i + 1, j))
+}
 
 fn init_signal_ptrs<'ctx>(
     blocks: &[Block],
@@ -269,7 +317,9 @@ fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Er
             Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
                 let dom = ndom[ni];
                 let start = ni - dom;
-                if dom > threshold {}
+                if dom > threshold {
+                    // push_land(dst, after_node, land_map);
+                }
             }
             Ternary(Choose, _cond, tt, ff) => {
                 let ttdom = ndom[*tt];
@@ -347,6 +397,7 @@ fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Er
     Ok(interrupts.into_boxed_slice())
 }
 
+#[derive(Clone)]
 struct Jump {
     before_node: usize,
     target: usize,
