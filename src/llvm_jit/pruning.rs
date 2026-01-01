@@ -2,7 +2,8 @@ use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, Value};
 use std::ffi::c_void;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Choice {
+enum Alternate {
+    None,
     Node(usize),
     Constant(Value),
 }
@@ -12,7 +13,7 @@ enum Interrupt {
     Jump {
         before_node: usize,
         target: usize,
-        alternate: Option<Value>,
+        alternate: Alternate,
     },
     Land {
         after_node: usize,
@@ -44,8 +45,8 @@ impl ControlFlow {
     fn from_tree(tree: &Tree, threshold: usize) -> Result<ControlFlow, Error> {
         let (tree, ndom) = tree.control_dependence_sorted()?;
         let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
-        let mut skippable = vec![false; tree.len()].into_boxed_slice();
         let mut criteria = Vec::<Criteria>::new();
+        let mut land_map: Vec<Option<usize>> = vec![None; tree.len()];
         for (ni, node) in tree.nodes().iter().enumerate() {
             match node {
                 Binary(Min | Max, lhs, rhs) => {
@@ -53,7 +54,71 @@ impl ControlFlow {
                     let rdom = ndom[*rhs];
                     let lskip = ldom > threshold;
                     let rskip = rdom > threshold;
-                    todo!();
+                    if lskip {
+                        let l = push_land(&mut interrupts, *lhs, &mut land_map);
+                        let j = push_interrupt(
+                            &mut interrupts,
+                            Interrupt::Jump {
+                                before_node: *lhs - ldom,
+                                target: l,
+                                alternate: Alternate::None,
+                            },
+                        );
+                        criteria.push(Criteria {
+                            jump_index: j,
+                            owner: ni,
+                            kind: PruneKind::Left,
+                        });
+                    }
+                    if rskip {
+                        let l = push_land(&mut interrupts, *rhs, &mut land_map);
+                        let j = push_interrupt(
+                            &mut interrupts,
+                            Interrupt::Jump {
+                                before_node: *rhs - rdom,
+                                target: l,
+                                alternate: Alternate::None,
+                            },
+                        );
+                        criteria.push(Criteria {
+                            jump_index: j,
+                            owner: ni,
+                            kind: PruneKind::Right,
+                        });
+                    }
+                    if lskip || rskip {
+                        let merge = push_land(&mut interrupts, ni, &mut land_map);
+                        if lskip {
+                            let j = push_interrupt(
+                                &mut interrupts,
+                                Interrupt::Jump {
+                                    before_node: ni,
+                                    target: merge,
+                                    alternate: Alternate::Node(*rhs),
+                                },
+                            );
+                            criteria.push(Criteria {
+                                jump_index: j,
+                                owner: ni,
+                                kind: PruneKind::Left,
+                            });
+                        }
+                        if rskip {
+                            let j = push_interrupt(
+                                &mut interrupts,
+                                Interrupt::Jump {
+                                    before_node: ni,
+                                    target: merge,
+                                    alternate: Alternate::Node(*lhs),
+                                },
+                            );
+                            criteria.push(Criteria {
+                                jump_index: j,
+                                owner: ni,
+                                kind: PruneKind::Right,
+                            });
+                        }
+                    }
                 }
                 Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
                     let dom = ndom[ni];
@@ -73,10 +138,84 @@ impl ControlFlow {
                 _ => continue,
             }
         }
+        let mut numbered: Vec<(usize, Interrupt)> =
+            interrupts.iter().cloned().enumerate().collect();
+        numbered.sort_by(|(_, a), (_, b)| -> std::cmp::Ordering {
+            match (a, b) {
+                (
+                    Interrupt::Jump {
+                        before_node: lbn,
+                        target: lt,
+                        alternate: _,
+                    },
+                    Interrupt::Jump {
+                        before_node: rbn,
+                        target: rt,
+                        alternate: _,
+                    },
+                ) => {
+                    let (lt, rt) = match (&interrupts[*lt], &interrupts[*rt]) {
+                        (
+                            Interrupt::Land { after_node: la },
+                            Interrupt::Land { after_node: ra },
+                        ) => (la, ra),
+                        _ => unreachable!("This is a bug"),
+                    };
+                    (lbn, std::cmp::Reverse(lt)).cmp(&(rbn, std::cmp::Reverse(rt)))
+                }
+                (Interrupt::Jump { before_node, .. }, Interrupt::Land { after_node }) => {
+                    (before_node, 0).cmp(&(after_node, 1))
+                }
+                (Interrupt::Land { after_node }, Interrupt::Jump { before_node, .. }) => {
+                    (after_node, 1).cmp(&(before_node, 0))
+                }
+                (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => {
+                    la.cmp(&ra)
+                }
+            }
+        });
+        let idxmap = numbered.iter().enumerate().fold(
+            vec![0usize; numbered.len()],
+            |mut idxmap, (inew, (iold, _))| {
+                idxmap[*iold] = inew;
+                idxmap
+            },
+        );
+        interrupts.clear();
+        interrupts.extend(numbered.drain(..).map(|(_, i)| match i {
+            Interrupt::Jump {
+                before_node,
+                target,
+                alternate,
+            } => Interrupt::Jump {
+                before_node,
+                target: idxmap[target],
+                alternate,
+            },
+            Interrupt::Land { after_node } => Interrupt::Land { after_node },
+        }));
         Ok(ControlFlow {
             interrupts: interrupts.into_boxed_slice(),
             criteria: criteria.into_boxed_slice(),
         })
+    }
+}
+
+fn push_interrupt(dst: &mut Vec<Interrupt>, interrupt: Interrupt) -> usize {
+    let idx = dst.len();
+    dst.push(interrupt);
+    return idx;
+}
+
+fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option<usize>]) -> usize {
+    let mapped = &mut land_map[after_node];
+    match mapped {
+        Some(found) => *found,
+        None => {
+            let out = push_interrupt(dst, Interrupt::Land { after_node });
+            *mapped = Some(out);
+            out
+        }
     }
 }
 
@@ -166,6 +305,7 @@ mod test {
         )
         .expect("Cannot create tree");
         let cfg = ControlFlow::from_tree(&tree, 0).expect("Cannot compute control flow");
+        dbg!(&cfg);
         assert_eq!(cfg, todo!(),);
     }
 
@@ -189,6 +329,7 @@ mod test {
         )
         .unwrap();
         let cfg = ControlFlow::from_tree(&tree, 0).expect("Unable to build control flow");
+        dbg!(&cfg);
         assert_eq!(cfg, todo!());
     }
 
