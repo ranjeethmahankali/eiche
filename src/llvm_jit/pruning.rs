@@ -1,5 +1,5 @@
 use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, Value};
-use std::ffi::c_void;
+use std::{ffi::c_void, ops::Range};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Alternate {
@@ -20,7 +20,7 @@ enum Interrupt {
     },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
 enum PruneKind {
     Left,
     Right,
@@ -29,23 +29,23 @@ enum PruneKind {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct Criteria {
-    jump_index: usize,
-    owner: usize,
-    kind: PruneKind,
+struct Notification {
+    receiver: usize,
+    sender_node: usize,
+    message: PruneKind,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct ControlFlow {
     interrupts: Box<[Interrupt]>,
-    criteria: Box<[Criteria]>,
+    criteria: Box<[Notification]>,
 }
 
 impl ControlFlow {
     fn from_tree(tree: &Tree, threshold: usize) -> Result<ControlFlow, Error> {
         let (tree, ndom) = tree.control_dependence_sorted()?;
         let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
-        let mut criteria = Vec::<Criteria>::new();
+        let mut criteria = Vec::<Notification>::new();
         let mut land_map: Vec<Option<usize>> = vec![None; tree.len()];
         for (ni, node) in tree.nodes().iter().enumerate() {
             match node {
@@ -64,10 +64,10 @@ impl ControlFlow {
                                 alternate: Alternate::None,
                             },
                         );
-                        criteria.push(Criteria {
-                            jump_index: j,
-                            owner: ni,
-                            kind: PruneKind::Left,
+                        criteria.push(Notification {
+                            receiver: j,
+                            sender_node: ni,
+                            message: PruneKind::Left,
                         });
                     }
                     if rskip {
@@ -80,10 +80,10 @@ impl ControlFlow {
                                 alternate: Alternate::None,
                             },
                         );
-                        criteria.push(Criteria {
-                            jump_index: j,
-                            owner: ni,
-                            kind: PruneKind::Right,
+                        criteria.push(Notification {
+                            receiver: j,
+                            sender_node: ni,
+                            message: PruneKind::Right,
                         });
                     }
                     if lskip || rskip {
@@ -97,10 +97,10 @@ impl ControlFlow {
                                     alternate: Alternate::Node(*rhs),
                                 },
                             );
-                            criteria.push(Criteria {
-                                jump_index: j,
-                                owner: ni,
-                                kind: PruneKind::Left,
+                            criteria.push(Notification {
+                                receiver: j,
+                                sender_node: ni,
+                                message: PruneKind::Left,
                             });
                         }
                         if rskip {
@@ -112,10 +112,10 @@ impl ControlFlow {
                                     alternate: Alternate::Node(*lhs),
                                 },
                             );
-                            criteria.push(Criteria {
-                                jump_index: j,
-                                owner: ni,
-                                kind: PruneKind::Right,
+                            criteria.push(Notification {
+                                receiver: j,
+                                sender_node: ni,
+                                message: PruneKind::Right,
                             });
                         }
                     }
@@ -194,11 +194,65 @@ impl ControlFlow {
             },
             Interrupt::Land { after_node } => Interrupt::Land { after_node },
         }));
+        for c in criteria.iter_mut() {
+            c.receiver = idxmap[c.receiver];
+        }
+        criteria.sort_by(|a, b| {
+            (a.sender_node, a.message, a.receiver).cmp(&(b.sender_node, b.message, b.receiver))
+        });
         Ok(ControlFlow {
             interrupts: interrupts.into_boxed_slice(),
             criteria: criteria.into_boxed_slice(),
         })
     }
+}
+
+enum Block {
+    Code(Range<usize>),
+    Branch(Range<usize>),
+    Merge(usize),
+}
+
+fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Block]>, Error> {
+    enum PartialBlock {
+        Code(usize),
+        Branch(usize),
+    }
+    let (mut blocks, last) = interrupts.into_iter().enumerate().fold(
+        (Vec::<Block>::new(), PartialBlock::Code(0)),
+        |(mut blocks, current), (i, interrupt)| match (current, interrupt) {
+            (PartialBlock::Code(start), Interrupt::Jump { before_node, .. }) => {
+                if start < before_node {
+                    blocks.push(Block::Code(start..before_node));
+                }
+                (blocks, PartialBlock::Branch(i))
+            }
+            (PartialBlock::Code(start), Interrupt::Land { after_node }) => {
+                if start < after_node + 1 {
+                    blocks.push(Block::Code(start..(after_node + 1)));
+                }
+                blocks.push(Block::Merge(after_node));
+                (blocks, PartialBlock::Code(after_node + 1))
+            }
+            (PartialBlock::Branch(index), Interrupt::Jump { .. }) => {
+                debug_assert!(index < i);
+                (blocks, PartialBlock::Branch(index))
+            }
+            (PartialBlock::Branch(_), Interrupt::Land { .. }) => {
+                unreachable!("Branching and landing without any code in between. This is a bug")
+            }
+        },
+    );
+    match last {
+        PartialBlock::Code(start) if start < n_nodes => {
+            blocks.push(Block::Code(start..n_nodes));
+        }
+        PartialBlock::Branch(_) => {
+            unreachable!("Last block should not be a branch block. This is a bug")
+        }
+        _ => {}
+    };
+    Ok(blocks.into_boxed_slice())
 }
 
 fn push_interrupt(dst: &mut Vec<Interrupt>, interrupt: Interrupt) -> usize {
