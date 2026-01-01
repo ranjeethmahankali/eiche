@@ -16,11 +16,13 @@ use inkwell::{
     llvm_sys::core::LLVMBuildFreeze,
     module::Module,
     types::{BasicType, IntType},
-    values::{AsValueRef, BasicValue, BasicValueEnum, IntValue, PhiValue, PointerValue},
+    values::{
+        AsValueRef, BasicValue, BasicValueEnum, FunctionValue, IntValue, PhiValue, PointerValue,
+    },
 };
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::{CStr, CString, c_void},
     ops::Range,
 };
@@ -217,7 +219,7 @@ impl Tree {
             }
         }
         // Build the logic to notify pruning decisions.
-        let mut notified = vec![false; signal_ptrs.len()].into_boxed_slice();
+        let mut notified = HashSet::<(usize, u32)>::new();
         for Notification {
             src_inst,
             dst_signal,
@@ -225,10 +227,25 @@ impl Tree {
             kind,
         } in notifications.into_iter()
         {
-            let bb = bbs[*code_map
+            let ci = *code_map
                 .get(&src_inst)
-                .expect("Code map is not complete. This is a bug.")];
+                .expect("Code map is not complete. This is a bug.");
+            let bb = bbs[ci];
             builder.position_at_end(bb);
+            let first = notified.insert((dst_signal, signal));
+            bbs[ci] = build_notify(
+                self.node(src_inst).clone(),
+                src_inst,
+                kind,
+                signal,
+                signal_ptrs[dst_signal],
+                first,
+                &regs,
+                builder,
+                &compiler.module,
+                &mut constants,
+                function,
+            )?;
         }
         todo!("Do proper branching and set the outputs.");
     }
@@ -238,14 +255,16 @@ fn build_notify<'ctx>(
     node: Node,
     index: usize,
     trigger: PruneKind,
+    signal: u32,
     signal_ptr: PointerValue<'ctx>,
-    first: &mut bool,
+    first: bool,
     regs: &[BasicValueEnum<'ctx>],
     builder: &'ctx Builder,
     module: &'ctx Module,
     constants: &mut Constants<'ctx>,
-) -> Result<(), Error> {
-    match node {
+    function: FunctionValue<'ctx>,
+) -> Result<BasicBlock<'ctx>, Error> {
+    let cond = match node {
         Binary(op, lhs, rhs) => {
             let interval::InequalityFlags {
                 either_empty,
@@ -282,7 +301,7 @@ fn build_notify<'ctx>(
                     .into_int_value(),
                 &format!("before_check"),
             )?;
-            let cond = match (op, trigger) {
+            match (op, trigger) {
                 (Min, PruneKind::Right)
                 | (Max, PruneKind::Left)
                 | (LessOrEqual, PruneKind::AlwaysTrue)
@@ -296,30 +315,35 @@ fn build_notify<'ctx>(
                 (Less, PruneKind::AlwaysTrue) => strictly_before,
                 (Greater, PruneKind::AlwaysTrue) => strictly_after,
                 _ => unreachable!("Invalid node / trigger combo. This is a bug."),
-            };
+            }
         }
         Ternary(op, _, _, _) => todo!(),
         _ => unreachable!("Unsupported node type. This is a bug."),
-    }
-    match (node, trigger) {
-        (Binary(Min | Max, lhs, rhs), PruneKind::Left) => {
-            todo!();
-        }
-        (Binary(Min | Max, _lhs, _rhs), PruneKind::Left) => {
-            todo!();
-        }
-        (
-            Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs),
-            PruneKind::AlwaysTrue,
-        ) => todo!(),
-        (
-            Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs),
-            PruneKind::AlwaysFalse,
-        ) => todo!(),
-        (Ternary(Choose, ..), PruneKind::Left) => todo!(),
-        (Ternary(Choose, ..), PruneKind::Right) => todo!(),
-        _ => unreachable!("Unrecognized type of node / pruning combination. This is a bug"),
-    }
+    };
+    let then_bb = module
+        .get_context()
+        .append_basic_block(function, &format!("notify_block_{index}"));
+    let merge_bb = module
+        .get_context()
+        .append_basic_block(function, &format!("notify_merge_{index}"));
+    builder.build_conditional_branch(cond, then_bb, merge_bb)?;
+    builder.position_at_end(then_bb);
+    let signal = constants.int_32(signal, false);
+    let signal = if first {
+        signal
+    } else {
+        let old = builder
+            .build_load(
+                module.get_context().i32_type(),
+                signal_ptr,
+                &format!("notify_combine_load_{index}"),
+            )?
+            .into_int_value();
+        builder.build_and(old, signal, &format!("notify_combine_{index}"))?
+    };
+    builder.build_store(signal_ptr, signal)?;
+    builder.build_unconditional_branch(merge_bb)?;
+    Ok(merge_bb)
 }
 
 fn build_freeze<'ctx>(
