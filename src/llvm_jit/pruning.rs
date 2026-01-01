@@ -142,12 +142,14 @@ fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Er
                     before_node: lbn,
                     target: lt,
                     alternate: la,
+                    owner: lo,
                     ..
                 },
                 Interrupt::Jump {
                     before_node: rbn,
                     target: rt,
                     alternate: ra,
+                    owner: ro,
                     ..
                 },
             ) => {
@@ -157,7 +159,7 @@ fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Er
                     }
                     _ => unreachable!("This is a bug"),
                 };
-                (lbn, std::cmp::Reverse(lt), la).cmp(&(rbn, std::cmp::Reverse(rt), ra))
+                (lbn, std::cmp::Reverse(lt), la, lo).cmp(&(rbn, std::cmp::Reverse(rt), ra, ro))
             }
             (Interrupt::Jump { before_node, .. }, Interrupt::Land { after_node }) => {
                 (before_node, 0).cmp(&(after_node, 1))
