@@ -9,10 +9,14 @@ enum Choice {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Interrupt {
-    Jump { before: usize, target: usize },
-    Land { after: usize, source: usize },
-    Diverge { before: usize, choice: Choice },
-    Converge { after: usize },
+    Jump {
+        before_node: usize,
+        target: usize,
+        alternate: Option<Value>,
+    },
+    Land {
+        after_node: usize,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -25,8 +29,7 @@ enum PruneKind {
 
 #[derive(Debug, PartialEq, Eq)]
 struct Criteria {
-    start: usize,
-    end: usize,
+    jump_index: usize,
     owner: usize,
     kind: PruneKind,
 }
@@ -50,176 +53,31 @@ impl ControlFlow {
                     let rdom = ndom[*rhs];
                     let lskip = ldom > threshold;
                     let rskip = rdom > threshold;
-                    if lskip {
-                        make_skip(
-                            *lhs - ldom,
-                            *lhs,
-                            ni,
-                            PruneKind::Left,
-                            &mut skippable[*lhs],
-                            &mut interrupts,
-                            &mut criteria,
-                        );
-                        interrupts.push(Interrupt::Diverge {
-                            before: ni,
-                            choice: Choice::Node(*rhs),
-                        });
-                    }
-                    if rskip {
-                        make_skip(
-                            *rhs - rdom,
-                            *rhs,
-                            ni,
-                            PruneKind::Right,
-                            &mut skippable[*rhs],
-                            &mut interrupts,
-                            &mut criteria,
-                        );
-                        interrupts.push(Interrupt::Diverge {
-                            before: ni,
-                            choice: Choice::Node(*lhs),
-                        });
-                    }
-                    if lskip || rskip {
-                        interrupts.push(Interrupt::Converge { after: ni });
-                    }
+                    todo!();
                 }
                 Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
                     let dom = ndom[ni];
                     let start = ni - dom;
-                    if dom > threshold {
-                        interrupts.push(Interrupt::Diverge {
-                            before: start,
-                            choice: Choice::Constant(Value::Bool(true)),
-                        });
-                        interrupts.push(Interrupt::Diverge {
-                            before: start,
-                            choice: Choice::Constant(Value::Bool(false)),
-                        });
-                        interrupts.push(Interrupt::Converge { after: ni });
-                    }
+                    if dom > threshold {}
                 }
                 Ternary(Choose, _cond, tt, ff) => {
                     let ttdom = ndom[*tt];
                     let ffdom = ndom[*ff];
                     let tskip = ttdom > threshold;
                     let fskip = ffdom > threshold;
-                    if tskip {
-                        make_skip(
-                            *tt - ttdom,
-                            *tt,
-                            ni,
-                            PruneKind::Left,
-                            &mut skippable[*tt],
-                            &mut interrupts,
-                            &mut criteria,
-                        );
-                        interrupts.push(Interrupt::Diverge {
-                            before: ni,
-                            choice: Choice::Node(*ff),
-                        });
-                    }
-                    if fskip {
-                        make_skip(
-                            *ff - ffdom,
-                            *ff,
-                            ni,
-                            PruneKind::Left,
-                            &mut skippable[*ff],
-                            &mut interrupts,
-                            &mut criteria,
-                        );
-                        interrupts.push(Interrupt::Diverge {
-                            before: ni,
-                            choice: Choice::Node(*tt),
-                        });
-                    }
-                    if tskip || fskip {
-                        interrupts.push(Interrupt::Converge { after: ni });
-                    }
+                    if tskip {}
+                    if fskip {}
+                    if tskip || fskip {}
+                    todo!();
                 }
                 _ => continue,
             }
         }
-        interrupts.sort_by(|a, b| match (a, b) {
-            (
-                Interrupt::Jump {
-                    before: lb,
-                    target: lt,
-                },
-                Interrupt::Jump {
-                    before: rb,
-                    target: rt,
-                },
-            ) => (*lb, std::cmp::Reverse(*lt)).cmp(&(*rb, std::cmp::Reverse(*rt))),
-            (Interrupt::Jump { before, .. }, Interrupt::Land { after, .. }) => {
-                (*before, 0).cmp(&(*after, 1)) // If the positions are the same, jump should come first.
-            }
-            (Interrupt::Jump { before: lb, .. }, Interrupt::Diverge { before: rb, .. })
-            | (Interrupt::Diverge { before: lb, .. }, Interrupt::Jump { before: rb, .. })
-            | (Interrupt::Diverge { before: lb, .. }, Interrupt::Diverge { before: rb, .. }) => {
-                lb.cmp(rb)
-            }
-            (Interrupt::Jump { before, .. }, Interrupt::Converge { after }) => before.cmp(after),
-            (Interrupt::Land { after, .. }, Interrupt::Jump { before, .. }) => after.cmp(before),
-            (
-                Interrupt::Land {
-                    after: la,
-                    source: ls,
-                },
-                Interrupt::Land {
-                    after: ra,
-                    source: rs,
-                },
-            ) => (*la, *ls).cmp(&(*ra, *rs)),
-            (Interrupt::Land { after, .. }, Interrupt::Diverge { before, .. })
-            | (Interrupt::Converge { after }, Interrupt::Jump { before, .. }) => after.cmp(before),
-            (Interrupt::Land { after: la, .. }, Interrupt::Converge { after: ra })
-            | (Interrupt::Converge { after: la }, Interrupt::Land { after: ra, .. })
-            | (Interrupt::Converge { after: la }, Interrupt::Converge { after: ra }) => la.cmp(ra),
-            (Interrupt::Diverge { before, .. }, Interrupt::Land { after, .. }) => before.cmp(after),
-            (Interrupt::Diverge { before, .. }, Interrupt::Converge { after }) => {
-                (*before, 0).cmp(&(*after, 1))
-            }
-            (Interrupt::Converge { after }, Interrupt::Diverge { before, .. }) => {
-                (*after, 1).cmp(&(*before, 0))
-            }
-        });
-        criteria.sort_by(|a, b| (a.start, a.end, a.owner).cmp(&(b.start, b.end, b.owner)));
         Ok(ControlFlow {
             interrupts: interrupts.into_boxed_slice(),
             criteria: criteria.into_boxed_slice(),
         })
     }
-}
-
-fn make_skip(
-    start: usize,
-    end: usize,
-    owner: usize,
-    kind: PruneKind,
-    skippable: &mut bool,
-    interrupts: &mut Vec<Interrupt>,
-    criteria: &mut Vec<Criteria>,
-) {
-    if !std::mem::replace(skippable, true) {
-        interrupts.extend_from_slice(&[
-            Interrupt::Jump {
-                before: start,
-                target: end,
-            },
-            Interrupt::Land {
-                after: end,
-                source: start,
-            },
-        ]);
-    }
-    criteria.push(Criteria {
-        start,
-        end,
-        owner,
-        kind,
-    });
 }
 
 /*
@@ -308,54 +166,7 @@ mod test {
         )
         .expect("Cannot create tree");
         let cfg = ControlFlow::from_tree(&tree, 0).expect("Cannot compute control flow");
-        assert_eq!(
-            cfg,
-            ControlFlow {
-                interrupts: vec![
-                    Interrupt::Jump {
-                        before: 0,
-                        target: 2,
-                    },
-                    Interrupt::Land {
-                        after: 2,
-                        source: 0,
-                    },
-                    Interrupt::Jump {
-                        before: 3,
-                        target: 5,
-                    },
-                    Interrupt::Land {
-                        after: 5,
-                        source: 3,
-                    },
-                    Interrupt::Diverge {
-                        before: 6,
-                        choice: Choice::Node(5,),
-                    },
-                    Interrupt::Diverge {
-                        before: 6,
-                        choice: Choice::Node(2,),
-                    },
-                    Interrupt::Converge { after: 6 },
-                ]
-                .into_boxed_slice(),
-                criteria: vec![
-                    Criteria {
-                        start: 0,
-                        end: 2,
-                        owner: 6,
-                        kind: PruneKind::Left,
-                    },
-                    Criteria {
-                        start: 3,
-                        end: 5,
-                        owner: 6,
-                        kind: PruneKind::Right,
-                    },
-                ]
-                .into_boxed_slice(),
-            }
-        );
+        assert_eq!(cfg, todo!(),);
     }
 
     #[test]
@@ -378,90 +189,31 @@ mod test {
         )
         .unwrap();
         let cfg = ControlFlow::from_tree(&tree, 0).expect("Unable to build control flow");
-        assert_eq!(
-            cfg,
-            ControlFlow {
-                interrupts: vec![
-                    Interrupt::Jump {
-                        before: 0,
-                        target: 6,
-                    },
-                    Interrupt::Jump {
-                        before: 0,
-                        target: 2,
-                    },
-                    Interrupt::Land {
-                        after: 2,
-                        source: 0,
-                    },
-                    Interrupt::Jump {
-                        before: 3,
-                        target: 5,
-                    },
-                    Interrupt::Land {
-                        after: 5,
-                        source: 3,
-                    },
-                    Interrupt::Diverge {
-                        before: 6,
-                        choice: Choice::Node(5,),
-                    },
-                    Interrupt::Diverge {
-                        before: 6,
-                        choice: Choice::Node(2,),
-                    },
-                    Interrupt::Converge { after: 6 },
-                    Interrupt::Land {
-                        after: 6,
-                        source: 0,
-                    },
-                    Interrupt::Jump {
-                        before: 7,
-                        target: 9,
-                    },
-                    Interrupt::Land {
-                        after: 9,
-                        source: 7,
-                    },
-                    Interrupt::Diverge {
-                        before: 10,
-                        choice: Choice::Node(9,),
-                    },
-                    Interrupt::Diverge {
-                        before: 10,
-                        choice: Choice::Node(6,),
-                    },
-                    Interrupt::Converge { after: 10 },
-                ]
-                .into_boxed_slice(),
-                criteria: vec![
-                    Criteria {
-                        start: 0,
-                        end: 2,
-                        owner: 6,
-                        kind: PruneKind::Left,
-                    },
-                    Criteria {
-                        start: 0,
-                        end: 6,
-                        owner: 10,
-                        kind: PruneKind::Left,
-                    },
-                    Criteria {
-                        start: 3,
-                        end: 5,
-                        owner: 6,
-                        kind: PruneKind::Right,
-                    },
-                    Criteria {
-                        start: 7,
-                        end: 9,
-                        owner: 10,
-                        kind: PruneKind::Right,
-                    },
-                ]
-                .into_boxed_slice(),
-            }
-        );
+        assert_eq!(cfg, todo!());
+    }
+
+    #[test]
+    fn t_choose_tiny() {
+        let tree = Tree::from_nodes(
+            vec![
+                Symbol('x'),                  // 0
+                Symbol('a'),                  // 1
+                Constant(Value::Scalar(1.0)), // 2
+                Binary(Add, 1, 2),            // 3
+                Binary(Less, 0, 3),           // 4
+                Symbol('y'),                  // 5
+                Constant(Value::Scalar(2.0)), // 6
+                Binary(Add, 5, 6),            // 7
+                Symbol('z'),                  // 8
+                Constant(Value::Scalar(3.0)), // 9
+                Binary(Add, 8, 9),            // 10
+                Ternary(Choose, 4, 7, 10),    // 11
+            ],
+            (1, 1),
+        )
+        .unwrap();
+        let cfg = ControlFlow::from_tree(&tree, 0).expect("Unable to build control flow");
+        dbg!(tree.nodes(), cfg);
+        assert!(false);
     }
 }
