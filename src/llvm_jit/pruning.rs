@@ -1,11 +1,31 @@
 use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, Value};
 use std::{ffi::c_void, ops::Range};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
 enum Alternate {
     None,
     Node(usize),
     Constant(Value),
+}
+
+impl Ord for Alternate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering::*;
+        match (self, other) {
+            (Alternate::None, Alternate::None) => Equal,
+            (Alternate::None, Alternate::Node(_))
+            | (Alternate::None, Alternate::Constant(_))
+            | (Alternate::Node(_), Alternate::Constant(_)) => Less,
+            (Alternate::Node(_), Alternate::None)
+            | (Alternate::Constant(_), Alternate::None)
+            | (Alternate::Constant(_), Alternate::Node(_)) => Greater,
+            (Alternate::Node(a), Alternate::Node(b)) => a.cmp(&b),
+            (Alternate::Constant(a), Alternate::Constant(b)) => match a.partial_cmp(&b) {
+                Some(cmp) => cmp,
+                None => Equal,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,12 +166,12 @@ impl ControlFlow {
                     Interrupt::Jump {
                         before_node: lbn,
                         target: lt,
-                        alternate: _,
+                        alternate: la,
                     },
                     Interrupt::Jump {
                         before_node: rbn,
                         target: rt,
-                        alternate: _,
+                        alternate: ra,
                     },
                 ) => {
                     let (lt, rt) = match (&interrupts[*lt], &interrupts[*rt]) {
@@ -161,7 +181,7 @@ impl ControlFlow {
                         ) => (la, ra),
                         _ => unreachable!("This is a bug"),
                     };
-                    (lbn, std::cmp::Reverse(lt)).cmp(&(rbn, std::cmp::Reverse(rt)))
+                    (lbn, std::cmp::Reverse(lt), la).cmp(&(rbn, std::cmp::Reverse(rt), ra))
                 }
                 (Interrupt::Jump { before_node, .. }, Interrupt::Land { after_node }) => {
                     (before_node, 0).cmp(&(after_node, 1))
