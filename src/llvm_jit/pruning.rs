@@ -2,12 +2,19 @@ use super::{
     JitCompiler, fast_math,
     interval::{self, Constants},
 };
-use crate::{BinaryOp::*, Error, Node::*, TernaryOp::*, Tree, Value};
+use crate::{
+    BinaryOp::*,
+    Error,
+    Node::{self, *},
+    TernaryOp::*,
+    Tree, Value,
+};
 use inkwell::{
     AddressSpace,
     basic_block::BasicBlock,
     builder::Builder,
     llvm_sys::core::LLVMBuildFreeze,
+    module::Module,
     types::{BasicType, IntType},
     values::{AsValueRef, BasicValue, BasicValueEnum, IntValue, PhiValue, PointerValue},
 };
@@ -89,7 +96,7 @@ impl Tree {
             &mut constants,
         )?;
         let (phis, phi_map) = init_merge_phi(&blocks, builder, &bbs, interval_type)?;
-        let mut notify_stack = Vec::<Notification>::new();
+        let mut notifications = Vec::<Notification>::new();
         let mut merge_stack = Vec::<Incoming>::new();
         for (bi, block) in blocks.iter().enumerate() {
             builder.position_at_end(bbs[bi]);
@@ -157,7 +164,7 @@ impl Tree {
                             });
                             prev_target = jump.target;
                         }
-                        notify_stack.push(Notification {
+                        notifications.push(Notification {
                             src_inst: jump.target,
                             dst_signal: si,
                             signal: index,
@@ -209,7 +216,109 @@ impl Tree {
                 }
             }
         }
+        // Build the logic to notify pruning decisions.
+        let mut notified = vec![false; signal_ptrs.len()].into_boxed_slice();
+        for Notification {
+            src_inst,
+            dst_signal,
+            signal,
+            kind,
+        } in notifications.into_iter()
+        {
+            let bb = bbs[*code_map
+                .get(&src_inst)
+                .expect("Code map is not complete. This is a bug.")];
+            builder.position_at_end(bb);
+        }
         todo!("Do proper branching and set the outputs.");
+    }
+}
+
+fn build_notify<'ctx>(
+    node: Node,
+    index: usize,
+    trigger: PruneKind,
+    signal_ptr: PointerValue<'ctx>,
+    first: &mut bool,
+    regs: &[BasicValueEnum<'ctx>],
+    builder: &'ctx Builder,
+    module: &'ctx Module,
+    constants: &mut Constants<'ctx>,
+) -> Result<(), Error> {
+    match node {
+        Binary(op, lhs, rhs) => {
+            let interval::InequalityFlags {
+                either_empty,
+                strictly_before,
+                strictly_after,
+                touching,
+            } = interval::build_interval_inequality_flags(
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                builder,
+                module,
+                constants,
+                index,
+            )?;
+            let before = builder.build_or(
+                strictly_before,
+                builder
+                    .build_extract_element(
+                        touching,
+                        constants.int_32(1, false),
+                        &format!("extract_touching_left"),
+                    )?
+                    .into_int_value(),
+                &format!("before_check"),
+            )?;
+            let after = builder.build_or(
+                strictly_after,
+                builder
+                    .build_extract_element(
+                        touching,
+                        constants.int_32(0, false),
+                        &format!("extract_touching_left"),
+                    )?
+                    .into_int_value(),
+                &format!("before_check"),
+            )?;
+            let cond = match (op, trigger) {
+                (Min, PruneKind::Right)
+                | (Max, PruneKind::Left)
+                | (LessOrEqual, PruneKind::AlwaysTrue)
+                | (Greater, PruneKind::AlwaysFalse)
+                | (GreaterOrEqual, PruneKind::AlwaysFalse) => before,
+                (Min, PruneKind::Left)
+                | (Max, PruneKind::Right)
+                | (GreaterOrEqual, PruneKind::AlwaysTrue)
+                | (Less, PruneKind::AlwaysFalse)
+                | (LessOrEqual, PruneKind::AlwaysFalse) => after,
+                (Less, PruneKind::AlwaysTrue) => strictly_before,
+                (Greater, PruneKind::AlwaysTrue) => strictly_after,
+                _ => unreachable!("Invalid node / trigger combo. This is a bug."),
+            };
+        }
+        Ternary(op, _, _, _) => todo!(),
+        _ => unreachable!("Unsupported node type. This is a bug."),
+    }
+    match (node, trigger) {
+        (Binary(Min | Max, lhs, rhs), PruneKind::Left) => {
+            todo!();
+        }
+        (Binary(Min | Max, _lhs, _rhs), PruneKind::Left) => {
+            todo!();
+        }
+        (
+            Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs),
+            PruneKind::AlwaysTrue,
+        ) => todo!(),
+        (
+            Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs),
+            PruneKind::AlwaysFalse,
+        ) => todo!(),
+        (Ternary(Choose, ..), PruneKind::Left) => todo!(),
+        (Ternary(Choose, ..), PruneKind::Right) => todo!(),
+        _ => unreachable!("Unrecognized type of node / pruning combination. This is a bug"),
     }
 }
 
