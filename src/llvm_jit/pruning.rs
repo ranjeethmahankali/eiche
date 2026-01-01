@@ -10,7 +10,7 @@ use crate::{
     Tree, Value,
 };
 use inkwell::{
-    AddressSpace,
+    AddressSpace, OptimizationLevel,
     basic_block::BasicBlock,
     builder::Builder,
     llvm_sys::core::LLVMBuildFreeze,
@@ -97,6 +97,9 @@ impl Tree {
             builder,
             &mut constants,
         )?;
+        if let Some(first) = bbs.first() {
+            builder.build_unconditional_branch(*first)?;
+        }
         let (phis, phi_map) = init_merge_phi(&blocks, builder, &bbs, interval_type)?;
         let mut notifications = Vec::<Notification>::new();
         let mut merge_stack = Vec::<Incoming>::new();
@@ -167,7 +170,7 @@ impl Tree {
                             prev_target = jump.target;
                         }
                         notifications.push(Notification {
-                            src_inst: jump.target,
+                            src_inst: jump.owner,
                             dst_signal: si,
                             signal: index,
                             kind: jump.trigger,
@@ -175,47 +178,7 @@ impl Tree {
                     }
                     builder.build_switch(signal, bbs[bi + 1], &cases)?;
                 }
-                Block::Merge(after_node) => {
-                    assert!(
-                        merge_stack
-                            .last()
-                            .expect("This cannot be empty. This is a bug")
-                            .target
-                            == *after_node,
-                        "The merge stack is broken. This is a bug"
-                    );
-                    let phi = phis[phi_map[bi]];
-                    while let Some(Incoming {
-                        target,
-                        basic_block,
-                        alternate,
-                    }) = merge_stack.pop()
-                    {
-                        if target != *after_node {
-                            merge_stack.push(Incoming {
-                                target,
-                                basic_block,
-                                alternate,
-                            });
-                            break;
-                        }
-                        let val = match alternate {
-                            Alternate::None => interval_type.get_poison(),
-                            Alternate::Node(ni) => regs[ni].into_vector_value(),
-                            Alternate::Constant(value) => {
-                                builder.position_at_end(basic_block);
-                                let out = interval::build_const(&mut constants, value)
-                                    .into_vector_value();
-                                builder.build_unconditional_branch(bbs[bi])?;
-                                out
-                            }
-                        };
-                        phi.add_incoming(&[(&val as &dyn BasicValue, basic_block)]);
-                    }
-                    // Default path when nothing is pruned.
-                    phi.add_incoming(&[(&regs[*after_node], bbs[bi - 1])]);
-                    regs[*after_node] = build_freeze(builder, phi, &format!("phi_{bi}_freeze"));
-                }
+                Block::Merge(_) => {} // We will do the merging later.
             }
         }
         // Build the logic to notify pruning decisions.
@@ -247,6 +210,106 @@ impl Tree {
                 function,
             )?;
         }
+        // Merge all phi nodes.
+        {
+            let phi = phis[phi_map[bi]];
+            while let Some(Incoming {
+                target,
+                basic_block,
+                alternate,
+            }) = merge_stack.pop()
+            {
+                if target != *after_node {
+                    merge_stack.push(Incoming {
+                        target,
+                        basic_block,
+                        alternate,
+                    });
+                    break;
+                }
+                let val = match alternate {
+                    Alternate::None => interval_type.get_poison(),
+                    Alternate::Node(ni) => {
+                        builder.position_at_end(basic_block);
+                        builder.build_unconditional_branch(bbs[bi])?;
+                        regs[ni].into_vector_value()
+                    }
+                    Alternate::Constant(value) => {
+                        builder.position_at_end(basic_block);
+                        let out = interval::build_const(&mut constants, value).into_vector_value();
+                        builder.build_unconditional_branch(bbs[bi])?;
+                        out
+                    }
+                };
+                phi.add_incoming(&[(&val as &dyn BasicValue, basic_block)]);
+            }
+            // Default path when nothing is pruned.
+            phi.add_incoming(&[(&regs[*after_node], bbs[bi - 1])]);
+            builder.position_at_end(bbs[bi]);
+            regs[*after_node] = build_freeze(builder, phi, &format!("phi_{bi}_freeze"));
+            if let Some(next_bb) = bbs.get(bi + 1) {
+                builder.build_unconditional_branch(*next_bb)?;
+            }
+        }
+        // Branch out of all code blocks.
+        let mut done = vec![false; bbs.len()];
+        for ci in code_map.values() {
+            if let Some(next) = bbs.get(ci + 1)
+                && !std::mem::replace(&mut done[*ci], true)
+            {
+                builder.position_at_end(bbs[*ci]);
+                builder.build_unconditional_branch(*next)?;
+            }
+        }
+        if let Some(last) = bbs.last() {
+            builder.position_at_end(*last);
+        }
+        // Compile instructions to copy the outputs to the out argument.
+        let outputs = function
+            .get_nth_param(1)
+            .ok_or(Error::JitCompilationError(
+                "Cannot read output address".to_string(),
+            ))?
+            .into_pointer_value();
+        for (i, reg) in regs[(self.len() - self.num_roots())..].iter().enumerate() {
+            // # SAFETY: This is unit tested a lot. If this fails, we segfault.
+            let dst = unsafe {
+                builder.build_gep(
+                    interval_type,
+                    outputs,
+                    &[constants.int_32(i as u32, false)],
+                    &format!("output_ptr_{i}"),
+                )?
+            };
+            let store_inst = builder.build_store(dst, reg.into_vector_value())?;
+            /*
+            Rust arrays only guarantee alignment with the size of T, where as
+            LLVM load / store instructions expect alignment with the vector size
+            (double the size of T). This mismatch can cause a segfault. So we
+            manually set the alignment for this store instruction.
+            */
+            store_inst
+                .set_alignment(std::mem::size_of::<T>() as u32)
+                .map_err(|e| {
+                    Error::JitCompilationError(format!(
+                        "Cannot set alignment when storing output: {e}"
+                    ))
+                })?;
+        }
+        builder.build_return(None)?;
+
+        compiler.module.print_to_stderr();
+
+        compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
+        let engine = compiler
+            .module
+            .create_jit_execution_engine(OptimizationLevel::Aggressive)
+            .map_err(|_| Error::CannotCreateJitModule)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
+        // let func = unsafe { engine.get_function(&func_name)? };
         todo!("Do proper branching and set the outputs.");
     }
 }
