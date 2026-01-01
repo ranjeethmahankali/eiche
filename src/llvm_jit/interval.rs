@@ -287,11 +287,11 @@ impl Tree {
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
         let interval_type = T::jit_type(context).vec_type(2);
-        let iptr_type = context.ptr_type(AddressSpace::default());
+        let ptr_type = context.ptr_type(AddressSpace::default());
         let mut constants = Constants::create::<T>(context);
         let fn_type = context
             .void_type()
-            .fn_type(&[iptr_type.into(), iptr_type.into()], false);
+            .fn_type(&[ptr_type.into(), ptr_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
         compiler.set_attributes(function, context)?;
         builder.position_at_end(context.append_basic_block(function, "entry"));
