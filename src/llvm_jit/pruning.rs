@@ -7,10 +7,16 @@ use inkwell::{
     AddressSpace,
     basic_block::BasicBlock,
     builder::Builder,
-    types::IntType,
-    values::{BasicValue, BasicValueEnum, IntValue, PointerValue},
+    llvm_sys::core::LLVMBuildFreeze,
+    types::{BasicType, IntType},
+    values::{AsValueRef, BasicValue, BasicValueEnum, IntValue, PhiValue, PointerValue},
 };
-use std::{ffi::c_void, ops::Range};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    ffi::{CStr, CString, c_void},
+    ops::Range,
+};
 
 use super::{JitContext, NumberType};
 
@@ -47,6 +53,7 @@ impl Tree {
         pruning_threshold: usize,
     ) -> Result<(), Error> {
         let blocks = make_blocks(make_interrupts(&self, pruning_threshold)?, self.len())?;
+        let (code_map, merge_map) = reverse_lookup(&blocks);
         if !self.is_scalar() {
             // Only support scalar output trees.
             return Err(Error::TypeMismatch);
@@ -81,6 +88,9 @@ impl Tree {
             builder,
             &mut constants,
         )?;
+        let (phis, phi_map) = init_merge_phi(&blocks, builder, &bbs, interval_type)?;
+        let mut notify_stack = Vec::<Notification>::new();
+        let mut merge_stack = Vec::<Incoming>::new();
         for (bi, block) in blocks.iter().enumerate() {
             builder.position_at_end(bbs[bi]);
             match block {
@@ -117,63 +127,185 @@ impl Tree {
                             &format!("load_signal_{si}"),
                         )?
                         .into_int_value();
-                    let cases: Box<[_]> = case_iter(jumps.iter().cloned())
-                        .map(|(case, j)| {
-                            (
-                                constants.int_32(case as u32, false),
-                                bbs[find_code_block(&blocks, j.target)],
-                            )
-                        })
-                        .collect();
+                    let mut cases = Vec::<(IntValue, BasicBlock)>::new();
+                    let mut prev_target = usize::MAX;
+                    let mut index = 0u32;
+                    for jump in jumps.iter() {
+                        if prev_target != jump.target {
+                            // New case.
+                            index += 1;
+                            let (case_bb, incoming_bb) = match jump.alternate {
+                                Alternate::None => {
+                                    let mbi = merge_map
+                                        .get(&jump.target)
+                                        .expect("We must find a match. This is a bug.");
+                                    (bbs[*mbi], bbs[bi])
+                                }
+                                Alternate::Node(_) | Alternate::Constant(_) => {
+                                    let bb = context.append_basic_block(
+                                        function,
+                                        &format!("branch_{bi}_case_{si}_bb"),
+                                    );
+                                    (bb, bb)
+                                }
+                            };
+                            cases.push((constants.int_32(index, false), case_bb));
+                            merge_stack.push(Incoming {
+                                target: jump.target,
+                                basic_block: incoming_bb,
+                                alternate: jump.alternate.clone(),
+                            });
+                            prev_target = jump.target;
+                        }
+                        notify_stack.push(Notification {
+                            src_inst: jump.target,
+                            dst_signal: si,
+                            signal: index,
+                            kind: jump.trigger,
+                        });
+                    }
                     builder.build_switch(signal, bbs[bi + 1], &cases)?;
                 }
-                Block::Merge(_) => todo!(),
+                Block::Merge(after_node) => {
+                    assert!(
+                        merge_stack
+                            .last()
+                            .expect("This cannot be empty. This is a bug")
+                            .target
+                            == *after_node,
+                        "The merge stack is broken. This is a bug"
+                    );
+                    let phi = phis[phi_map[bi]];
+                    while let Some(Incoming {
+                        target,
+                        basic_block,
+                        alternate,
+                    }) = merge_stack.pop()
+                    {
+                        if target != *after_node {
+                            merge_stack.push(Incoming {
+                                target,
+                                basic_block,
+                                alternate,
+                            });
+                            break;
+                        }
+                        let val = match alternate {
+                            Alternate::None => interval_type.get_poison(),
+                            Alternate::Node(ni) => regs[ni].into_vector_value(),
+                            Alternate::Constant(value) => {
+                                builder.position_at_end(basic_block);
+                                let out = interval::build_const(&mut constants, value)
+                                    .into_vector_value();
+                                builder.build_unconditional_branch(bbs[bi])?;
+                                out
+                            }
+                        };
+                        phi.add_incoming(&[(&val as &dyn BasicValue, basic_block)]);
+                    }
+                    // Default path when nothing is pruned.
+                    phi.add_incoming(&[(&regs[*after_node], bbs[bi - 1])]);
+                    regs[*after_node] = build_freeze(builder, phi, &format!("phi_{bi}_freeze"));
+                }
             }
         }
-        todo!();
+        todo!("Do proper branching and set the outputs.");
     }
 }
 
-fn find_code_block(blocks: &[Block], inst: usize) -> usize {
-    use std::cmp::Ordering::*;
-    match blocks.binary_search_by(|block| match block {
-        Block::Code(range) => match (range.start.cmp(&inst), range.end.cmp(&inst)) {
-            (Less, Less) | (Less, Equal) | (_, Equal) => Less,
-            (Less, Greater) | (Equal, Greater) | (Equal, Less) => Equal,
-            (Greater, _) => Greater,
-        },
-        Block::Branch(jumps) => jumps
-            .iter()
-            .find_map(|j| {
-                Some(match j.before_node.cmp(&inst) {
-                    Less | Equal => Less,
-                    Greater => Greater,
-                })
-            })
-            .expect("Empty jump list"),
-        Block::Merge(after) => match after.cmp(&inst) {
-            Less => Less,
-            Equal | Greater => Greater,
-        },
-    }) {
-        Ok(found) => found,
-        Err(_) => unreachable!("This should never happen, this is a bug"),
+fn build_freeze<'ctx>(
+    builder: &'ctx Builder,
+    phi: PhiValue<'ctx>,
+    name: &str,
+) -> BasicValueEnum<'ctx> {
+    /// This function takes in a Rust string and either:
+    ///
+    /// A) Finds a terminating null byte in the Rust string and can reference it directly like a C string.
+    ///
+    /// B) Finds no null byte and allocates a new C string based on the input Rust string.
+    pub(crate) fn to_c_str(mut s: &str) -> Cow<'_, CStr> {
+        if s.is_empty() {
+            s = "\0";
+        }
+
+        // Start from the end of the string as it's the most likely place to find a null byte
+        if !s.chars().rev().any(|ch| ch == '\0') {
+            return Cow::from(CString::new(s).expect("unreachable since null bytes are checked"));
+        }
+
+        unsafe { Cow::from(CStr::from_ptr(s.as_ptr() as *const _)) }
+    }
+    let c_string = to_c_str(name);
+    unsafe {
+        BasicValueEnum::new(LLVMBuildFreeze(
+            builder.as_mut_ptr(),
+            phi.as_value_ref(),
+            c_string.as_ptr(),
+        ))
     }
 }
 
-fn case_iter<'ctx>(jumps: impl Iterator<Item = Jump>) -> impl Iterator<Item = (usize, Jump)> {
-    jumps
-        .scan(None, |target: &mut Option<Jump>, j| match target {
-            None => {
-                *target = Some(j.clone());
-                Some(Some(j))
+fn reverse_lookup(blocks: &[Block]) -> (HashMap<usize, usize>, HashMap<usize, usize>) {
+    let mut code_map = HashMap::default();
+    let mut merge_map = HashMap::default();
+    for (bi, block) in blocks.iter().enumerate() {
+        match block {
+            Block::Code(range) => {
+                code_map.extend(range.clone().map(|inst| (inst, bi)));
             }
-            Some(prev) if prev.target == j.target && prev.alternate == j.alternate => Some(None),
-            Some(prev) => Some(Some(std::mem::replace(prev, j))),
-        })
-        .filter_map(|v| v)
-        .enumerate()
-        .map(|(i, j)| (i + 1, j))
+            Block::Branch(_) => {}
+            Block::Merge(after) => {
+                merge_map.insert(*after, bi);
+            }
+        };
+    }
+    (code_map, merge_map)
+}
+
+#[derive(Debug)]
+struct Incoming<'ctx> {
+    target: usize,
+    basic_block: BasicBlock<'ctx>,
+    alternate: Alternate,
+}
+
+struct Notification {
+    src_inst: usize,
+    dst_signal: usize,
+    signal: u32,
+    kind: PruneKind,
+}
+
+fn init_merge_phi<'ctx, TPhi: BasicType<'ctx> + Copy>(
+    blocks: &[Block],
+    builder: &'ctx Builder,
+    bbs: &[BasicBlock<'ctx>],
+    out_type: TPhi,
+) -> Result<(Box<[PhiValue<'ctx>]>, Box<[usize]>), Error> {
+    let original_bb = builder.get_insert_block();
+    let (phis, indices) = blocks.iter().zip(bbs.iter()).try_fold(
+        (Vec::<PhiValue>::new(), Vec::<usize>::new()),
+        |(mut phis, mut indices), (block, bb)| -> Result<(Vec<PhiValue>, Vec<usize>), Error> {
+            match block {
+                Block::Code(_) | Block::Branch(_) => {
+                    indices.push(usize::MAX);
+                    Ok((phis, indices))
+                }
+                Block::Merge(_) => {
+                    let index = phis.len();
+                    builder.position_at_end(*bb);
+                    let phi = builder.build_phi(out_type, &format!("merge_phi_{index}"))?;
+                    phis.push(phi);
+                    indices.push(index);
+                    Ok((phis, indices))
+                }
+            }
+        },
+    )?;
+    if let Some(bb) = original_bb {
+        builder.position_at_end(bb);
+    }
+    Ok((phis.into_boxed_slice(), indices.into_boxed_slice()))
 }
 
 fn init_signal_ptrs<'ctx>(
@@ -334,8 +466,7 @@ fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Er
             _ => continue,
         }
     }
-    let mut numbered: Vec<(usize, Interrupt)> = interrupts.iter().cloned().enumerate().collect();
-    numbered.sort_by(|(_, a), (_, b)| -> std::cmp::Ordering {
+    interrupts.sort_by(|a, b| -> std::cmp::Ordering {
         match (a, b) {
             (
                 Interrupt::Jump {
@@ -352,15 +483,7 @@ fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Er
                     owner: ro,
                     ..
                 },
-            ) => {
-                let (lt, rt) = match (&interrupts[*lt], &interrupts[*rt]) {
-                    (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => {
-                        (la, ra)
-                    }
-                    _ => unreachable!("This is a bug"),
-                };
-                (lbn, std::cmp::Reverse(lt), la, lo).cmp(&(rbn, std::cmp::Reverse(rt), ra, ro))
-            }
+            ) => (lbn, std::cmp::Reverse(lt), la, lo).cmp(&(rbn, std::cmp::Reverse(rt), ra, ro)),
             (Interrupt::Jump { before_node, .. }, Interrupt::Land { after_node }) => {
                 (before_node, 0).cmp(&(after_node, 1))
             }
@@ -370,34 +493,10 @@ fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Er
             (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => la.cmp(&ra),
         }
     });
-    let idxmap = numbered.iter().enumerate().fold(
-        vec![0usize; numbered.len()],
-        |mut idxmap, (inew, (iold, _))| {
-            idxmap[*iold] = inew;
-            idxmap
-        },
-    );
-    interrupts.clear();
-    interrupts.extend(numbered.drain(..).map(|(_, i)| match i {
-        Interrupt::Jump {
-            before_node,
-            target,
-            alternate,
-            owner,
-            trigger,
-        } => Interrupt::Jump {
-            before_node,
-            target: idxmap[target],
-            alternate,
-            owner,
-            trigger,
-        },
-        Interrupt::Land { after_node } => Interrupt::Land { after_node },
-    }));
     Ok(interrupts.into_boxed_slice())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Jump {
     before_node: usize,
     target: usize,
@@ -406,6 +505,7 @@ struct Jump {
     trigger: PruneKind,
 }
 
+#[derive(Debug)]
 enum Block {
     Code(Range<usize>),
     Branch(Vec<Jump>),
@@ -519,20 +619,20 @@ mod test {
     fn t_min_tiny() {
         let tree = Tree::from_nodes(
             vec![
-                Symbol('x'),
-                Constant(Value::Scalar(1.0)),
-                Binary(Add, 0, 1),
-                Symbol('y'),
-                Constant(Value::Scalar(2.0)),
-                Binary(Add, 3, 4),
-                Binary(Min, 2, 5),
+                Symbol('x'),                  // 0
+                Constant(Value::Scalar(1.0)), // 1
+                Binary(Add, 0, 1),            // 2
+                Symbol('y'),                  // 3
+                Constant(Value::Scalar(2.0)), // 4
+                Binary(Add, 3, 4),            // 5
+                Binary(Min, 2, 5),            // 6
             ],
             (1, 1),
         )
         .expect("Cannot create tree");
-        let cfg = make_interrupts(&tree, 0).expect("Cannot compute control flow");
-        dbg!(&cfg);
-        assert_eq!(cfg, todo!(),);
+        let context = JitContext::default();
+        let eval = tree.jit_compile_pruner::<f32>(&context, "xy", 0).unwrap();
+        assert!(false);
     }
 
     #[test]
