@@ -845,10 +845,10 @@ fn build_notify<'ctx>(
                     .build_extract_element(
                         touching,
                         constants.int_32(0, false),
-                        &format!("extract_touching_left_{index}"),
+                        &format!("extract_touching_right_{index}"),
                     )?
                     .into_int_value(),
-                &format!("before_check_{index}"),
+                &format!("after_check_{index}"),
             )?;
             let strictly_before = builder.build_and(
                 not_empty,
@@ -891,7 +891,7 @@ fn build_notify<'ctx>(
                 builder,
                 module,
                 "llvm.vector.reduce.and.*",
-                &format!("all_true_checK"),
+                &format!("all_true_check_{index}"),
                 regs[cond].into_vector_value(),
             )?
             .into_int_value(),
