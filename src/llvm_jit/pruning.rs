@@ -1,6 +1,7 @@
 use super::{
     JitCompiler, build_vec_unary_intrinsic, fast_math,
     interval::{self, Constants},
+    simd_array::{JitSimdBuffers, SimdVec, Wide},
     single,
 };
 use crate::{
@@ -15,7 +16,7 @@ use inkwell::{
     AddressSpace, OptimizationLevel,
     basic_block::BasicBlock,
     builder::Builder,
-    execution_engine::JitFunction,
+    execution_engine::{ExecutionEngine, JitFunction},
     llvm_sys::core::LLVMBuildFreeze,
     module::Module,
     types::{BasicType, IntType},
@@ -48,8 +49,8 @@ type NativeSingleFunc = unsafe extern "C" fn(
 type NativeSimdFunc = unsafe extern "C" fn(
     *const c_void, // Inputs
     *mut c_void,   // Outputs
-    *const u32,    // Signals,
     u64,           // Number of evals.
+    *const u32,    // Signals,
 );
 
 type NativeIntervalFunc = unsafe extern "C" fn(
@@ -79,6 +80,73 @@ pub struct JitPruningFn<'ctx, T: NumberType> {
     _phantom: PhantomData<T>,
 }
 
+pub struct JitPruningSimdFn<'ctx, T: NumberType> {
+    func: JitFunction<'ctx, NativeSimdFunc>,
+    n_signals: usize,
+    phantom: PhantomData<T>,
+}
+
+pub struct JitPruningIntervalFn<'ctx, T: NumberType> {
+    func: JitFunction<'ctx, NativeIntervalFunc>,
+    n_inputs: usize,
+    n_outputs: usize,
+    n_signals: usize,
+    _phantom: PhantomData<T>,
+}
+
+impl<'ctx, T> JitPruningSimdFn<'ctx, T>
+where
+    Wide: SimdVec<T>,
+    T: NumberType,
+{
+    pub fn run(&self, buf: &mut JitSimdBuffers<T>, signals: &[u32]) -> Result<(), Error> {
+        if self.n_signals != signals.len() {
+            return Err(Error::InputSizeMismatch(self.n_signals, signals.len()));
+        }
+        // SAFETY: Calling a raw function pointer. `JitSimdBuffers` is a safe
+        // wrapper that populates the inputs correctly via it's public API, and
+        // knows the correct number of SIMD iterations required.
+        unsafe {
+            self.func.call(
+                buf.inputs.as_ptr().cast(),
+                buf.outputs.as_mut_ptr().cast(),
+                buf.num_simd_iters() as u64,
+                signals.as_ptr(),
+            );
+        }
+        Ok(())
+    }
+}
+
+impl<'ctx, T: NumberType> JitPruningIntervalFn<'ctx, T> {
+    pub fn run(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &[u32],
+    ) -> Result<(), Error> {
+        if inputs.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
+        } else if outputs.len() != self.n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
+        } else if signals.len() != self.n_signals {
+            return Err(Error::OutputSizeMismatch(signals.len(), self.n_signals));
+        }
+        unsafe { self.run_unchecked(inputs, outputs, signals) }
+        Ok(())
+    }
+
+    pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]], signals: &[u32]) {
+        unsafe {
+            self.func.call(
+                inputs.as_ptr().cast(),
+                outputs.as_mut_ptr().cast(),
+                signals.as_ptr().cast(),
+            )
+        }
+    }
+}
+
 impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
     pub fn run(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) -> Result<(), Error> {
         if inputs.len() != self.n_inputs {
@@ -86,7 +154,7 @@ impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
         } else if outputs.len() != self.n_outputs {
             return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
         } else if signals.len() != self.n_signals {
-            return Err(Error::OutputSizeMismatch(signals.len(), self.n_signals));
+            return Err(Error::InputSizeMismatch(signals.len(), self.n_signals));
         }
         unsafe { self.run_unchecked(inputs, outputs, signals) }
         Ok(())
@@ -338,6 +406,32 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             _phantom: PhantomData,
         })
     }
+
+    pub fn compile_interval_func(
+        &self,
+        context: &'ctx JitContext,
+    ) -> Result<JitPruningIntervalFn<'ctx, T>, Error> {
+        let PrunerInfo {
+            engine,
+            func_name,
+            n_inputs,
+            n_outputs,
+            n_signals,
+            ..
+        } = compile_pruner_impl::<T, false>(&self.tree, context, &self.blocks, &self.params)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
+        let func = unsafe { engine.get_function(&func_name)? };
+        Ok(JitPruningIntervalFn {
+            func,
+            n_inputs,
+            n_outputs,
+            n_signals,
+            _phantom: PhantomData,
+        })
+    }
 }
 
 impl Tree {
@@ -352,21 +446,57 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let (tree, ndom) = self.control_dependence_sorted()?;
-        compile_pruner_impl(tree, context, ndom, params, pruning_threshold)
+        let blocks = make_blocks(
+            make_interrupts(&tree, &ndom, pruning_threshold)?,
+            tree.len(),
+        )?;
+        let PrunerInfo {
+            engine,
+            func_name,
+            n_inputs,
+            n_outputs,
+            n_signals,
+            params,
+            merge_block_map,
+            block_signal_map,
+        } = compile_pruner_impl::<T, true>(&tree, context, &blocks, params)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
+        let func = unsafe { engine.get_function(&func_name)? };
+        Ok(JitPruner {
+            func,
+            n_inputs,
+            n_outputs,
+            n_signals,
+            params: params.to_string(),
+            blocks,
+            merge_block_map,
+            block_signal_map,
+            tree,
+            phantom: PhantomData,
+        })
     }
 }
 
-fn compile_pruner_impl<'ctx, T: NumberType>(
-    tree: Tree,
+struct PrunerInfo<'ctx> {
+    engine: ExecutionEngine<'ctx>,
+    func_name: String,
+    n_inputs: usize,
+    n_outputs: usize,
+    n_signals: usize,
+    params: String,
+    merge_block_map: HashMap<usize, usize>,
+    block_signal_map: Box<[usize]>,
+}
+
+fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
+    tree: &Tree,
     context: &'ctx JitContext,
-    ndom: Box<[usize]>,
+    blocks: &[Block],
     params: &str,
-    pruning_threshold: usize,
-) -> Result<JitPruner<'ctx, T>, Error> {
-    let blocks = make_blocks(
-        make_interrupts(&tree, &ndom, pruning_threshold)?,
-        tree.len(),
-    )?;
+) -> Result<PrunerInfo<'ctx>, Error> {
     let (code_block_map, merge_block_map) = reverse_lookup(&blocks);
     let ranges = interval::compute_ranges(&tree)?;
     let func_name = context.new_func_name::<T>(Some("pruner"));
@@ -423,8 +553,8 @@ fn compile_pruner_impl<'ctx, T: NumberType>(
         context.bool_type().vec_type(2),
         tree.nodes(),
     )?;
-    let mut notifications = Vec::<Notification>::new();
     let mut merge_list = Vec::<Incoming>::new();
+    let mut notifications = Vec::<Notification>::new();
     let mut notified = HashSet::<(usize, u32)>::new();
     for (bi, block) in blocks.iter().enumerate() {
         builder.position_at_end(bbs[bi]);
@@ -452,36 +582,38 @@ fn compile_pruner_impl<'ctx, T: NumberType>(
                         bbs[bi] = bb;
                     }
                 }
-                // Notify upstream.
-                for Notification {
-                    src_inst,
-                    dst_signal,
-                    signal,
-                    kind,
-                } in notifications.iter().filter(|n| n.src_inst == range.end - 1)
-                {
-                    let ci = *code_block_map
-                        .get(&src_inst)
-                        .expect("Code map is not complete. This is a bug.");
-                    let bb = bbs[ci];
-                    builder.position_at_end(bb);
-                    let first = notified.insert((*dst_signal, *signal));
-                    bbs[ci] = build_notify(
-                        tree.node(*src_inst).clone(),
-                        *src_inst,
-                        *kind,
-                        *signal,
-                        signal_ptrs[*dst_signal],
-                        first,
-                        &regs,
-                        builder,
-                        &compiler.module,
-                        &mut constants,
-                        function,
-                    )?;
+                if WITH_NOTIFY {
+                    // Notify upstream.
+                    for Notification {
+                        src_inst,
+                        dst_signal,
+                        signal,
+                        kind,
+                    } in notifications.iter().filter(|n| n.src_inst == range.end - 1)
+                    {
+                        let ci = *code_block_map
+                            .get(&src_inst)
+                            .expect("Code map is not complete. This is a bug.");
+                        let bb = bbs[ci];
+                        builder.position_at_end(bb);
+                        let first = notified.insert((*dst_signal, *signal));
+                        bbs[ci] = build_notify(
+                            tree.node(*src_inst).clone(),
+                            *src_inst,
+                            *kind,
+                            *signal,
+                            signal_ptrs[*dst_signal],
+                            first,
+                            &regs,
+                            builder,
+                            &compiler.module,
+                            &mut constants,
+                            function,
+                        )?;
+                    }
+                    // Clear the processed notifications.
+                    notifications.retain(|n| n.src_inst != range.end - 1);
                 }
-                // Clear the processed notifications.
-                notifications.retain(|n| n.src_inst != range.end - 1);
             }
             Block::Branch(jumps) => {
                 let si = block_signal_map[bi];
@@ -524,12 +656,14 @@ fn compile_pruner_impl<'ctx, T: NumberType>(
                         prev_target = jump.target;
                         prev_val = Some(jump.alternate.clone());
                     }
-                    notifications.push(Notification {
-                        src_inst: jump.owner,
-                        dst_signal: si,
-                        signal: index,
-                        kind: jump.trigger,
-                    });
+                    if WITH_NOTIFY {
+                        notifications.push(Notification {
+                            src_inst: jump.owner,
+                            dst_signal: si,
+                            signal: index,
+                            kind: jump.trigger,
+                        });
+                    }
                 }
                 builder.build_switch(signal, bbs[bi + 1], &cases)?;
             }
@@ -602,22 +736,15 @@ fn compile_pruner_impl<'ctx, T: NumberType>(
         .module
         .create_jit_execution_engine(OptimizationLevel::Aggressive)
         .map_err(|_| Error::CannotCreateJitModule)?;
-    // SAFETY: The signature is correct, and well tested. The function
-    // pointer should never be invalidated, because we allocated a dedicated
-    // execution engine, with it's own block of executable memory, that will
-    // live as long as the function wrapper lives.
-    let func = unsafe { engine.get_function(&func_name)? };
-    Ok(JitPruner {
-        func,
+    Ok(PrunerInfo {
+        engine,
+        func_name,
         n_inputs: params.len(),
         n_outputs: tree.num_roots(),
         n_signals: signal_ptrs.len(),
         params: params.to_string(),
-        blocks,
         merge_block_map,
         block_signal_map,
-        tree,
-        phantom: PhantomData,
     })
 }
 
@@ -1281,51 +1408,6 @@ mod test {
     use crate::{assert_float_eq, deftree};
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
-    fn format_interleave_interrupts(tree: &Tree) -> String {
-        use std::fmt::Write;
-        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let interrupts = make_interrupts(&tree, &ndom, 3).unwrap();
-        // Print the interrupts interleaved with nodes.
-        let mut i = 0usize;
-        let mut out = String::new();
-        writeln!(out, "").unwrap();
-        for interrupt in interrupts {
-            match interrupt {
-                Interrupt::Jump {
-                    before_node,
-                    target,
-                    alternate,
-                    owner,
-                    trigger,
-                } => {
-                    if before_node > i {
-                        let range = i..before_node;
-                        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-                            writeln!(out, "\t{ni}: {node}").unwrap();
-                        }
-                    }
-                    writeln!(
-                        out,
-                        "Jump({before_node}, {target}, {alternate:?}, {owner}, {trigger:?})"
-                    )
-                    .unwrap();
-                    i = before_node;
-                }
-                Interrupt::Land { after_node } => {
-                    if after_node >= i {
-                        let range = i..=after_node;
-                        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-                            writeln!(out, "\t{ni}: {node}").unwrap();
-                        }
-                    }
-                    writeln!(out, "Land({after_node})").unwrap();
-                    i = after_node + 1;
-                }
-            }
-        }
-        out
-    }
-
     #[test]
     fn t_pruning_two_circles() {
         let tree = deftree!(min
@@ -1498,6 +1580,9 @@ mod test {
         let pruner = tree
             .jit_compile_pruner::<T>(&context, &params, pruning_threshold)
             .expect("Unable to compile a JIT pruner");
+        let pruned_interval_eval = pruner
+            .compile_interval_func(&context)
+            .expect("Unable to compile pruned interval evaluator");
         let pruned_eval = pruner
             .compile_single_func(&context)
             .expect("Unable to compile a pruned single eval");
@@ -1524,6 +1609,10 @@ mod test {
                 bounds.map(|b| T::from_f64(b))
             }));
             // Ensure the pruner and interval eval report the same value.
+            iout.clear();
+            iout.resize(n_outputs, [T::nan(); 2]);
+            interval_eval.run(&interval, &mut iout).unwrap();
+            // Compare the pruner.
             iout_pruned.clear();
             iout_pruned.resize(n_outputs, [T::nan(); 2]);
             signals.clear();
@@ -1531,11 +1620,17 @@ mod test {
             pruner
                 .run(&interval, &mut iout_pruned, &mut signals)
                 .unwrap();
-            // Now the actual interval evaluator we trust.
-            iout.clear();
-            iout.resize(n_outputs, [T::nan(); 2]);
-            interval_eval.run(&interval, &mut iout).unwrap();
             // Compare intervals.
+            for (i, j) in iout.iter().zip(iout_pruned.iter()) {
+                for (i, j) in i.iter().zip(j.iter()) {
+                    assert_float_eq!(i.to_f64(), j.to_f64(), eps);
+                }
+            }
+            // Compare the pruned interval eval.
+            iout_pruned.fill([T::nan(); 2]);
+            pruned_interval_eval
+                .run(&interval, &mut iout_pruned, &signals)
+                .unwrap();
             for (i, j) in iout.iter().zip(iout_pruned.iter()) {
                 for (i, j) in i.iter().zip(j.iter()) {
                     assert_float_eq!(i.to_f64(), j.to_f64(), eps);

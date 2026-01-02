@@ -960,12 +960,12 @@ where
     Wide: SimdVec<T>,
     T: NumberType,
 {
-    num_samples: usize,
-    num_inputs: usize,
-    num_outputs: usize,
-    inputs: Vec<Wide>,
-    outputs: Vec<Wide>,
-    phantom: PhantomData<T>, // This only exists to specialize the type for type T.
+    pub(crate) n_samples: usize,
+    pub(crate) n_inputs: usize,
+    pub(crate) n_outputs: usize,
+    pub(crate) inputs: Vec<Wide>,
+    pub(crate) outputs: Vec<Wide>,
+    pub(crate) phantom: PhantomData<T>, // This only exists to specialize the type for type T.
 }
 
 impl<'ctx, T> JitSimdFn<'ctx, T>
@@ -1008,7 +1008,7 @@ where
         // wrapper that populates the inputs correctly via it's public API, and
         // knows the correct number of SIMD iterations required.
         unsafe {
-            self.run_raw(
+            self.run_unchecked(
                 buf.inputs.as_ptr().cast(),
                 buf.outputs.as_mut_ptr().cast(),
                 buf.num_simd_iters(),
@@ -1035,7 +1035,7 @@ where
     slice must be `n_symbols * num_iters` long, and the output slice must be
     `n_roots * num_iters` long.
      */
-    pub unsafe fn run_raw(&self, inputs: *const Wide, outputs: *mut Wide, num_iters: usize) {
+    pub unsafe fn run_unchecked(&self, inputs: *const Wide, outputs: *mut Wide, num_iters: usize) {
         // SAFETY: Calling a raw functin pointer. We told the caller it's their
         // responsibility to make sure inputs are correct.
         unsafe {
@@ -1053,9 +1053,9 @@ where
 
     pub fn new(tree: &Tree) -> Self {
         Self {
-            num_samples: 0,
-            num_inputs: tree.symbols().len(),
-            num_outputs: tree.num_roots(),
+            n_samples: 0,
+            n_inputs: tree.symbols().len(),
+            n_outputs: tree.num_roots(),
             inputs: Vec::new(),
             outputs: Vec::new(),
             phantom: PhantomData,
@@ -1072,9 +1072,9 @@ where
         let num_inputs = tree.symbols().len();
         let num_outputs = tree.num_roots();
         Self {
-            num_samples: 0,
-            num_inputs,
-            num_outputs,
+            n_samples: 0,
+            n_inputs: num_inputs,
+            n_outputs: num_outputs,
             inputs: Vec::with_capacity(n_simd * num_inputs),
             outputs: Vec::with_capacity(n_simd * num_outputs),
             phantom: PhantomData,
@@ -1082,16 +1082,16 @@ where
     }
 
     pub fn reset_for_tree(&mut self, tree: &Tree) {
-        self.num_samples = 0;
-        self.num_inputs = tree.symbols().len();
-        self.num_outputs = tree.num_roots();
+        self.n_samples = 0;
+        self.n_inputs = tree.symbols().len();
+        self.n_outputs = tree.num_roots();
         self.inputs.clear();
         self.outputs.clear();
     }
 
-    fn num_simd_iters(&self) -> usize {
-        (self.num_samples / Self::SIMD_VEC_SIZE)
-            + if self.num_samples.is_multiple_of(Self::SIMD_VEC_SIZE) {
+    pub(crate) fn num_simd_iters(&self) -> usize {
+        (self.n_samples / Self::SIMD_VEC_SIZE)
+            + if self.n_samples.is_multiple_of(Self::SIMD_VEC_SIZE) {
                 0
             } else {
                 1
@@ -1104,28 +1104,28 @@ where
     /// variables in the same order as they are returned by calling
     /// `tree.symbols` on the tree that produced this JIT evaluator.
     pub fn pack(&mut self, sample: &[T]) -> Result<(), Error> {
-        if sample.len() != self.num_inputs {
-            return Err(Error::InputSizeMismatch(sample.len(), self.num_inputs));
+        if sample.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(sample.len(), self.n_inputs));
         }
-        let lane = self.num_samples % Self::SIMD_VEC_SIZE;
+        let lane = self.n_samples % Self::SIMD_VEC_SIZE;
         if lane == 0 {
             self.inputs.extend(std::iter::repeat_n(
                 <Wide as SimdVec<T>>::nan(),
-                self.num_inputs,
+                self.n_inputs,
             ));
             self.outputs.extend(std::iter::repeat_n(
                 <Wide as SimdVec<T>>::nan(),
-                self.num_outputs,
+                self.n_outputs,
             ));
         }
         let inpsize = self.inputs.len();
-        for (reg, val) in self.inputs[(inpsize - self.num_inputs)..]
+        for (reg, val) in self.inputs[(inpsize - self.n_inputs)..]
             .iter_mut()
             .zip(sample.iter())
         {
             <Wide as SimdVec<T>>::set(reg, *val, lane);
         }
-        self.num_samples += 1;
+        self.n_samples += 1;
         Ok(())
     }
 
@@ -1137,13 +1137,13 @@ where
 
     pub fn clear_outputs(&mut self) {
         self.outputs.clear();
-        self.num_samples = 0;
+        self.n_samples = 0;
     }
 
     pub fn unpack_outputs(&self) -> impl Iterator<Item = T> {
-        debug_assert_eq!(self.outputs.len() % self.num_outputs, 0);
+        debug_assert_eq!(self.outputs.len() % self.n_outputs, 0);
         self.outputs
-            .chunks_exact(self.num_outputs)
+            .chunks_exact(self.n_outputs)
             .flat_map(|chunk| {
                 (0..Self::SIMD_VEC_SIZE).flat_map(|lane| {
                     chunk
@@ -1151,7 +1151,7 @@ where
                         .map(move |simd| <Wide as SimdVec<T>>::get(simd, lane))
                 })
             })
-            .take(self.num_samples * self.num_outputs)
+            .take(self.n_samples * self.n_outputs)
     }
 }
 
