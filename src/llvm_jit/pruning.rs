@@ -1908,7 +1908,12 @@ mod test {
             // Compare intervals.
             for (i, j) in iout.iter().zip(iout_pruned.iter()) {
                 for (i, j) in i.iter().zip(j.iter()) {
-                    assert_float_eq!(i.to_f64(), j.to_f64(), eps);
+                    assert_float_eq!(
+                        i.to_f64(),
+                        j.to_f64(),
+                        eps,
+                        "Comparing the pruner with interval eval"
+                    );
                 }
             }
             // Compare the pruned interval eval.
@@ -1918,7 +1923,12 @@ mod test {
                 .unwrap();
             for (i, j) in iout.iter().zip(iout_pruned.iter()) {
                 for (i, j) in i.iter().zip(j.iter()) {
-                    assert_float_eq!(i.to_f64(), j.to_f64(), eps);
+                    assert_float_eq!(
+                        i.to_f64(),
+                        j.to_f64(),
+                        eps,
+                        "Comparing pruned interval eval"
+                    );
                 }
             }
             // Now sample that interval and compare pruned and un-pruned evaluations.
@@ -1940,7 +1950,13 @@ mod test {
                 out.resize(n_outputs, T::nan());
                 eval.run(&sample, &mut out).unwrap();
                 for (i, j) in out_pruned.iter().zip(out.iter()) {
-                    assert_float_eq!(i.to_f64(), j.to_f64(), eps);
+                    assert_float_eq!(
+                        i.to_f64(),
+                        j.to_f64(),
+                        eps,
+                        "Comparing pruned single evals within the interval, with inputs: {:?}",
+                        sample
+                    );
                 }
             }
             // Now compare the simd evaluations with and without pruning.
@@ -1956,7 +1972,12 @@ mod test {
                     (None, Some(_)) | (Some(_), None) => {
                         panic!("The two evaluations returned unequal number of outputs")
                     }
-                    (Some(i), Some(j)) => assert_float_eq!(i.to_f64(), j.to_f64(), eps),
+                    (Some(i), Some(j)) => assert_float_eq!(
+                        i.to_f64(),
+                        j.to_f64(),
+                        eps,
+                        "Comparing simd evals within the interval"
+                    ),
                 }
             }
         }

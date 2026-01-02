@@ -123,14 +123,12 @@ macro_rules! assert_float_eq {
         let b = $b;
         let eps = $eps;
         let error = (a - b).abs();
-
         if error > eps {
             // Only format on failure
             $(
                 eprintln!($fmt $(, $args)*);
             )?
         }
-
         assert!(
             error <= eps,
             "Assertion failed: |({}) - ({})| = {:e} <= {:e}",
