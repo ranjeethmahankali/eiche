@@ -1,7 +1,7 @@
 use super::{
     JitCompiler, build_vec_unary_intrinsic, fast_math,
     interval::{self, Constants},
-    simd_array::{JitSimdBuffers, SimdVec, Wide},
+    simd_array::{self, JitSimdBuffers, SimdVec, Wide},
     single,
 };
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     tree::is_node_scalar,
 };
 use inkwell::{
-    AddressSpace, OptimizationLevel,
+    AddressSpace, IntPredicate, OptimizationLevel,
     basic_block::BasicBlock,
     builder::Builder,
     execution_engine::{ExecutionEngine, JitFunction},
@@ -271,7 +271,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             context.bool_type(),
             self.tree.nodes(),
         )?;
-        let mut merge_list = Vec::<Incoming>::new();
+        let mut merge_list = Vec::<Incoming>::new(); // Keep track of phi nodes that need to be merged.
         for (bi, block) in self.blocks.iter().enumerate() {
             builder.position_at_end(bbs[bi]);
             match block {
@@ -430,6 +430,253 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             n_outputs,
             n_signals,
             _phantom: PhantomData,
+        })
+    }
+
+    pub fn compile_simd_func(
+        &self,
+        context: &'ctx JitContext,
+    ) -> Result<JitPruningSimdFn<'ctx, T>, Error>
+    where
+        Wide: SimdVec<T>,
+    {
+        // No need to check if the tree has a valid scalar output, because we
+        // already checked that when we made this pruner.
+        let func_name = context.new_func_name::<T>(Some("array"));
+        let context = &context.inner;
+        let compiler = JitCompiler::new(context)?;
+        let builder = &compiler.builder;
+        let flt_type = <Wide as SimdVec<T>>::float_type(context);
+        let i64_type = context.i64_type();
+        let fvec_type = flt_type.vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
+        let ptr_type = context.ptr_type(AddressSpace::default());
+        let fn_type = context.void_type().fn_type(
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+            ],
+            false,
+        );
+        let function = compiler.module.add_function(&func_name, fn_type, None);
+        compiler.set_attributes(function, context)?;
+        let start_block = context.append_basic_block(function, "entry");
+        let loop_block = context.append_basic_block(function, "loop");
+        let end_block = context.append_basic_block(function, "end");
+        // Extract the function args.
+        builder.position_at_end(start_block);
+        let inputs = function
+            .get_nth_param(0)
+            .ok_or(Error::JitCompilationError("Cannot read inputs".to_string()))?
+            .into_pointer_value();
+        let eval_len = function
+            .get_nth_param(2)
+            .ok_or(Error::JitCompilationError(
+                "Cannot read number of evaluations".to_string(),
+            ))?
+            .into_int_value();
+        let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.tree.len());
+        let mut bbs: Box<[BasicBlock]> = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(bi, block)| {
+                context.append_basic_block(
+                    function,
+                    &format!(
+                        "{}_bb_{bi}",
+                        match block {
+                            Block::Code(_) => "code",
+                            Block::Branch(_) => "branch",
+                            Block::Merge(_) => "merge",
+                        }
+                    ),
+                )
+            })
+            .collect();
+        let signals_arg = function
+            .get_nth_param(3)
+            .ok_or(Error::JitCompilationError(
+                "Cannot read output address".to_string(),
+            ))?
+            .into_pointer_value();
+        let signal_ptrs: Result<Vec<PointerValue>, inkwell::builder::BuilderError> = (0..self
+            .n_signals)
+            .map(|si| unsafe {
+                builder.build_gep(
+                    context.i32_type(),
+                    signals_arg,
+                    &[context.i32_type().const_int(si as u64, false)],
+                    &format!("signal_ptr_{}", si),
+                )
+            })
+            .collect();
+        let signal_ptrs = signal_ptrs?.into_boxed_slice();
+        builder.build_unconditional_branch(loop_block)?;
+        // Start the loop
+        builder.position_at_end(loop_block);
+        let loop_index_phi = builder.build_phi(i64_type, "counter_phi")?;
+        loop_index_phi.add_incoming(&[(&i64_type.const_int(0, false), start_block)]);
+        let loop_index = loop_index_phi.as_basic_value().into_int_value();
+        if let Some(first) = bbs.first() {
+            builder.build_unconditional_branch(*first)?;
+        }
+        let (phis, phi_map) = init_merge_phi(
+            &self.blocks,
+            builder,
+            &bbs,
+            flt_type,
+            context.bool_type(),
+            self.tree.nodes(),
+        )?;
+        let mut merge_list = Vec::<Incoming>::new();
+        for (bi, block) in self.blocks.iter().enumerate() {
+            builder.position_at_end(bbs[bi]);
+            match block {
+                Block::Code(range) => {
+                    for (node_index, node) in
+                        self.tree.nodes()[range.clone()].iter().copied().enumerate()
+                    {
+                        let reg = simd_array::build_op(
+                            simd_array::BuildArgs {
+                                nodes: self.tree.nodes(),
+                                params: &self.params,
+                                context,
+                                fvec_type,
+                                inputs,
+                                loop_index,
+                                regs: &regs,
+                                node_index,
+                                node,
+                            },
+                            builder,
+                            &compiler.module,
+                        )?;
+                        regs.push(reg);
+                        // We may have created new blocks when building the op. So we overwrite the basic block.
+                        if let Some(bb) = builder.get_insert_block() {
+                            bbs[bi] = bb;
+                        }
+                    }
+                    if let Some(next_bb) = bbs.get(bi + 1) {
+                        builder.build_unconditional_branch(*next_bb)?;
+                    }
+                }
+                Block::Branch(jumps) => {
+                    let si = self.block_signal_map[bi];
+                    let signal = builder
+                        .build_load(
+                            context.i32_type(),
+                            signal_ptrs[si],
+                            &format!("load_signal_{si}"),
+                        )?
+                        .into_int_value();
+                    let mut cases = Vec::<(IntValue, BasicBlock)>::new();
+                    let mut prev_target = usize::MAX;
+                    let mut prev_val = None;
+                    let mut index = 0u32;
+                    for jump in jumps.iter() {
+                        if prev_target != jump.target || prev_val != Some(jump.alternate.clone()) {
+                            // New case.
+                            index += 1;
+                            let (case_bb, incoming_bb) = match jump.alternate {
+                                Alternate::None => {
+                                    let mbi = self
+                                        .merge_block_map
+                                        .get(&jump.target)
+                                        .expect("We must find a match. This is a bug.");
+                                    (bbs[*mbi], bbs[bi])
+                                }
+                                Alternate::Node(_) | Alternate::Constant(_) => {
+                                    let bb = context.append_basic_block(
+                                        function,
+                                        &format!("branch_{bi}_case_{si}_bb"),
+                                    );
+                                    (bb, bb)
+                                }
+                            };
+                            cases
+                                .push((context.i32_type().const_int(index as u64, false), case_bb));
+                            merge_list.push(Incoming {
+                                target: jump.target,
+                                basic_block: incoming_bb,
+                                alternate: jump.alternate.clone(),
+                            });
+                            prev_target = jump.target;
+                            prev_val = Some(jump.alternate.clone());
+                        }
+                    }
+                    builder.build_switch(signal, bbs[bi + 1], &cases)?;
+                }
+                Block::Merge(target) => {
+                    build_merges(
+                        &phis,
+                        &phi_map,
+                        &mut merge_list,
+                        &self.merge_block_map,
+                        &bbs,
+                        flt_type.get_poison(),
+                        builder,
+                        &mut regs,
+                        |value| match value {
+                            Value::Bool(val) => <Wide as SimdVec<T>>::const_bool(val, context),
+                            Value::Scalar(val) => <Wide as SimdVec<T>>::const_float(val, context),
+                        },
+                        *target,
+                    )?;
+                }
+            }
+        }
+        // Copy the outputs.
+        let outputs = function
+            .get_nth_param(1)
+            .ok_or(Error::JitCompilationError(
+                "Cannot read output address".to_string(),
+            ))?
+            .into_pointer_value();
+        for (i, reg) in regs[(self.tree.len() - self.tree.num_roots())..]
+            .iter()
+            .enumerate()
+        {
+            let offset = builder.build_int_add(
+                builder.build_int_mul(
+                    loop_index,
+                    i64_type.const_int(self.tree.num_roots() as u64, false),
+                    "offset_mul",
+                )?,
+                i64_type.const_int(i as u64, false),
+                "offset_add",
+            )?;
+            // SAFETY: GEP can segfault if the index is out of bounds. The
+            // offset calculation looks pretty solid, and is thoroughly tested.
+            let dst = unsafe {
+                builder.build_gep(fvec_type, outputs, &[offset], &format!("output_{i}"))?
+            };
+            builder.build_store(dst, *reg)?;
+        }
+        // Check to see if the loop should go on.
+        let next = builder.build_int_add(loop_index, i64_type.const_int(1, false), "increment")?;
+        loop_index_phi.add_incoming(&[(&next, loop_block)]);
+        let cmp = builder.build_int_compare(IntPredicate::ULT, next, eval_len, "loop-check")?;
+        builder.build_conditional_branch(cmp, loop_block, end_block)?;
+        // End loop and return.
+        builder.position_at_end(end_block);
+        builder.build_return(None)?;
+        compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
+        let engine = compiler
+            .module
+            .create_jit_execution_engine(OptimizationLevel::Aggressive)
+            .map_err(|_| Error::CannotCreateJitModule)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
+        let func = unsafe { engine.get_function(&func_name)? };
+        Ok(JitPruningSimdFn::<T> {
+            func,
+            n_signals: signal_ptrs.len(),
+            phantom: PhantomData,
         })
     }
 }

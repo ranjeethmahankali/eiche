@@ -1175,14 +1175,13 @@ impl Tree {
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
-        let float_type = <Wide as SimdVec<T>>::float_type(context);
+        let flt_type = <Wide as SimdVec<T>>::float_type(context);
         let i64_type = context.i64_type();
-        let fvec_type = float_type.vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
-        let fptr_type = context.ptr_type(AddressSpace::default());
-        let fn_type = context.void_type().fn_type(
-            &[fptr_type.into(), fptr_type.into(), i64_type.into()],
-            false,
-        );
+        let fvec_type = flt_type.vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
+        let ptr_type = context.ptr_type(AddressSpace::default());
+        let fn_type = context
+            .void_type()
+            .fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
         compiler.set_attributes(function, context)?;
         let start_block = context.append_basic_block(function, "entry");
@@ -1203,15 +1202,15 @@ impl Tree {
         builder.build_unconditional_branch(loop_block)?;
         // Start the loop
         builder.position_at_end(loop_block);
-        let phi = builder.build_phi(i64_type, "counter_phi")?;
-        phi.add_incoming(&[(&i64_type.const_int(0, false), start_block)]);
-        let loop_index = phi.as_basic_value().into_int_value();
+        let loop_index_phi = builder.build_phi(i64_type, "counter_phi")?;
+        loop_index_phi.add_incoming(&[(&i64_type.const_int(0, false), start_block)]);
+        let loop_index = loop_index_phi.as_basic_value().into_int_value();
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
         for (node_index, node) in self.nodes().iter().copied().enumerate() {
             let reg = build_op::<T>(
                 BuildArgs {
                     nodes: self.nodes(),
-                    symbols,
+                    params: symbols,
                     context,
                     fvec_type,
                     inputs,
@@ -1251,7 +1250,7 @@ impl Tree {
         }
         // Check to see if the loop should go on.
         let next = builder.build_int_add(loop_index, i64_type.const_int(1, false), "increment")?;
-        phi.add_incoming(&[(&next, loop_block)]);
+        loop_index_phi.add_incoming(&[(&next, loop_block)]);
         let cmp = builder.build_int_compare(IntPredicate::ULT, next, eval_len, "loop-check")?;
         builder.build_conditional_branch(cmp, loop_block, end_block)?;
         // End loop and return.
@@ -1275,15 +1274,15 @@ impl Tree {
 }
 
 pub struct BuildArgs<'a, 'ctx> {
-    nodes: &'a [Node],
-    symbols: &'a str,
-    context: &'ctx Context,
-    fvec_type: VectorType<'ctx>,
-    inputs: PointerValue<'ctx>,
-    loop_index: IntValue<'ctx>,
-    regs: &'a [BasicValueEnum<'ctx>],
-    node_index: usize,
-    node: Node,
+    pub(crate) nodes: &'a [Node],
+    pub(crate) params: &'a str,
+    pub(crate) context: &'ctx Context,
+    pub(crate) fvec_type: VectorType<'ctx>,
+    pub(crate) inputs: PointerValue<'ctx>,
+    pub(crate) loop_index: IntValue<'ctx>,
+    pub(crate) regs: &'a [BasicValueEnum<'ctx>],
+    pub(crate) node_index: usize,
+    pub(crate) node: Node,
 }
 
 pub fn build_op<'a, 'ctx, T>(
@@ -1297,7 +1296,7 @@ where
 {
     let BuildArgs {
         nodes,
-        symbols,
+        params: symbols,
         context,
         fvec_type,
         inputs,
