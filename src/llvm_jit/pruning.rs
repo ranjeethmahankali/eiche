@@ -354,7 +354,13 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                         &mut merge_list,
                         &self.merge_block_map,
                         &bbs,
-                        flt_type.get_poison(),
+                        |ni| {
+                            if is_node_scalar(self.tree.nodes(), ni) {
+                                flt_type.get_poison().as_basic_value_enum()
+                            } else {
+                                context.bool_type().get_poison().as_basic_value_enum()
+                            }
+                        },
                         builder,
                         &mut regs,
                         |value| single::build_const::<T>(context, value),
@@ -619,7 +625,13 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                         &mut merge_list,
                         &self.merge_block_map,
                         &bbs,
-                        flt_vec_type.get_poison(),
+                        |ni| {
+                            if is_node_scalar(self.tree.nodes(), ni) {
+                                flt_vec_type.get_poison().as_basic_value_enum()
+                            } else {
+                                bool_vec_type.get_poison().as_basic_value_enum()
+                            }
+                        },
                         builder,
                         &mut regs,
                         |value| match value {
@@ -927,7 +939,17 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
                     &mut merge_list,
                     &merge_block_map,
                     &bbs,
-                    interval_type.get_poison(),
+                    |ni| {
+                        if is_node_scalar(tree.nodes(), ni) {
+                            interval_type.get_poison().as_basic_value_enum()
+                        } else {
+                            context
+                                .bool_type()
+                                .vec_type(2)
+                                .get_poison()
+                                .as_basic_value_enum()
+                        }
+                    },
                     builder,
                     &mut regs,
                     |value| interval::build_const(&mut constants, value),
@@ -1001,16 +1023,20 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
     })
 }
 
-fn build_merges<'ctx, T: BasicValue<'ctx> + Copy, F: FnMut(Value) -> BasicValueEnum<'ctx>>(
+fn build_merges<
+    'ctx,
+    FnMakePoison: Fn(usize) -> BasicValueEnum<'ctx>,
+    FnMakeConst: FnMut(Value) -> BasicValueEnum<'ctx>,
+>(
     phis: &Box<[PhiValue<'ctx>]>,
     phi_map: &Box<[usize]>,
     merge_list: &mut Vec<Incoming<'ctx>>,
     merge_map: &HashMap<usize, usize>,
     bbs: &[BasicBlock<'ctx>],
-    poison: T,
+    get_poison: FnMakePoison,
     builder: &'ctx Builder,
     regs: &mut [BasicValueEnum<'ctx>],
-    mut build_const_fn: F,
+    mut build_const_fn: FnMakeConst,
     target: usize,
 ) -> Result<(), Error> {
     let bi = merge_map
@@ -1019,13 +1045,13 @@ fn build_merges<'ctx, T: BasicValue<'ctx> + Copy, F: FnMut(Value) -> BasicValueE
         .expect("This is a bug. We must find a block index here.");
     let phi = phis[phi_map[bi]];
     for Incoming {
-        target: _,
+        target,
         basic_block,
         alternate,
     } in merge_list.iter().filter(|m| m.target == target)
     {
         let val = match alternate {
-            Alternate::None => poison.as_basic_value_enum(),
+            Alternate::None => get_poison(*target),
             Alternate::Node(ni) => {
                 builder.position_at_end(*basic_block);
                 builder.build_unconditional_branch(bbs[bi])?;
@@ -1950,8 +1976,8 @@ mod test {
     fn t_circles() {
         check_pruned_eval(
             deftree!(min
-                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
-                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
+                     (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                     (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
             .unwrap()
             .compacted()
             .unwrap(),
@@ -1961,10 +1987,10 @@ mod test {
         );
         check_pruned_eval(
             deftree!(min
-                            (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
-                            (min
-                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
-                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)))
+                     (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
+                     (min
+                      (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                      (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)))
             .unwrap()
             .compacted()
             .unwrap(),
@@ -2055,5 +2081,19 @@ mod test {
             &[('x', -5., 5.)],
             1e-16,
         );
+    }
+
+    #[test]
+    fn t_nested_booleans() {
+        let tree = deftree!(if
+                            (< (- (sqrt (+ (pow 'x 2.1) (pow (- 'y 1.2) 2))) 1.3) 0)
+                            (min
+                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
+                            (/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.)))
+        .unwrap()
+        .compacted()
+        .unwrap();
+        check_pruned_eval(tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)], 1e-16);
     }
 }
