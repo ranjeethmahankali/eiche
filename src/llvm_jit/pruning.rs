@@ -61,23 +61,64 @@ pub struct JitPruner<'ctx, T: NumberType> {
     n_inputs: usize,
     n_outputs: usize,
     n_signals: usize,
+    blocks: Box<[Block]>,
+    tree: Tree,
     phantom: PhantomData<T>,
+}
+
+impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
+    fn run(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &mut [u32],
+    ) -> Result<(), Error> {
+        if inputs.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
+        } else if outputs.len() != self.n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
+        } else if signals.len() != self.n_signals {
+            return Err(Error::OutputSizeMismatch(signals.len(), self.n_signals));
+        }
+        unsafe { self.run_unchecked(inputs, outputs, signals) }
+        Ok(())
+    }
+
+    pub unsafe fn run_unchecked(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &mut [u32],
+    ) {
+        unsafe {
+            self.func.call(
+                inputs.as_ptr().cast(),
+                outputs.as_mut_ptr().cast(),
+                signals.as_mut_ptr().cast(),
+            )
+        }
+    }
 }
 
 impl Tree {
     pub fn jit_compile_pruner<'ctx, T: NumberType>(
-        &self,
+        self,
         context: &'ctx JitContext,
         params: &str,
         pruning_threshold: usize,
-    ) -> Result<(), Error> {
-        let blocks = make_blocks(make_interrupts(&self, pruning_threshold)?, self.len())?;
-        let (code_map, merge_map) = reverse_lookup(&blocks);
+    ) -> Result<JitPruner<'ctx, T>, Error> {
         if !self.is_scalar() {
             // Only support scalar output trees.
             return Err(Error::TypeMismatch);
         }
-        let ranges = interval::compute_ranges(self)?;
+        let tree = self;
+        let (tree, ndom) = tree.control_dependence_sorted()?;
+        let blocks = make_blocks(
+            make_interrupts(&tree, &ndom, pruning_threshold)?,
+            tree.len(),
+        )?;
+        let (code_map, merge_map) = reverse_lookup(&blocks);
+        let ranges = interval::compute_ranges(&tree)?;
         let func_name = context.new_func_name::<T>(Some("interval"));
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
@@ -91,7 +132,7 @@ impl Tree {
         let function = compiler.module.add_function(&func_name, fn_type, None);
         compiler.set_attributes(function, context)?;
         builder.position_at_end(context.append_basic_block(function, "entry"));
-        let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
+        let mut regs = Vec::<BasicValueEnum>::with_capacity(tree.len());
         let mut bbs: Box<[BasicBlock]> = blocks
             .iter()
             .enumerate()
@@ -132,10 +173,10 @@ impl Tree {
             builder.position_at_end(bbs[bi]);
             match block {
                 Block::Code(range) => {
-                    for (index, node) in self.nodes()[range.clone()].iter().copied().enumerate() {
+                    for (index, node) in tree.nodes()[range.clone()].iter().copied().enumerate() {
                         let reg = interval::build_op::<T>(
                             interval::BuildArgs {
-                                nodes: self.nodes(),
+                                nodes: tree.nodes(),
                                 params,
                                 ranges: ranges.as_ref(),
                                 regs: &regs,
@@ -169,7 +210,7 @@ impl Tree {
                         builder.position_at_end(bb);
                         let first = notified.insert((*dst_signal, *signal));
                         bbs[ci] = build_notify(
-                            self.node(*src_inst).clone(),
+                            tree.node(*src_inst).clone(),
                             *src_inst,
                             *kind,
                             *signal,
@@ -272,7 +313,7 @@ impl Tree {
                 "Cannot read output address".to_string(),
             ))?
             .into_pointer_value();
-        for (i, reg) in regs[(self.len() - self.num_roots())..].iter().enumerate() {
+        for (i, reg) in regs[(tree.len() - tree.num_roots())..].iter().enumerate() {
             // # SAFETY: This is unit tested a lot. If this fails, we segfault.
             let dst = unsafe {
                 builder.build_gep(
@@ -298,9 +339,6 @@ impl Tree {
                 })?;
         }
         builder.build_return(None)?;
-
-        compiler.module.print_to_stderr();
-
         compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
         let engine = compiler
             .module
@@ -310,8 +348,16 @@ impl Tree {
         // pointer should never be invalidated, because we allocated a dedicated
         // execution engine, with it's own block of executable memory, that will
         // live as long as the function wrapper lives.
-        // let func = unsafe { engine.get_function(&func_name)? };
-        todo!("Do proper branching and set the outputs.");
+        let func = unsafe { engine.get_function(&func_name)? };
+        Ok(JitPruner {
+            func,
+            n_inputs: params.len(),
+            n_outputs: tree.num_roots(),
+            n_signals: signal_ptrs.len(),
+            blocks,
+            tree,
+            phantom: PhantomData,
+        })
     }
 }
 
@@ -643,8 +689,11 @@ enum PruneKind {
     AlwaysFalse = 4,
 }
 
-fn make_interrupts(tree: &Tree, threshold: usize) -> Result<Box<[Interrupt]>, Error> {
-    let (tree, ndom) = tree.control_dependence_sorted()?;
+fn make_interrupts(
+    tree: &Tree,
+    ndom: &[usize],
+    threshold: usize,
+) -> Result<Box<[Interrupt]>, Error> {
     let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
     let mut land_map: Vec<Option<usize>> = vec![None; tree.len()];
     for (ni, node) in tree.nodes().iter().enumerate() {
@@ -863,7 +912,7 @@ fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::deftree;
+    use crate::{assert_float_eq, deftree};
 
     #[test]
     fn t_min_tiny() {
@@ -904,7 +953,8 @@ mod test {
             (1, 1),
         )
         .unwrap();
-        let cfg = make_interrupts(&tree, 0).expect("Unable to build control flow");
+        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+        let cfg = make_interrupts(&tree, &ndom, 0).expect("Unable to build control flow");
         dbg!(&cfg);
         assert_eq!(cfg, todo!());
     }
@@ -929,8 +979,38 @@ mod test {
             (1, 1),
         )
         .unwrap();
-        let cfg = make_interrupts(&tree, 0).expect("Unable to build control flow");
+        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+        let cfg = make_interrupts(&tree, &ndom, 0).expect("Unable to build control flow");
         dbg!(tree.nodes(), cfg);
         assert!(false);
+    }
+
+    #[test]
+    fn t_min_spheres() {
+        let tree = deftree!(min
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
+        .unwrap();
+        let ctx = JitContext::default();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        assert_eq!(eval.n_signals, 3);
+        assert_eq!(eval.n_inputs, 2);
+        assert_eq!(eval.n_outputs, 1);
+        // Prune the RHS with an interval to the left of the origin.
+        let mut outputs = [[f64::NAN; 2]];
+        let mut signals = [0u32; 3];
+        eval.run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_eq!(&signals, &[0, 1, 1]);
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        // Reset and test the other side of the origin.
+        signals.fill(0u32);
+        outputs[0].fill(f64::NAN);
+        eval.run(&[[1.0, 2.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        assert_eq!(&signals, &[1, 0, 2]);
     }
 }
