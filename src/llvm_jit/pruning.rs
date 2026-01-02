@@ -116,7 +116,8 @@ impl Tree {
         }
         let (phis, phi_map) = init_merge_phi(&blocks, builder, &bbs, interval_type)?;
         let mut notifications = Vec::<Notification>::new();
-        let mut merge_stack = Vec::<Incoming>::new();
+        let mut merge_list = Vec::<Incoming>::new();
+        let mut notified = HashSet::<(usize, u32)>::new();
         for (bi, block) in blocks.iter().enumerate() {
             builder.position_at_end(bbs[bi]);
             match block {
@@ -143,6 +144,36 @@ impl Tree {
                             bbs[bi] = bb;
                         }
                     }
+                    // Notify upstream.
+                    for Notification {
+                        src_inst,
+                        dst_signal,
+                        signal,
+                        kind,
+                    } in notifications.iter().filter(|n| n.src_inst == range.end)
+                    {
+                        let ci = *code_map
+                            .get(&src_inst)
+                            .expect("Code map is not complete. This is a bug.");
+                        let bb = bbs[ci];
+                        builder.position_at_end(bb);
+                        let first = notified.insert((*dst_signal, *signal));
+                        bbs[ci] = build_notify(
+                            self.node(*src_inst).clone(),
+                            *src_inst,
+                            *kind,
+                            *signal,
+                            signal_ptrs[*dst_signal],
+                            first,
+                            &regs,
+                            builder,
+                            &compiler.module,
+                            &mut constants,
+                            function,
+                        )?;
+                    }
+                    // Clear the processed notifications.
+                    notifications.retain(|n| n.src_inst != range.end);
                 }
                 Block::Branch(jumps) => {
                     let si = block_signal_map[bi];
@@ -176,7 +207,7 @@ impl Tree {
                                 }
                             };
                             cases.push((constants.int_32(index, false), case_bb));
-                            merge_stack.push(Incoming {
+                            merge_list.push(Incoming {
                                 target: jump.target,
                                 basic_block: incoming_bb,
                                 alternate: jump.alternate.clone(),
@@ -192,37 +223,22 @@ impl Tree {
                     }
                     builder.build_switch(signal, bbs[bi + 1], &cases)?;
                 }
-                Block::Merge(_) => {} // We will do the merging later.
+                Block::Merge(target) => {
+                    build_merges(
+                        &phis,
+                        &phi_map,
+                        &mut merge_list,
+                        &merge_map,
+                        &bbs,
+                        interval_type.get_poison(),
+                        builder,
+                        &mut regs,
+                        &mut constants,
+                        interval::build_const,
+                        *target,
+                    )?;
+                }
             }
-        }
-        // Build the logic to notify pruning decisions.
-        let mut notified = HashSet::<(usize, u32)>::new();
-        for Notification {
-            src_inst,
-            dst_signal,
-            signal,
-            kind,
-        } in notifications.into_iter()
-        {
-            let ci = *code_map
-                .get(&src_inst)
-                .expect("Code map is not complete. This is a bug.");
-            let bb = bbs[ci];
-            builder.position_at_end(bb);
-            let first = notified.insert((dst_signal, signal));
-            bbs[ci] = build_notify(
-                self.node(src_inst).clone(),
-                src_inst,
-                kind,
-                signal,
-                signal_ptrs[dst_signal],
-                first,
-                &regs,
-                builder,
-                &compiler.module,
-                &mut constants,
-                function,
-            )?;
         }
         // Branch out of all code blocks.
         let mut done = vec![false; bbs.len()];
@@ -234,18 +250,6 @@ impl Tree {
                 builder.build_unconditional_branch(*next)?;
             }
         }
-        build_merges(
-            phis,
-            phi_map,
-            merge_stack,
-            merge_map,
-            &bbs,
-            interval_type.get_poison(),
-            builder,
-            &mut regs,
-            &mut constants,
-            interval::build_const,
-        )?;
         if let Some(last) = bbs.last() {
             builder.position_at_end(*last);
         }
@@ -300,83 +304,55 @@ impl Tree {
 }
 
 fn build_merges<'ctx, T: BasicValue<'ctx> + Copy>(
-    phis: Box<[PhiValue<'ctx>]>,
-    phi_map: Box<[usize]>,
-    mut merge_list: Vec<Incoming<'ctx>>,
-    merge_map: HashMap<usize, usize>,
+    phis: &Box<[PhiValue<'ctx>]>,
+    phi_map: &Box<[usize]>,
+    merge_list: &mut Vec<Incoming<'ctx>>,
+    merge_map: &HashMap<usize, usize>,
     bbs: &[BasicBlock<'ctx>],
     poison: T,
     builder: &'ctx Builder,
     regs: &mut [BasicValueEnum<'ctx>],
     constants: &mut Constants<'ctx>,
     build_const_fn: impl Fn(&mut Constants<'ctx>, Value) -> BasicValueEnum<'ctx>,
+    target: usize,
 ) -> Result<(), Error> {
-    merge_list
-        .sort_by(|a, b| (a.target, a.alternate.clone()).cmp(&(b.target, b.alternate.clone())));
-    let mut miter = merge_list.into_iter();
-    let mut buf = Vec::new();
-    let (mut target, mut alternate) = match miter.next() {
-        Some(i) => {
-            let out = (i.target, i.alternate.clone());
-            buf.push(i);
-            out
-        }
-        None => return Ok(()),
-    };
-    loop {
-        let mut next = None;
-        while let Some(n) = miter.next() {
-            if n.target == target && n.alternate == alternate {
-                buf.push(n);
-            } else {
-                next = Some(n);
-                break;
+    let bi = merge_map
+        .get(&target)
+        .copied()
+        .expect("This is a bug. We must find a block index here.");
+    let phi = phis[phi_map[bi]];
+    for Incoming {
+        target: _,
+        basic_block,
+        alternate,
+    } in merge_list.iter().filter(|m| m.target == target)
+    {
+        let val = match alternate {
+            Alternate::None => poison.as_basic_value_enum(),
+            Alternate::Node(ni) => {
+                builder.position_at_end(*basic_block);
+                builder.build_unconditional_branch(bbs[bi])?;
+                regs[*ni]
             }
-        }
-        // Now process the collected stuff.
-        let bi = merge_map
-            .get(&target)
-            .copied()
-            .expect("This is a bug. We must find a block index here.");
-        let phi = phis[phi_map[bi]];
-        for Incoming {
-            target: _,
-            basic_block,
-            alternate,
-        } in buf.drain(..)
-        {
-            let val = match alternate {
-                Alternate::None => poison.as_basic_value_enum(),
-                Alternate::Node(ni) => {
-                    builder.position_at_end(basic_block);
-                    builder.build_unconditional_branch(bbs[bi])?;
-                    regs[ni]
-                }
-                Alternate::Constant(value) => {
-                    builder.position_at_end(basic_block);
-                    let out = build_const_fn(constants, value);
-                    builder.build_unconditional_branch(bbs[bi])?;
-                    out
-                }
-            };
-            phi.add_incoming(&[(&val as &dyn BasicValue, basic_block)]);
-        }
-        // Default path when nothing is pruned.
-        phi.add_incoming(&[(&regs[target], bbs[bi - 1])]);
-        builder.position_at_end(bbs[bi]);
-        regs[target] = build_freeze(builder, phi, &format!("phi_{bi}_freeze"));
-        if let Some(next_bb) = bbs.get(bi + 1) {
-            builder.build_unconditional_branch(*next_bb)?;
-        }
-        // Prep for the next iteration.
-        buf.clear();
-        if let Some(next) = next {
-            (target, alternate) = (next.target, next.alternate.clone());
-            buf.push(next);
-        } else {
-            break Ok(());
-        }
+            Alternate::Constant(value) => {
+                builder.position_at_end(*basic_block);
+                let out = build_const_fn(constants, *value);
+                builder.build_unconditional_branch(bbs[bi])?;
+                out
+            }
+        };
+        phi.add_incoming(&[(&val as &dyn BasicValue, *basic_block)]);
     }
+    // Default path when nothing is pruned.
+    phi.add_incoming(&[(&regs[target], bbs[bi - 1])]);
+    builder.position_at_end(bbs[bi]);
+    regs[target] = build_freeze(builder, phi, &format!("phi_{bi}_freeze"));
+    if let Some(next_bb) = bbs.get(bi + 1) {
+        builder.build_unconditional_branch(*next_bb)?;
+    }
+    // Clean up.
+    merge_list.retain(|m| m.target != target);
+    Ok(())
 }
 
 fn build_notify<'ctx>(
