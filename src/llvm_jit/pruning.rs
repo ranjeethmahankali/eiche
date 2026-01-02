@@ -79,12 +79,7 @@ pub struct JitPruningFn<'ctx, T: NumberType> {
 }
 
 impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
-    pub fn run(
-        &self,
-        inputs: &[[T; 2]],
-        outputs: &mut [[T; 2]],
-        signals: &[u32],
-    ) -> Result<(), Error> {
+    pub fn run(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) -> Result<(), Error> {
         if inputs.len() != self.n_inputs {
             return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
         } else if outputs.len() != self.n_outputs {
@@ -96,7 +91,7 @@ impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
         Ok(())
     }
 
-    pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]], signals: &[u32]) {
+    pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) {
         unsafe {
             self.func.call(
                 inputs.as_ptr().cast(),
@@ -227,6 +222,9 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                             bbs[bi] = bb;
                         }
                     }
+                    if let Some(next_bb) = bbs.get(bi + 1) {
+                        builder.build_unconditional_branch(*next_bb)?;
+                    }
                 }
                 Block::Branch(jumps) => {
                     let si = self.block_signal_map[bi];
@@ -337,7 +335,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
 
 impl Tree {
     pub fn jit_compile_pruner<'ctx, T: NumberType>(
-        self,
+        &'ctx self,
         context: &'ctx JitContext,
         params: &str,
         pruning_threshold: usize,
@@ -346,261 +344,268 @@ impl Tree {
             // Only support scalar output trees.
             return Err(Error::TypeMismatch);
         }
-        let tree = self;
-        let (tree, ndom) = tree.control_dependence_sorted()?;
-        let blocks = make_blocks(
-            make_interrupts(&tree, &ndom, pruning_threshold)?,
-            tree.len(),
-        )?;
-        let (code_block_map, merge_block_map) = reverse_lookup(&blocks);
-        let ranges = interval::compute_ranges(&tree)?;
-        let func_name = context.new_func_name::<T>(Some("pruner"));
-        let context = &context.inner;
-        let compiler = JitCompiler::new(context)?;
-        let builder = &compiler.builder;
-        let interval_type = T::jit_type(context).vec_type(2);
-        let ptr_type = context.ptr_type(AddressSpace::default());
-        let mut constants = Constants::create::<T>(context);
-        let fn_type = context
-            .void_type()
-            .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
-        let function = compiler.module.add_function(&func_name, fn_type, None);
-        compiler.set_attributes(function, context)?;
-        builder.position_at_end(context.append_basic_block(function, "entry"));
-        let mut regs = Vec::<BasicValueEnum>::with_capacity(tree.len());
-        let mut bbs: Box<[BasicBlock]> = blocks
-            .iter()
-            .enumerate()
-            .map(|(bi, block)| {
-                context.append_basic_block(
-                    function,
-                    &format!(
-                        "{}_bb_{bi}",
-                        match block {
-                            Block::Code(_) => "code",
-                            Block::Branch(_) => "branch",
-                            Block::Merge(_) => "merge",
-                        }
-                    ),
-                )
-            })
-            .collect();
-        let (signal_ptrs, block_signal_map) = init_signal_ptrs(
-            &blocks,
-            function
-                .get_nth_param(2)
-                .ok_or(Error::JitCompilationError(
-                    "Cannot read output address".to_string(),
-                ))?
-                .into_pointer_value(),
-            context.i32_type(),
-            builder,
-            &mut constants,
-        )?;
-        if let Some(first) = bbs.first() {
-            builder.build_unconditional_branch(*first)?;
-        }
-        let (phis, phi_map) = init_merge_phi(&blocks, builder, &bbs, interval_type)?;
-        let mut notifications = Vec::<Notification>::new();
-        let mut merge_list = Vec::<Incoming>::new();
-        let mut notified = HashSet::<(usize, u32)>::new();
-        for (bi, block) in blocks.iter().enumerate() {
-            builder.position_at_end(bbs[bi]);
-            match block {
-                Block::Code(range) => {
-                    for (index, node) in tree.nodes()[range.clone()].iter().copied().enumerate() {
-                        let reg = interval::build_op::<T>(
-                            interval::BuildArgs {
-                                nodes: tree.nodes(),
-                                params,
-                                ranges: ranges.as_ref(),
-                                regs: &regs,
-                                constants: &mut constants,
-                                interval_type,
-                                function,
-                                node,
-                                index,
-                            },
-                            builder,
-                            &compiler.module,
-                        )?;
-                        regs.push(fast_math(reg));
-                        // We may have created new blocks when building the op. So we overwrite the basic block.
-                        if let Some(bb) = builder.get_insert_block() {
-                            bbs[bi] = bb;
-                        }
+        let (tree, ndom) = self.control_dependence_sorted()?;
+        compile_pruner_impl(tree, context, ndom, params, pruning_threshold)
+    }
+}
+
+fn compile_pruner_impl<'ctx, T: NumberType>(
+    tree: Tree,
+    context: &'ctx JitContext,
+    ndom: Box<[usize]>,
+    params: &str,
+    pruning_threshold: usize,
+) -> Result<JitPruner<'ctx, T>, Error> {
+    let blocks = make_blocks(
+        make_interrupts(&tree, &ndom, pruning_threshold)?,
+        tree.len(),
+    )?;
+    let (code_block_map, merge_block_map) = reverse_lookup(&blocks);
+    let ranges = interval::compute_ranges(&tree)?;
+    let func_name = context.new_func_name::<T>(Some("pruner"));
+    let context = &context.inner;
+    let compiler = JitCompiler::new(context)?;
+    let builder = &compiler.builder;
+    let interval_type = T::jit_type(context).vec_type(2);
+    let ptr_type = context.ptr_type(AddressSpace::default());
+    let mut constants = Constants::create::<T>(context);
+    let fn_type = context
+        .void_type()
+        .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
+    let function = compiler.module.add_function(&func_name, fn_type, None);
+    compiler.set_attributes(function, context)?;
+    builder.position_at_end(context.append_basic_block(function, "entry"));
+    let mut regs = Vec::<BasicValueEnum>::with_capacity(tree.len());
+    let mut bbs: Box<[BasicBlock]> = blocks
+        .iter()
+        .enumerate()
+        .map(|(bi, block)| {
+            context.append_basic_block(
+                function,
+                &format!(
+                    "{}_bb_{bi}",
+                    match block {
+                        Block::Code(_) => "code",
+                        Block::Branch(_) => "branch",
+                        Block::Merge(_) => "merge",
                     }
-                    // Notify upstream.
-                    for Notification {
-                        src_inst,
-                        dst_signal,
-                        signal,
-                        kind,
-                    } in notifications.iter().filter(|n| n.src_inst == range.end - 1)
-                    {
-                        let ci = *code_block_map
-                            .get(&src_inst)
-                            .expect("Code map is not complete. This is a bug.");
-                        let bb = bbs[ci];
-                        builder.position_at_end(bb);
-                        let first = notified.insert((*dst_signal, *signal));
-                        bbs[ci] = build_notify(
-                            tree.node(*src_inst).clone(),
-                            *src_inst,
-                            *kind,
-                            *signal,
-                            signal_ptrs[*dst_signal],
-                            first,
-                            &regs,
-                            builder,
-                            &compiler.module,
-                            &mut constants,
-                            function,
-                        )?;
-                    }
-                    // Clear the processed notifications.
-                    notifications.retain(|n| n.src_inst != range.end - 1);
-                }
-                Block::Branch(jumps) => {
-                    let si = block_signal_map[bi];
-                    let signal = builder
-                        .build_load(
-                            context.i32_type(),
-                            signal_ptrs[si],
-                            &format!("load_signal_{si}"),
-                        )?
-                        .into_int_value();
-                    let mut cases = Vec::<(IntValue, BasicBlock)>::new();
-                    let mut prev_target = usize::MAX;
-                    let mut prev_val = None;
-                    let mut index = 0u32;
-                    for jump in jumps.iter() {
-                        if prev_target != jump.target || prev_val != Some(jump.alternate.clone()) {
-                            // New case.
-                            index += 1;
-                            let (case_bb, incoming_bb) = match jump.alternate {
-                                Alternate::None => {
-                                    let mbi = merge_block_map
-                                        .get(&jump.target)
-                                        .expect("We must find a match. This is a bug.");
-                                    (bbs[*mbi], bbs[bi])
-                                }
-                                Alternate::Node(_) | Alternate::Constant(_) => {
-                                    let bb = context.append_basic_block(
-                                        function,
-                                        &format!("branch_{bi}_case_{si}_bb"),
-                                    );
-                                    (bb, bb)
-                                }
-                            };
-                            cases.push((constants.int_32(index, false), case_bb));
-                            merge_list.push(Incoming {
-                                target: jump.target,
-                                basic_block: incoming_bb,
-                                alternate: jump.alternate.clone(),
-                            });
-                            prev_target = jump.target;
-                            prev_val = Some(jump.alternate.clone());
-                        }
-                        notifications.push(Notification {
-                            src_inst: jump.owner,
-                            dst_signal: si,
-                            signal: index,
-                            kind: jump.trigger,
-                        });
-                    }
-                    builder.build_switch(signal, bbs[bi + 1], &cases)?;
-                }
-                Block::Merge(target) => {
-                    build_merges(
-                        &phis,
-                        &phi_map,
-                        &mut merge_list,
-                        &merge_block_map,
-                        &bbs,
-                        interval_type.get_poison(),
-                        builder,
-                        &mut regs,
-                        &mut constants,
-                        interval::build_const,
-                        *target,
-                    )?;
-                }
-            }
-        }
-        assert!(
-            merge_list.is_empty(),
-            "All merges should be processed by now. This is a bug otherwise"
-        );
-        // Branch out of all code blocks.
-        let mut done = vec![false; bbs.len()];
-        for ci in code_block_map.values() {
-            if let Some(next) = bbs.get(ci + 1)
-                && !std::mem::replace(&mut done[*ci], true)
-            {
-                builder.position_at_end(bbs[*ci]);
-                builder.build_unconditional_branch(*next)?;
-            }
-        }
-        if let Some(last) = bbs.last() {
-            builder.position_at_end(*last);
-        }
-        // Compile instructions to copy the outputs to the out argument.
-        let outputs = function
-            .get_nth_param(1)
+                ),
+            )
+        })
+        .collect();
+    let (signal_ptrs, block_signal_map) = init_signal_ptrs(
+        &blocks,
+        function
+            .get_nth_param(2)
             .ok_or(Error::JitCompilationError(
                 "Cannot read output address".to_string(),
             ))?
-            .into_pointer_value();
-        for (i, reg) in regs[(tree.len() - tree.num_roots())..].iter().enumerate() {
-            // # SAFETY: This is unit tested a lot. If this fails, we segfault.
-            let dst = unsafe {
-                builder.build_gep(
-                    interval_type,
-                    outputs,
-                    &[constants.int_32(i as u32, false)],
-                    &format!("output_ptr_{i}"),
-                )?
-            };
-            let store_inst = builder.build_store(dst, reg.into_vector_value())?;
-            /*
-            Rust arrays only guarantee alignment with the size of T, where as
-            LLVM load / store instructions expect alignment with the vector size
-            (double the size of T). This mismatch can cause a segfault. So we
-            manually set the alignment for this store instruction.
-            */
-            store_inst
-                .set_alignment(std::mem::size_of::<T>() as u32)
-                .map_err(|e| {
-                    Error::JitCompilationError(format!(
-                        "Cannot set alignment when storing output: {e}"
-                    ))
-                })?;
-        }
-        builder.build_return(None)?;
-        compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
-        let engine = compiler
-            .module
-            .create_jit_execution_engine(OptimizationLevel::Aggressive)
-            .map_err(|_| Error::CannotCreateJitModule)?;
-        // SAFETY: The signature is correct, and well tested. The function
-        // pointer should never be invalidated, because we allocated a dedicated
-        // execution engine, with it's own block of executable memory, that will
-        // live as long as the function wrapper lives.
-        let func = unsafe { engine.get_function(&func_name)? };
-        Ok(JitPruner {
-            func,
-            n_inputs: params.len(),
-            n_outputs: tree.num_roots(),
-            n_signals: signal_ptrs.len(),
-            params: params.to_string(),
-            blocks,
-            merge_block_map,
-            block_signal_map,
-            tree,
-            phantom: PhantomData,
-        })
+            .into_pointer_value(),
+        context.i32_type(),
+        builder,
+        &mut constants,
+    )?;
+    if let Some(first) = bbs.first() {
+        builder.build_unconditional_branch(*first)?;
     }
+    let (phis, phi_map) = init_merge_phi(&blocks, builder, &bbs, interval_type)?;
+    let mut notifications = Vec::<Notification>::new();
+    let mut merge_list = Vec::<Incoming>::new();
+    let mut notified = HashSet::<(usize, u32)>::new();
+    for (bi, block) in blocks.iter().enumerate() {
+        builder.position_at_end(bbs[bi]);
+        match block {
+            Block::Code(range) => {
+                for (index, node) in tree.nodes()[range.clone()].iter().copied().enumerate() {
+                    let reg = interval::build_op::<T>(
+                        interval::BuildArgs {
+                            nodes: tree.nodes(),
+                            params,
+                            ranges: ranges.as_ref(),
+                            regs: &regs,
+                            constants: &mut constants,
+                            interval_type,
+                            function,
+                            node,
+                            index,
+                        },
+                        builder,
+                        &compiler.module,
+                    )?;
+                    regs.push(fast_math(reg));
+                    // We may have created new blocks when building the op. So we overwrite the basic block.
+                    if let Some(bb) = builder.get_insert_block() {
+                        bbs[bi] = bb;
+                    }
+                }
+                // Notify upstream.
+                for Notification {
+                    src_inst,
+                    dst_signal,
+                    signal,
+                    kind,
+                } in notifications.iter().filter(|n| n.src_inst == range.end - 1)
+                {
+                    let ci = *code_block_map
+                        .get(&src_inst)
+                        .expect("Code map is not complete. This is a bug.");
+                    let bb = bbs[ci];
+                    builder.position_at_end(bb);
+                    let first = notified.insert((*dst_signal, *signal));
+                    bbs[ci] = build_notify(
+                        tree.node(*src_inst).clone(),
+                        *src_inst,
+                        *kind,
+                        *signal,
+                        signal_ptrs[*dst_signal],
+                        first,
+                        &regs,
+                        builder,
+                        &compiler.module,
+                        &mut constants,
+                        function,
+                    )?;
+                }
+                // Clear the processed notifications.
+                notifications.retain(|n| n.src_inst != range.end - 1);
+            }
+            Block::Branch(jumps) => {
+                let si = block_signal_map[bi];
+                let signal = builder
+                    .build_load(
+                        context.i32_type(),
+                        signal_ptrs[si],
+                        &format!("load_signal_{si}"),
+                    )?
+                    .into_int_value();
+                let mut cases = Vec::<(IntValue, BasicBlock)>::new();
+                let mut prev_target = usize::MAX;
+                let mut prev_val = None;
+                let mut index = 0u32;
+                for jump in jumps.iter() {
+                    if prev_target != jump.target || prev_val != Some(jump.alternate.clone()) {
+                        // New case.
+                        index += 1;
+                        let (case_bb, incoming_bb) = match jump.alternate {
+                            Alternate::None => {
+                                let mbi = merge_block_map
+                                    .get(&jump.target)
+                                    .expect("We must find a match. This is a bug.");
+                                (bbs[*mbi], bbs[bi])
+                            }
+                            Alternate::Node(_) | Alternate::Constant(_) => {
+                                let bb = context.append_basic_block(
+                                    function,
+                                    &format!("branch_{bi}_case_{si}_bb"),
+                                );
+                                (bb, bb)
+                            }
+                        };
+                        cases.push((constants.int_32(index, false), case_bb));
+                        merge_list.push(Incoming {
+                            target: jump.target,
+                            basic_block: incoming_bb,
+                            alternate: jump.alternate.clone(),
+                        });
+                        prev_target = jump.target;
+                        prev_val = Some(jump.alternate.clone());
+                    }
+                    notifications.push(Notification {
+                        src_inst: jump.owner,
+                        dst_signal: si,
+                        signal: index,
+                        kind: jump.trigger,
+                    });
+                }
+                builder.build_switch(signal, bbs[bi + 1], &cases)?;
+            }
+            Block::Merge(target) => {
+                build_merges(
+                    &phis,
+                    &phi_map,
+                    &mut merge_list,
+                    &merge_block_map,
+                    &bbs,
+                    interval_type.get_poison(),
+                    builder,
+                    &mut regs,
+                    &mut constants,
+                    interval::build_const,
+                    *target,
+                )?;
+            }
+        }
+    }
+    assert!(
+        merge_list.is_empty(),
+        "All merges should be processed by now. This is a bug otherwise"
+    );
+    // Branch out of all code blocks.
+    let mut done = vec![false; bbs.len()];
+    for ci in code_block_map.values() {
+        if let Some(next) = bbs.get(ci + 1)
+            && !std::mem::replace(&mut done[*ci], true)
+        {
+            builder.position_at_end(bbs[*ci]);
+            builder.build_unconditional_branch(*next)?;
+        }
+    }
+    if let Some(last) = bbs.last() {
+        builder.position_at_end(*last);
+    }
+    // Compile instructions to copy the outputs to the out argument.
+    let outputs = function
+        .get_nth_param(1)
+        .ok_or(Error::JitCompilationError(
+            "Cannot read output address".to_string(),
+        ))?
+        .into_pointer_value();
+    for (i, reg) in regs[(tree.len() - tree.num_roots())..].iter().enumerate() {
+        // # SAFETY: This is unit tested a lot. If this fails, we segfault.
+        let dst = unsafe {
+            builder.build_gep(
+                interval_type,
+                outputs,
+                &[constants.int_32(i as u32, false)],
+                &format!("output_ptr_{i}"),
+            )?
+        };
+        let store_inst = builder.build_store(dst, reg.into_vector_value())?;
+        /*
+        Rust arrays only guarantee alignment with the size of T, where as
+        LLVM load / store instructions expect alignment with the vector size
+        (double the size of T). This mismatch can cause a segfault. So we
+        manually set the alignment for this store instruction.
+        */
+        store_inst
+            .set_alignment(std::mem::size_of::<T>() as u32)
+            .map_err(|e| {
+                Error::JitCompilationError(format!("Cannot set alignment when storing output: {e}"))
+            })?;
+    }
+    builder.build_return(None)?;
+    compiler.run_passes("mem2reg,instcombine,reassociate,gvn,simplifycfg,adce,instcombine")?;
+    let engine = compiler
+        .module
+        .create_jit_execution_engine(OptimizationLevel::Aggressive)
+        .map_err(|_| Error::CannotCreateJitModule)?;
+    // SAFETY: The signature is correct, and well tested. The function
+    // pointer should never be invalidated, because we allocated a dedicated
+    // execution engine, with it's own block of executable memory, that will
+    // live as long as the function wrapper lives.
+    let func = unsafe { engine.get_function(&func_name)? };
+    Ok(JitPruner {
+        func,
+        n_inputs: params.len(),
+        n_outputs: tree.num_roots(),
+        n_signals: signal_ptrs.len(),
+        params: params.to_string(),
+        blocks,
+        merge_block_map,
+        block_signal_map,
+        tree,
+        phantom: PhantomData,
+    })
 }
 
 fn build_merges<'ctx, T: BasicValue<'ctx> + Copy>(
@@ -1178,6 +1183,7 @@ fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option
 mod test {
     use super::*;
     use crate::{assert_float_eq, deftree};
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     fn format_interleave_interrupts(tree: &Tree) -> String {
         use std::fmt::Write;
@@ -1222,6 +1228,86 @@ mod test {
             }
         }
         out
+    }
+
+    fn check_pruned_eval<T: NumberType>(
+        tree: &Tree,
+        pruning_threshold: usize,
+        vardata: &[(char, f64, f64)],
+    ) {
+        let params: String = vardata.iter().map(|(c, _, _)| *c).collect();
+        let context = JitContext::default();
+        let interval_eval = tree
+            .jit_compile_interval::<T>(&context, &params)
+            .expect("Unable to compile interval eval");
+        let eval = tree
+            .jit_compile::<T>(&context, &params)
+            .expect("Unable to compile single eval");
+        let pruner = tree
+            .jit_compile_pruner::<T>(&context, &params, pruning_threshold)
+            .expect("Unable to compile a JIT pruner");
+        let pruned_eval = pruner
+            .compile_single_func(&context)
+            .expect("Unable to compile a pruned single eval");
+        let mut rng = StdRng::seed_from_u64(42);
+        let n_outputs = tree.num_roots();
+        const N_INTERVALS: usize = 32;
+        const N_QUERIES: usize = 32;
+        // Reusable buffers for evaluations.
+        let mut interval = Vec::<[T; 2]>::new();
+        let mut iout_pruned = Vec::<[T; 2]>::new();
+        let mut iout = Vec::<[T; 2]>::new();
+        let mut sample = Vec::<T>::new();
+        let mut out = Vec::<T>::new();
+        let mut out_pruned = Vec::<T>::new();
+        let mut signals = Vec::<u32>::new();
+        for _ in 0..N_INTERVALS {
+            // Sample a random interval.
+            interval.clear();
+            interval.extend(vardata.iter().map(|(_, lo, hi)| {
+                let mut bounds = [0, 1].map(|_| lo + rng.random::<f64>() * (hi - lo));
+                if bounds[0] > bounds[1] {
+                    bounds.swap(0, 1);
+                }
+                bounds.map(|b| T::from_f64(b))
+            }));
+            // Ensure the pruner and interval eval report the same value.
+            iout_pruned.clear();
+            iout_pruned.resize(n_outputs, [T::nan(); 2]);
+            signals.clear();
+            signals.resize(pruner.n_signals, 0u32);
+            pruner
+                .run(&interval, &mut iout_pruned, &mut signals)
+                .unwrap();
+            // Now the actual interval evaluator we trust.
+            iout.clear();
+            iout.resize(n_outputs, [T::nan(); 2]);
+            interval_eval.run(&interval, &mut iout).unwrap();
+            // Compare intervals.
+            for (i, j) in iout.iter().zip(iout_pruned.iter()) {
+                for (i, j) in i.iter().zip(j.iter()) {
+                    assert_float_eq!(i.to_f64(), j.to_f64());
+                }
+            }
+            // Now sample that interval and compare pruned and un-pruned evaluations.
+            for _ in 0..N_QUERIES {
+                sample.clear();
+                sample.extend(interval.iter().map(|i| {
+                    T::from_f64(
+                        i[0].to_f64() + rng.random::<f64>() * (i[1].to_f64() - i[0].to_f64()),
+                    )
+                }));
+                out_pruned.clear();
+                out_pruned.resize(n_outputs, T::nan());
+                pruned_eval.run(&sample, &mut out_pruned, &signals).unwrap();
+                out.clear();
+                out.resize(n_outputs, T::nan());
+                eval.run(&sample, &mut out).unwrap();
+                for (i, j) in out_pruned.iter().zip(out.iter()) {
+                    assert_float_eq!(i.to_f64(), j.to_f64());
+                }
+            }
+        }
     }
 
     #[test]
@@ -1348,5 +1434,19 @@ mod test {
         assert_float_eq!(outputs[0][0], -1.5);
         assert_float_eq!(outputs[0][1], -0.08578643762690485);
         assert_eq!(&signals, &[0, 1, 0, 2, 0, 0]);
+    }
+
+    #[test]
+    fn t_three_spheres() {
+        let tree = deftree!(min
+                            (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
+                            (min
+                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)))
+        .unwrap()
+        .compacted()
+        .unwrap();
+        check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
+        check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
     }
 }
