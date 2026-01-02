@@ -1229,4 +1229,68 @@ mod test {
         assert_float_eq!(outputs[0][1], -0.08578643762690485);
         assert_eq!(&signals, &[0, 2, 0, 2, 0]);
     }
+
+    #[test]
+    fn t_pruning_two_spheres_compacted() {
+        let tree = deftree!(min
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
+        .unwrap()
+        .compacted()
+        .unwrap();
+        let ctx = JitContext::default();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        assert_eq!(eval.n_signals, 3);
+        assert_eq!(eval.n_inputs, 2);
+        assert_eq!(eval.n_outputs, 1);
+        // Prune the RHS with an interval to the left of the origin.
+        let mut outputs = [[f64::NAN; 2]];
+        let mut signals = [0u32; 3];
+        eval.run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_eq!(&signals, &[0, 1, 1]);
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        // Reset and test the other side of the origin.
+        signals.fill(0u32);
+        outputs[0].fill(f64::NAN);
+        eval.run(&[[1.0, 2.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        assert_eq!(&signals, &[1, 0, 2]);
+    }
+
+    #[test]
+    fn t_pruning_three_spheres_compacted() {
+        let tree = deftree!(min
+                            (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
+                            (min
+                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)))
+        .unwrap()
+        .compacted()
+        .unwrap();
+        let ctx = JitContext::default();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        assert_eq!(eval.n_signals, 5);
+        assert_eq!(eval.n_inputs, 2);
+        assert_eq!(eval.n_outputs, 1);
+        // Prune the RHS with an interval to the left of the origin.
+        let mut outputs = [[f64::NAN; 2]];
+        let mut signals = [0u32; 5];
+        eval.run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_eq!(&signals, &[0, 0, 1, 1, 0]);
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        // Reset and test the other side of the origin.
+        signals.fill(0u32);
+        outputs[0].fill(f64::NAN);
+        eval.run(&[[1.0, 2.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        assert_eq!(&signals, &[0, 2, 0, 2, 0]);
+    }
 }
