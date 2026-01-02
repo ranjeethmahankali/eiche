@@ -448,7 +448,10 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         let builder = &compiler.builder;
         let flt_type = <Wide as SimdVec<T>>::float_type(context);
         let i64_type = context.i64_type();
-        let fvec_type = flt_type.vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
+        let flt_vec_type = flt_type.vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
+        let bool_vec_type = context
+            .bool_type()
+            .vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
         let ptr_type = context.ptr_type(AddressSpace::default());
         let fn_type = context.void_type().fn_type(
             &[
@@ -526,8 +529,8 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             &self.blocks,
             builder,
             &bbs,
-            flt_type,
-            context.bool_type(),
+            flt_vec_type,
+            bool_vec_type,
             self.tree.nodes(),
         )?;
         let mut merge_list = Vec::<Incoming>::new();
@@ -543,7 +546,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                                 nodes: self.tree.nodes(),
                                 params: &self.params,
                                 context,
-                                fvec_type,
+                                fvec_type: flt_vec_type,
                                 inputs,
                                 loop_index,
                                 regs: &regs,
@@ -651,7 +654,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             // SAFETY: GEP can segfault if the index is out of bounds. The
             // offset calculation looks pretty solid, and is thoroughly tested.
             let dst = unsafe {
-                builder.build_gep(fvec_type, outputs, &[offset], &format!("output_{i}"))?
+                builder.build_gep(flt_vec_type, outputs, &[offset], &format!("output_{i}"))?
             };
             builder.build_store(dst, *reg)?;
         }
