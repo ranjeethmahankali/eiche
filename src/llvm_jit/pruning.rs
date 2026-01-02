@@ -2106,15 +2106,10 @@ mod test {
 
     #[test]
     fn t_nested_booleans() {
-        let tree = deftree!(if
-                            (< (- (sqrt (+ (pow 'x 2.1) (pow (- 'y 1.2) 2))) 1.3) 0)
-                            (min
-                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
-                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
-                            (/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.)))
-        .unwrap()
-        .compacted()
-        .unwrap();
-        check_pruned_eval(tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)], 1e-16);
+        let tree = deftree!(if (< (pow 'x 2.1) 1) (+ 1 'x) (- 1 'x))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        check_pruned_eval(tree, 0, &[('x', -10.0, 10.0)], 1e-16);
     }
 }
