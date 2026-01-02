@@ -1897,6 +1897,7 @@ mod test {
             }
             // Now sample that interval and compare pruned and un-pruned evaluations.
             simd_buf.clear();
+            simd_pruned_buf.clear();
             for _ in 0..N_QUERIES {
                 sample.clear();
                 sample.extend(interval.iter().map(|i| {
@@ -1946,7 +1947,7 @@ mod test {
     }
 
     #[test]
-    fn t_two_circles() {
+    fn t_circles() {
         check_pruned_eval(
             deftree!(min
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
