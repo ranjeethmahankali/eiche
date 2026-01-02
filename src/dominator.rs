@@ -193,7 +193,7 @@ impl Tree {
         let domtable = DomTable::from_tree(self);
         let domtree = DomTree::from_table(&domtable);
         let mut stack: Vec<StackElement> = Vec::with_capacity(self.len());
-        stack.extend(self.root_indices().map(|r| StackElement {
+        stack.extend(self.root_indices().rev().map(|r| StackElement {
             index: r,
             visited_children: false,
             is_root: true,
@@ -289,7 +289,7 @@ impl Tree {
 #[cfg(test)]
 mod test {
     use super::DomTable;
-    use crate::{Tree, deftree, test_util::compare_trees};
+    use crate::{Node, Tree, deftree, test_util::compare_trees};
 
     fn check(table: &DomTable, parent: usize, child: usize) -> bool {
         let offset = child * table.n_chunks;
@@ -665,5 +665,15 @@ in the tree."
             6,
             1e-14,
         ); // 6^4 = 1,296 samples
+    }
+
+    #[test]
+    fn t_interval_trees_concat_1() {
+        /* At one point I had a bug where the control dependence sorting was
+         * reversing the order of root nodes. This test is to ensure that
+         * doesn't regress. */
+        let tree = deftree!(concat 'x 'y).unwrap();
+        let (sorted, _subcounts) = tree.control_dependence_sorted().unwrap();
+        assert_eq!(sorted.nodes(), &[Node::Symbol('x'), Node::Symbol('y'),]);
     }
 }
