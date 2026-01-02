@@ -47,8 +47,8 @@ where
     T: NumberType,
 {
     func: JitFunction<'ctx, NativeIntervalFunc>,
-    num_inputs: usize,
-    num_outputs: usize,
+    n_inputs: usize,
+    n_outputs: usize,
     _phantom: PhantomData<T>,
 }
 
@@ -359,8 +359,8 @@ impl Tree {
         let func = unsafe { engine.get_function(&func_name)? };
         Ok(JitIntervalFn {
             func,
-            num_inputs: params.len(),
-            num_outputs: self.num_roots(),
+            n_inputs: params.len(),
+            n_outputs: self.num_roots(),
             _phantom: PhantomData,
         })
     }
@@ -3038,10 +3038,10 @@ fn build_float_rem_euclid<'ctx>(
 
 impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
     pub fn run(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]]) -> Result<(), Error> {
-        if inputs.len() != self.num_inputs {
-            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
-        } else if outputs.len() != self.num_outputs {
-            return Err(Error::OutputSizeMismatch(outputs.len(), self.num_outputs));
+        if inputs.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
+        } else if outputs.len() != self.n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
         }
         // SAFETY: We just checked the size of the slices above.
         unsafe { self.run_unchecked(inputs, outputs) };
@@ -3069,8 +3069,8 @@ impl<'ctx, T: NumberType> JitIntervalFn<'ctx, T> {
             // execution engine that owns the block of executable memory to
             // which the function pointer points.
             func: unsafe { self.func.as_raw() },
-            num_inputs: self.num_inputs,
-            num_outputs: self.num_outputs,
+            num_inputs: self.n_inputs,
+            num_outputs: self.n_outputs,
             _phantom: PhantomData,
         }
     }

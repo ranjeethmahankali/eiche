@@ -13,6 +13,7 @@ use inkwell::{
     AddressSpace, OptimizationLevel,
     basic_block::BasicBlock,
     builder::Builder,
+    execution_engine::JitFunction,
     llvm_sys::core::LLVMBuildFreeze,
     module::Module,
     types::{BasicType, IntType},
@@ -24,6 +25,7 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     ffi::{CStr, CString, c_void},
+    marker::PhantomData,
     ops::Range,
 };
 
@@ -53,6 +55,14 @@ pub type NativeIntervalFunc = unsafe extern "C" fn(
     *mut c_void,   // Outputs
     *const u32,    // Signals,
 );
+
+pub struct JitPruner<'ctx, T: NumberType> {
+    func: JitFunction<'ctx, NativePruningIntervalFunc>,
+    n_inputs: usize,
+    n_outputs: usize,
+    n_signals: usize,
+    phantom: PhantomData<T>,
+}
 
 impl Tree {
     pub fn jit_compile_pruner<'ctx, T: NumberType>(
