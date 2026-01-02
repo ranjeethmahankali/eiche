@@ -114,19 +114,23 @@ macro_rules! deftree {
         out
     }};
 }
-
-/// Assert that the floating point numbers are equal within the given epsilon.
+/// Assert that two floating point numbers are equal within epsilon.
 #[macro_export]
 macro_rules! assert_float_eq {
-    ($a:expr, $b:expr, $eps:expr, $debug:expr) => {{
-        // Make variables to avoid evaluating experssions multiple times.
+    // --- core implementation ---
+    (@impl $a:expr, $b:expr, $eps:expr $(, $fmt:expr $(, $args:tt)*)?) => {{
         let a = $a;
         let b = $b;
         let eps = $eps;
         let error = (a - b).abs();
+
         if error > eps {
-            eprintln!("{:?}", $debug);
+            // Only format on failure
+            $(
+                eprintln!($fmt $(, $args)*);
+            )?
         }
+
         assert!(
             error <= eps,
             "Assertion failed: |({}) - ({})| = {:e} <= {:e}",
@@ -136,11 +140,21 @@ macro_rules! assert_float_eq {
             eps
         );
     }};
-    ($a:expr, $b:expr, $eps:expr) => {
-        $crate::assert_float_eq!($a, $b, $eps, "")
-    };
+    // --- a, b ---
     ($a:expr, $b:expr) => {
-        $crate::assert_float_eq!($a, $b, f64::EPSILON)
+        $crate::assert_float_eq!(@impl $a, $b, f64::EPSILON)
+    };
+    // --- a, b, eps ---
+    ($a:expr, $b:expr, $eps:expr) => {
+        $crate::assert_float_eq!(@impl $a, $b, $eps)
+    };
+    // --- a, b, eps, fmt ---
+    ($a:expr, $b:expr, $eps:expr, $fmt:expr $(, $args:tt)*) => {
+        $crate::assert_float_eq!(@impl $a, $b, $eps, $fmt $(, $args)*)
+    };
+    // --- a, b, fmt ---
+    ($a:expr, $b:expr, $fmt:expr $(, $args:tt)*) => {
+        $crate::assert_float_eq!(@impl $a, $b, f64::EPSILON, $fmt $(, $args)*)
     };
 }
 

@@ -141,7 +141,7 @@ pub fn compare_trees(
         );
         for (l, r) in results1.iter().zip(results2.iter()) {
             match (l, r) {
-                (Value::Scalar(a), Value::Scalar(b)) => assert_float_eq!(a, b, eps, sample),
+                (Value::Scalar(a), Value::Scalar(b)) => assert_float_eq!(a, b, eps, "{:?}", sample),
                 (Value::Bool(a), Value::Bool(b)) => assert_eq!(a, b),
                 _ => panic!("Mismatched types"),
             }
