@@ -1115,25 +1115,32 @@ fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Bloc
                     owner,
                     trigger,
                 },
-            ) => {
-                assert!(
-                    match jumps.last() {
-                        Some(prev) => prev.before_node == before_node,
-                        None => true,
-                    },
-                    "Consecutive jumps from two different nodes without a land block in between is invalid.
-The consecutive jumps are from nodes {} and {}",
-                    jumps.last().map(|j| j.before_node).unwrap_or(usize::MAX), before_node,
-                );
-                jumps.push(Jump {
-                    before_node,
-                    target,
-                    alternate,
-                    owner,
-                    trigger,
-                });
-                (blocks, PartialBlock::Branch(jumps))
-            }
+            ) => match jumps.last().map(|j| j.before_node) {
+                Some(prev) if prev != before_node => {
+                    blocks.push(Block::Branch(jumps));
+                    blocks.push(Block::Code(prev..before_node));
+                    (
+                        blocks,
+                        PartialBlock::Branch(vec![Jump {
+                            before_node,
+                            target,
+                            alternate,
+                            owner,
+                            trigger,
+                        }]),
+                    )
+                }
+                _ => {
+                    jumps.push(Jump {
+                        before_node,
+                        target,
+                        alternate,
+                        owner,
+                        trigger,
+                    });
+                    (blocks, PartialBlock::Branch(jumps))
+                }
+            },
             (PartialBlock::Branch(jumps), Interrupt::Land { after_node }) => {
                 let start = match jumps.last() {
                     Some(j) => j.before_node,
@@ -1171,6 +1178,51 @@ fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option
 mod test {
     use super::*;
     use crate::{assert_float_eq, deftree};
+
+    fn format_interleave_interrupts(tree: &Tree) -> String {
+        use std::fmt::Write;
+        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+        let interrupts = make_interrupts(&tree, &ndom, 3).unwrap();
+        // Print the interrupts interleaved with nodes.
+        let mut i = 0usize;
+        let mut out = String::new();
+        writeln!(out, "").unwrap();
+        for interrupt in interrupts {
+            match interrupt {
+                Interrupt::Jump {
+                    before_node,
+                    target,
+                    alternate,
+                    owner,
+                    trigger,
+                } => {
+                    if before_node > i {
+                        let range = i..before_node;
+                        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
+                            writeln!(out, "\t{ni}: {node}").unwrap();
+                        }
+                    }
+                    writeln!(
+                        out,
+                        "Jump({before_node}, {target}, {alternate:?}, {owner}, {trigger:?})"
+                    )
+                    .unwrap();
+                    i = before_node;
+                }
+                Interrupt::Land { after_node } => {
+                    if after_node >= i {
+                        let range = i..=after_node;
+                        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
+                            writeln!(out, "\t{ni}: {node}").unwrap();
+                        }
+                    }
+                    writeln!(out, "Land({after_node})").unwrap();
+                    i = after_node + 1;
+                }
+            }
+        }
+        out
+    }
 
     #[test]
     fn t_pruning_two_spheres() {
@@ -1277,15 +1329,15 @@ mod test {
         .unwrap();
         let ctx = JitContext::default();
         let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 3).unwrap();
-        assert_eq!(eval.n_signals, 5);
+        assert_eq!(eval.n_signals, 6);
         assert_eq!(eval.n_inputs, 2);
         assert_eq!(eval.n_outputs, 1);
         // Prune the RHS with an interval to the left of the origin.
         let mut outputs = [[f64::NAN; 2]];
-        let mut signals = [0u32; 5];
+        let mut signals = [0u32; 6];
         eval.run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
             .unwrap();
-        assert_eq!(&signals, &[0, 0, 1, 1, 0]);
+        assert_eq!(&signals, &[0, 0, 1, 1, 0, 0]);
         assert_float_eq!(outputs[0][0], -1.5);
         assert_float_eq!(outputs[0][1], -0.08578643762690485);
         // Reset and test the other side of the origin.
@@ -1295,6 +1347,6 @@ mod test {
             .unwrap();
         assert_float_eq!(outputs[0][0], -1.5);
         assert_float_eq!(outputs[0][1], -0.08578643762690485);
-        assert_eq!(&signals, &[0, 2, 0, 2, 0]);
+        assert_eq!(&signals, &[0, 1, 0, 2, 0, 0]);
     }
 }
