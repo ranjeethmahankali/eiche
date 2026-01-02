@@ -1171,78 +1171,7 @@ mod test {
     use crate::{assert_float_eq, deftree};
 
     #[test]
-    fn t_min_tiny() {
-        let tree = Tree::from_nodes(
-            vec![
-                Symbol('x'),                  // 0
-                Constant(Value::Scalar(1.0)), // 1
-                Binary(Add, 0, 1),            // 2
-                Symbol('y'),                  // 3
-                Constant(Value::Scalar(2.0)), // 4
-                Binary(Add, 3, 4),            // 5
-                Binary(Min, 2, 5),            // 6
-            ],
-            (1, 1),
-        )
-        .expect("Cannot create tree");
-        let context = JitContext::default();
-        let eval = tree.jit_compile_pruner::<f32>(&context, "xy", 0).unwrap();
-        assert!(false);
-    }
-
-    #[test]
-    fn t_min_nested() {
-        let tree = Tree::from_nodes(
-            vec![
-                Symbol('x'),                  // 0
-                Constant(Value::Scalar(1.0)), // 1
-                Binary(Add, 0, 1),            // 2
-                Symbol('y'),                  // 3
-                Constant(Value::Scalar(2.0)), // 4
-                Binary(Add, 3, 4),            // 5
-                Binary(Min, 2, 5),            // 6
-                Symbol('z'),                  // 7
-                Constant(Value::Scalar(3.0)), // 8
-                Binary(Add, 7, 8),            // 9
-                Binary(Min, 6, 9),            // 10
-            ],
-            (1, 1),
-        )
-        .unwrap();
-        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let cfg = make_interrupts(&tree, &ndom, 0).expect("Unable to build control flow");
-        dbg!(&cfg);
-        assert_eq!(cfg, todo!());
-    }
-
-    #[test]
-    fn t_choose_tiny() {
-        let tree = Tree::from_nodes(
-            vec![
-                Symbol('x'),                  // 0
-                Symbol('a'),                  // 1
-                Constant(Value::Scalar(1.0)), // 2
-                Binary(Add, 1, 2),            // 3
-                Binary(Less, 0, 3),           // 4
-                Symbol('y'),                  // 5
-                Constant(Value::Scalar(2.0)), // 6
-                Binary(Add, 5, 6),            // 7
-                Symbol('z'),                  // 8
-                Constant(Value::Scalar(3.0)), // 9
-                Binary(Add, 8, 9),            // 10
-                Ternary(Choose, 4, 7, 10),    // 11
-            ],
-            (1, 1),
-        )
-        .unwrap();
-        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let cfg = make_interrupts(&tree, &ndom, 0).expect("Unable to build control flow");
-        dbg!(tree.nodes(), cfg);
-        assert!(false);
-    }
-
-    #[test]
-    fn t_min_two_spheres() {
+    fn t_pruning_two_spheres() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
@@ -1271,7 +1200,7 @@ mod test {
     }
 
     #[test]
-    fn t_min_three_spheres() {
+    fn t_pruning_three_spheres() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
                             (min
