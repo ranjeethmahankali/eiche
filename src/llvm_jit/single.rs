@@ -28,13 +28,10 @@ type NativeFunc = unsafe extern "C" fn(
 
 /// This represents a JIT compiled tree. This is a wrapper around the JIT compiled native function.
 #[derive(Clone)]
-pub struct JitFn<'ctx, T>
-where
-    T: NumberType,
-{
+pub struct JitFn<'ctx, T: NumberType> {
     func: JitFunction<'ctx, NativeFunc>,
-    num_inputs: usize,
-    num_outputs: usize,
+    n_inputs: usize,
+    n_outputs: usize,
     _phantom: PhantomData<T>,
 }
 
@@ -66,13 +63,13 @@ where
 unsafe impl<'ctx, T> Sync for JitFnSync<'ctx, T> where T: NumberType {}
 
 pub struct BuildArgs<'a, 'ctx> {
-    nodes: &'a [Node],
-    params: &'a str,
-    float_type: FloatType<'ctx>,
-    function: FunctionValue<'ctx>,
-    regs: &'a [BasicValueEnum<'ctx>],
-    node: Node,
-    index: usize,
+    pub nodes: &'a [Node],
+    pub params: &'a str,
+    pub float_type: FloatType<'ctx>,
+    pub function: FunctionValue<'ctx>,
+    pub regs: &'a [BasicValueEnum<'ctx>],
+    pub node: Node,
+    pub index: usize,
 }
 
 impl Tree {
@@ -100,7 +97,7 @@ impl Tree {
         compiler.set_attributes(function, context)?;
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
-        for (ni, node) in self.nodes().iter().copied().enumerate() {
+        for (index, node) in self.nodes().iter().copied().enumerate() {
             let reg = build_op(
                 BuildArgs {
                     nodes: self.nodes(),
@@ -109,7 +106,7 @@ impl Tree {
                     function,
                     regs: &regs,
                     node,
-                    index: ni,
+                    index,
                 },
                 builder,
                 &compiler.module,
@@ -149,8 +146,8 @@ impl Tree {
         let func = unsafe { engine.get_function(&func_name)? };
         Ok(JitFn {
             func,
-            num_inputs: params.len(),
-            num_outputs: num_roots,
+            n_inputs: params.len(),
+            n_outputs: num_roots,
             _phantom: PhantomData,
         })
     }
@@ -421,10 +418,10 @@ where
     /// order as returned by calling `tree.symbols()` which was compiled to
     /// produce this evaluator.
     pub fn run(&self, inputs: &[T], outputs: &mut [T]) -> Result<(), Error> {
-        if inputs.len() != self.num_inputs {
-            return Err(Error::InputSizeMismatch(inputs.len(), self.num_inputs));
-        } else if outputs.len() != self.num_outputs {
-            return Err(Error::OutputSizeMismatch(outputs.len(), self.num_outputs));
+        if inputs.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
+        } else if outputs.len() != self.n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
         }
         // SAFETY: We just checked above.
         unsafe { self.run_unchecked(inputs, outputs) };
@@ -457,8 +454,8 @@ where
             // execution engine that owns the block of executable memory to
             // which the function pointer points.
             func: unsafe { self.func.as_raw() },
-            n_inputs: self.num_inputs,
-            n_outputs: self.num_outputs,
+            n_inputs: self.n_inputs,
+            n_outputs: self.n_outputs,
             _phantom: PhantomData,
         }
     }
