@@ -1239,7 +1239,9 @@ mod test {
         .compacted()
         .unwrap();
         let ctx = JitContext::default();
-        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        // Because the tree is compacted, more nodes are shared, and the min
+        // nodes dominate fewer nodes. So we lower the pruning threshold for this test.
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 3).unwrap();
         assert_eq!(eval.n_signals, 3);
         assert_eq!(eval.n_inputs, 2);
         assert_eq!(eval.n_outputs, 1);
@@ -1272,7 +1274,7 @@ mod test {
         .compacted()
         .unwrap();
         let ctx = JitContext::default();
-        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 3).unwrap();
         assert_eq!(eval.n_signals, 5);
         assert_eq!(eval.n_inputs, 2);
         assert_eq!(eval.n_outputs, 1);
