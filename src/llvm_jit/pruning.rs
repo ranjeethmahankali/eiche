@@ -117,6 +117,7 @@ impl Tree {
             make_interrupts(&tree, &ndom, pruning_threshold)?,
             tree.len(),
         )?;
+        dbg!(&blocks);
         let (code_map, merge_map) = reverse_lookup(&blocks);
         let ranges = interval::compute_ranges(&tree)?;
         let func_name = context.new_func_name::<T>(Some("interval"));
@@ -986,7 +987,7 @@ mod test {
     }
 
     #[test]
-    fn t_min_spheres() {
+    fn t_min_two_spheres() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
@@ -1012,5 +1013,37 @@ mod test {
         assert_float_eq!(outputs[0][0], -1.5);
         assert_float_eq!(outputs[0][1], -0.08578643762690485);
         assert_eq!(&signals, &[1, 0, 2]);
+    }
+
+    #[test]
+    fn t_min_three_spheres() {
+        let tree = deftree!(min
+                            (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
+                            (min
+                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)))
+        .unwrap();
+        println!("{tree}");
+        let ctx = JitContext::default();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        assert_eq!(eval.n_signals, 5);
+        assert_eq!(eval.n_inputs, 2);
+        assert_eq!(eval.n_outputs, 1);
+        // Prune the RHS with an interval to the left of the origin.
+        let mut outputs = [[f64::NAN; 2]];
+        let mut signals = [0u32; 5];
+        eval.run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_eq!(&signals, &[0, 1, 1, 0, 0]);
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        // Reset and test the other side of the origin.
+        signals.fill(0u32);
+        outputs[0].fill(f64::NAN);
+        eval.run(&[[1.0, 2.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        assert_eq!(&signals, &[1, 0, 2, 0, 0]);
     }
 }
