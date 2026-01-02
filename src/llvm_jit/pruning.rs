@@ -1815,7 +1815,9 @@ mod test {
         pruning_threshold: usize,
         vardata: &[(char, f64, f64)],
         eps: f64,
-    ) {
+    ) where
+        Wide: SimdVec<T>,
+    {
         let params: String = vardata.iter().map(|(c, _, _)| *c).collect();
         let context = JitContext::default();
         let interval_eval = tree
@@ -1824,6 +1826,7 @@ mod test {
         let eval = tree
             .jit_compile::<T>(&context, &params)
             .expect("Unable to compile single eval");
+        let simd_eval = tree.jit_compile_array(&context, &params).unwrap();
         let pruner = tree
             .jit_compile_pruner::<T>(&context, &params, pruning_threshold)
             .expect("Unable to compile a JIT pruner");
@@ -1833,6 +1836,7 @@ mod test {
         let pruned_eval = pruner
             .compile_single_func(&context)
             .expect("Unable to compile a pruned single eval");
+        let pruned_simd_eval = pruner.compile_simd_func(&context).unwrap();
         let mut rng = StdRng::seed_from_u64(42);
         let n_outputs = tree.num_roots();
         const N_INTERVALS: usize = 32;
@@ -1845,6 +1849,8 @@ mod test {
         let mut out = Vec::<T>::new();
         let mut out_pruned = Vec::<T>::new();
         let mut signals = Vec::<u32>::new();
+        let mut simd_buf = JitSimdBuffers::<T>::new(&tree);
+        let mut simd_pruned_buf = JitSimdBuffers::<T>::new(&tree);
         for _ in 0..N_INTERVALS {
             // Sample a random interval.
             interval.clear();
@@ -1884,6 +1890,7 @@ mod test {
                 }
             }
             // Now sample that interval and compare pruned and un-pruned evaluations.
+            simd_buf.clear();
             for _ in 0..N_QUERIES {
                 sample.clear();
                 sample.extend(interval.iter().map(|i| {
@@ -1891,6 +1898,8 @@ mod test {
                         i[0].to_f64() + rng.random::<f64>() * (i[1].to_f64() - i[0].to_f64()),
                     )
                 }));
+                simd_buf.pack(&sample).unwrap();
+                simd_pruned_buf.pack(&sample).unwrap();
                 out_pruned.clear();
                 out_pruned.resize(n_outputs, T::nan());
                 pruned_eval.run(&sample, &mut out_pruned, &signals).unwrap();
@@ -1899,6 +1908,22 @@ mod test {
                 eval.run(&sample, &mut out).unwrap();
                 for (i, j) in out_pruned.iter().zip(out.iter()) {
                     assert_float_eq!(i.to_f64(), j.to_f64(), eps);
+                }
+            }
+            // Now compare the simd evaluations with and without pruning.
+            simd_eval.run(&mut simd_buf);
+            pruned_simd_eval
+                .run(&mut simd_pruned_buf, &signals)
+                .unwrap();
+            let mut actual = simd_pruned_buf.unpack_outputs();
+            let mut expected = simd_buf.unpack_outputs();
+            loop {
+                match (actual.next(), expected.next()) {
+                    (None, None) => break,
+                    (None, Some(_)) | (Some(_), None) => {
+                        panic!("The two evaluations returned unequal number of outputs")
+                    }
+                    (Some(i), Some(j)) => assert_float_eq!(i.to_f64(), j.to_f64(), eps),
                 }
             }
         }

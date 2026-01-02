@@ -1160,7 +1160,7 @@ impl Tree {
     pub fn jit_compile_array<'ctx, T>(
         &'ctx self,
         context: &'ctx JitContext,
-        symbols: &str,
+        params: &str,
     ) -> Result<JitSimdFn<'ctx, T>, Error>
     where
         Wide: SimdVec<T>,
@@ -1210,7 +1210,7 @@ impl Tree {
             let reg = build_op::<T>(
                 BuildArgs {
                     nodes: self.nodes(),
-                    params: symbols,
+                    params,
                     context,
                     fvec_type,
                     inputs,
@@ -1296,7 +1296,7 @@ where
 {
     let BuildArgs {
         nodes,
-        params: symbols,
+        params,
         context,
         fvec_type,
         inputs,
@@ -1317,11 +1317,11 @@ where
                     module
                         .get_context()
                         .i64_type()
-                        .const_int(symbols.len() as u64, false),
+                        .const_int(params.len() as u64, false),
                     &format!("input_offset_mul_{label}"),
                 )?,
                 module.get_context().i64_type().const_int(
-                    symbols
+                    params
                         .chars()
                         .position(|c| c == label)
                         .ok_or(Error::JitCompilationError("Cannot find symbol".to_string()))?
