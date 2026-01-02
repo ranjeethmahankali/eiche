@@ -1116,12 +1116,14 @@ fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Bloc
                     trigger,
                 },
             ) => {
-                debug_assert!(
+                assert!(
                     match jumps.last() {
                         Some(prev) => prev.before_node == before_node,
                         None => true,
                     },
-                    "Consecutive jumps without a land block is invalid."
+                    "Consecutive jumps from two different nodes without a land block in between is invalid.
+The consecutive jumps are from nodes {} and {}",
+                    jumps.last().map(|j| j.before_node).unwrap_or(usize::MAX), before_node,
                 );
                 jumps.push(Jump {
                     before_node,
