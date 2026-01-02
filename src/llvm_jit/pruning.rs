@@ -9,6 +9,7 @@ use crate::{
     Node::{self, *},
     TernaryOp::*,
     Tree, Value,
+    tree::is_node_scalar,
 };
 use inkwell::{
     AddressSpace, OptimizationLevel,
@@ -194,7 +195,14 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         if let Some(first) = bbs.first() {
             builder.build_unconditional_branch(*first)?;
         }
-        let (phis, phi_map) = init_merge_phi(&self.blocks, builder, &bbs, flt_type)?;
+        let (phis, phi_map) = init_merge_phi(
+            &self.blocks,
+            builder,
+            &bbs,
+            flt_type,
+            context.bool_type(),
+            self.tree.nodes(),
+        )?;
         let mut merge_list = Vec::<Incoming>::new();
         for (bi, block) in self.blocks.iter().enumerate() {
             builder.position_at_end(bbs[bi]);
@@ -281,8 +289,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                         flt_type.get_poison(),
                         builder,
                         &mut regs,
-                        &mut constants,
-                        interval::build_const,
+                        |value| single::build_const::<T>(context, value),
                         *target,
                     )?;
                 }
@@ -408,7 +415,14 @@ fn compile_pruner_impl<'ctx, T: NumberType>(
     if let Some(first) = bbs.first() {
         builder.build_unconditional_branch(*first)?;
     }
-    let (phis, phi_map) = init_merge_phi(&blocks, builder, &bbs, interval_type)?;
+    let (phis, phi_map) = init_merge_phi(
+        &blocks,
+        builder,
+        &bbs,
+        interval_type,
+        context.bool_type().vec_type(2),
+        tree.nodes(),
+    )?;
     let mut notifications = Vec::<Notification>::new();
     let mut merge_list = Vec::<Incoming>::new();
     let mut notified = HashSet::<(usize, u32)>::new();
@@ -529,8 +543,7 @@ fn compile_pruner_impl<'ctx, T: NumberType>(
                     interval_type.get_poison(),
                     builder,
                     &mut regs,
-                    &mut constants,
-                    interval::build_const,
+                    |value| interval::build_const(&mut constants, value),
                     *target,
                 )?;
             }
@@ -608,7 +621,7 @@ fn compile_pruner_impl<'ctx, T: NumberType>(
     })
 }
 
-fn build_merges<'ctx, T: BasicValue<'ctx> + Copy>(
+fn build_merges<'ctx, T: BasicValue<'ctx> + Copy, F: FnMut(Value) -> BasicValueEnum<'ctx>>(
     phis: &Box<[PhiValue<'ctx>]>,
     phi_map: &Box<[usize]>,
     merge_list: &mut Vec<Incoming<'ctx>>,
@@ -617,8 +630,7 @@ fn build_merges<'ctx, T: BasicValue<'ctx> + Copy>(
     poison: T,
     builder: &'ctx Builder,
     regs: &mut [BasicValueEnum<'ctx>],
-    constants: &mut Constants<'ctx>,
-    build_const_fn: impl Fn(&mut Constants<'ctx>, Value) -> BasicValueEnum<'ctx>,
+    mut build_const_fn: F,
     target: usize,
 ) -> Result<(), Error> {
     let bi = merge_map
@@ -641,7 +653,7 @@ fn build_merges<'ctx, T: BasicValue<'ctx> + Copy>(
             }
             Alternate::Constant(value) => {
                 builder.position_at_end(*basic_block);
-                let out = build_const_fn(constants, *value);
+                let out = build_const_fn(*value);
                 builder.build_unconditional_branch(bbs[bi])?;
                 out
             }
@@ -861,11 +873,13 @@ struct Notification {
     kind: PruneKind,
 }
 
-fn init_merge_phi<'ctx, TPhi: BasicType<'ctx> + Copy>(
+fn init_merge_phi<'ctx, TPhi: BasicType<'ctx> + Copy, TBool: BasicType<'ctx> + Copy>(
     blocks: &[Block],
     builder: &'ctx Builder,
     bbs: &[BasicBlock<'ctx>],
     out_type: TPhi,
+    bool_type: TBool,
+    nodes: &[Node],
 ) -> Result<(Box<[PhiValue<'ctx>]>, Box<[usize]>), Error> {
     let original_bb = builder.get_insert_block();
     let (phis, indices) = blocks.iter().zip(bbs.iter()).try_fold(
@@ -876,10 +890,14 @@ fn init_merge_phi<'ctx, TPhi: BasicType<'ctx> + Copy>(
                     indices.push(usize::MAX);
                     Ok((phis, indices))
                 }
-                Block::Merge(_) => {
+                Block::Merge(after) => {
                     let index = phis.len();
                     builder.position_at_end(*bb);
-                    let phi = builder.build_phi(out_type, &format!("merge_phi_{index}"))?;
+                    let phi = if is_node_scalar(nodes, *after) {
+                        builder.build_phi(out_type, &format!("merge_phi_{index}"))?
+                    } else {
+                        builder.build_phi(bool_type, &format!("merge_phi_{index}"))?
+                    };
                     phis.push(phi);
                     indices.push(index);
                     Ok((phis, indices))

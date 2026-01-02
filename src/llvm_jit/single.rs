@@ -14,6 +14,7 @@ use crate::{
 use inkwell::{
     AddressSpace, FloatPredicate, OptimizationLevel,
     builder::Builder,
+    context::Context,
     execution_engine::JitFunction,
     module::Module,
     types::FloatType,
@@ -150,6 +151,19 @@ impl Tree {
             n_outputs: num_roots,
             _phantom: PhantomData,
         })
+    }
+}
+
+pub fn build_const<'ctx, T: NumberType>(
+    context: &'ctx Context,
+    value: Value,
+) -> BasicValueEnum<'ctx> {
+    match value {
+        Bool(val) => context
+            .bool_type()
+            .const_int(if val { 1 } else { 0 }, false)
+            .as_basic_value_enum(),
+        Scalar(val) => T::jit_type(context).const_float(val).as_basic_value_enum(),
     }
 }
 
