@@ -103,7 +103,7 @@ impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
 }
 
 impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
-    fn run(
+    pub fn run(
         &self,
         inputs: &[[T; 2]],
         outputs: &mut [[T; 2]],
@@ -1155,9 +1155,9 @@ fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Bloc
         Code(usize),
         Branch(Vec<Jump>),
     }
-    let (mut blocks, last) = interrupts.into_iter().enumerate().fold(
+    let (mut blocks, last) = interrupts.into_iter().fold(
         (Vec::<Block>::new(), PartialBlock::Code(0)),
-        |(mut blocks, partial), (i, current)| match (partial, current) {
+        |(mut blocks, partial), current| match (partial, current) {
             (
                 PartialBlock::Code(start),
                 Interrupt::Jump {
