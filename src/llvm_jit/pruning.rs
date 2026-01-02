@@ -971,7 +971,7 @@ enum Interrupt {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
 enum PruneKind {
-    None = 0,
+    // 0 is reserved for cases that are not pruned. We don't need a variant for that here.
     Left = 1,
     Right = 2,
     AlwaysTrue = 3,
@@ -1463,10 +1463,11 @@ mod test {
         assert_eq!(&signals, &[0, 1, 0, 2, 0, 0]);
     }
 
-    fn check_pruned_eval<T: NumberType>(
+    fn check_pruned_eval_impl<T: NumberType>(
         tree: &Tree,
         pruning_threshold: usize,
         vardata: &[(char, f64, f64)],
+        eps: f64,
     ) {
         let params: String = vardata.iter().map(|(c, _, _)| *c).collect();
         let context = JitContext::default();
@@ -1519,7 +1520,7 @@ mod test {
             // Compare intervals.
             for (i, j) in iout.iter().zip(iout_pruned.iter()) {
                 for (i, j) in i.iter().zip(j.iter()) {
-                    assert_float_eq!(i.to_f64(), j.to_f64());
+                    assert_float_eq!(i.to_f64(), j.to_f64(), eps);
                 }
             }
             // Now sample that interval and compare pruned and un-pruned evaluations.
@@ -1537,45 +1538,130 @@ mod test {
                 out.resize(n_outputs, T::nan());
                 eval.run(&sample, &mut out).unwrap();
                 for (i, j) in out_pruned.iter().zip(out.iter()) {
-                    assert_float_eq!(i.to_f64(), j.to_f64());
+                    assert_float_eq!(i.to_f64(), j.to_f64(), eps);
                 }
             }
         }
     }
 
-    #[test]
-    fn t_two_circles() {
-        let tree = deftree!(min
-                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
-                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
-        .unwrap()
-        .compacted()
-        .unwrap();
-        check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
-        check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
+    fn check_pruned_eval(
+        tree: Tree,
+        pruning_threshold: usize,
+        vardata: &[(char, f64, f64)],
+        eps: f64,
+    ) {
+        check_pruned_eval_impl::<f32>(&tree, pruning_threshold, vardata, eps);
+        check_pruned_eval_impl::<f64>(&tree, pruning_threshold, vardata, eps);
     }
 
     #[test]
-    fn t_three_circles() {
-        let tree = deftree!(min
+    fn t_two_circles() {
+        check_pruned_eval(
+            deftree!(min
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
+            .unwrap()
+            .compacted()
+            .unwrap(),
+            3,
+            &[('x', -10.0, 10.0), ('y', -10.0, 10.0)],
+            1e-16,
+        );
+        check_pruned_eval(
+            deftree!(min
                             (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
                             (min
                              (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                              (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)))
-        .unwrap()
-        .compacted()
-        .unwrap();
-        check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
-        check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
+            .unwrap()
+            .compacted()
+            .unwrap(),
+            3,
+            &[('x', -10.0, 10.0), ('y', -10.0, 10.0)],
+            1e-16,
+        );
     }
 
     #[test]
     fn t_choose_two_circles() {
-        let tree = deftree!(if (< 'x 0)
+        check_pruned_eval(
+            deftree!(if (< 'x 0)
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
-        .unwrap();
-        check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
-        check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
+            .unwrap(),
+            3,
+            &[('x', -10.0, 10.0), ('y', -10.0, 10.0)],
+            1e-16,
+        );
+    }
+
+    #[test]
+    fn t_interval_tree_2() {
+        check_pruned_eval(
+            deftree!(
+                (max (min
+                      (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                      (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                 (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
+            )
+                .unwrap(),
+            8,
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            1e-5,
+        );
+    }
+
+    #[test]
+    fn t_interval_trees_concat_1() {
+        check_pruned_eval(
+            deftree!(concat
+                     (/ (pow (log (+ (sin 'x) 2.)) 3.) (+ (cos 'x) 2.))
+                     (+ 'x 'y)
+                     ((max (min
+                            (- (sqrt (+ (+ (pow (- 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 2.75)
+                            (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (- 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 4.))
+                       (- (sqrt (+ (+ (pow (+ 'x 2.) 2.) (pow (+ 'y 3.) 2.)) (pow (- 'z 4.) 2.))) 5.25))
+            )).unwrap(), 8,
+            &[('x', -10., 10.), ('y', -9., 10.), ('z', -11., 12.)],
+            1e-8,
+        );
+    }
+
+    #[test]
+    fn t_interval_choose() {
+        check_pruned_eval(
+            deftree!(if (> 'x 0) 'x (- 'x)).unwrap(),
+            0,
+            &[('x', -10., 10.)],
+            1e-16,
+        );
+        check_pruned_eval(
+            deftree!(if (< 'x 0) (- 'x) 'x).unwrap(),
+            0,
+            &[('x', -10., 10.)],
+            1e-16,
+        );
+    }
+
+    #[test]
+    fn t_jit_interval_boolean_ops() {
+        check_pruned_eval(
+            deftree!(if (and (> 'x 0) (< 'y 5)) (- 'x 2.) (+ 'y 1.5)).unwrap(),
+            0,
+            &[('x', -2., 3.), ('y', 2., 7.)],
+            1e-16,
+        );
+        check_pruned_eval(
+            deftree!(if (or (> 'x 5) (< 'y 0)) (- 'x 2.) (+ 'y 1.5)).unwrap(),
+            0,
+            &[('x', -2., 3.), ('y', 2., 7.)],
+            1e-16,
+        );
+        check_pruned_eval(
+            deftree!(if (not (> 'x 0)) (- 'x 2.) 1.5).unwrap(),
+            0,
+            &[('x', -5., 5.)],
+            1e-16,
+        );
     }
 }
