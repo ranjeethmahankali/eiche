@@ -1,5 +1,5 @@
 use super::{
-    JitCompiler, fast_math,
+    JitCompiler, build_vec_unary_intrinsic, fast_math,
     interval::{self, Constants},
     single,
 };
@@ -688,17 +688,17 @@ fn build_notify<'ctx>(
                 constants,
                 index,
             )?;
-            let not_empty = builder.build_not(either_empty, &format!("not_empty"))?;
+            let not_empty = builder.build_not(either_empty, &format!("not_empty_{index}"))?;
             let before = builder.build_or(
                 strictly_before,
                 builder
                     .build_extract_element(
                         touching,
                         constants.int_32(1, false),
-                        &format!("extract_touching_left"),
+                        &format!("extract_touching_left_{index}"),
                     )?
                     .into_int_value(),
-                &format!("before_check"),
+                &format!("before_check_{index}"),
             )?;
             let after = builder.build_or(
                 strictly_after,
@@ -706,24 +706,31 @@ fn build_notify<'ctx>(
                     .build_extract_element(
                         touching,
                         constants.int_32(0, false),
-                        &format!("extract_touching_left"),
+                        &format!("extract_touching_left_{index}"),
                     )?
                     .into_int_value(),
-                &format!("before_check"),
+                &format!("before_check_{index}"),
             )?;
             let strictly_before = builder.build_and(
                 not_empty,
                 strictly_before,
-                &format!("not_empty_combine_flags"),
+                &format!("not_empty_combine_flags_{index}"),
             )?;
             let strictly_after = builder.build_and(
                 not_empty,
                 strictly_after,
-                &format!("not_empty_combine_flags"),
+                &format!("not_empty_combine_flags_{index}"),
             )?;
-            let before =
-                builder.build_and(not_empty, before, &format!("not_empty_combine_flags"))?;
-            let after = builder.build_and(not_empty, after, &format!("not_empty_combine_flags"))?;
+            let before = builder.build_and(
+                not_empty,
+                before,
+                &format!("not_empty_combine_flags_{index}"),
+            )?;
+            let after = builder.build_and(
+                not_empty,
+                after,
+                &format!("not_empty_combine_flags_{index}"),
+            )?;
             match (op, trigger) {
                 (Min, PruneKind::Right)
                 | (Max, PruneKind::Left)
@@ -740,7 +747,28 @@ fn build_notify<'ctx>(
                 _ => unreachable!("Invalid node / trigger combo. This is a bug."),
             }
         }
-        Ternary(op, _, _, _) => todo!(),
+        Ternary(Choose, cond, _, _) => match trigger {
+            PruneKind::Right => build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.and.*",
+                &format!("all_true_checK"),
+                regs[cond].into_vector_value(),
+            )?
+            .into_int_value(),
+            PruneKind::Left => build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.vector.reduce.and.*",
+                &format!("all_false_check_{index}"),
+                builder.build_not(
+                    regs[cond].into_vector_value(),
+                    &format!("always_false_check_flip_{index}"),
+                )?,
+            )?
+            .into_int_value(),
+            _ => unreachable!("Invalid node / trigger combo. This is a bug."),
+        },
         _ => unreachable!("Unsupported node type. This is a bug."),
     };
     let then_bb = module
@@ -1008,9 +1036,22 @@ fn make_interrupts(
             }
             Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
                 let dom = ndom[ni];
-                let start = ni - dom;
                 if dom > threshold {
-                    // push_land(dst, after_node, land_map);
+                    push_land(&mut interrupts, ni, &mut land_map);
+                    interrupts.push(Interrupt::Jump {
+                        before_node: ni - dom,
+                        target: ni,
+                        alternate: Alternate::Constant(Value::Bool(true)),
+                        owner: ni,
+                        trigger: PruneKind::AlwaysTrue,
+                    });
+                    interrupts.push(Interrupt::Jump {
+                        before_node: ni - dom,
+                        target: ni,
+                        alternate: Alternate::Constant(Value::Bool(false)),
+                        owner: ni,
+                        trigger: PruneKind::AlwaysFalse,
+                    });
                 }
             }
             Ternary(Choose, _cond, tt, ff) => {
@@ -1018,10 +1059,47 @@ fn make_interrupts(
                 let ffdom = ndom[*ff];
                 let tskip = ttdom > threshold;
                 let fskip = ffdom > threshold;
-                if tskip {}
-                if fskip {}
-                if tskip || fskip {}
-                todo!();
+                if tskip {
+                    push_land(&mut interrupts, *tt, &mut land_map);
+                    interrupts.push(Interrupt::Jump {
+                        before_node: *tt - ttdom,
+                        target: *tt,
+                        alternate: Alternate::None,
+                        owner: ni,
+                        trigger: PruneKind::Left,
+                    });
+                }
+                if fskip {
+                    push_land(&mut interrupts, *ff, &mut land_map);
+                    interrupts.push(Interrupt::Jump {
+                        before_node: *ff - ffdom,
+                        target: *ff,
+                        alternate: Alternate::None,
+                        owner: ni,
+                        trigger: PruneKind::Right,
+                    });
+                }
+                if tskip || fskip {
+                    push_land(&mut interrupts, ni, &mut land_map);
+                    if tskip {
+                        interrupts.push(Interrupt::Jump {
+                            before_node: ni,
+                            target: ni,
+                            alternate: Alternate::Node(*ff),
+                            owner: ni,
+                            trigger: PruneKind::Left,
+                        });
+                    }
+                    if fskip {
+                        interrupts.push(Interrupt::Jump {
+                            before_node: ni,
+                            target: ni,
+                            alternate: Alternate::Node(*tt),
+                            owner: ni,
+                            trigger: PruneKind::Right,
+                        });
+                    }
+                }
             }
             _ => continue,
         }
@@ -1233,6 +1311,35 @@ mod test {
     #[test]
     fn t_pruning_two_spheres() {
         let tree = deftree!(min
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
+        .unwrap();
+        let ctx = JitContext::default();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        assert_eq!(eval.n_signals, 3);
+        assert_eq!(eval.n_inputs, 2);
+        assert_eq!(eval.n_outputs, 1);
+        // Prune the RHS with an interval to the left of the origin.
+        let mut outputs = [[f64::NAN; 2]];
+        let mut signals = [0u32; 3];
+        eval.run(&[[-2.0, -1.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_eq!(&signals, &[0, 1, 1]);
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        // Reset and test the other side of the origin.
+        signals.fill(0u32);
+        outputs[0].fill(f64::NAN);
+        eval.run(&[[1.0, 2.0], [-1.0, 1.0]], &mut outputs, &mut signals)
+            .unwrap();
+        assert_float_eq!(outputs[0][0], -1.5);
+        assert_float_eq!(outputs[0][1], -0.08578643762690485);
+        assert_eq!(&signals, &[1, 0, 2]);
+    }
+
+    #[test]
+    fn t_pruning_choose_two_spheres() {
+        let tree = deftree!(if (< 'x 0)
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
         .unwrap();
