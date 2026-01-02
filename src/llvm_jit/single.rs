@@ -64,13 +64,13 @@ where
 unsafe impl<'ctx, T> Sync for JitFnSync<'ctx, T> where T: NumberType {}
 
 pub struct BuildArgs<'a, 'ctx> {
-    pub nodes: &'a [Node],
-    pub params: &'a str,
-    pub float_type: FloatType<'ctx>,
-    pub function: FunctionValue<'ctx>,
-    pub regs: &'a [BasicValueEnum<'ctx>],
-    pub node: Node,
-    pub index: usize,
+    pub(crate) nodes: &'a [Node],
+    pub(crate) params: &'a str,
+    pub(crate) float_type: FloatType<'ctx>,
+    pub(crate) function: FunctionValue<'ctx>,
+    pub(crate) regs: &'a [BasicValueEnum<'ctx>],
+    pub(crate) node: Node,
+    pub(crate) index: usize,
 }
 
 impl Tree {

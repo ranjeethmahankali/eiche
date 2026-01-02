@@ -259,15 +259,15 @@ pub fn compute_ranges(tree: &Tree) -> Result<Box<[Interval]>, Error> {
 }
 
 pub struct BuildArgs<'a, 'ctx> {
-    pub nodes: &'a [Node],
-    pub params: &'a str,
-    pub ranges: &'a [Interval],
-    pub regs: &'a [BasicValueEnum<'ctx>],
-    pub constants: &'a mut Constants<'ctx>,
-    pub interval_type: VectorType<'ctx>,
-    pub function: FunctionValue<'ctx>,
-    pub node: Node,
-    pub index: usize,
+    pub(crate) nodes: &'a [Node],
+    pub(crate) params: &'a str,
+    pub(crate) ranges: &'a [Interval],
+    pub(crate) regs: &'a [BasicValueEnum<'ctx>],
+    pub(crate) constants: &'a mut Constants<'ctx>,
+    pub(crate) interval_type: VectorType<'ctx>,
+    pub(crate) function: FunctionValue<'ctx>,
+    pub(crate) node: Node,
+    pub(crate) index: usize,
 }
 
 impl Tree {
