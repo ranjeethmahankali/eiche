@@ -1,6 +1,7 @@
 use super::{
     JitCompiler, fast_math,
     interval::{self, Constants},
+    single,
 };
 use crate::{
     BinaryOp::*,
@@ -43,14 +44,14 @@ type NativeSingleFunc = unsafe extern "C" fn(
     *const u32,    // Signals,
 );
 
-pub type NativeSimdFunc = unsafe extern "C" fn(
+type NativeSimdFunc = unsafe extern "C" fn(
     *const c_void, // Inputs
     *mut c_void,   // Outputs
     *const u32,    // Signals,
     u64,           // Number of evals.
 );
 
-pub type NativeIntervalFunc = unsafe extern "C" fn(
+type NativeIntervalFunc = unsafe extern "C" fn(
     *const c_void, // Inputs
     *mut c_void,   // Outputs
     *const u32,    // Signals,
@@ -61,9 +62,49 @@ pub struct JitPruner<'ctx, T: NumberType> {
     n_inputs: usize,
     n_outputs: usize,
     n_signals: usize,
+    params: String,
     blocks: Box<[Block]>,
+    merge_block_map: HashMap<usize, usize>,
+    block_signal_map: Box<[usize]>,
     tree: Tree,
     phantom: PhantomData<T>,
+}
+
+pub struct JitPruningFn<'ctx, T: NumberType> {
+    func: JitFunction<'ctx, NativeSingleFunc>,
+    n_inputs: usize,
+    n_outputs: usize,
+    n_signals: usize,
+    _phantom: PhantomData<T>,
+}
+
+impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
+    pub fn run(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &[u32],
+    ) -> Result<(), Error> {
+        if inputs.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
+        } else if outputs.len() != self.n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
+        } else if signals.len() != self.n_signals {
+            return Err(Error::OutputSizeMismatch(signals.len(), self.n_signals));
+        }
+        unsafe { self.run_unchecked(inputs, outputs, signals) }
+        Ok(())
+    }
+
+    pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]], signals: &[u32]) {
+        unsafe {
+            self.func.call(
+                inputs.as_ptr().cast(),
+                outputs.as_mut_ptr().cast(),
+                signals.as_ptr().cast(),
+            )
+        }
+    }
 }
 
 impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
@@ -98,6 +139,200 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             )
         }
     }
+
+    pub fn compile_single_func(
+        &self,
+        context: &'ctx JitContext,
+    ) -> Result<JitPruningFn<'ctx, T>, Error> {
+        // No need to check if the tree has a valid scalar output, because we
+        // already checked that when we made this pruner.
+        let func_name = context.new_func_name::<T>(Some("pruning"));
+        let context = &context.inner;
+        let compiler = JitCompiler::new(context)?;
+        let builder = &compiler.builder;
+        let flt_type = T::jit_type(context);
+        let ptr_type = context.ptr_type(AddressSpace::default());
+        let mut constants = Constants::create::<T>(context);
+        let fn_type = context
+            .void_type()
+            .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
+        let function = compiler.module.add_function(&func_name, fn_type, None);
+        compiler.set_attributes(function, context)?;
+        builder.position_at_end(context.append_basic_block(function, "entry"));
+        let mut regs = Vec::<BasicValueEnum>::with_capacity(self.tree.len());
+        let mut bbs: Box<[BasicBlock]> = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(bi, block)| {
+                context.append_basic_block(
+                    function,
+                    &format!(
+                        "{}_bb_{bi}",
+                        match block {
+                            Block::Code(_) => "code",
+                            Block::Branch(_) => "branch",
+                            Block::Merge(_) => "merge",
+                        }
+                    ),
+                )
+            })
+            .collect();
+        let signals_arg = function
+            .get_nth_param(2)
+            .ok_or(Error::JitCompilationError(
+                "Cannot read output address".to_string(),
+            ))?
+            .into_pointer_value();
+        let signal_ptrs: Result<Vec<PointerValue>, inkwell::builder::BuilderError> = (0..self
+            .n_signals)
+            .map(|si| unsafe {
+                builder.build_gep(
+                    context.i32_type(),
+                    signals_arg,
+                    &[constants.int_32(si as u32, false)],
+                    &format!("signal_ptr_{}", si),
+                )
+            })
+            .collect();
+        let signal_ptrs = signal_ptrs?.into_boxed_slice();
+        if let Some(first) = bbs.first() {
+            builder.build_unconditional_branch(*first)?;
+        }
+        let (phis, phi_map) = init_merge_phi(&self.blocks, builder, &bbs, flt_type)?;
+        let mut merge_list = Vec::<Incoming>::new();
+        for (bi, block) in self.blocks.iter().enumerate() {
+            builder.position_at_end(bbs[bi]);
+            match block {
+                Block::Code(range) => {
+                    for (index, node) in
+                        self.tree.nodes()[range.clone()].iter().copied().enumerate()
+                    {
+                        let reg = single::build_op(
+                            single::BuildArgs {
+                                nodes: self.tree.nodes(),
+                                params: &self.params,
+                                float_type: flt_type,
+                                function,
+                                regs: &regs,
+                                node,
+                                index,
+                            },
+                            builder,
+                            &compiler.module,
+                        )?;
+                        regs.push(reg);
+                        // We may have created new blocks when building the op. So we overwrite the basic block.
+                        if let Some(bb) = builder.get_insert_block() {
+                            bbs[bi] = bb;
+                        }
+                    }
+                }
+                Block::Branch(jumps) => {
+                    let si = self.block_signal_map[bi];
+                    let signal = builder
+                        .build_load(
+                            context.i32_type(),
+                            signal_ptrs[si],
+                            &format!("load_signal_{si}"),
+                        )?
+                        .into_int_value();
+                    let mut cases = Vec::<(IntValue, BasicBlock)>::new();
+                    let mut prev_target = usize::MAX;
+                    let mut prev_val = None;
+                    let mut index = 0u32;
+                    for jump in jumps.iter() {
+                        if prev_target != jump.target || prev_val != Some(jump.alternate.clone()) {
+                            // New case.
+                            index += 1;
+                            let (case_bb, incoming_bb) = match jump.alternate {
+                                Alternate::None => {
+                                    let mbi = self
+                                        .merge_block_map
+                                        .get(&jump.target)
+                                        .expect("We must find a match. This is a bug.");
+                                    (bbs[*mbi], bbs[bi])
+                                }
+                                Alternate::Node(_) | Alternate::Constant(_) => {
+                                    let bb = context.append_basic_block(
+                                        function,
+                                        &format!("branch_{bi}_case_{si}_bb"),
+                                    );
+                                    (bb, bb)
+                                }
+                            };
+                            cases.push((constants.int_32(index, false), case_bb));
+                            merge_list.push(Incoming {
+                                target: jump.target,
+                                basic_block: incoming_bb,
+                                alternate: jump.alternate.clone(),
+                            });
+                            prev_target = jump.target;
+                            prev_val = Some(jump.alternate.clone());
+                        }
+                    }
+                    builder.build_switch(signal, bbs[bi + 1], &cases)?;
+                }
+                Block::Merge(target) => {
+                    build_merges(
+                        &phis,
+                        &phi_map,
+                        &mut merge_list,
+                        &self.merge_block_map,
+                        &bbs,
+                        flt_type.get_poison(),
+                        builder,
+                        &mut regs,
+                        &mut constants,
+                        interval::build_const,
+                        *target,
+                    )?;
+                }
+            }
+        }
+        // Copy the outputs.
+        let outputs = function
+            .get_last_param()
+            .ok_or(Error::JitCompilationError(
+                "Cannot write to outputs".to_string(),
+            ))?
+            .into_pointer_value();
+        for (i, reg) in regs[(self.tree.len() - self.tree.num_roots())..]
+            .iter()
+            .enumerate()
+        {
+            // SAFETY: GEP can segfault if the index is out of bounds. The
+            // offset calculation looks pretty solid, and is thoroughly tested.
+            let dst = unsafe {
+                builder.build_gep(
+                    flt_type,
+                    outputs,
+                    &[context.i64_type().const_int(i as u64, false)],
+                    &format!("output_{i}"),
+                )?
+            };
+            builder.build_store(dst, *reg)?;
+        }
+        builder.build_return(None)?;
+        // TODO: Copied these passes from single.rs. Find out what is optimal for pruning single evals.
+        compiler.run_passes("mem2reg,instcombine,reassociate,gvn,instcombine,slp-vectorizer,instcombine,simplifycfg,adce")?;
+        let engine = compiler
+            .module
+            .create_jit_execution_engine(OptimizationLevel::Aggressive)
+            .map_err(|_| Error::CannotCreateJitModule)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
+        let func = unsafe { engine.get_function(&func_name)? };
+        Ok(JitPruningFn {
+            func,
+            n_inputs: self.n_inputs,
+            n_outputs: self.n_outputs,
+            n_signals: self.n_signals,
+            _phantom: PhantomData,
+        })
+    }
 }
 
 impl Tree {
@@ -117,9 +352,9 @@ impl Tree {
             make_interrupts(&tree, &ndom, pruning_threshold)?,
             tree.len(),
         )?;
-        let (code_map, merge_map) = reverse_lookup(&blocks);
+        let (code_block_map, merge_block_map) = reverse_lookup(&blocks);
         let ranges = interval::compute_ranges(&tree)?;
-        let func_name = context.new_func_name::<T>(Some("interval"));
+        let func_name = context.new_func_name::<T>(Some("pruner"));
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
@@ -203,7 +438,7 @@ impl Tree {
                         kind,
                     } in notifications.iter().filter(|n| n.src_inst == range.end - 1)
                     {
-                        let ci = *code_map
+                        let ci = *code_block_map
                             .get(&src_inst)
                             .expect("Code map is not complete. This is a bug.");
                         let bb = bbs[ci];
@@ -245,7 +480,7 @@ impl Tree {
                             index += 1;
                             let (case_bb, incoming_bb) = match jump.alternate {
                                 Alternate::None => {
-                                    let mbi = merge_map
+                                    let mbi = merge_block_map
                                         .get(&jump.target)
                                         .expect("We must find a match. This is a bug.");
                                     (bbs[*mbi], bbs[bi])
@@ -281,7 +516,7 @@ impl Tree {
                         &phis,
                         &phi_map,
                         &mut merge_list,
-                        &merge_map,
+                        &merge_block_map,
                         &bbs,
                         interval_type.get_poison(),
                         builder,
@@ -293,9 +528,13 @@ impl Tree {
                 }
             }
         }
+        assert!(
+            merge_list.is_empty(),
+            "All merges should be processed by now. This is a bug otherwise"
+        );
         // Branch out of all code blocks.
         let mut done = vec![false; bbs.len()];
-        for ci in code_map.values() {
+        for ci in code_block_map.values() {
             if let Some(next) = bbs.get(ci + 1)
                 && !std::mem::replace(&mut done[*ci], true)
             {
@@ -354,7 +593,10 @@ impl Tree {
             n_inputs: params.len(),
             n_outputs: tree.num_roots(),
             n_signals: signal_ptrs.len(),
+            params: params.to_string(),
             blocks,
+            merge_block_map,
+            block_signal_map,
             tree,
             phantom: PhantomData,
         })
@@ -441,6 +683,7 @@ fn build_notify<'ctx>(
                 constants,
                 index,
             )?;
+            let not_empty = builder.build_not(either_empty, &format!("not_empty"))?;
             let before = builder.build_or(
                 strictly_before,
                 builder
@@ -463,6 +706,19 @@ fn build_notify<'ctx>(
                     .into_int_value(),
                 &format!("before_check"),
             )?;
+            let strictly_before = builder.build_and(
+                not_empty,
+                strictly_before,
+                &format!("not_empty_combine_flags"),
+            )?;
+            let strictly_after = builder.build_and(
+                not_empty,
+                strictly_after,
+                &format!("not_empty_combine_flags"),
+            )?;
+            let before =
+                builder.build_and(not_empty, before, &format!("not_empty_combine_flags"))?;
+            let after = builder.build_and(not_empty, after, &format!("not_empty_combine_flags"))?;
             match (op, trigger) {
                 (Min, PruneKind::Right)
                 | (Max, PruneKind::Left)
