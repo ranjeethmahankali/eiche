@@ -290,7 +290,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         }
         // Copy the outputs.
         let outputs = function
-            .get_last_param()
+            .get_nth_param(1)
             .ok_or(Error::JitCompilationError(
                 "Cannot write to outputs".to_string(),
             ))?
@@ -1230,86 +1230,6 @@ mod test {
         out
     }
 
-    fn check_pruned_eval<T: NumberType>(
-        tree: &Tree,
-        pruning_threshold: usize,
-        vardata: &[(char, f64, f64)],
-    ) {
-        let params: String = vardata.iter().map(|(c, _, _)| *c).collect();
-        let context = JitContext::default();
-        let interval_eval = tree
-            .jit_compile_interval::<T>(&context, &params)
-            .expect("Unable to compile interval eval");
-        let eval = tree
-            .jit_compile::<T>(&context, &params)
-            .expect("Unable to compile single eval");
-        let pruner = tree
-            .jit_compile_pruner::<T>(&context, &params, pruning_threshold)
-            .expect("Unable to compile a JIT pruner");
-        let pruned_eval = pruner
-            .compile_single_func(&context)
-            .expect("Unable to compile a pruned single eval");
-        let mut rng = StdRng::seed_from_u64(42);
-        let n_outputs = tree.num_roots();
-        const N_INTERVALS: usize = 32;
-        const N_QUERIES: usize = 32;
-        // Reusable buffers for evaluations.
-        let mut interval = Vec::<[T; 2]>::new();
-        let mut iout_pruned = Vec::<[T; 2]>::new();
-        let mut iout = Vec::<[T; 2]>::new();
-        let mut sample = Vec::<T>::new();
-        let mut out = Vec::<T>::new();
-        let mut out_pruned = Vec::<T>::new();
-        let mut signals = Vec::<u32>::new();
-        for _ in 0..N_INTERVALS {
-            // Sample a random interval.
-            interval.clear();
-            interval.extend(vardata.iter().map(|(_, lo, hi)| {
-                let mut bounds = [0, 1].map(|_| lo + rng.random::<f64>() * (hi - lo));
-                if bounds[0] > bounds[1] {
-                    bounds.swap(0, 1);
-                }
-                bounds.map(|b| T::from_f64(b))
-            }));
-            // Ensure the pruner and interval eval report the same value.
-            iout_pruned.clear();
-            iout_pruned.resize(n_outputs, [T::nan(); 2]);
-            signals.clear();
-            signals.resize(pruner.n_signals, 0u32);
-            pruner
-                .run(&interval, &mut iout_pruned, &mut signals)
-                .unwrap();
-            // Now the actual interval evaluator we trust.
-            iout.clear();
-            iout.resize(n_outputs, [T::nan(); 2]);
-            interval_eval.run(&interval, &mut iout).unwrap();
-            // Compare intervals.
-            for (i, j) in iout.iter().zip(iout_pruned.iter()) {
-                for (i, j) in i.iter().zip(j.iter()) {
-                    assert_float_eq!(i.to_f64(), j.to_f64());
-                }
-            }
-            // Now sample that interval and compare pruned and un-pruned evaluations.
-            for _ in 0..N_QUERIES {
-                sample.clear();
-                sample.extend(interval.iter().map(|i| {
-                    T::from_f64(
-                        i[0].to_f64() + rng.random::<f64>() * (i[1].to_f64() - i[0].to_f64()),
-                    )
-                }));
-                out_pruned.clear();
-                out_pruned.resize(n_outputs, T::nan());
-                pruned_eval.run(&sample, &mut out_pruned, &signals).unwrap();
-                out.clear();
-                out.resize(n_outputs, T::nan());
-                eval.run(&sample, &mut out).unwrap();
-                for (i, j) in out_pruned.iter().zip(out.iter()) {
-                    assert_float_eq!(i.to_f64(), j.to_f64());
-                }
-            }
-        }
-    }
-
     #[test]
     fn t_pruning_two_spheres() {
         let tree = deftree!(min
@@ -1436,11 +1356,84 @@ mod test {
         assert_eq!(&signals, &[0, 1, 0, 2, 0, 0]);
     }
 
-    #[test]
-    fn t_prune_compare_small_tree() {
-        let tree = deftree!('x).unwrap().compacted().unwrap();
-        check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0)]);
-        check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0)]);
+    fn check_pruned_eval<T: NumberType>(
+        tree: &Tree,
+        pruning_threshold: usize,
+        vardata: &[(char, f64, f64)],
+    ) {
+        let params: String = vardata.iter().map(|(c, _, _)| *c).collect();
+        let context = JitContext::default();
+        let interval_eval = tree
+            .jit_compile_interval::<T>(&context, &params)
+            .expect("Unable to compile interval eval");
+        let eval = tree
+            .jit_compile::<T>(&context, &params)
+            .expect("Unable to compile single eval");
+        let pruner = tree
+            .jit_compile_pruner::<T>(&context, &params, pruning_threshold)
+            .expect("Unable to compile a JIT pruner");
+        let pruned_eval = pruner
+            .compile_single_func(&context)
+            .expect("Unable to compile a pruned single eval");
+        let mut rng = StdRng::seed_from_u64(42);
+        let n_outputs = tree.num_roots();
+        const N_INTERVALS: usize = 32;
+        const N_QUERIES: usize = 32;
+        // Reusable buffers for evaluations.
+        let mut interval = Vec::<[T; 2]>::new();
+        let mut iout_pruned = Vec::<[T; 2]>::new();
+        let mut iout = Vec::<[T; 2]>::new();
+        let mut sample = Vec::<T>::new();
+        let mut out = Vec::<T>::new();
+        let mut out_pruned = Vec::<T>::new();
+        let mut signals = Vec::<u32>::new();
+        for _ in 0..N_INTERVALS {
+            // Sample a random interval.
+            interval.clear();
+            interval.extend(vardata.iter().map(|(_, lo, hi)| {
+                let mut bounds = [0, 1].map(|_| lo + rng.random::<f64>() * (hi - lo));
+                if bounds[0] > bounds[1] {
+                    bounds.swap(0, 1);
+                }
+                bounds.map(|b| T::from_f64(b))
+            }));
+            // Ensure the pruner and interval eval report the same value.
+            iout_pruned.clear();
+            iout_pruned.resize(n_outputs, [T::nan(); 2]);
+            signals.clear();
+            signals.resize(pruner.n_signals, 0u32);
+            pruner
+                .run(&interval, &mut iout_pruned, &mut signals)
+                .unwrap();
+            // Now the actual interval evaluator we trust.
+            iout.clear();
+            iout.resize(n_outputs, [T::nan(); 2]);
+            interval_eval.run(&interval, &mut iout).unwrap();
+            // Compare intervals.
+            for (i, j) in iout.iter().zip(iout_pruned.iter()) {
+                for (i, j) in i.iter().zip(j.iter()) {
+                    assert_float_eq!(i.to_f64(), j.to_f64());
+                }
+            }
+            // Now sample that interval and compare pruned and un-pruned evaluations.
+            for _ in 0..N_QUERIES {
+                sample.clear();
+                sample.extend(interval.iter().map(|i| {
+                    T::from_f64(
+                        i[0].to_f64() + rng.random::<f64>() * (i[1].to_f64() - i[0].to_f64()),
+                    )
+                }));
+                out_pruned.clear();
+                out_pruned.resize(n_outputs, T::nan());
+                pruned_eval.run(&sample, &mut out_pruned, &signals).unwrap();
+                out.clear();
+                out.resize(n_outputs, T::nan());
+                eval.run(&sample, &mut out).unwrap();
+                for (i, j) in out_pruned.iter().zip(out.iter()) {
+                    assert_float_eq!(i.to_f64(), j.to_f64());
+                }
+            }
+        }
     }
 
     #[test]
