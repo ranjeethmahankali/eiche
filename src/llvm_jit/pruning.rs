@@ -1437,6 +1437,25 @@ mod test {
     }
 
     #[test]
+    fn t_prune_compare_small_tree() {
+        let tree = deftree!('x).unwrap().compacted().unwrap();
+        check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0)]);
+        check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0)]);
+    }
+
+    #[test]
+    fn t_two_spheres() {
+        let tree = deftree!(min
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
+        .unwrap()
+        .compacted()
+        .unwrap();
+        check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
+        check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
+    }
+
+    #[test]
     fn t_three_spheres() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
