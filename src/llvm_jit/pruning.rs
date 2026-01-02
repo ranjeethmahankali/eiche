@@ -1309,7 +1309,7 @@ mod test {
     }
 
     #[test]
-    fn t_pruning_two_spheres() {
+    fn t_pruning_two_circles() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
@@ -1338,7 +1338,7 @@ mod test {
     }
 
     #[test]
-    fn t_pruning_choose_two_spheres() {
+    fn t_pruning_choose_two_circles() {
         let tree = deftree!(if (< 'x 0)
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
@@ -1367,7 +1367,7 @@ mod test {
     }
 
     #[test]
-    fn t_pruning_three_spheres() {
+    fn t_pruning_three_circles() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
                             (min
@@ -1398,7 +1398,7 @@ mod test {
     }
 
     #[test]
-    fn t_pruning_two_spheres_compacted() {
+    fn t_pruning_two_circles_compacted() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
@@ -1431,7 +1431,7 @@ mod test {
     }
 
     #[test]
-    fn t_pruning_three_spheres_compacted() {
+    fn t_pruning_three_circles_compacted() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
                             (min
@@ -1544,7 +1544,7 @@ mod test {
     }
 
     #[test]
-    fn t_two_spheres() {
+    fn t_two_circles() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
@@ -1556,7 +1556,7 @@ mod test {
     }
 
     #[test]
-    fn t_three_spheres() {
+    fn t_three_circles() {
         let tree = deftree!(min
                             (- (sqrt (+ (pow 'x 2) (pow (- 'y 1) 2))) 1.5)
                             (min
@@ -1564,6 +1564,16 @@ mod test {
                              (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)))
         .unwrap()
         .compacted()
+        .unwrap();
+        check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
+        check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
+    }
+
+    #[test]
+    fn t_choose_two_circles() {
+        let tree = deftree!(if (< 'x 0)
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
         .unwrap();
         check_pruned_eval::<f32>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
         check_pruned_eval::<f64>(&tree, 3, &[('x', -10.0, 10.0), ('y', -10.0, 10.0)]);
