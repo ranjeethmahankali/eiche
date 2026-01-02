@@ -619,7 +619,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                         &mut merge_list,
                         &self.merge_block_map,
                         &bbs,
-                        flt_type.get_poison(),
+                        flt_vec_type.get_poison(),
                         builder,
                         &mut regs,
                         |value| match value {
@@ -659,10 +659,13 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             builder.build_store(dst, *reg)?;
         }
         // Check to see if the loop should go on.
+        let loop_check_bb = context.append_basic_block(function, "loop_check_bb");
+        builder.build_unconditional_branch(loop_check_bb)?;
+        builder.position_at_end(loop_check_bb);
         let next = builder.build_int_add(loop_index, i64_type.const_int(1, false), "increment")?;
-        loop_index_phi.add_incoming(&[(&next, loop_block)]);
         let cmp = builder.build_int_compare(IntPredicate::ULT, next, eval_len, "loop-check")?;
         builder.build_conditional_branch(cmp, loop_block, end_block)?;
+        loop_index_phi.add_incoming(&[(&next, loop_check_bb)]);
         // End loop and return.
         builder.position_at_end(end_block);
         builder.build_return(None)?;
