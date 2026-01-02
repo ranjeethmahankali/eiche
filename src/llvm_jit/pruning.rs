@@ -150,7 +150,7 @@ impl Tree {
                         dst_signal,
                         signal,
                         kind,
-                    } in notifications.iter().filter(|n| n.src_inst == range.end)
+                    } in notifications.iter().filter(|n| n.src_inst == range.end - 1)
                     {
                         let ci = *code_map
                             .get(&src_inst)
@@ -173,7 +173,7 @@ impl Tree {
                         )?;
                     }
                     // Clear the processed notifications.
-                    notifications.retain(|n| n.src_inst != range.end);
+                    notifications.retain(|n| n.src_inst != range.end - 1);
                 }
                 Block::Branch(jumps) => {
                     let si = block_signal_map[bi];
@@ -186,9 +186,10 @@ impl Tree {
                         .into_int_value();
                     let mut cases = Vec::<(IntValue, BasicBlock)>::new();
                     let mut prev_target = usize::MAX;
+                    let mut prev_val = None;
                     let mut index = 0u32;
                     for jump in jumps.iter() {
-                        if prev_target != jump.target {
+                        if prev_target != jump.target || prev_val != Some(jump.alternate.clone()) {
                             // New case.
                             index += 1;
                             let (case_bb, incoming_bb) = match jump.alternate {
@@ -213,6 +214,7 @@ impl Tree {
                                 alternate: jump.alternate.clone(),
                             });
                             prev_target = jump.target;
+                            prev_val = Some(jump.alternate.clone());
                         }
                         notifications.push(Notification {
                             src_inst: jump.owner,
@@ -506,6 +508,7 @@ struct Incoming<'ctx> {
     alternate: Alternate,
 }
 
+#[derive(Debug)]
 struct Notification {
     src_inst: usize,
     dst_signal: usize,
