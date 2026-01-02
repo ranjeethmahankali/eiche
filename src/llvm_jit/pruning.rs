@@ -82,8 +82,22 @@ impl Tree {
         compiler.set_attributes(function, context)?;
         builder.position_at_end(context.append_basic_block(function, "entry"));
         let mut regs = Vec::<BasicValueEnum>::with_capacity(self.len());
-        let mut bbs: Box<[BasicBlock]> = (0..blocks.len())
-            .map(|bi| context.append_basic_block(function, &format!("bb_{bi}")))
+        let mut bbs: Box<[BasicBlock]> = blocks
+            .iter()
+            .enumerate()
+            .map(|(bi, block)| {
+                context.append_basic_block(
+                    function,
+                    &format!(
+                        "{}_bb_{bi}",
+                        match block {
+                            Block::Code(_) => "code",
+                            Block::Branch(_) => "branch",
+                            Block::Merge(_) => "merge",
+                        }
+                    ),
+                )
+            })
             .collect();
         let (signal_ptrs, block_signal_map) = init_signal_ptrs(
             &blocks,
@@ -210,47 +224,6 @@ impl Tree {
                 function,
             )?;
         }
-        // Merge all phi nodes.
-        {
-            let phi = phis[phi_map[bi]];
-            while let Some(Incoming {
-                target,
-                basic_block,
-                alternate,
-            }) = merge_stack.pop()
-            {
-                if target != *after_node {
-                    merge_stack.push(Incoming {
-                        target,
-                        basic_block,
-                        alternate,
-                    });
-                    break;
-                }
-                let val = match alternate {
-                    Alternate::None => interval_type.get_poison(),
-                    Alternate::Node(ni) => {
-                        builder.position_at_end(basic_block);
-                        builder.build_unconditional_branch(bbs[bi])?;
-                        regs[ni].into_vector_value()
-                    }
-                    Alternate::Constant(value) => {
-                        builder.position_at_end(basic_block);
-                        let out = interval::build_const(&mut constants, value).into_vector_value();
-                        builder.build_unconditional_branch(bbs[bi])?;
-                        out
-                    }
-                };
-                phi.add_incoming(&[(&val as &dyn BasicValue, basic_block)]);
-            }
-            // Default path when nothing is pruned.
-            phi.add_incoming(&[(&regs[*after_node], bbs[bi - 1])]);
-            builder.position_at_end(bbs[bi]);
-            regs[*after_node] = build_freeze(builder, phi, &format!("phi_{bi}_freeze"));
-            if let Some(next_bb) = bbs.get(bi + 1) {
-                builder.build_unconditional_branch(*next_bb)?;
-            }
-        }
         // Branch out of all code blocks.
         let mut done = vec![false; bbs.len()];
         for ci in code_map.values() {
@@ -261,6 +234,18 @@ impl Tree {
                 builder.build_unconditional_branch(*next)?;
             }
         }
+        build_merges(
+            phis,
+            phi_map,
+            merge_stack,
+            merge_map,
+            &bbs,
+            interval_type.get_poison(),
+            builder,
+            &mut regs,
+            &mut constants,
+            interval::build_const,
+        )?;
         if let Some(last) = bbs.last() {
             builder.position_at_end(*last);
         }
@@ -311,6 +296,86 @@ impl Tree {
         // live as long as the function wrapper lives.
         // let func = unsafe { engine.get_function(&func_name)? };
         todo!("Do proper branching and set the outputs.");
+    }
+}
+
+fn build_merges<'ctx, T: BasicValue<'ctx> + Copy>(
+    phis: Box<[PhiValue<'ctx>]>,
+    phi_map: Box<[usize]>,
+    mut merge_list: Vec<Incoming<'ctx>>,
+    merge_map: HashMap<usize, usize>,
+    bbs: &[BasicBlock<'ctx>],
+    poison: T,
+    builder: &'ctx Builder,
+    regs: &mut [BasicValueEnum<'ctx>],
+    constants: &mut Constants<'ctx>,
+    build_const_fn: impl Fn(&mut Constants<'ctx>, Value) -> BasicValueEnum<'ctx>,
+) -> Result<(), Error> {
+    merge_list
+        .sort_by(|a, b| (a.target, a.alternate.clone()).cmp(&(b.target, b.alternate.clone())));
+    let mut miter = merge_list.into_iter();
+    let mut buf = Vec::new();
+    let (mut target, mut alternate) = match miter.next() {
+        Some(i) => {
+            let out = (i.target, i.alternate.clone());
+            buf.push(i);
+            out
+        }
+        None => return Ok(()),
+    };
+    loop {
+        let mut next = None;
+        while let Some(n) = miter.next() {
+            if n.target == target && n.alternate == alternate {
+                buf.push(n);
+            } else {
+                next = Some(n);
+                break;
+            }
+        }
+        // Now process the collected stuff.
+        let bi = merge_map
+            .get(&target)
+            .copied()
+            .expect("This is a bug. We must find a block index here.");
+        let phi = phis[phi_map[bi]];
+        for Incoming {
+            target: _,
+            basic_block,
+            alternate,
+        } in buf.drain(..)
+        {
+            let val = match alternate {
+                Alternate::None => poison.as_basic_value_enum(),
+                Alternate::Node(ni) => {
+                    builder.position_at_end(basic_block);
+                    builder.build_unconditional_branch(bbs[bi])?;
+                    regs[ni]
+                }
+                Alternate::Constant(value) => {
+                    builder.position_at_end(basic_block);
+                    let out = build_const_fn(constants, value);
+                    builder.build_unconditional_branch(bbs[bi])?;
+                    out
+                }
+            };
+            phi.add_incoming(&[(&val as &dyn BasicValue, basic_block)]);
+        }
+        // Default path when nothing is pruned.
+        phi.add_incoming(&[(&regs[target], bbs[bi - 1])]);
+        builder.position_at_end(bbs[bi]);
+        regs[target] = build_freeze(builder, phi, &format!("phi_{bi}_freeze"));
+        if let Some(next_bb) = bbs.get(bi + 1) {
+            builder.build_unconditional_branch(*next_bb)?;
+        }
+        // Prep for the next iteration.
+        buf.clear();
+        if let Some(next) = next {
+            (target, alternate) = (next.target, next.alternate.clone());
+            buf.push(next);
+        } else {
+            break Ok(());
+        }
     }
 }
 
