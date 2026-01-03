@@ -172,6 +172,10 @@ impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
 }
 
 impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
+    pub fn num_signals(&self) -> usize {
+        self.n_signals
+    }
+
     pub fn run(
         &self,
         inputs: &[[T; 2]],
@@ -2216,7 +2220,6 @@ mod test {
                 .jit_compile_pruner::<f64>(&context, "xy", PRUNE_THRESHOLD)
                 .unwrap();
             let eval = pruner.compile_single_func(&context).unwrap();
-            eprintln!("Using {} signals", pruner.n_signals);
             let mut signals = vec![0u32; pruner.n_signals].into_boxed_slice();
             for yi in (0..DIMS).step_by(DIM_INTERVAL as usize) {
                 let mut interval = [[f64::NAN; 2], [yi as f64, (yi + DIM_INTERVAL) as f64]];
