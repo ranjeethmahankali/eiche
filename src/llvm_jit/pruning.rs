@@ -2160,10 +2160,16 @@ mod test {
 
     #[test]
     fn t_rational_pow_cond() {
-        let tree = deftree!(if (< (pow 'x 2.1) 1) 0 1)
+        check_pruned_eval(
+            deftree!(if (< (pow 'a 2.1) 1)
+                            (- (sqrt (+ (pow (+ 'x 1) 2) (pow 'y 2))) 1.5)
+                            (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
             .unwrap()
             .compacted()
-            .unwrap();
-        check_pruned_eval(tree, 0, &[('x', 0.0, 10.0)], 1e-16);
+            .unwrap(),
+            0,
+            &[('a', 0.0, 10.0), ('x', -10.0, 10.0), ('y', -10.0, 10.0)],
+            1e-16,
+        );
     }
 }
