@@ -2023,7 +2023,7 @@ mod test {
                     if before_node > i {
                         let range = i..before_node;
                         for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-                            writeln!(out, "\t{ni}: {node}").unwrap();
+                            writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
                         }
                     }
                     writeln!(
@@ -2037,7 +2037,7 @@ mod test {
                     if after_node >= i {
                         let range = i..=after_node;
                         for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-                            writeln!(out, "\t{ni}: {node}").unwrap();
+                            writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
                         }
                     }
                     writeln!(out, "Land({after_node})").unwrap();
@@ -2048,7 +2048,7 @@ mod test {
         // Print any remaining nodes:
         let range = i..tree.len();
         for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-            writeln!(out, "\t{ni}: {node}").unwrap();
+            writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
         }
         out
     }
@@ -2496,15 +2496,11 @@ mod test {
      */
     #[test]
     fn t_hex_test_case_reduced() {
-        let tree = deftree!(- (+ (max (min
-                                       (rem (- (- 'x)
-                                             0.016421999999999999098055)
-                                        0.011199999999999999886202)
-                                       (- (- 'x) 0.016421999999999999098055))
-                                  (- (- (- 'x) 0.016421999999999999098055)
-                                   0.963199999999999945110574))
-                               0.016421999999999999098055)
-                            0.022399999999999999772404)
+        let tree = deftree!(min
+                            (rem (- (- 'x)
+                                  0.016421999999999999098055)
+                             0.011199999999999999886202)
+                            (- (- 'x) 0.016421999999999999098055))
         .unwrap()
         .compacted()
         .unwrap();
@@ -2535,12 +2531,13 @@ mod test {
         let mut signals = vec![0u32; pruner.n_signals];
         pruner.run(&interval, &mut iout, &mut signals).unwrap();
         output.fill(f32::NAN);
+        prune_eval.run(&input, &mut output, &signals).unwrap();
+        let actual = output[0];
         {
             // DEBUG
             eprintln!("{:?}", &signals);
+            eprintln!("Comparing {} with {}", expected, actual);
         }
-        prune_eval.run(&input, &mut output, &signals).unwrap();
-        let actual = output[0];
         assert!(
             actual.signum() == expected.signum() && (actual - expected).abs() < f32::EPSILON,
             "These two values must be equal. This works if the original tree is not compacted"
