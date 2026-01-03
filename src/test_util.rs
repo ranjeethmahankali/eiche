@@ -206,9 +206,9 @@ pub fn random_circles_sorted(
         while chunk_size > 1 {
             for chunk in centers.chunks_mut(chunk_size) {
                 if flag {
-                    chunk.sort_by(|(ax, _), (bx, _)| ax.total_cmp(&bx));
+                    chunk.sort_by(|(ax, _), (bx, _)| ax.total_cmp(bx));
                 } else {
-                    chunk.sort_by(|(_, ay), (_, by)| ay.total_cmp(&by))
+                    chunk.sort_by(|(_, ay), (_, by)| ay.total_cmp(by))
                 }
             }
             flag = !flag;

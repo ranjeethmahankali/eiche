@@ -768,8 +768,8 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
     blocks: &[Block],
     params: &str,
 ) -> Result<PrunerInfo<'ctx>, Error> {
-    let (code_block_map, merge_block_map) = reverse_lookup(&blocks);
-    let ranges = interval::compute_ranges(&tree)?;
+    let (code_block_map, merge_block_map) = reverse_lookup(blocks);
+    let ranges = interval::compute_ranges(tree)?;
     let func_name = context.new_func_name::<T>(Some("pruner"));
     let context = &context.inner;
     let compiler = JitCompiler::new(context)?;
@@ -802,7 +802,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
         })
         .collect();
     let (signal_ptrs, block_signal_map) = init_signal_ptrs(
-        &blocks,
+        blocks,
         function
             .get_nth_param(2)
             .ok_or(Error::JitCompilationError(
@@ -817,7 +817,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
         builder.build_unconditional_branch(*first)?;
     }
     let (phis, phi_map) = init_merge_phi(
-        &blocks,
+        blocks,
         builder,
         &bbs,
         interval_type,
@@ -863,13 +863,13 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
                     } in notifications.iter().filter(|n| n.src_inst == range.end - 1)
                     {
                         let ci = *code_block_map
-                            .get(&src_inst)
+                            .get(src_inst)
                             .expect("Code map is not complete. This is a bug.");
                         let bb = bbs[ci];
                         builder.position_at_end(bb);
                         let first = notified.insert((*dst_signal, *signal));
                         bbs[ci] = build_notify(
-                            tree.node(*src_inst).clone(),
+                            *tree.node(*src_inst),
                             *src_inst,
                             *kind,
                             *signal,
@@ -1376,8 +1376,8 @@ impl Ord for Alternate {
             (Alternate::Node(_), Alternate::None)
             | (Alternate::Constant(_), Alternate::None)
             | (Alternate::Constant(_), Alternate::Node(_)) => Greater,
-            (Alternate::Node(a), Alternate::Node(b)) => a.cmp(&b),
-            (Alternate::Constant(a), Alternate::Constant(b)) => match a.partial_cmp(&b) {
+            (Alternate::Node(a), Alternate::Node(b)) => a.cmp(b),
+            (Alternate::Constant(a), Alternate::Constant(b)) => match a.partial_cmp(b) {
                 Some(cmp) => cmp,
                 None => Equal,
             },
@@ -1558,7 +1558,7 @@ fn make_interrupts(
             (Interrupt::Land { after_node }, Interrupt::Jump { before_node, .. }) => {
                 (after_node, 1).cmp(&(before_node, 0))
             }
-            (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => la.cmp(&ra),
+            (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => la.cmp(ra),
         }
     });
     Ok(interrupts.into_boxed_slice())
@@ -1680,7 +1680,7 @@ fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Bloc
 
 fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option<usize>]) {
     let mapped = &mut land_map[after_node];
-    if let None = *mapped {
+    if mapped.is_none() {
         let idx = dst.len();
         dst.push(Interrupt::Land { after_node });
         *mapped = Some(idx);
@@ -1701,7 +1701,7 @@ mod test {
         // Print the interrupts interleaved with nodes.
         let mut i = 0usize;
         let mut out = String::new();
-        writeln!(out, "").unwrap();
+        writeln!(out).unwrap();
         for interrupt in interrupts {
             match interrupt {
                 Interrupt::Jump {
@@ -1938,8 +1938,8 @@ mod test {
         let mut out = Vec::<T>::new();
         let mut out_pruned = Vec::<T>::new();
         let mut signals = Vec::<u32>::new();
-        let mut simd_buf = JitSimdBuffers::<T>::new(&tree);
-        let mut simd_pruned_buf = JitSimdBuffers::<T>::new(&tree);
+        let mut simd_buf = JitSimdBuffers::<T>::new(tree);
+        let mut simd_pruned_buf = JitSimdBuffers::<T>::new(tree);
         for _ in 0..N_INTERVALS {
             // Sample a random interval.
             interval.clear();
