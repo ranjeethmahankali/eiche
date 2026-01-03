@@ -353,7 +353,7 @@ fn b_spheres_interval_eval(c: &mut Criterion) {
 }
 
 fn b_circles_value_eval(c: &mut Criterion) {
-    let tree = test_util::random_circles(
+    let tree = test_util::random_circles_sorted(
         (0., circles::DIMS_F64),
         (0., circles::DIMS_F64),
         circles::RAD_RANGE,
@@ -794,7 +794,7 @@ mod jit {
     }
 
     fn b_circles_eval<T: NumberType>(c: &mut Criterion) {
-        let tree = test_util::random_circles(
+        let tree = test_util::random_circles_sorted(
             (0., circles::DIMS_F64),
             (0., circles::DIMS_F64),
             circles::RAD_RANGE,
@@ -827,6 +827,68 @@ mod jit {
                     }
                 }
             })
+        });
+    }
+
+    fn b_circles_pruned_eval<T: NumberType>(c: &mut Criterion) {
+        const PRUNE_THRESHOLD: usize = circles::N_CIRCLES / 2;
+        const DIM_INTERVAL: u32 = 1 << (circles::PRUNE_DEPTH - 2);
+        let tree = test_util::random_circles_sorted(
+            (0., circles::DIMS_F64),
+            (0., circles::DIMS_F64),
+            circles::RAD_RANGE,
+            circles::N_CIRCLES,
+        );
+        let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
+        let context = JitContext::default();
+        let pruner = tree
+            .jit_compile_pruner::<T>(&context, "xy", PRUNE_THRESHOLD)
+            .unwrap();
+        let eval = pruner.compile_single_func(&context).unwrap();
+        let mut signals = vec![0u32; pruner.num_signals()].into_boxed_slice();
+        c.bench_function(&format!("circles-jit-pruned-{}", T::type_str()), |b| {
+            b.iter(|| {
+                for yi in (0..circles::DIMS).step_by(DIM_INTERVAL as usize) {
+                    let mut interval = [
+                        [T::nan(); 2],
+                        [
+                            T::from_f64(yi as f64),
+                            T::from_f64((yi + DIM_INTERVAL) as f64),
+                        ],
+                    ];
+                    for xi in (0..circles::DIMS).step_by(DIM_INTERVAL as usize) {
+                        interval[0] = [
+                            T::from_f64(xi as f64),
+                            T::from_f64((xi + DIM_INTERVAL) as f64),
+                        ];
+                        let mut iout = [[T::nan(); 2]];
+                        signals.fill(0u32);
+                        black_box(&pruner)
+                            .run(&interval, &mut iout, &mut signals)
+                            .unwrap();
+                        for y in yi..(yi + DIM_INTERVAL) {
+                            let mut pos = [T::nan(), T::from_f64(y as f64 + 0.5)];
+                            for x in xi..(xi + DIM_INTERVAL) {
+                                pos[0] = T::from_f64(x as f64 + 0.5);
+                                let mut out = [T::nan()];
+                                black_box(&eval)
+                                    .run(black_box(&pos), &mut out, &signals)
+                                    .unwrap();
+                                let val = out[0].to_f64();
+                                *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                                    f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
+                                } else {
+                                    f64::min(
+                                        ((circles::RAD_RANGE.1 - val) / circles::RAD_RANGE.1)
+                                            * 255.,
+                                        255.,
+                                    ) as u8
+                                }]);
+                            }
+                        }
+                    }
+                }
+            });
         });
     }
 
@@ -937,68 +999,6 @@ mod jit {
                         out[0]
                     }),
                 ));
-            });
-        });
-    }
-
-    fn b_circles_pruned_eval<T: NumberType>(c: &mut Criterion) {
-        const PRUNE_THRESHOLD: usize = circles::N_CIRCLES / 2;
-        const DIM_INTERVAL: u32 = 1 << (circles::PRUNE_DEPTH - 2);
-        let tree = test_util::random_circles_sorted(
-            (0., circles::DIMS_F64),
-            (0., circles::DIMS_F64),
-            circles::RAD_RANGE,
-            circles::N_CIRCLES,
-        );
-        let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
-        let context = JitContext::default();
-        let pruner = tree
-            .jit_compile_pruner::<T>(&context, "xy", PRUNE_THRESHOLD)
-            .unwrap();
-        let eval = pruner.compile_single_func(&context).unwrap();
-        let mut signals = vec![0u32; pruner.num_signals()].into_boxed_slice();
-        c.bench_function(&format!("circles-pruned-eval-{}", T::type_str()), |b| {
-            b.iter(|| {
-                for yi in (0..circles::DIMS).step_by(DIM_INTERVAL as usize) {
-                    let mut interval = [
-                        [T::nan(); 2],
-                        [
-                            T::from_f64(yi as f64),
-                            T::from_f64((yi + DIM_INTERVAL) as f64),
-                        ],
-                    ];
-                    for xi in (0..circles::DIMS).step_by(DIM_INTERVAL as usize) {
-                        interval[0] = [
-                            T::from_f64(xi as f64),
-                            T::from_f64((xi + DIM_INTERVAL) as f64),
-                        ];
-                        let mut iout = [[T::nan(); 2]];
-                        signals.fill(0u32);
-                        black_box(&pruner)
-                            .run(&interval, &mut iout, &mut signals)
-                            .unwrap();
-                        for y in yi..(yi + DIM_INTERVAL) {
-                            let mut pos = [T::nan(), T::from_f64(y as f64 + 0.5)];
-                            for x in xi..(xi + DIM_INTERVAL) {
-                                pos[0] = T::from_f64(x as f64 + 0.5);
-                                let mut out = [T::nan()];
-                                black_box(&eval)
-                                    .run(black_box(&pos), &mut out, &signals)
-                                    .unwrap();
-                                let val = out[0].to_f64();
-                                *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
-                                    f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
-                                } else {
-                                    f64::min(
-                                        ((circles::RAD_RANGE.1 - val) / circles::RAD_RANGE.1)
-                                            * 255.,
-                                        255.,
-                                    ) as u8
-                                }]);
-                            }
-                        }
-                    }
-                }
             });
         });
     }
