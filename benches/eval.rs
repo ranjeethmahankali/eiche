@@ -47,7 +47,7 @@ mod circles {
     pub const DIMS: u32 = 1 << PRUNE_DEPTH; // 512 x 512 image.
     pub const DIMS_F64: f64 = DIMS as f64;
     pub const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
-    pub const N_CIRCLES: usize = 100;
+    pub const N_CIRCLES: usize = 256;
 }
 
 /// Creates a very large tree for benchmarking. This tree is designed to:
@@ -358,7 +358,9 @@ fn b_circles_value_eval(c: &mut Criterion) {
         (0., circles::DIMS_F64),
         circles::RAD_RANGE,
         circles::N_CIRCLES,
-    );
+    )
+    .compacted()
+    .unwrap();
     let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
     let mut eval = ValueEvaluator::new(&tree);
     let mut group = c.benchmark_group("circles");
@@ -395,7 +397,9 @@ fn b_circles_pruned_eval(c: &mut Criterion) {
         (0., circles::DIMS_F64),
         circles::RAD_RANGE,
         circles::N_CIRCLES,
-    );
+    )
+    .compacted()
+    .unwrap();
     let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
     let mut group = c.benchmark_group("circles");
     group.sample_size(10);
@@ -799,7 +803,9 @@ mod jit {
             (0., circles::DIMS_F64),
             circles::RAD_RANGE,
             circles::N_CIRCLES,
-        );
+        )
+        .compacted()
+        .unwrap();
         let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
         let context = JitContext::default();
         let eval = tree.jit_compile::<T>(&context, "xy").unwrap();
@@ -831,14 +837,16 @@ mod jit {
     }
 
     fn b_circles_pruned_eval<T: NumberType>(c: &mut Criterion) {
-        const PRUNE_THRESHOLD: usize = circles::N_CIRCLES / 2;
-        const DIM_INTERVAL: u32 = 1 << (circles::PRUNE_DEPTH - 2);
+        const PRUNE_THRESHOLD: usize = circles::N_CIRCLES / 8;
+        const DIM_INTERVAL: u32 = 1 << (circles::PRUNE_DEPTH - 4);
         let tree = test_util::random_circles_sorted(
             (0., circles::DIMS_F64),
             (0., circles::DIMS_F64),
             circles::RAD_RANGE,
             circles::N_CIRCLES,
-        );
+        )
+        .compacted()
+        .unwrap();
         let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
         let context = JitContext::default();
         let pruner = tree
@@ -1015,14 +1023,14 @@ mod jit {
         b_circles_interval::<f64>,
         b_circles_eval::<f32>,
         b_circles_eval::<f64>,
+        b_circles_pruned_eval::<f32>,
+        b_circles_pruned_eval::<f64>,
         b_small_tree_interval::<f32>,
         b_small_tree_interval::<f64>,
         b_medium_tree_interval::<f32>,
         b_medium_tree_interval::<f64>,
         b_large_tree_interval::<f32>,
         b_large_tree_interval::<f64>,
-        b_circles_pruned_eval::<f32>,
-        b_circles_pruned_eval::<f64>,
     );
 }
 
