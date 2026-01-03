@@ -390,7 +390,7 @@ fn b_circles_value_eval(c: &mut Criterion) {
 }
 
 fn b_circles_pruned_eval(c: &mut Criterion) {
-    let tree = test_util::random_circles(
+    let tree = test_util::random_circles_sorted(
         (0., circles::DIMS_F64),
         (0., circles::DIMS_F64),
         circles::RAD_RANGE,
