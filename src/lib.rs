@@ -27,6 +27,10 @@ pub mod llvm_jit;
 pub use llvm_jit::{
     JitContext,
     interval::{JitIntervalFn, JitIntervalFnSync},
+    pruning::{
+        JitPruner, JitPrunerSync, JitPruningFn, JitPruningFnSync, JitPruningIntervalFn,
+        JitPruningIntervalFnSync, JitPruningSimdFn, JitPruningSimdFnSync,
+    },
     simd_array::{JitSimdFn, NativeSimdFunc, SimdVec, Wide},
     single::{JitFn, JitFnSync},
 };
