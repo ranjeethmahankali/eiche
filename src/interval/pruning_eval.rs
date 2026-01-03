@@ -521,8 +521,6 @@ mod test {
         tree::{Tree, Value},
     };
 
-    type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
-
     fn sphere(cx: f64, cy: f64, cz: f64, r: f64) -> Result<Tree, Error> {
         deftree!(- (sqrt (+
                           (pow (- 'x (const cx)) 2)
@@ -640,6 +638,7 @@ mod test {
 
     #[test]
     fn t_compare_pruned_eval() {
+        type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
         const PRUNE_DEPTH: usize = 7;
         const DIMS: u32 = 1 << PRUNE_DEPTH;
         const DIMS_F64: f64 = DIMS as f64;
