@@ -2495,28 +2495,19 @@ mod test {
      */
     #[test]
     fn t_hex_test_case_reduced() {
-        /*
-        0 => 'x
-        1 => (- 'x)
-        2 => 0.016421999999999999098055
-        3 => (- (- 'x) 0.016421999999999999098055)
-        4 => 0.011199999999999999886202
-        5 => (rem (- (- 'x) 0.016421999999999999098055) 0.011199999999999999886202)
-        6 => (min (rem (- (- 'x) 0.016421999999999999098055) 0.011199999999999999886202) (- (- 'x) 0.016421999999999999098055))
-        7 => 0.963199999999999945110574
-        8 => (- (- (- 'x) 0.016421999999999999098055) 0.963199999999999945110574)
-        9 => (max (min (rem (- (- 'x) 0.016421999999999999098055) 0.011199999999999999886202) (- (- 'x) 0.016421999999999999098055)) (- (- (- 'x) 0.016421999999999999098055) 0.963199999999999945110574))
-
-        10 => (+ (max (min (rem (- (- 'x) 0.016421999999999999098055) 0.011199999999999999886202) (- (- 'x) 0.016421999999999999098055)) (- (- (- 'x) 0.016421999999999999098055) 0.963199999999999945110574)) 0.016421999999999999098055)
-
-        11 => 0.022399999999999999772404
-        12 => (- (+ (max (min (rem (- (- 'x) 0.016421999999999999098055) 0.011199999999999999886202) (- (- 'x) 0.016421999999999999098055)) (- (- (- 'x) 0.016421999999999999098055) 0.963199999999999945110574)) 0.016421999999999999098055) 0.022399999999999999772404)
-         */
-        let tree = deftree!(- (+ (max (min (rem (- (- 'x) 0.016421999999999999098055)
-                                            0.011199999999999999886202)
+        let tree = deftree!(- (+ (max (min
+                                       (rem (- (- 'x)
+                                             0.016421999999999999098055)
+                                        0.011199999999999999886202)
                                        (- (- 'x) 0.016421999999999999098055))
-                                  (- (- (- 'x) 0.016421999999999999098055) 0.963199999999999945110574))
-                               0.016421999999999999098055) 0.022399999999999999772404).unwrap();
+                                  (- (- (- 'x) 0.016421999999999999098055)
+                                   0.963199999999999945110574))
+                               0.016421999999999999098055)
+                            0.022399999999999999772404)
+        .unwrap()
+        .compacted()
+        .unwrap();
+        // Setup the buffers;
         let threshold = tree.len() / 10;
         let input: [f32; 3] = [-0.11246335, -0.022609971, -0.0885];
         let interval: [[f32; 2]; 3] = [
@@ -2524,29 +2515,27 @@ mod test {
             [-0.045131966, -0.022609971],
             [-0.08850001, -0.08849999],
         ];
+        let mut iout = [[f32::NAN; 2]];
         let mut output = [f32::NAN];
+        // Evaluate without pruning for baseline.
         let context = JitContext::default();
-
         let eval = tree.jit_compile(&context, "xyz").unwrap();
         eval.run(&input, &mut output).unwrap();
         let expected = output[0];
-
+        // Evaluate with pruning.
         let pruner = tree
             .jit_compile_pruner::<f32>(&context, "xyz", threshold, 1e-6)
             .unwrap();
         let prune_eval = pruner.compile_single_func(&context).unwrap();
-        let mut iout = [[f32::NAN; 2]];
         let mut signals = vec![0u32; pruner.n_signals];
         pruner.run(&interval, &mut iout, &mut signals).unwrap();
         output.fill(f32::NAN);
         prune_eval.run(&input, &mut output, &signals).unwrap();
         let actual = output[0];
-
-        dbg!(actual, expected, (actual - expected).abs());
-        assert!({
-            const ERR: f32 = 0.01;
-            actual.signum() != expected.signum() || (actual - expected).abs() > ERR
-        });
+        assert!(
+            actual.signum() == expected.signum() && (actual - expected).abs() < f32::EPSILON,
+            "These two values must be equal. This works if the original tree is not compacted"
+        );
     }
 
     #[test]
