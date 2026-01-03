@@ -183,3 +183,60 @@ pub fn random_circles(
     assert_eq!(tree.dims(), (1, 1));
     tree
 }
+
+pub fn random_circles_sorted(
+    xrange: (f64, f64),
+    yrange: (f64, f64),
+    rad_range: (f64, f64),
+    num_circles: usize,
+) -> Tree {
+    let mut rng = StdRng::seed_from_u64(42);
+    let mut centers = (0..num_circles)
+        .map(|_| {
+            (
+                sample_range(xrange, &mut rng),
+                sample_range(yrange, &mut rng),
+            )
+        })
+        .collect::<Box<[(f64, f64)]>>();
+    {
+        // Sort the centers.
+        let mut chunk_size = centers.len();
+        let mut flag = true;
+        while chunk_size > 1 {
+            for chunk in centers.chunks_mut(chunk_size) {
+                if flag {
+                    chunk.sort_by(|(ax, _), (bx, _)| ax.total_cmp(&bx));
+                } else {
+                    chunk.sort_by(|(_, ay), (_, by)| ay.total_cmp(&by))
+                }
+            }
+            flag = !flag;
+            chunk_size /= 2;
+        }
+    }
+    let mut ping: Vec<_> = centers
+        .into_iter()
+        .map(|(x, y)| circle(x, y, sample_range(rad_range, &mut rng)))
+        .collect();
+    let mut pong = Vec::<Result<Tree, Error>>::with_capacity(num_circles / 2);
+    while ping.len() > 1 {
+        {
+            let mut ping = ping.drain(..);
+            loop {
+                pong.push(match (ping.next(), ping.next()) {
+                    (Some(a), Some(b)) => crate::min(a, b),
+                    (Some(v), None) => v,
+                    _ => break,
+                });
+            }
+        }
+        std::mem::swap(&mut ping, &mut pong);
+    }
+    assert_eq!(ping.len(), 1);
+    assert_eq!(pong.len(), 0);
+    ping.into_iter()
+        .next()
+        .expect("Not expecting an empty list")
+        .expect("Unable to create a sorted tree of random circles")
+}

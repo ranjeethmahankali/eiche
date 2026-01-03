@@ -2176,16 +2176,24 @@ mod test {
     #[test]
     fn t_compare_pruned_eval_random_circles() {
         type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
-        const DIMS: u32 = 1 << 8;
+        const DIMS: u32 = 1 << 7;
         const DIMS_F64: f64 = DIMS as f64;
         const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
-        const DIM_INTERVAL: u32 = 1 << 8;
-        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, 512);
+        const DIM_INTERVAL: u32 = 1 << 5;
+        const NUM_CIRCLES: usize = 64;
+        const PRUNE_THRESHOLD: usize = 32;
+        let tree = test_util::random_circles_sorted(
+            (0., DIMS_F64),
+            (0., DIMS_F64),
+            RAD_RANGE,
+            NUM_CIRCLES,
+        )
+        .compacted()
+        .unwrap();
         let context = JitContext::default();
         let expected_image = {
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let eval = tree.jit_compile::<f64>(&context, "xy").unwrap();
-            let before = std::time::Instant::now();
             for y in 0..DIMS {
                 let mut pos = [f64::NAN, y as f64 + 0.5];
                 for x in 0..DIMS {
@@ -2200,29 +2208,23 @@ mod test {
                     }]);
                 }
             }
-            println!(
-                "Base time: {}ms",
-                (std::time::Instant::now() - before).as_millis()
-            );
-            image.save("expected.png").unwrap();
             image
         };
         let pruned_image = {
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let pruner = tree
-                .jit_compile_pruner::<f64>(&context, "xy", 7200)
+                .jit_compile_pruner::<f64>(&context, "xy", PRUNE_THRESHOLD)
                 .unwrap();
             let eval = pruner.compile_single_func(&context).unwrap();
             eprintln!("Using {} signals", pruner.n_signals);
             let mut signals = vec![0u32; pruner.n_signals].into_boxed_slice();
-            let before = std::time::Instant::now();
             for yi in (0..DIMS).step_by(DIM_INTERVAL as usize) {
-                // let mut interval = [[f64::NAN; 2], [yi as f64, (yi + DIM_INTERVAL) as f64]];
+                let mut interval = [[f64::NAN; 2], [yi as f64, (yi + DIM_INTERVAL) as f64]];
                 for xi in (0..DIMS).step_by(DIM_INTERVAL as usize) {
-                    // interval[0] = [xi as f64, (xi + DIM_INTERVAL) as f64];
-                    // let mut iout = [[f64::NAN; 2]];
-                    // signals.fill(0u32);
-                    // pruner.run(&interval, &mut iout, &mut signals).unwrap();
+                    interval[0] = [xi as f64, (xi + DIM_INTERVAL) as f64];
+                    let mut iout = [[f64::NAN; 2]];
+                    signals.fill(0u32);
+                    pruner.run(&interval, &mut iout, &mut signals).unwrap();
                     for y in yi..(yi + DIM_INTERVAL) {
                         let mut pos = [f64::NAN, y as f64 + 0.5];
                         for x in xi..(xi + DIM_INTERVAL) {
@@ -2239,11 +2241,6 @@ mod test {
                     }
                 }
             }
-            println!(
-                "Pruned time: {}ms",
-                (std::time::Instant::now() - before).as_millis()
-            );
-            image.save("actual.png").unwrap();
             image
         };
         assert_eq!(pruned_image.width(), expected_image.width());
