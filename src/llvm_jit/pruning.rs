@@ -19,9 +19,10 @@ use inkwell::{
     execution_engine::{ExecutionEngine, JitFunction},
     llvm_sys::core::LLVMBuildFreeze,
     module::Module,
-    types::{BasicType, IntType},
+    types::{BasicType, IntType, VectorType},
     values::{
         AsValueRef, BasicValue, BasicValueEnum, FunctionValue, IntValue, PhiValue, PointerValue,
+        VectorValue,
     },
 };
 use std::{
@@ -638,7 +639,13 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             n_outputs,
             n_signals,
             ..
-        } = compile_pruner_impl::<T, false>(&self.tree, context, &self.blocks, &self.params)?;
+        } = compile_pruner_impl::<T, false>(
+            &self.tree,
+            context,
+            &self.blocks,
+            &self.params,
+            f64::NAN,
+        )?;
         // SAFETY: The signature is correct, and well tested. The function
         // pointer should never be invalidated, because we allocated a dedicated
         // execution engine, with it's own block of executable memory, that will
@@ -975,6 +982,7 @@ impl Tree {
         context: &'ctx JitContext,
         params: &str,
         pruning_threshold: usize,
+        eps: f64,
     ) -> Result<JitPruner<'ctx, T>, Error> {
         if !self.is_scalar() {
             // Only support scalar output trees.
@@ -994,7 +1002,7 @@ impl Tree {
             params,
             merge_block_map,
             block_signal_map,
-        } = compile_pruner_impl::<T, true>(&tree, context, &blocks, params)?;
+        } = compile_pruner_impl::<T, true>(&tree, context, &blocks, params, eps)?;
         // SAFETY: The signature is correct, and well tested. The function
         // pointer should never be invalidated, because we allocated a dedicated
         // execution engine, with it's own block of executable memory, that will
@@ -1031,6 +1039,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
     context: &'ctx JitContext,
     blocks: &[Block],
     params: &str,
+    eps: f64,
 ) -> Result<PrunerInfo<'ctx>, Error> {
     let (code_block_map, merge_block_map) = reverse_lookup(blocks);
     let ranges = interval::compute_ranges(tree)?;
@@ -1080,6 +1089,8 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
         builder,
         &mut constants,
     )?;
+    let eps = eps.abs();
+    let eps = VectorType::const_vector(&[constants.float(-eps), constants.float(eps)]);
     if let Some(first) = bbs.first() {
         builder.build_unconditional_branch(*first)?;
     }
@@ -1147,6 +1158,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
                             &compiler.module,
                             &mut constants,
                             function,
+                            eps,
                         )?;
                     }
                     // Clear the processed notifications.
@@ -1365,21 +1377,27 @@ fn build_notify<'ctx>(
     module: &'ctx Module,
     constants: &mut Constants<'ctx>,
     function: FunctionValue<'ctx>,
+    eps: VectorValue<'ctx>,
 ) -> Result<BasicBlock<'ctx>, Error> {
     let cond = match node {
         Binary(op, lhs, rhs) => {
+            let left = builder.build_float_add(
+                regs[lhs].into_vector_value(),
+                eps,
+                &format!("lhs_inflate_{index}"),
+            )?;
+            let right = builder.build_float_add(
+                regs[rhs].into_vector_value(),
+                eps,
+                &format!("rhs_inflate_{index}"),
+            )?;
             let interval::InequalityFlags {
                 either_empty,
                 strictly_before,
                 strictly_after,
                 touching,
             } = interval::build_interval_inequality_flags(
-                regs[lhs].into_vector_value(),
-                regs[rhs].into_vector_value(),
-                builder,
-                module,
-                constants,
-                index,
+                left, right, builder, module, constants, index,
             )?;
             let not_empty = builder.build_not(either_empty, &format!("not_empty_{index}"))?;
             let before = builder.build_or(
@@ -2042,7 +2060,7 @@ mod test {
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
         .unwrap();
         let ctx = JitContext::default();
-        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8, 1e-6).unwrap();
         assert_eq!(eval.n_signals, 3);
         assert_eq!(eval.n_inputs, 2);
         assert_eq!(eval.n_outputs, 1);
@@ -2071,7 +2089,7 @@ mod test {
                             (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5))
         .unwrap();
         let ctx = JitContext::default();
-        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8, 1e-6).unwrap();
         assert_eq!(eval.n_signals, 3);
         assert_eq!(eval.n_inputs, 2);
         assert_eq!(eval.n_outputs, 1);
@@ -2102,7 +2120,7 @@ mod test {
                              (- (sqrt (+ (pow (- 'x 1) 2) (pow 'y 2))) 1.5)))
         .unwrap();
         let ctx = JitContext::default();
-        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8).unwrap();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 8, 1e-6).unwrap();
         assert_eq!(eval.n_signals, 5);
         assert_eq!(eval.n_inputs, 2);
         assert_eq!(eval.n_outputs, 1);
@@ -2135,7 +2153,7 @@ mod test {
         let ctx = JitContext::default();
         // Because the tree is compacted, more nodes are shared, and the min
         // nodes dominate fewer nodes. So we lower the pruning threshold for this test.
-        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 3).unwrap();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 3, 1e-6).unwrap();
         assert_eq!(eval.n_signals, 3);
         assert_eq!(eval.n_inputs, 2);
         assert_eq!(eval.n_outputs, 1);
@@ -2168,7 +2186,7 @@ mod test {
         .compacted()
         .unwrap();
         let ctx = JitContext::default();
-        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 3).unwrap();
+        let eval = tree.jit_compile_pruner::<f64>(&ctx, "xy", 3, 1e-6).unwrap();
         assert_eq!(eval.n_signals, 6);
         assert_eq!(eval.n_inputs, 2);
         assert_eq!(eval.n_outputs, 1);
@@ -2208,7 +2226,7 @@ mod test {
             .expect("Unable to compile single eval");
         let simd_eval = tree.jit_compile_array(&context, &params).unwrap();
         let pruner = tree
-            .jit_compile_pruner::<T>(&context, &params, pruning_threshold)
+            .jit_compile_pruner::<T>(&context, &params, pruning_threshold, eps)
             .expect("Unable to compile a JIT pruner");
         let pruned_interval_eval = pruner
             .compile_interval_func(&context)
@@ -2508,7 +2526,7 @@ mod test {
         let pruned_image = {
             let mut image = ImageBuffer::new(DIMS, DIMS);
             let pruner = tree
-                .jit_compile_pruner::<f64>(&context, "xy", PRUNE_THRESHOLD)
+                .jit_compile_pruner::<f64>(&context, "xy", PRUNE_THRESHOLD, 1e-6)
                 .unwrap();
             let eval = pruner.compile_single_func(&context).unwrap();
             let mut signals = vec![0u32; pruner.n_signals].into_boxed_slice();

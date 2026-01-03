@@ -850,7 +850,7 @@ mod jit {
         let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
         let context = JitContext::default();
         let pruner = tree
-            .jit_compile_pruner::<T>(&context, "xy", PRUNE_THRESHOLD)
+            .jit_compile_pruner::<T>(&context, "xy", PRUNE_THRESHOLD, 1e-6)
             .unwrap();
         let eval = pruner.compile_single_func(&context).unwrap();
         let mut signals = vec![0u32; pruner.num_signals()].into_boxed_slice();
