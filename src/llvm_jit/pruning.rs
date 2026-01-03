@@ -138,7 +138,9 @@ where
         Ok(())
     }
 
-    /// # SAFETY: This is the same as [`run`] except the caller has to ensure
+    /// # Safety
+    ///
+    /// This is the same as [`run`] except the caller has to ensure
     /// the buffers of the right size.
     pub unsafe fn run_unchecked(&self, buf: &mut JitSimdBuffers<T>, signals: &[u32]) {
         // SAFETY: Calling a raw function pointer. `JitSimdBuffers` is a safe
@@ -189,7 +191,9 @@ where
         Ok(())
     }
 
-    /// # SAFETY: This is the same as [`run`] except the caller has to ensure
+    /// # Safety
+    ///
+    /// This is the same as [`run`] except the caller has to ensure
     /// the buffers of the right size.
     pub unsafe fn run_unchecked(&self, buf: &mut JitSimdBuffers<T>, signals: &[u32]) {
         // SAFETY: Calling a raw function pointer. `JitSimdBuffers` is a safe
@@ -226,7 +230,9 @@ impl<'ctx, T: NumberType> JitPruningIntervalFn<'ctx, T> {
         Ok(())
     }
 
-    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// # Safety
+    ///
+    /// This is the same as [`run`], except the user has to ensure the
     /// buffers are all the right size.
     pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]], signals: &[u32]) {
         // # SAFETY: We told the caller it's their fault.
@@ -275,7 +281,9 @@ impl<'ctx, T: NumberType> JitPruningIntervalFnSync<'ctx, T> {
         Ok(())
     }
 
-    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// # Safety
+    ///
+    /// This is the same as [`run`], except the user has to ensure the
     /// buffers are all the right size.
     pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]], signals: &[u32]) {
         // # SAFETY: We told the caller it's their fault.
@@ -303,7 +311,9 @@ impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
         Ok(())
     }
 
-    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// # Safety
+    ///
+    /// This is the same as [`run`], except the user has to ensure the
     /// buffers are all the right size.
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) {
         // # SAFETY: We told the caller it's their fault.
@@ -347,7 +357,9 @@ impl<'ctx, T: NumberType> JitPruningFnSync<'ctx, T> {
         Ok(())
     }
 
-    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// # Safety
+    ///
+    /// This is the same as [`run`], except the user has to ensure the
     /// buffers are all the right size.
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) {
         // # SAFETY: We told the caller it's their fault.
@@ -384,7 +396,9 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         Ok(())
     }
 
-    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// # Safety
+    ///
+    /// This is the same as [`run`], except the user has to ensure the
     /// buffers are all the right size.
     pub unsafe fn run_unchecked(
         &self,
@@ -934,7 +948,9 @@ impl<'ctx, T: NumberType> JitPrunerSync<'ctx, T> {
         Ok(())
     }
 
-    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// # Safety
+    ///
+    /// This is the same as [`run`], except the user has to ensure the
     /// buffers are all the right size.
     pub unsafe fn run_unchecked(
         &self,
