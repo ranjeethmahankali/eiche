@@ -136,6 +136,11 @@ impl<'ctx, T: NumberType> JitPruningIntervalFn<'ctx, T> {
         Ok(())
     }
 
+    /**
+    # Safety
+
+    This is the same as [`run`], except the user has to ensure the buffers are all the right size.
+     */
     pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]], signals: &[u32]) {
         unsafe {
             self.func.call(
@@ -160,6 +165,11 @@ impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
         Ok(())
     }
 
+    /**
+    # Safety
+
+    This is the same as [`run`], except the user has to ensure the buffers are all the right size.
+     */
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) {
         unsafe {
             self.func.call(
@@ -193,6 +203,11 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         Ok(())
     }
 
+    /**
+    # Safety
+
+    This is the same as [`run`], except the user has to ensure the buffers are all the right size.
+     */
     pub unsafe fn run_unchecked(
         &self,
         inputs: &[[T; 2]],
@@ -267,7 +282,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         if let Some(first) = bbs.first() {
             builder.build_unconditional_branch(*first)?;
         }
-        let (phis, phi_map) = init_merge_phi(
+        let PhiNodes { phis, phi_map } = init_merge_phi(
             &self.blocks,
             builder,
             &bbs,
@@ -537,7 +552,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         if let Some(first) = bbs.first() {
             builder.build_unconditional_branch(*first)?;
         }
-        let (phis, phi_map) = init_merge_phi(
+        let PhiNodes { phis, phi_map } = init_merge_phi(
             &self.blocks,
             builder,
             &bbs,
@@ -801,7 +816,10 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
             )
         })
         .collect();
-    let (signal_ptrs, block_signal_map) = init_signal_ptrs(
+    let SignalPointers {
+        pointers: signal_ptrs,
+        block_signal_map,
+    } = init_signal_ptrs(
         blocks,
         function
             .get_nth_param(2)
@@ -816,7 +834,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
     if let Some(first) = bbs.first() {
         builder.build_unconditional_branch(*first)?;
     }
-    let (phis, phi_map) = init_merge_phi(
+    let PhiNodes { phis, phi_map } = init_merge_phi(
         blocks,
         builder,
         &bbs,
@@ -1029,13 +1047,14 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_merges<
     'ctx,
     FnMakePoison: Fn(usize) -> BasicValueEnum<'ctx>,
     FnMakeConst: FnMut(Value) -> BasicValueEnum<'ctx>,
 >(
-    phis: &Box<[PhiValue<'ctx>]>,
-    phi_map: &Box<[usize]>,
+    phis: &[PhiValue<'ctx>],
+    phi_map: &[usize],
     merge_list: &mut Vec<Incoming<'ctx>>,
     merge_map: &HashMap<usize, usize>,
     bbs: &[BasicBlock<'ctx>],
@@ -1084,6 +1103,7 @@ fn build_merges<
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_notify<'ctx>(
     node: Node,
     index: usize,
@@ -1285,6 +1305,11 @@ struct Notification {
     kind: PruneKind,
 }
 
+struct PhiNodes<'ctx> {
+    phis: Box<[PhiValue<'ctx>]>,
+    phi_map: Box<[usize]>,
+}
+
 fn init_merge_phi<'ctx, TPhi: BasicType<'ctx> + Copy, TBool: BasicType<'ctx> + Copy>(
     blocks: &[Block],
     builder: &'ctx Builder,
@@ -1292,7 +1317,7 @@ fn init_merge_phi<'ctx, TPhi: BasicType<'ctx> + Copy, TBool: BasicType<'ctx> + C
     out_type: TPhi,
     bool_type: TBool,
     nodes: &[Node],
-) -> Result<(Box<[PhiValue<'ctx>]>, Box<[usize]>), Error> {
+) -> Result<PhiNodes<'ctx>, Error> {
     let original_bb = builder.get_insert_block();
     let (phis, indices) = blocks.iter().zip(bbs.iter()).try_fold(
         (Vec::<PhiValue>::new(), Vec::<usize>::new()),
@@ -1320,7 +1345,15 @@ fn init_merge_phi<'ctx, TPhi: BasicType<'ctx> + Copy, TBool: BasicType<'ctx> + C
     if let Some(bb) = original_bb {
         builder.position_at_end(bb);
     }
-    Ok((phis.into_boxed_slice(), indices.into_boxed_slice()))
+    Ok(PhiNodes {
+        phis: phis.into_boxed_slice(),
+        phi_map: indices.into_boxed_slice(),
+    })
+}
+
+struct SignalPointers<'ctx> {
+    pointers: Box<[PointerValue<'ctx>]>,
+    block_signal_map: Box<[usize]>,
 }
 
 fn init_signal_ptrs<'ctx>(
@@ -1329,7 +1362,7 @@ fn init_signal_ptrs<'ctx>(
     i32_type: IntType<'ctx>,
     builder: &'ctx Builder,
     constants: &mut Constants<'ctx>,
-) -> Result<(Box<[PointerValue<'ctx>]>, Box<[usize]>), Error> {
+) -> Result<SignalPointers<'ctx>, Error> {
     let (ptrs, indices) = blocks.iter().try_fold(
         (Vec::<PointerValue>::new(), Vec::<usize>::new()),
         |(mut ptrs, mut indices), block| -> Result<(Vec<PointerValue>, Vec<usize>), Error> {
@@ -1355,14 +1388,23 @@ fn init_signal_ptrs<'ctx>(
             }
         },
     )?;
-    Ok((ptrs.into_boxed_slice(), indices.into_boxed_slice()))
+    Ok(SignalPointers {
+        pointers: ptrs.into_boxed_slice(),
+        block_signal_map: indices.into_boxed_slice(),
+    })
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Alternate {
     None,
     Node(usize),
     Constant(Value),
+}
+
+impl PartialOrd for Alternate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl Ord for Alternate {
