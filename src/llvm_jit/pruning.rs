@@ -94,6 +94,36 @@ pub struct JitPruningIntervalFn<'ctx, T: NumberType> {
     _phantom: PhantomData<T>,
 }
 
+pub struct JitPrunerSync<'ctx, T: NumberType> {
+    func: NativePruningIntervalFunc,
+    n_inputs: usize,
+    n_outputs: usize,
+    n_signals: usize,
+    phantom: PhantomData<&'ctx JitPruner<'ctx, T>>,
+}
+
+pub struct JitPruningFnSync<'ctx, T: NumberType> {
+    func: NativeSingleFunc,
+    n_inputs: usize,
+    n_outputs: usize,
+    n_signals: usize,
+    phantom: PhantomData<&'ctx JitPruningFn<'ctx, T>>,
+}
+
+pub struct JitPruningSimdFnSync<'ctx, T: NumberType> {
+    func: NativeSimdFunc,
+    n_signals: usize,
+    phantom: PhantomData<&'ctx JitPruningSimdFn<'ctx, T>>,
+}
+
+pub struct JitPruningIntervalFnSync<'ctx, T: NumberType> {
+    func: NativeIntervalFunc,
+    n_inputs: usize,
+    n_outputs: usize,
+    n_signals: usize,
+    phantom: PhantomData<&'ctx JitPruningIntervalFn<'ctx, T>>,
+}
+
 impl<'ctx, T> JitPruningSimdFn<'ctx, T>
 where
     Wide: SimdVec<T>,
@@ -103,9 +133,18 @@ where
         if self.n_signals != signals.len() {
             return Err(Error::InputSizeMismatch(self.n_signals, signals.len()));
         }
+        // SAFETY: We just checked above.
+        unsafe { self.run_unchecked(buf, signals) }
+        Ok(())
+    }
+
+    /// # SAFETY: This is the same as [`run`] except the caller has to ensure
+    /// the buffers of the right size.
+    pub unsafe fn run_unchecked(&self, buf: &mut JitSimdBuffers<T>, signals: &[u32]) {
         // SAFETY: Calling a raw function pointer. `JitSimdBuffers` is a safe
         // wrapper that populates the inputs correctly via it's public API, and
-        // knows the correct number of SIMD iterations required.
+        // knows the correct number of SIMD iterations required. For signals, we
+        // told the user they are responsible.
         unsafe {
             self.func.call(
                 buf.inputs.as_ptr().cast(),
@@ -114,7 +153,57 @@ where
                 signals.as_ptr(),
             );
         }
+    }
+
+    pub fn as_sync(&'ctx self) -> JitPruningSimdFnSync<'ctx, T> {
+        // SAFETY: Accessing the raw function pointer. This is ok, because
+        // this borrows from Self, which owns an Rc reference to the
+        // execution engine that owns the block of executable memory to
+        // which the function pointer points.
+        JitPruningSimdFnSync {
+            func: unsafe { self.func.as_raw() },
+            n_signals: self.n_signals,
+            phantom: PhantomData,
+        }
+    }
+}
+
+unsafe impl<'ctx, T> Sync for JitPruningSimdFnSync<'ctx, T>
+where
+    Wide: SimdVec<T>,
+    T: NumberType,
+{
+}
+
+impl<'ctx, T> JitPruningSimdFnSync<'ctx, T>
+where
+    Wide: SimdVec<T>,
+    T: NumberType,
+{
+    pub fn run(&self, buf: &mut JitSimdBuffers<T>, signals: &[u32]) -> Result<(), Error> {
+        if self.n_signals != signals.len() {
+            return Err(Error::InputSizeMismatch(self.n_signals, signals.len()));
+        }
+        // SAFETY: We just checked above.
+        unsafe { self.run_unchecked(buf, signals) }
         Ok(())
+    }
+
+    /// # SAFETY: This is the same as [`run`] except the caller has to ensure
+    /// the buffers of the right size.
+    pub unsafe fn run_unchecked(&self, buf: &mut JitSimdBuffers<T>, signals: &[u32]) {
+        // SAFETY: Calling a raw function pointer. `JitSimdBuffers` is a safe
+        // wrapper that populates the inputs correctly via it's public API, and
+        // knows the correct number of SIMD iterations required. For signals, we
+        // told the user they are responsible.
+        unsafe {
+            (self.func)(
+                buf.inputs.as_ptr().cast(),
+                buf.outputs.as_mut_ptr().cast(),
+                buf.num_simd_iters() as u64,
+                signals.as_ptr(),
+            );
+        }
     }
 }
 
@@ -132,18 +221,66 @@ impl<'ctx, T: NumberType> JitPruningIntervalFn<'ctx, T> {
         } else if signals.len() != self.n_signals {
             return Err(Error::OutputSizeMismatch(signals.len(), self.n_signals));
         }
+        // # SAFETY:  We just checked the bounds above.
         unsafe { self.run_unchecked(inputs, outputs, signals) }
         Ok(())
     }
 
-    /**
-    # Safety
-
-    This is the same as [`run`], except the user has to ensure the buffers are all the right size.
-     */
+    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// buffers are all the right size.
     pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]], signals: &[u32]) {
+        // # SAFETY: We told the caller it's their fault.
         unsafe {
             self.func.call(
+                inputs.as_ptr().cast(),
+                outputs.as_mut_ptr().cast(),
+                signals.as_ptr().cast(),
+            )
+        }
+    }
+
+    pub fn as_sync(&'ctx self) -> JitPruningIntervalFnSync<'ctx, T> {
+        JitPruningIntervalFnSync {
+            // SAFETY: Accessing the raw function pointer. This is ok, because
+            // this borrows from Self, which owns an Rc reference to the
+            // execution engine that owns the block of executable memory to
+            // which the function pointer points.
+            func: unsafe { self.func.as_raw() },
+            n_inputs: self.n_inputs,
+            n_outputs: self.n_outputs,
+            n_signals: self.n_signals,
+            phantom: PhantomData,
+        }
+    }
+}
+
+unsafe impl<'ctx, T: NumberType> Sync for JitPruningIntervalFnSync<'ctx, T> {}
+
+impl<'ctx, T: NumberType> JitPruningIntervalFnSync<'ctx, T> {
+    pub fn run(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &[u32],
+    ) -> Result<(), Error> {
+        if inputs.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
+        } else if outputs.len() != self.n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
+        } else if signals.len() != self.n_signals {
+            return Err(Error::OutputSizeMismatch(signals.len(), self.n_signals));
+        }
+        // # SAFETY:  We just checked the bounds above.
+        unsafe { self.run_unchecked(inputs, outputs, signals) }
+        Ok(())
+    }
+
+    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// buffers are all the right size.
+    pub unsafe fn run_unchecked(&self, inputs: &[[T; 2]], outputs: &mut [[T; 2]], signals: &[u32]) {
+        // # SAFETY: We told the caller it's their fault.
+        unsafe {
+            (self.func)(
                 inputs.as_ptr().cast(),
                 outputs.as_mut_ptr().cast(),
                 signals.as_ptr().cast(),
@@ -161,18 +298,61 @@ impl<'ctx, T: NumberType> JitPruningFn<'ctx, T> {
         } else if signals.len() != self.n_signals {
             return Err(Error::InputSizeMismatch(signals.len(), self.n_signals));
         }
+        // # SAFETY: We just checked above.
         unsafe { self.run_unchecked(inputs, outputs, signals) }
         Ok(())
     }
 
-    /**
-    # Safety
-
-    This is the same as [`run`], except the user has to ensure the buffers are all the right size.
-     */
+    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// buffers are all the right size.
     pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) {
+        // # SAFETY: We told the caller it's their fault.
         unsafe {
             self.func.call(
+                inputs.as_ptr().cast(),
+                outputs.as_mut_ptr().cast(),
+                signals.as_ptr().cast(),
+            )
+        }
+    }
+
+    pub fn as_sync(&'ctx self) -> JitPruningFnSync<'ctx, T> {
+        JitPruningFnSync {
+            // SAFETY: Accessing the raw function pointer. This is ok, because
+            // this borrows from Self, which owns an Rc reference to the
+            // execution engine that owns the block of executable memory to
+            // which the function pointer points.
+            func: unsafe { self.func.as_raw() },
+            n_inputs: self.n_inputs,
+            n_outputs: self.n_outputs,
+            n_signals: self.n_signals,
+            phantom: PhantomData,
+        }
+    }
+}
+
+unsafe impl<'ctx, T: NumberType> Sync for JitPruningFnSync<'ctx, T> {}
+
+impl<'ctx, T: NumberType> JitPruningFnSync<'ctx, T> {
+    pub fn run(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) -> Result<(), Error> {
+        if inputs.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
+        } else if outputs.len() != self.n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
+        } else if signals.len() != self.n_signals {
+            return Err(Error::InputSizeMismatch(signals.len(), self.n_signals));
+        }
+        // # SAFETY: We just checked above.
+        unsafe { self.run_unchecked(inputs, outputs, signals) }
+        Ok(())
+    }
+
+    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// buffers are all the right size.
+    pub unsafe fn run_unchecked(&self, inputs: &[T], outputs: &mut [T], signals: &[u32]) {
+        // # SAFETY: We told the caller it's their fault.
+        unsafe {
+            (self.func)(
                 inputs.as_ptr().cast(),
                 outputs.as_mut_ptr().cast(),
                 signals.as_ptr().cast(),
@@ -199,21 +379,20 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
         } else if signals.len() != self.n_signals {
             return Err(Error::OutputSizeMismatch(signals.len(), self.n_signals));
         }
+        // # SAFETY: We just checked above.
         unsafe { self.run_unchecked(inputs, outputs, signals) }
         Ok(())
     }
 
-    /**
-    # Safety
-
-    This is the same as [`run`], except the user has to ensure the buffers are all the right size.
-     */
+    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// buffers are all the right size.
     pub unsafe fn run_unchecked(
         &self,
         inputs: &[[T; 2]],
         outputs: &mut [[T; 2]],
         signals: &mut [u32],
     ) {
+        // # SAFETY: We told the caller it's their fault.
         unsafe {
             self.func.call(
                 inputs.as_ptr().cast(),
@@ -717,6 +896,60 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             n_signals: signal_ptrs.len(),
             phantom: PhantomData,
         })
+    }
+
+    pub fn as_sync(&'ctx self) -> JitPrunerSync<'ctx, T> {
+        JitPrunerSync {
+            // SAFETY: Accessing the raw function pointer. This is ok, because
+            // this borrows from Self, which owns an Rc reference to the
+            // execution engine that owns the block of executable memory to
+            // which the function pointer points.
+            func: unsafe { self.func.as_raw() },
+            n_inputs: self.n_inputs,
+            n_outputs: self.n_outputs,
+            n_signals: self.n_signals,
+            phantom: PhantomData,
+        }
+    }
+}
+
+unsafe impl<'ctx, T: NumberType> Sync for JitPrunerSync<'ctx, T> {}
+
+impl<'ctx, T: NumberType> JitPrunerSync<'ctx, T> {
+    pub fn run(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &mut [u32],
+    ) -> Result<(), Error> {
+        if inputs.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(inputs.len(), self.n_inputs));
+        } else if outputs.len() != self.n_outputs {
+            return Err(Error::OutputSizeMismatch(outputs.len(), self.n_outputs));
+        } else if signals.len() != self.n_signals {
+            return Err(Error::OutputSizeMismatch(signals.len(), self.n_signals));
+        }
+        // # SAFETY: We just checked above.
+        unsafe { self.run_unchecked(inputs, outputs, signals) }
+        Ok(())
+    }
+
+    /// # SAFETY: This is the same as [`run`], except the user has to ensure the
+    /// buffers are all the right size.
+    pub unsafe fn run_unchecked(
+        &self,
+        inputs: &[[T; 2]],
+        outputs: &mut [[T; 2]],
+        signals: &mut [u32],
+    ) {
+        // # SAFETY: We told the caller it's their fault.
+        unsafe {
+            (self.func)(
+                inputs.as_ptr().cast(),
+                outputs.as_mut_ptr().cast(),
+                signals.as_mut_ptr().cast(),
+            )
+        }
     }
 }
 
