@@ -51,7 +51,7 @@ pub use prune::Pruner;
 pub use reduce::reduce;
 pub use tree::{
     BinaryOp, Node, TernaryOp, Tree, UnaryOp, Value, abs, add, and, cos, div, dot, equals, exp,
-    extract, floor, geq, greater, l2norm, leq, less, log, matmul, max, min, mul, negate, neq,
-    normalize, not, or, pow, rem, reshape, sin, sqrt, sub, tan, transpose,
+    extract, floor, geq, greater, is_node_scalar, l2norm, leq, less, log, matmul, max, min, mul,
+    negate, neq, normalize, not, or, pow, rem, reshape, sin, sqrt, sub, tan, transpose,
 };
 pub use walk::{DepthIterator, DepthWalker, NodeOrdering};
