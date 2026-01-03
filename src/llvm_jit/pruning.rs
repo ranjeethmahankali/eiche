@@ -1686,7 +1686,7 @@ fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{assert_float_eq, deftree};
+    use crate::{assert_float_eq, deftree, test_util};
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
     #[allow(dead_code)]
@@ -2170,6 +2170,89 @@ mod test {
             0,
             &[('a', 0.0, 10.0), ('x', -10.0, 10.0), ('y', -10.0, 10.0)],
             1e-16,
+        );
+    }
+
+    #[test]
+    fn t_compare_pruned_eval_random_circles() {
+        type ImageBuffer = image::ImageBuffer<image::Luma<u8>, Vec<u8>>;
+        const DIMS: u32 = 1 << 8;
+        const DIMS_F64: f64 = DIMS as f64;
+        const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
+        const DIM_INTERVAL: u32 = 1 << 8;
+        let tree = test_util::random_circles((0., DIMS_F64), (0., DIMS_F64), RAD_RANGE, 512);
+        let context = JitContext::default();
+        let expected_image = {
+            let mut image = ImageBuffer::new(DIMS, DIMS);
+            let eval = tree.jit_compile::<f64>(&context, "xy").unwrap();
+            let before = std::time::Instant::now();
+            for y in 0..DIMS {
+                let mut pos = [f64::NAN, y as f64 + 0.5];
+                for x in 0..DIMS {
+                    pos[0] = x as f64 + 0.5;
+                    let mut out = [f64::NAN];
+                    eval.run(&pos, &mut out).unwrap();
+                    let val = out[0];
+                    *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                        f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
+                    } else {
+                        f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
+                    }]);
+                }
+            }
+            println!(
+                "Base time: {}ms",
+                (std::time::Instant::now() - before).as_millis()
+            );
+            image.save("expected.png").unwrap();
+            image
+        };
+        let pruned_image = {
+            let mut image = ImageBuffer::new(DIMS, DIMS);
+            let pruner = tree
+                .jit_compile_pruner::<f64>(&context, "xy", 7200)
+                .unwrap();
+            let eval = pruner.compile_single_func(&context).unwrap();
+            eprintln!("Using {} signals", pruner.n_signals);
+            let mut signals = vec![0u32; pruner.n_signals].into_boxed_slice();
+            let before = std::time::Instant::now();
+            for yi in (0..DIMS).step_by(DIM_INTERVAL as usize) {
+                // let mut interval = [[f64::NAN; 2], [yi as f64, (yi + DIM_INTERVAL) as f64]];
+                for xi in (0..DIMS).step_by(DIM_INTERVAL as usize) {
+                    // interval[0] = [xi as f64, (xi + DIM_INTERVAL) as f64];
+                    // let mut iout = [[f64::NAN; 2]];
+                    // signals.fill(0u32);
+                    // pruner.run(&interval, &mut iout, &mut signals).unwrap();
+                    for y in yi..(yi + DIM_INTERVAL) {
+                        let mut pos = [f64::NAN, y as f64 + 0.5];
+                        for x in xi..(xi + DIM_INTERVAL) {
+                            pos[0] = x as f64 + 0.5;
+                            let mut out = [f64::NAN];
+                            eval.run(&pos, &mut out, &signals).unwrap();
+                            let val = out[0];
+                            *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                                f64::min((-val / RAD_RANGE.1) * 255., 255.) as u8
+                            } else {
+                                f64::min(((RAD_RANGE.1 - val) / RAD_RANGE.1) * 255., 255.) as u8
+                            }]);
+                        }
+                    }
+                }
+            }
+            println!(
+                "Pruned time: {}ms",
+                (std::time::Instant::now() - before).as_millis()
+            );
+            image.save("actual.png").unwrap();
+            image
+        };
+        assert_eq!(pruned_image.width(), expected_image.width());
+        assert_eq!(pruned_image.height(), expected_image.height());
+        assert!(
+            pruned_image
+                .iter()
+                .zip(expected_image.iter())
+                .all(|(left, right)| left == right)
         );
     }
 }
