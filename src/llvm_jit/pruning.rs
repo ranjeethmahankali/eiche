@@ -2356,6 +2356,7 @@ mod test {
         vardata: &[(char, f64, f64)],
         eps: f64,
     ) {
+        let tree = tree.compacted().unwrap();
         check_pruned_eval_impl::<f32>(&tree, pruning_threshold, vardata, eps);
         check_pruned_eval_impl::<f64>(&tree, pruning_threshold, vardata, eps);
     }
@@ -2509,6 +2510,10 @@ mod test {
         .unwrap();
         // Setup the buffers;
         let threshold = tree.len() / 10;
+        {
+            // DEBUG
+            eprintln!("{}", interleave_interrupts_as_string(&tree, threshold));
+        }
         let input: [f32; 3] = [-0.11246335, -0.022609971, -0.0885];
         let interval: [[f32; 2]; 3] = [
             [-0.11246335, -0.07492669],
@@ -2530,6 +2535,10 @@ mod test {
         let mut signals = vec![0u32; pruner.n_signals];
         pruner.run(&interval, &mut iout, &mut signals).unwrap();
         output.fill(f32::NAN);
+        {
+            // DEBUG
+            eprintln!("{:?}", &signals);
+        }
         prune_eval.run(&input, &mut output, &signals).unwrap();
         let actual = output[0];
         assert!(
