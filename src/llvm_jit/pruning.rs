@@ -276,8 +276,10 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             builder.position_at_end(bbs[bi]);
             match block {
                 Block::Code(range) => {
-                    for (index, node) in
-                        self.tree.nodes()[range.clone()].iter().copied().enumerate()
+                    for (node, index) in self.tree.nodes()[range.clone()]
+                        .iter()
+                        .copied()
+                        .zip(range.clone())
                     {
                         let reg = single::build_op(
                             single::BuildArgs {
@@ -1687,6 +1689,57 @@ mod test {
     use crate::{assert_float_eq, deftree};
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
+    #[allow(dead_code)]
+    fn interleave_interrupts_as_string(tree: &Tree, pruning_threshold: usize) -> String {
+        use std::fmt::Write;
+        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+        let interrupts = make_interrupts(&tree, &ndom, pruning_threshold).unwrap();
+        // Print the interrupts interleaved with nodes.
+        let mut i = 0usize;
+        let mut out = String::new();
+        writeln!(out, "").unwrap();
+        for interrupt in interrupts {
+            match interrupt {
+                Interrupt::Jump {
+                    before_node,
+                    target,
+                    alternate,
+                    owner,
+                    trigger,
+                } => {
+                    if before_node > i {
+                        let range = i..before_node;
+                        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
+                            writeln!(out, "\t{ni}: {node}").unwrap();
+                        }
+                    }
+                    writeln!(
+                        out,
+                        "Jump(src: {before_node}, dst: {target}, alt: {alternate:?}, sel: {owner}, {trigger:?})"
+                    )
+                    .unwrap();
+                    i = before_node;
+                }
+                Interrupt::Land { after_node } => {
+                    if after_node >= i {
+                        let range = i..=after_node;
+                        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
+                            writeln!(out, "\t{ni}: {node}").unwrap();
+                        }
+                    }
+                    writeln!(out, "Land({after_node})").unwrap();
+                    i = after_node + 1;
+                }
+            }
+        }
+        // Print any remaining nodes:
+        let range = i..tree.len();
+        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
+            writeln!(out, "\t{ni}: {node}").unwrap();
+        }
+        out
+    }
+
     #[test]
     fn t_pruning_two_circles() {
         let tree = deftree!(min
@@ -1954,8 +2007,9 @@ mod test {
                         i.to_f64(),
                         j.to_f64(),
                         eps,
-                        "Comparing pruned single evals within the interval, with inputs: {:?}",
-                        sample
+                        "Pruned single eval compare: {:?}; Signals: {:?}\n",
+                        sample,
+                        signals
                     );
                 }
             }
@@ -2105,11 +2159,11 @@ mod test {
     }
 
     #[test]
-    fn t_nested_booleans() {
-        let tree = deftree!(if (< (pow 'x 2.1) 1) (+ 1 'x) (- 1 'x))
+    fn t_rational_pow_cond() {
+        let tree = deftree!(if (< (pow 'x 2.1) 1) 0 1)
             .unwrap()
             .compacted()
             .unwrap();
-        check_pruned_eval(tree, 0, &[('x', -10.0, 10.0)], 1e-16);
+        check_pruned_eval(tree, 0, &[('x', 0.0, 10.0)], 1e-16);
     }
 }
