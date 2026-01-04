@@ -55,12 +55,14 @@ impl BitTable {
             let off = i * self.n_chunks;
             off..(off + self.n_chunks)
         });
-        // Don't report the error upstream if it is a bug in the
-        // implementation. This is the same as any hard coded index that panics
-        // in Rust.
-        self.bits
-            .get_disjoint_mut(ranges)
-            .expect("This is not exposed to the public API, so this is an internal bug.")
+        match self.bits.get_disjoint_mut(ranges) {
+            Ok(out) => out,
+            Err(e) => {
+                eprintln!("\nERROR: {e}");
+                eprintln!("Indices: {indices:?}");
+                panic!("This is not exposed to the public API, so this is an internal bug.");
+            }
+        }
     }
 }
 
@@ -79,6 +81,10 @@ impl DependencyTable {
                 n_chunks,
             }
         };
+        /* We transfer dependencies from children to parents, making sure to
+         * handle duplicates properly. Otherwise this will cause a panic when we
+         * try to borrow the same slice twice from the bit table.
+         */
         for (i, node) in tree.nodes().iter().enumerate() {
             match node {
                 Constant(_) | Symbol(_) => set(table.row_mut(i), i),
@@ -87,8 +93,32 @@ impl DependencyTable {
                     parent_bits.copy_from_slice(child_bits);
                     set(parent_bits, i);
                 }
+                Binary(_, lhs, rhs) if *lhs == *rhs => {
+                    let [parent_bits, child_bits] = table.rows_mut([i, *lhs]);
+                    parent_bits.copy_from_slice(child_bits);
+                    set(parent_bits, i);
+                }
                 Binary(_, lhs, rhs) => {
                     let [parent, left, right] = table.rows_mut([i, *lhs, *rhs]);
+                    for (p, (l, r)) in parent.iter_mut().zip(left.iter().zip(right.iter())) {
+                        *p = *l | *r;
+                    }
+                    set(parent, i);
+                }
+                Ternary(_, a, b, c) if *b == *c && *a == *b => {
+                    let [parent_bits, child_bits] = table.rows_mut([i, *a]);
+                    parent_bits.copy_from_slice(child_bits);
+                    set(parent_bits, i);
+                }
+                Ternary(_, a, b, c) if *a == *b => {
+                    let [parent, left, right] = table.rows_mut([i, *b, *c]);
+                    for (p, (l, r)) in parent.iter_mut().zip(left.iter().zip(right.iter())) {
+                        *p = *l | *r;
+                    }
+                    set(parent, i);
+                }
+                Ternary(_, a, b, c) if *b == *c || *c == *a => {
+                    let [parent, left, right] = table.rows_mut([i, *a, *b]);
                     for (p, (l, r)) in parent.iter_mut().zip(left.iter().zip(right.iter())) {
                         *p = *l | *r;
                     }
