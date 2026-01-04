@@ -1104,7 +1104,8 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
         tree.nodes(),
     )?;
     let mut merge_list = Vec::<Incoming>::new();
-    let mut notifications = Vec::<Notification>::new();
+    let mut all_notifications = Vec::<Notification>::new();
+    let mut temp_notify = Vec::<Notification>::new();
     let mut notified = HashSet::<(usize, u32)>::new();
     let nan_interval = constants.float_vec([f64::NAN; 2]).as_basic_value_enum();
     for (bi, block) in blocks.iter().enumerate() {
@@ -1135,36 +1136,60 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
                 }
                 if WITH_NOTIFY {
                     // Notify upstream.
-                    for Notification {
-                        src_inst,
-                        dst_signal,
-                        signal,
-                        kind,
-                    } in notifications.iter().filter(|n| n.src_inst == range.end - 1)
-                    {
-                        let ci = *code_block_map
-                            .get(src_inst)
-                            .expect("Code map is not complete. This is a bug.");
-                        let bb = bbs[ci];
-                        builder.position_at_end(bb);
-                        let first = notified.insert((*dst_signal, *signal));
-                        bbs[ci] = build_notify(
-                            *tree.node(*src_inst),
-                            *src_inst,
-                            *kind,
-                            *signal,
-                            signal_ptrs[*dst_signal],
-                            first,
-                            &regs,
-                            builder,
-                            &compiler.module,
-                            &mut constants,
-                            function,
-                            eps,
-                        )?;
-                    }
-                    // Clear the processed notifications.
-                    notifications.retain(|n| n.src_inst != range.end - 1);
+                    temp_notify.clear();
+                    all_notifications.retain(
+                        |Notification {
+                             src_inst,
+                             dst_signal,
+                             signal,
+                             kind,
+                         }| {
+                            if *src_inst == range.end - 1 {
+                                temp_notify.push(Notification {
+                                    src_inst: *src_inst,
+                                    dst_signal: *dst_signal,
+                                    signal: *signal,
+                                    kind: *kind,
+                                });
+                                false
+                            } else {
+                                true
+                            }
+                        },
+                    );
+                    temp_notify.drain(..).try_fold(
+                        (),
+                        |_,
+                         Notification {
+                             src_inst,
+                             dst_signal,
+                             signal,
+                             kind,
+                         }|
+                         -> Result<(), Error> {
+                            let ci = *code_block_map
+                                .get(&src_inst)
+                                .expect("Code map is not complete. This is a bug.");
+                            let bb = bbs[ci];
+                            builder.position_at_end(bb);
+                            let first = notified.insert((dst_signal, signal));
+                            bbs[ci] = build_notify(
+                                tree.node(src_inst).clone(),
+                                src_inst,
+                                kind,
+                                signal,
+                                signal_ptrs[dst_signal],
+                                first,
+                                &regs,
+                                builder,
+                                &compiler.module,
+                                &mut constants,
+                                function,
+                                eps,
+                            )?;
+                            Ok(())
+                        },
+                    )?;
                 }
             }
             Block::Branch(jumps) => {
@@ -1209,7 +1234,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
                         prev_val = Some(jump.alternate.clone());
                     }
                     if WITH_NOTIFY {
-                        notifications.push(Notification {
+                        all_notifications.push(Notification {
                             src_inst: jump.owner,
                             dst_signal: si,
                             signal: index,
