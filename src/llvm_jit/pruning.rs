@@ -18,18 +18,15 @@ use inkwell::{
     basic_block::BasicBlock,
     builder::Builder,
     execution_engine::{ExecutionEngine, JitFunction},
-    llvm_sys::core::LLVMBuildFreeze,
     module::Module,
     types::{BasicType, IntType, VectorType},
     values::{
-        AsValueRef, BasicValue, BasicValueEnum, FunctionValue, IntValue, PhiValue, PointerValue,
-        VectorValue,
+        BasicValue, BasicValueEnum, FunctionValue, IntValue, PhiValue, PointerValue, VectorValue,
     },
 };
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet},
-    ffi::{CStr, CString, c_void},
+    ffi::c_void,
     marker::PhantomData,
     ops::Range,
 };
@@ -572,9 +569,9 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                         &bbs,
                         |ni| {
                             if is_node_scalar(self.tree.nodes(), ni) {
-                                flt_type.get_poison().as_basic_value_enum()
+                                flt_type.const_zero().as_basic_value_enum()
                             } else {
-                                context.bool_type().get_poison().as_basic_value_enum()
+                                context.bool_type().const_zero().as_basic_value_enum()
                             }
                         },
                         builder,
@@ -849,9 +846,9 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                         &bbs,
                         |ni| {
                             if is_node_scalar(self.tree.nodes(), ni) {
-                                flt_vec_type.get_poison().as_basic_value_enum()
+                                flt_vec_type.const_zero().as_basic_value_enum()
                             } else {
-                                bool_vec_type.get_poison().as_basic_value_enum()
+                                bool_vec_type.const_zero().as_basic_value_enum()
                             }
                         },
                         builder,
@@ -1228,12 +1225,12 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
                     &bbs,
                     |ni| {
                         if is_node_scalar(tree.nodes(), ni) {
-                            interval_type.get_poison().as_basic_value_enum()
+                            interval_type.const_zero().as_basic_value_enum()
                         } else {
                             context
                                 .bool_type()
                                 .vec_type(2)
-                                .get_poison()
+                                .const_zero()
                                 .as_basic_value_enum()
                         }
                     },
@@ -1313,7 +1310,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
 #[allow(clippy::too_many_arguments)]
 fn build_merges<
     'ctx,
-    FnMakePoison: Fn(usize) -> BasicValueEnum<'ctx>,
+    FnGetZero: Fn(usize) -> BasicValueEnum<'ctx>,
     FnMakeConst: FnMut(Value) -> BasicValueEnum<'ctx>,
 >(
     phis: &[PhiValue<'ctx>],
@@ -1321,7 +1318,7 @@ fn build_merges<
     merge_list: &mut Vec<Incoming<'ctx>>,
     merge_map: &HashMap<usize, usize>,
     bbs: &[BasicBlock<'ctx>],
-    get_poison: FnMakePoison,
+    get_zero: FnGetZero,
     builder: &'ctx Builder,
     regs: &mut [BasicValueEnum<'ctx>],
     mut build_const_fn: FnMakeConst,
@@ -1339,7 +1336,7 @@ fn build_merges<
     } in merge_list.iter().filter(|m| m.target == target)
     {
         let val = match alternate {
-            Alternate::None => get_poison(*target),
+            Alternate::None => get_zero(*target),
             Alternate::Node(ni) => {
                 builder.position_at_end(*basic_block);
                 builder.build_unconditional_branch(bbs[bi])?;
@@ -1357,7 +1354,7 @@ fn build_merges<
     // Default path when nothing is pruned.
     phi.add_incoming(&[(&regs[target], bbs[bi - 1])]);
     builder.position_at_end(bbs[bi]);
-    regs[target] = build_freeze(builder, phi.as_basic_value(), &format!("phi_{bi}_freeze"));
+    regs[target] = phi.as_basic_value();
     if let Some(next_bb) = bbs.get(bi + 1) {
         builder.build_unconditional_branch(*next_bb)?;
     }
@@ -1508,38 +1505,6 @@ fn build_notify<'ctx>(
     builder.build_store(signal_ptr, signal)?;
     builder.build_unconditional_branch(merge_bb)?;
     Ok(merge_bb)
-}
-
-fn build_freeze<'ctx>(
-    builder: &'ctx Builder,
-    phi: BasicValueEnum<'ctx>,
-    name: &str,
-) -> BasicValueEnum<'ctx> {
-    /// This function takes in a Rust string and either:
-    ///
-    /// A) Finds a terminating null byte in the Rust string and can reference it directly like a C string.
-    ///
-    /// B) Finds no null byte and allocates a new C string based on the input Rust string.
-    pub(crate) fn to_c_str(mut s: &str) -> Cow<'_, CStr> {
-        if s.is_empty() {
-            s = "\0";
-        }
-
-        // Start from the end of the string as it's the most likely place to find a null byte
-        if !s.chars().rev().any(|ch| ch == '\0') {
-            return Cow::from(CString::new(s).expect("unreachable since null bytes are checked"));
-        }
-
-        unsafe { Cow::from(CStr::from_ptr(s.as_ptr() as *const _)) }
-    }
-    let c_string = to_c_str(name);
-    unsafe {
-        BasicValueEnum::new(LLVMBuildFreeze(
-            builder.as_mut_ptr(),
-            phi.as_value_ref(),
-            c_string.as_ptr(),
-        ))
-    }
 }
 
 fn reverse_lookup(blocks: &[Block]) -> (HashMap<usize, usize>, HashMap<usize, usize>) {
