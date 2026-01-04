@@ -1,7 +1,7 @@
+mod analyze;
 mod compile;
 mod dedup;
 mod derivative;
-mod dominator;
 mod dual;
 mod error;
 mod eval;
@@ -37,6 +37,7 @@ pub use llvm_jit::{
 
 pub mod test_util;
 
+pub use analyze::DependencyTable;
 pub use dedup::{Deduplicater, equivalent_trees};
 pub use derivative::{numerical_deriv, symbolic_deriv};
 pub use dual::{Dual, DualEvaluator};

@@ -66,7 +66,7 @@ impl BitTable {
     }
 }
 
-pub(crate) struct DependencyTable {
+pub struct DependencyTable {
     table: BitTable,
 }
 

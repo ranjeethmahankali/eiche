@@ -10,7 +10,7 @@ use crate::{
     Node::{self, *},
     TernaryOp::*,
     Tree, Value,
-    dominator::DependencyTable,
+    analyze::DependencyTable,
     tree::is_node_scalar,
 };
 use inkwell::{
