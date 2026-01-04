@@ -990,7 +990,7 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let (tree, ndom) = self.control_dependence_sorted()?;
-        let deps = DependencyTable::from_tree(&self);
+        let deps = DependencyTable::from_tree(self);
         let blocks = make_blocks(
             make_interrupts(&tree, &ndom, deps, pruning_threshold)?,
             tree.len(),
@@ -2502,9 +2502,9 @@ mod test {
     fn t_hex_test_case_reduced() {
         let tree = deftree!(min
                             (rem (- (- 'x)
-                                  0.016421999999999999098055)
-                             0.011199999999999999886202)
-                            (- (- 'x) 0.016421999999999999098055))
+                                  0.016_422)
+                             0.011_2)
+                            (- (- 'x) 0.016_422))
         .unwrap()
         .compacted()
         .unwrap();
@@ -2535,7 +2535,12 @@ mod test {
         let actual = output[0];
         assert!(
             actual.signum() == expected.signum() && (actual - expected).abs() < f32::EPSILON,
-            "These two values must be equal. This works if the original tree is not compacted"
+            "
+
+These two values must be equal. This bug was fixed at some point by checking for
+dependencies between mutually exclusive code blocks when pruning.
+
+"
         );
     }
 

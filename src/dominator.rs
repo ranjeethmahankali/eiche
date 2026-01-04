@@ -84,7 +84,7 @@ impl DependencyTable {
                 Constant(_) | Symbol(_) => set(table.row_mut(i), i),
                 Unary(_, input) => {
                     let [parent_bits, child_bits] = table.rows_mut([i, *input]);
-                    parent_bits.copy_from_slice(&child_bits);
+                    parent_bits.copy_from_slice(child_bits);
                     set(parent_bits, i);
                 }
                 Binary(_, lhs, rhs) => {
@@ -223,7 +223,7 @@ impl DomTree {
         let num_nodes = table.num_rows();
         let pairs = {
             let mut pairs: Vec<_> = (0..num_nodes)
-                .filter_map(|ni| match immediate_dominator(&table, ni) {
+                .filter_map(|ni| match immediate_dominator(table, ni) {
                     idom if idom == ni => None,
                     idom => Some((idom, ni)),
                 })
