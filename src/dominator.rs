@@ -4,39 +4,40 @@ use crate::{
     Tree,
 };
 
+type ChunkType = u64;
+const CHUNK_SIZE: usize = ChunkType::BITS as usize;
+
 /// Used to manage a dominator mapping between nodes of a tree.
 ///
 /// Because this is used to manage the dominator mapping of any node with any
 /// other node, the width and the height of the table are always eual to the
 /// number of nodes, i.e. `size`.
 struct DomTable {
-    bits: Box<[u64]>,
+    bits: Box<[ChunkType]>,
     n_chunks: usize, // Number of bytes per row.
 }
 
 impl DomTable {
-    const CHUNK_SIZE: usize = 64;
-
-    fn set(bits: &mut [u64], i: usize) {
-        let quot = i / Self::CHUNK_SIZE;
-        let rem = i % Self::CHUNK_SIZE;
+    fn set(bits: &mut [ChunkType], i: usize) {
+        let quot = i / CHUNK_SIZE;
+        let rem = i % CHUNK_SIZE;
         bits[quot] |= 1 << rem;
     }
 
-    fn unset(bits: &mut [u64], i: usize) {
-        let quot = i / Self::CHUNK_SIZE;
-        let rem = i % Self::CHUNK_SIZE;
+    fn unset(bits: &mut [ChunkType], i: usize) {
+        let quot = i / CHUNK_SIZE;
+        let rem = i % CHUNK_SIZE;
         bits[quot] &= !(1 << rem);
     }
 
     pub fn from_tree(tree: &Tree) -> Self {
         // Empty tree.
         let mut table = {
-            let quot = tree.len() / Self::CHUNK_SIZE;
-            let rem = tree.len() % Self::CHUNK_SIZE;
+            let quot = tree.len() / CHUNK_SIZE;
+            let rem = tree.len() % CHUNK_SIZE;
             let n_chunks = quot + (if rem == 0 { 0 } else { 1 });
             DomTable {
-                bits: vec![0u64; n_chunks * tree.len()].into_boxed_slice(),
+                bits: vec![0; n_chunks * tree.len()].into_boxed_slice(),
                 n_chunks,
             }
         };
@@ -94,9 +95,13 @@ impl DomTable {
         self.bits[offset..(offset + self.n_chunks)]
             .iter()
             .enumerate()
-            .find_map(|(i, flags)| match flags.trailing_zeros() {
-                64 => None,
-                n => Some(i * Self::CHUNK_SIZE + n as usize),
+            .find_map(|(i, flags)| {
+                let n = flags.trailing_zeros();
+                if n == (CHUNK_SIZE as u32) {
+                    None
+                } else {
+                    Some(i * CHUNK_SIZE + n as usize)
+                }
             })
             .unwrap_or(child) // If no dominator found then return the node itself.
     }
@@ -121,7 +126,7 @@ impl DomTable {
                     chunk >>= 1;
                     shift += 1;
                 }
-                offset += 64;
+                offset += CHUNK_SIZE;
             }
         }
         counts
@@ -288,14 +293,14 @@ impl Tree {
 
 #[cfg(test)]
 mod test {
-    use super::DomTable;
+    use super::{CHUNK_SIZE, DomTable};
     use crate::{Node, Tree, deftree, test_util::compare_trees};
 
     fn check(table: &DomTable, parent: usize, child: usize) -> bool {
         let offset = child * table.n_chunks;
         let flags = &table.bits[offset..(offset + table.n_chunks)];
-        let quot = parent / DomTable::CHUNK_SIZE;
-        let rem = parent % DomTable::CHUNK_SIZE;
+        let quot = parent / CHUNK_SIZE;
+        let rem = parent % CHUNK_SIZE;
         flags[quot] & (1 << rem) != 0
     }
 
@@ -648,7 +653,7 @@ in the tree."
     }
 
     #[test]
-    fn t_bit_boundary_64() {
+    fn t_bit_boundary_chunk_size() {
         // Test with fewer variables to avoid combinatorial explosion in equivalence testing
         let tree = deftree!(+ (+ (+ 'x 'y) 'z) 'a).unwrap();
         let (sorted_tree, subcounts) = tree.control_dependence_sorted().unwrap();
