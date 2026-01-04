@@ -837,8 +837,8 @@ mod jit {
     }
 
     fn b_circles_pruned_eval<T: NumberType>(c: &mut Criterion) {
-        const PRUNE_THRESHOLD: usize = circles::N_CIRCLES / 8;
-        const DIM_INTERVAL: u32 = 1 << (circles::PRUNE_DEPTH - 4);
+        const PRUNE_THRESHOLD: usize = circles::N_CIRCLES / 4;
+        const DIM_INTERVAL: u32 = 1 << (circles::PRUNE_DEPTH - 5);
         let tree = test_util::random_circles_sorted(
             (0., circles::DIMS_F64),
             (0., circles::DIMS_F64),
@@ -850,7 +850,7 @@ mod jit {
         let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
         let context = JitContext::default();
         let pruner = tree
-            .jit_compile_pruner::<T>(&context, "xy", PRUNE_THRESHOLD, 1e-6)
+            .jit_compile_pruner::<T>(&context, "xy", PRUNE_THRESHOLD, 1e-8)
             .unwrap();
         let eval = pruner.compile_single_func(&context).unwrap();
         let mut signals = vec![0u32; pruner.num_signals()].into_boxed_slice();
