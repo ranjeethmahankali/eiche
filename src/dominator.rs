@@ -7,11 +7,11 @@ use crate::{
 type ChunkType = u64;
 const CHUNK_SIZE: usize = ChunkType::BITS as usize;
 
-/// Used to manage a dominator mapping between nodes of a tree.
+/// Used to manage a dominator and dependency relations within a tree.
 ///
-/// Because this is used to manage the dominator mapping of any node with any
-/// other node, the width and the height of the table are always eual to the
-/// number of nodes, i.e. `size`.
+/// Because this is used to manage the mapping between nodes of the same tree,
+/// the width and the height of the table are always eual to the number of
+/// nodes, i.e. `size`.
 struct BitTable {
     bits: Box<[ChunkType]>,
     n_chunks: usize, // Number of bytes per row.
@@ -29,14 +29,94 @@ fn unset(bits: &mut [ChunkType], i: usize) {
     bits[quot] &= !(1 << rem);
 }
 
+fn check(bits: &[ChunkType], i: usize) -> bool {
+    let quot = i / CHUNK_SIZE;
+    let rem = i % CHUNK_SIZE;
+    (bits[quot] & 1 << rem) != 0
+}
+
 impl BitTable {
     pub fn num_rows(&self) -> usize {
         self.bits.len() / self.n_chunks
     }
+
+    pub fn row(&self, i: usize) -> &[ChunkType] {
+        let off = i * self.n_chunks;
+        &self.bits[off..(off + self.n_chunks)]
+    }
+
+    pub fn row_mut(&mut self, i: usize) -> &mut [ChunkType] {
+        let off = i * self.n_chunks;
+        &mut self.bits[off..(off + self.n_chunks)]
+    }
+
+    pub fn rows_mut<const N: usize>(&mut self, indices: [usize; N]) -> [&mut [ChunkType]; N] {
+        let ranges = indices.map(|i| {
+            let off = i * self.n_chunks;
+            off..(off + self.n_chunks)
+        });
+        // Don't report the error upstream if it is a bug in the
+        // implementation. This is the same as any hard coded index that panics
+        // in Rust.
+        self.bits
+            .get_disjoint_mut(ranges)
+            .expect("This is not exposed to the public API, so this is an internal bug.")
+    }
+}
+
+pub(crate) struct DependencyTable {
+    table: BitTable,
+}
+
+impl DependencyTable {
+    pub fn from_tree(tree: &Tree) -> Self {
+        let mut table = {
+            let quot = tree.len() / CHUNK_SIZE;
+            let rem = tree.len() % CHUNK_SIZE;
+            let n_chunks = quot + (if rem == 0 { 0 } else { 1 });
+            BitTable {
+                bits: vec![0; n_chunks * tree.len()].into_boxed_slice(),
+                n_chunks,
+            }
+        };
+        for (i, node) in tree.nodes().iter().enumerate() {
+            match node {
+                Constant(_) | Symbol(_) => set(table.row_mut(i), i),
+                Unary(_, input) => {
+                    let [parent_bits, child_bits] = table.rows_mut([i, *input]);
+                    parent_bits.copy_from_slice(&child_bits);
+                    set(parent_bits, i);
+                }
+                Binary(_, lhs, rhs) => {
+                    let [parent, left, right] = table.rows_mut([i, *lhs, *rhs]);
+                    for (p, (l, r)) in parent.iter_mut().zip(left.iter().zip(right.iter())) {
+                        *p = *l | *r;
+                    }
+                    set(parent, i);
+                }
+                Ternary(_, a, b, c) => {
+                    let [parent, a, b, c] = table.rows_mut([i, *a, *b, *c]);
+                    for (p, ((a, b), c)) in
+                        parent.iter_mut().zip(a.iter().zip(b.iter()).zip(c.iter()))
+                    {
+                        *p = *a | *b | *c;
+                    }
+                    set(parent, i);
+                }
+            }
+        }
+        Self { table }
+    }
+
+    pub fn check_dependency(&self, child: usize, parent: usize) -> bool {
+        // Assuming this table was constructed from a valid tree, any node whose
+        // index is smaller cannot depend on a node with a larger index. So we
+        // check that first and only check the table after that.
+        parent > child && check(self.table.row(parent), child)
+    }
 }
 
 fn build_dom_table(tree: &Tree) -> BitTable {
-    // Empty tree.
     let mut table = {
         let quot = tree.len() / CHUNK_SIZE;
         let rem = tree.len() % CHUNK_SIZE;

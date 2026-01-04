@@ -10,6 +10,7 @@ use crate::{
     Node::{self, *},
     TernaryOp::*,
     Tree, Value,
+    dominator::DependencyTable,
     tree::is_node_scalar,
 };
 use inkwell::{
@@ -989,8 +990,9 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let (tree, ndom) = self.control_dependence_sorted()?;
+        let deps = DependencyTable::from_tree(&self);
         let blocks = make_blocks(
-            make_interrupts(&tree, &ndom, pruning_threshold)?,
+            make_interrupts(&tree, &ndom, deps, pruning_threshold)?,
             tree.len(),
         )?;
         let PrunerInfo {
@@ -1720,6 +1722,7 @@ enum PruneKind {
 fn make_interrupts(
     tree: &Tree,
     ndom: &[usize],
+    deps: DependencyTable,
     threshold: usize,
 ) -> Result<Box<[Interrupt]>, Error> {
     let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
@@ -1729,8 +1732,8 @@ fn make_interrupts(
             Binary(Min | Max, lhs, rhs) => {
                 let ldom = ndom[*lhs];
                 let rdom = ndom[*rhs];
-                let lskip = ldom > threshold;
-                let rskip = rdom > threshold;
+                let lskip = ldom > threshold && !deps.check_dependency(*lhs, *rhs);
+                let rskip = rdom > threshold && !deps.check_dependency(*rhs, *lhs);
                 if lskip {
                     push_land(&mut interrupts, *lhs, &mut land_map);
                     interrupts.push(Interrupt::Jump {
@@ -2006,7 +2009,8 @@ mod test {
     fn interleave_interrupts_as_string(tree: &Tree, pruning_threshold: usize) -> String {
         use std::fmt::Write;
         let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let interrupts = make_interrupts(&tree, &ndom, pruning_threshold).unwrap();
+        let deps = DependencyTable::from_tree(&tree);
+        let interrupts = make_interrupts(&tree, &ndom, deps, pruning_threshold).unwrap();
         // Print the interrupts interleaved with nodes.
         let mut i = 0usize;
         let mut out = String::new();
@@ -2506,10 +2510,6 @@ mod test {
         .unwrap();
         // Setup the buffers;
         let threshold = tree.len() / 10;
-        {
-            // DEBUG
-            eprintln!("{}", interleave_interrupts_as_string(&tree, threshold));
-        }
         let input: [f32; 3] = [-0.11246335, -0.022609971, -0.0885];
         let interval: [[f32; 2]; 3] = [
             [-0.11246335, -0.07492669],
@@ -2533,11 +2533,6 @@ mod test {
         output.fill(f32::NAN);
         prune_eval.run(&input, &mut output, &signals).unwrap();
         let actual = output[0];
-        {
-            // DEBUG
-            eprintln!("{:?}", &signals);
-            eprintln!("Comparing {} with {}", expected, actual);
-        }
         assert!(
             actual.signum() == expected.signum() && (actual - expected).abs() < f32::EPSILON,
             "These two values must be equal. This works if the original tree is not compacted"
