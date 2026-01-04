@@ -1357,7 +1357,7 @@ fn build_merges<
     // Default path when nothing is pruned.
     phi.add_incoming(&[(&regs[target], bbs[bi - 1])]);
     builder.position_at_end(bbs[bi]);
-    regs[target] = build_freeze(builder, phi, &format!("phi_{bi}_freeze"));
+    regs[target] = build_freeze(builder, phi.as_basic_value(), &format!("phi_{bi}_freeze"));
     if let Some(next_bb) = bbs.get(bi + 1) {
         builder.build_unconditional_branch(*next_bb)?;
     }
@@ -1512,7 +1512,7 @@ fn build_notify<'ctx>(
 
 fn build_freeze<'ctx>(
     builder: &'ctx Builder,
-    phi: PhiValue<'ctx>,
+    phi: BasicValueEnum<'ctx>,
     name: &str,
 ) -> BasicValueEnum<'ctx> {
     /// This function takes in a Rust string and either:
