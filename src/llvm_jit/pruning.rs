@@ -483,6 +483,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             self.tree.nodes(),
         )?;
         let mut merge_list = Vec::<Incoming>::new(); // Keep track of phi nodes that need to be merged.
+        let nan_val = flt_type.const_float(f64::NAN).as_basic_value_enum();
         for (bi, block) in self.blocks.iter().enumerate() {
             builder.position_at_end(bbs[bi]);
             match block {
@@ -569,7 +570,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                         &bbs,
                         |ni| {
                             if is_node_scalar(self.tree.nodes(), ni) {
-                                flt_type.const_zero().as_basic_value_enum()
+                                nan_val
                             } else {
                                 context.bool_type().const_zero().as_basic_value_enum()
                             }
@@ -759,6 +760,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             self.tree.nodes(),
         )?;
         let mut merge_list = Vec::<Incoming>::new();
+        let nan_vec = <Wide as SimdVec<T>>::const_float(f64::NAN, context);
         for (bi, block) in self.blocks.iter().enumerate() {
             builder.position_at_end(bbs[bi]);
             match block {
@@ -846,7 +848,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                         &bbs,
                         |ni| {
                             if is_node_scalar(self.tree.nodes(), ni) {
-                                flt_vec_type.const_zero().as_basic_value_enum()
+                                nan_vec
                             } else {
                                 bool_vec_type.const_zero().as_basic_value_enum()
                             }
@@ -1104,6 +1106,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
     let mut merge_list = Vec::<Incoming>::new();
     let mut notifications = Vec::<Notification>::new();
     let mut notified = HashSet::<(usize, u32)>::new();
+    let nan_interval = constants.float_vec([f64::NAN; 2]).as_basic_value_enum();
     for (bi, block) in blocks.iter().enumerate() {
         builder.position_at_end(bbs[bi]);
         match block {
@@ -1225,7 +1228,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
                     &bbs,
                     |ni| {
                         if is_node_scalar(tree.nodes(), ni) {
-                            interval_type.const_zero().as_basic_value_enum()
+                            nan_interval
                         } else {
                             context
                                 .bool_type()
@@ -1310,7 +1313,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
 #[allow(clippy::too_many_arguments)]
 fn build_merges<
     'ctx,
-    FnGetZero: Fn(usize) -> BasicValueEnum<'ctx>,
+    FnGetNaN: Fn(usize) -> BasicValueEnum<'ctx>,
     FnMakeConst: FnMut(Value) -> BasicValueEnum<'ctx>,
 >(
     phis: &[PhiValue<'ctx>],
@@ -1318,7 +1321,7 @@ fn build_merges<
     merge_list: &mut Vec<Incoming<'ctx>>,
     merge_map: &HashMap<usize, usize>,
     bbs: &[BasicBlock<'ctx>],
-    get_zero: FnGetZero,
+    get_nan: FnGetNaN,
     builder: &'ctx Builder,
     regs: &mut [BasicValueEnum<'ctx>],
     mut build_const_fn: FnMakeConst,
@@ -1336,7 +1339,7 @@ fn build_merges<
     } in merge_list.iter().filter(|m| m.target == target)
     {
         let val = match alternate {
-            Alternate::None => get_zero(*target),
+            Alternate::None => get_nan(*target),
             Alternate::Node(ni) => {
                 builder.position_at_end(*basic_block);
                 builder.build_unconditional_branch(bbs[bi])?;
