@@ -138,7 +138,7 @@ impl DependencyTable {
         Self { table }
     }
 
-    pub fn check_dependency(&self, child: usize, parent: usize) -> bool {
+    pub fn is_needed_by(&self, child: usize, parent: usize) -> bool {
         // Assuming this table was constructed from a valid tree, any node whose
         // index is smaller cannot depend on a node with a larger index. So we
         // check that first and only check the table after that.

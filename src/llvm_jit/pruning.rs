@@ -1700,8 +1700,8 @@ fn make_interrupts(
             Binary(Min | Max, lhs, rhs) => {
                 let ldom = ndom[*lhs];
                 let rdom = ndom[*rhs];
-                let lskip = ldom > threshold && !deps.check_dependency(*lhs, *rhs);
-                let rskip = rdom > threshold && !deps.check_dependency(*rhs, *lhs);
+                let lskip = ldom > threshold && !deps.is_needed_by(*lhs, *rhs);
+                let rskip = rdom > threshold && !deps.is_needed_by(*rhs, *lhs);
                 if lskip {
                     push_land(&mut interrupts, *lhs, &mut land_map);
                     interrupts.push(Interrupt::Jump {
@@ -1767,8 +1767,8 @@ fn make_interrupts(
             Ternary(Choose, _cond, tt, ff) => {
                 let ttdom = ndom[*tt];
                 let ffdom = ndom[*ff];
-                let tskip = ttdom > threshold;
-                let fskip = ffdom > threshold;
+                let tskip = ttdom > threshold && !deps.is_needed_by(*tt, *ff);
+                let fskip = ffdom > threshold && !deps.is_needed_by(*ff, *tt);
                 if tskip {
                     push_land(&mut interrupts, *tt, &mut land_map);
                     interrupts.push(Interrupt::Jump {
