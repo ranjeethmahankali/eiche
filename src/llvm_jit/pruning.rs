@@ -989,7 +989,7 @@ impl Tree {
             return Err(Error::TypeMismatch);
         }
         let (tree, ndom) = self.control_dependence_sorted()?;
-        let deps = DependencyTable::from_tree(self);
+        let deps = DependencyTable::from_tree(&tree);
         let blocks = make_blocks(
             make_interrupts(&tree, &ndom, deps, pruning_threshold)?,
             tree.len(),
