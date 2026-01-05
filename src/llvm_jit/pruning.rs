@@ -1723,10 +1723,11 @@ fn make_interrupts(
     for (ni, node) in tree.nodes().iter().enumerate() {
         match node {
             Binary(Min | Max, lhs, rhs) => {
+                let dom_start = ni - ndom[ni];
                 let ldom = ndom[*lhs];
                 let rdom = ndom[*rhs];
-                let lskip = ldom > threshold && !deps.is_needed_by(*lhs, *rhs);
-                let rskip = rdom > threshold && !deps.is_needed_by(*rhs, *lhs);
+                let lskip = *lhs >= dom_start && ldom > threshold && !deps.is_needed_by(*lhs, *rhs);
+                let rskip = *rhs >= dom_start && rdom > threshold && !deps.is_needed_by(*rhs, *lhs);
                 if lskip {
                     push_land(&mut interrupts, *lhs, &mut land_map);
                     interrupts.push(Interrupt::Jump {
@@ -1790,10 +1791,11 @@ fn make_interrupts(
                 }
             }
             Ternary(Choose, _cond, tt, ff) => {
+                let dom_start = ndom[ni];
                 let ttdom = ndom[*tt];
                 let ffdom = ndom[*ff];
-                let tskip = ttdom > threshold && !deps.is_needed_by(*tt, *ff);
-                let fskip = ffdom > threshold && !deps.is_needed_by(*ff, *tt);
+                let tskip = *tt >= dom_start && ttdom > threshold && !deps.is_needed_by(*tt, *ff);
+                let fskip = *ff >= dom_start && ffdom > threshold && !deps.is_needed_by(*ff, *tt);
                 if tskip {
                     push_land(&mut interrupts, *tt, &mut land_map);
                     interrupts.push(Interrupt::Jump {
@@ -1992,63 +1994,63 @@ fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option
     }
 }
 
+#[allow(dead_code)]
+fn interleave_interrupts_as_string(tree: &Tree, pruning_threshold: usize) -> String {
+    use std::fmt::Write;
+    let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+    let deps = DependencyTable::from_tree(&tree);
+    let interrupts = make_interrupts(&tree, &ndom, deps, pruning_threshold).unwrap();
+    // Print the interrupts interleaved with nodes.
+    let mut i = 0usize;
+    let mut out = String::new();
+    writeln!(out).unwrap();
+    for interrupt in interrupts {
+        match interrupt {
+            Interrupt::Jump {
+                before_node,
+                target,
+                alternate,
+                owner,
+                trigger,
+            } => {
+                if before_node > i {
+                    let range = i..before_node;
+                    for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
+                        writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
+                    }
+                }
+                writeln!(
+                        out,
+                        "Jump(src: {before_node}, dst: {target}, alt: {alternate:?}, sel: {owner}, {trigger:?})"
+                    )
+                    .unwrap();
+                i = before_node;
+            }
+            Interrupt::Land { after_node } => {
+                if after_node >= i {
+                    let range = i..=after_node;
+                    for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
+                        writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
+                    }
+                }
+                writeln!(out, "Land({after_node})").unwrap();
+                i = after_node + 1;
+            }
+        }
+    }
+    // Print any remaining nodes:
+    let range = i..tree.len();
+    for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
+        writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
+    }
+    out
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::{assert_float_eq, deftree, test_util};
     use rand::{Rng, SeedableRng, rngs::StdRng};
-
-    #[allow(dead_code)]
-    fn interleave_interrupts_as_string(tree: &Tree, pruning_threshold: usize) -> String {
-        use std::fmt::Write;
-        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let deps = DependencyTable::from_tree(&tree);
-        let interrupts = make_interrupts(&tree, &ndom, deps, pruning_threshold).unwrap();
-        // Print the interrupts interleaved with nodes.
-        let mut i = 0usize;
-        let mut out = String::new();
-        writeln!(out).unwrap();
-        for interrupt in interrupts {
-            match interrupt {
-                Interrupt::Jump {
-                    before_node,
-                    target,
-                    alternate,
-                    owner,
-                    trigger,
-                } => {
-                    if before_node > i {
-                        let range = i..before_node;
-                        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-                            writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
-                        }
-                    }
-                    writeln!(
-                        out,
-                        "Jump(src: {before_node}, dst: {target}, alt: {alternate:?}, sel: {owner}, {trigger:?})"
-                    )
-                    .unwrap();
-                    i = before_node;
-                }
-                Interrupt::Land { after_node } => {
-                    if after_node >= i {
-                        let range = i..=after_node;
-                        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-                            writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
-                        }
-                    }
-                    writeln!(out, "Land({after_node})").unwrap();
-                    i = after_node + 1;
-                }
-            }
-        }
-        // Print any remaining nodes:
-        let range = i..tree.len();
-        for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-            writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
-        }
-        out
-    }
 
     #[test]
     fn t_pruning_two_circles() {
