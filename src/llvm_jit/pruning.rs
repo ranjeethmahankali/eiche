@@ -1878,11 +1878,7 @@ fn make_claims(tree: &Tree, ndom: &[usize], threshold: usize) {
         (None, Some(_)) | (Some(_), None) => false,
         (Some((la, _, _)), Some((ra, _, _))) => la == ra,
     }) {
-        let mut i = chunk.len();
-        if i < 2 {
-            continue;
-        }
-        i -= 1;
+        let mut i = chunk.len() - 1;
         while i > 0 {
             let (left, right) = chunk.split_at_mut(i);
             i -= 1;
@@ -1920,10 +1916,20 @@ mod test {
 
     #[test]
     fn t_claim() {
-        let tree = deftree!(min (+ 'x 1)(+ 'y (min (+ 'x 1) (+ 'y 1))))
-            .unwrap()
-            .compacted()
-            .unwrap();
+        // let tree = deftree!(min (+ 'x 1)(+ 'y (min (+ 'x 1) (+ 'y 1))))
+        //     .unwrap()
+        //     .compacted()
+        //     .unwrap();
+        // println!("{tree}");
+        // make_claims(&tree, &ndom, 0);
+        let tree = deftree!(min
+                            (rem (- (- 'x)
+                                  0.016_422)
+                             0.011_2)
+                            (- (- 'x) 0.016_422))
+        .unwrap()
+        .compacted()
+        .unwrap();
         let (tree, ndom) = tree.control_dependence_sorted().unwrap();
         println!("{tree}");
         make_claims(&tree, &ndom, 0);
