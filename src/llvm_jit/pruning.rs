@@ -1822,7 +1822,11 @@ fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Bloc
     Ok(blocks.into_boxed_slice())
 }
 
-fn make_claims(tree: &Tree, ndom: &[usize], threshold: usize) {
+fn make_claims(
+    tree: &Tree,
+    ndom: &[usize],
+    threshold: usize,
+) -> Result<Box<[(usize, usize, PruneKind)]>, Error> {
     use std::cmp::Ordering;
     let mut claims = tree
         .nodes()
@@ -1904,8 +1908,14 @@ fn make_claims(tree: &Tree, ndom: &[usize], threshold: usize) {
             continue;
         }
     }
-    let claims = claims.into_iter().filter_map(|c| c).collect::<Vec<_>>();
-    dbg!(claims);
+    let mut claims = claims.into_iter().filter_map(|c| c).collect::<Vec<_>>();
+    let self_owned: HashSet<usize> = HashSet::from_iter(
+        claims
+            .iter()
+            .filter_map(|(a, b, _)| if *a == *b { Some(*a) } else { None }),
+    );
+    claims.retain(|(i, _, _)| !self_owned.contains(i));
+    Ok(claims.into_boxed_slice())
 }
 
 #[cfg(test)]
