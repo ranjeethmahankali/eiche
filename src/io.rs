@@ -107,6 +107,12 @@ impl std::fmt::Display for Node {
 }
 
 mod alias {
+    // Constants.
+    pub const BOOL: &str = "bool";
+    pub const FLOAT: &str = "float";
+    pub const B_TRUE: &str = "t";
+    pub const B_FALSE: &str = "f";
+    pub const VARIABLE: &str = "var";
     // Unary ops.
     pub const NEGATE: &str = "neg";
     pub const SQRT: &str = "sqrt";
@@ -126,7 +132,7 @@ mod alias {
     pub const POW: &str = "pow";
     pub const MIN: &str = "min";
     pub const MAX: &str = "max";
-    pub const REMAINDER: &str = "";
+    pub const REMAINDER: &str = "rem";
     pub const LESS: &str = "lt";
     pub const LESSOREQUAL: &str = "le";
     pub const EQUAL: &str = "eq";
@@ -148,15 +154,19 @@ impl Tree {
         ) -> Result<(), std::io::Error> {
             match node {
                 Constant(value) => match value {
-                    Bool(flag) => {
-                        writeln!(w, "bool {} # {}", if *flag { "t" } else { "f" }, index)?
-                    }
+                    Bool(flag) => writeln!(
+                        w,
+                        "{} {} # {}",
+                        alias::BOOL,
+                        if *flag { "t" } else { "f" },
+                        index
+                    )?,
                     Scalar(value) => {
                         let bits = value.to_bits();
-                        writeln!(w, "float {bits:x} # {index}: {value}")?
+                        writeln!(w, "{} {:x} # {}: {}", alias::FLOAT, bits, index, value)?
                     }
                 },
-                Symbol(label) => writeln!(w, "var {label}")?,
+                Symbol(label) => writeln!(w, "{} {}", alias::VARIABLE, label)?,
                 Unary(op, input) => {
                     let opstr = match op {
                         Negate => alias::NEGATE,
@@ -236,6 +246,13 @@ impl Tree {
         let dims = {
             let (rows, cols) = lines
                 .next()
+                .map(|line| {
+                    line.trim()
+                        .split_once('#')
+                        .map(|(before, _after)| before)
+                        .unwrap_or(line)
+                        .trim()
+                })
                 .map(|s| s.split_once(" "))
                 .flatten()
                 .ok_or_else(|| {
@@ -249,7 +266,7 @@ impl Tree {
             )
         };
         let mut nodes = Vec::<Node>::new();
-        for line in src.lines() {
+        for line in lines {
             let line = line
                 .trim()
                 .split_once('#')
@@ -264,6 +281,37 @@ impl Tree {
                 .next()
                 .ok_or_else(|| Error::IOError("Unable to read the op".into()))?;
             let node = match opstr {
+                alias::BOOL => {
+                    match words
+                        .next()
+                        .ok_or_else(|| Error::IOError("Unable to read boolean constant".into()))?
+                    {
+                        alias::B_TRUE => Constant(Value::Bool(true)),
+                        alias::B_FALSE => Constant(Value::Bool(false)),
+                        _ => return Err(Error::IOError("Invalid boolean value".into())),
+                    }
+                }
+                alias::FLOAT => Constant(Value::Scalar(f64::from_bits(
+                    u64::from_str_radix(
+                        words.next().ok_or_else(|| {
+                            Error::IOError("Unable to read float constant".into())
+                        })?,
+                        16,
+                    )
+                    .map_err(|e| Error::IOError(e.to_string()))?,
+                ))),
+                alias::VARIABLE => Symbol(
+                    words
+                        .next()
+                        .ok_or_else(|| Error::IOError("Unable to read boolean constant".into()))?
+                        .chars()
+                        .next()
+                        .ok_or_else(|| {
+                            Error::IOError(
+                                "Cannot read the first char of the variable label".into(),
+                            )
+                        })?,
+                ),
                 alias::NEGATE => Unary(Negate, read_int(&mut words)?),
                 alias::SQRT => Unary(Sqrt, read_int(&mut words)?),
                 alias::ABS => Unary(Abs, read_int(&mut words)?),
@@ -302,7 +350,7 @@ impl Tree {
                     read_int(&mut words)?,
                     read_int(&mut words)?,
                 ),
-                _ => return Err(Error::IOError("Unrecognized op".into())),
+                op => return Err(Error::IOError(format!("Unrecognized op: {op}"))),
             };
             nodes.push(node);
         }
