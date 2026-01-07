@@ -990,37 +990,34 @@ impl Tree {
         }
         let (tree, ndom) = self.control_dependence_sorted()?;
         let deps = DependencyTable::from_tree(&tree);
-        let blocks = make_blocks(
-            make_interrupts(&tree, &ndom, deps, pruning_threshold)?,
-            tree.len(),
-        )?;
-        let PrunerInfo {
-            engine,
-            func_name,
-            n_inputs,
-            n_outputs,
-            n_signals,
-            params,
-            merge_block_map,
-            block_signal_map,
-        } = compile_pruner_impl::<T, true>(&tree, context, &blocks, params, eps)?;
-        // SAFETY: The signature is correct, and well tested. The function
-        // pointer should never be invalidated, because we allocated a dedicated
-        // execution engine, with it's own block of executable memory, that will
-        // live as long as the function wrapper lives.
-        let func = unsafe { engine.get_function(&func_name)? };
-        Ok(JitPruner {
-            func,
-            n_inputs,
-            n_outputs,
-            n_signals,
-            params: params.to_string(),
-            blocks,
-            merge_block_map,
-            block_signal_map,
-            tree,
-            phantom: PhantomData,
-        })
+        todo!();
+        // let PrunerInfo {
+        //     engine,
+        //     func_name,
+        //     n_inputs,
+        //     n_outputs,
+        //     n_signals,
+        //     params,
+        //     merge_block_map,
+        //     block_signal_map,
+        // } = compile_pruner_impl::<T, true>(&tree, context, &blocks, params, eps)?;
+        // // SAFETY: The signature is correct, and well tested. The function
+        // // pointer should never be invalidated, because we allocated a dedicated
+        // // execution engine, with it's own block of executable memory, that will
+        // // live as long as the function wrapper lives.
+        // let func = unsafe { engine.get_function(&func_name)? };
+        // Ok(JitPruner {
+        //     func,
+        //     n_inputs,
+        //     n_outputs,
+        //     n_signals,
+        //     params: params.to_string(),
+        //     blocks,
+        //     merge_block_map,
+        //     block_signal_map,
+        //     tree,
+        //     phantom: PhantomData,
+        // })
     }
 }
 
@@ -1472,16 +1469,16 @@ fn build_notify<'ctx>(
             match (op, trigger) {
                 (Min, PruneKind::Right)
                 | (Max, PruneKind::Left)
-                | (LessOrEqual, PruneKind::AlwaysTrue)
-                | (Greater, PruneKind::AlwaysFalse)
-                | (GreaterOrEqual, PruneKind::AlwaysFalse) => before,
+                | (LessOrEqual, PruneKind::Constant(Value::Bool(true)))
+                | (Greater, PruneKind::Constant(Value::Bool(false)))
+                | (GreaterOrEqual, PruneKind::Constant(Value::Bool(false))) => before,
                 (Min, PruneKind::Left)
                 | (Max, PruneKind::Right)
-                | (GreaterOrEqual, PruneKind::AlwaysTrue)
-                | (Less, PruneKind::AlwaysFalse)
-                | (LessOrEqual, PruneKind::AlwaysFalse) => after,
-                (Less, PruneKind::AlwaysTrue) => strictly_before,
-                (Greater, PruneKind::AlwaysTrue) => strictly_after,
+                | (GreaterOrEqual, PruneKind::Constant(Value::Bool(true)))
+                | (Less, PruneKind::Constant(Value::Bool(false)))
+                | (LessOrEqual, PruneKind::Constant(Value::Bool(false))) => after,
+                (Less, PruneKind::Constant(Value::Bool(true))) => strictly_before,
+                (Greater, PruneKind::Constant(Value::Bool(true))) => strictly_after,
                 _ => unreachable!("Invalid node / trigger combo. This is a bug."),
             }
         }
@@ -1703,172 +1700,12 @@ enum Interrupt {
     },
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 enum PruneKind {
-    // 0 is reserved for cases that are not pruned. We don't need a variant for that here.
-    Left = 1,
-    Right = 2,
-    AlwaysTrue = 3,
-    AlwaysFalse = 4,
-}
-
-fn make_interrupts(
-    tree: &Tree,
-    ndom: &[usize],
-    deps: DependencyTable,
-    threshold: usize,
-) -> Result<Box<[Interrupt]>, Error> {
-    let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
-    let mut land_map: Vec<Option<usize>> = vec![None; tree.len()];
-    for (ni, node) in tree.nodes().iter().enumerate() {
-        match node {
-            Binary(Min | Max, lhs, rhs) => {
-                let dom_start = ni - ndom[ni];
-                let ldom = ndom[*lhs];
-                let rdom = ndom[*rhs];
-                let lskip = *lhs >= dom_start && ldom > threshold && !deps.is_needed_by(*lhs, *rhs);
-                let rskip = *rhs >= dom_start && rdom > threshold && !deps.is_needed_by(*rhs, *lhs);
-                if lskip {
-                    push_land(&mut interrupts, *lhs, &mut land_map);
-                    interrupts.push(Interrupt::Jump {
-                        before_node: *lhs - ldom,
-                        target: *lhs,
-                        alternate: Alternate::None,
-                        owner: ni,
-                        trigger: PruneKind::Left,
-                    });
-                }
-                if rskip {
-                    push_land(&mut interrupts, *rhs, &mut land_map);
-                    interrupts.push(Interrupt::Jump {
-                        before_node: *rhs - rdom,
-                        target: *rhs,
-                        alternate: Alternate::None,
-                        owner: ni,
-                        trigger: PruneKind::Right,
-                    });
-                }
-                if lskip || rskip {
-                    push_land(&mut interrupts, ni, &mut land_map);
-                    if lskip {
-                        interrupts.push(Interrupt::Jump {
-                            before_node: ni,
-                            target: ni,
-                            alternate: Alternate::Node(*rhs),
-                            owner: ni,
-                            trigger: PruneKind::Left,
-                        });
-                    }
-                    if rskip {
-                        interrupts.push(Interrupt::Jump {
-                            before_node: ni,
-                            target: ni,
-                            alternate: Alternate::Node(*lhs),
-                            owner: ni,
-                            trigger: PruneKind::Right,
-                        });
-                    }
-                }
-            }
-            Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
-                let dom = ndom[ni];
-                if dom > threshold {
-                    push_land(&mut interrupts, ni, &mut land_map);
-                    interrupts.push(Interrupt::Jump {
-                        before_node: ni - dom,
-                        target: ni,
-                        alternate: Alternate::Constant(Value::Bool(true)),
-                        owner: ni,
-                        trigger: PruneKind::AlwaysTrue,
-                    });
-                    interrupts.push(Interrupt::Jump {
-                        before_node: ni - dom,
-                        target: ni,
-                        alternate: Alternate::Constant(Value::Bool(false)),
-                        owner: ni,
-                        trigger: PruneKind::AlwaysFalse,
-                    });
-                }
-            }
-            Ternary(Choose, _cond, tt, ff) => {
-                let dom_start = ndom[ni];
-                let ttdom = ndom[*tt];
-                let ffdom = ndom[*ff];
-                let tskip = *tt >= dom_start && ttdom > threshold && !deps.is_needed_by(*tt, *ff);
-                let fskip = *ff >= dom_start && ffdom > threshold && !deps.is_needed_by(*ff, *tt);
-                if tskip {
-                    push_land(&mut interrupts, *tt, &mut land_map);
-                    interrupts.push(Interrupt::Jump {
-                        before_node: *tt - ttdom,
-                        target: *tt,
-                        alternate: Alternate::None,
-                        owner: ni,
-                        trigger: PruneKind::Left,
-                    });
-                }
-                if fskip {
-                    push_land(&mut interrupts, *ff, &mut land_map);
-                    interrupts.push(Interrupt::Jump {
-                        before_node: *ff - ffdom,
-                        target: *ff,
-                        alternate: Alternate::None,
-                        owner: ni,
-                        trigger: PruneKind::Right,
-                    });
-                }
-                if tskip || fskip {
-                    push_land(&mut interrupts, ni, &mut land_map);
-                    if tskip {
-                        interrupts.push(Interrupt::Jump {
-                            before_node: ni,
-                            target: ni,
-                            alternate: Alternate::Node(*ff),
-                            owner: ni,
-                            trigger: PruneKind::Left,
-                        });
-                    }
-                    if fskip {
-                        interrupts.push(Interrupt::Jump {
-                            before_node: ni,
-                            target: ni,
-                            alternate: Alternate::Node(*tt),
-                            owner: ni,
-                            trigger: PruneKind::Right,
-                        });
-                    }
-                }
-            }
-            _ => continue,
-        }
-    }
-    interrupts.sort_by(|a, b| -> std::cmp::Ordering {
-        match (a, b) {
-            (
-                Interrupt::Jump {
-                    before_node: lbn,
-                    target: lt,
-                    alternate: la,
-                    owner: lo,
-                    ..
-                },
-                Interrupt::Jump {
-                    before_node: rbn,
-                    target: rt,
-                    alternate: ra,
-                    owner: ro,
-                    ..
-                },
-            ) => (lbn, std::cmp::Reverse(lt), la, lo).cmp(&(rbn, std::cmp::Reverse(rt), ra, ro)),
-            (Interrupt::Jump { before_node, .. }, Interrupt::Land { after_node }) => {
-                (before_node, 0).cmp(&(after_node, 1))
-            }
-            (Interrupt::Land { after_node }, Interrupt::Jump { before_node, .. }) => {
-                (after_node, 1).cmp(&(before_node, 0))
-            }
-            (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => la.cmp(ra),
-        }
-    });
-    Ok(interrupts.into_boxed_slice())
+    None,
+    Left,
+    Right,
+    Constant(Value),
 }
 
 #[derive(Clone, Debug)]
@@ -1985,65 +1822,94 @@ fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Bloc
     Ok(blocks.into_boxed_slice())
 }
 
-fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option<usize>]) {
-    let mapped = &mut land_map[after_node];
-    if mapped.is_none() {
-        let idx = dst.len();
-        dst.push(Interrupt::Land { after_node });
-        *mapped = Some(idx);
-    }
-}
-
-#[allow(dead_code)]
-fn interleave_interrupts_as_string(tree: &Tree, pruning_threshold: usize) -> String {
-    use std::fmt::Write;
-    let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-    let deps = DependencyTable::from_tree(&tree);
-    let interrupts = make_interrupts(&tree, &ndom, deps, pruning_threshold).unwrap();
-    // Print the interrupts interleaved with nodes.
-    let mut i = 0usize;
-    let mut out = String::new();
-    writeln!(out).unwrap();
-    for interrupt in interrupts {
-        match interrupt {
-            Interrupt::Jump {
-                before_node,
-                target,
-                alternate,
-                owner,
-                trigger,
-            } => {
-                if before_node > i {
-                    let range = i..before_node;
-                    for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-                        writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
-                    }
-                }
-                writeln!(
-                        out,
-                        "Jump(src: {before_node}, dst: {target}, alt: {alternate:?}, sel: {owner}, {trigger:?})"
-                    )
-                    .unwrap();
-                i = before_node;
+fn make_claims(tree: &Tree, ndom: &[usize], threshold: usize) {
+    use std::cmp::Ordering;
+    let mut claims = tree
+        .nodes()
+        .iter()
+        .enumerate()
+        .fold(Vec::new(), |mut claims, (ni, node)| match node {
+            Constant(_) | Symbol(_) => claims,
+            Unary(_, input) => {
+                claims.push(Some((*input, ni, PruneKind::None)));
+                claims
             }
-            Interrupt::Land { after_node } => {
-                if after_node >= i {
-                    let range = i..=after_node;
-                    for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-                        writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
-                    }
+            Binary(Min | Max, lhs, rhs) => {
+                if ndom[*lhs] > threshold {
+                    claims.push(Some((*lhs, ni, PruneKind::Left)));
                 }
-                writeln!(out, "Land({after_node})").unwrap();
-                i = after_node + 1;
+                if ndom[*rhs] > threshold {
+                    claims.push(Some((*rhs, ni, PruneKind::Right)));
+                }
+                claims
+            }
+            Binary(Less | LessOrEqual | Greater | GreaterOrEqual, lhs, rhs)
+                if ndom[ni] > threshold =>
+            {
+                claims.push(Some((ni, ni, PruneKind::Constant(Value::Bool(true)))));
+                claims.push(Some((ni, ni, PruneKind::Constant(Value::Bool(false)))));
+                claims
+            }
+            Binary(_, lhs, rhs) => {
+                claims.push(Some((*lhs, ni, PruneKind::None)));
+                claims.push(Some((*rhs, ni, PruneKind::None)));
+                claims
+            }
+            Ternary(op, _cond, tt, ff) => match op {
+                Choose => {
+                    if ndom[*tt] > threshold {
+                        claims.push(Some((*tt, ni, PruneKind::Left)));
+                    }
+                    if ndom[*ff] > threshold {
+                        claims.push(Some((*ff, ni, PruneKind::Right)));
+                    }
+                    claims
+                }
+            },
+        });
+    claims.sort_by(|a, b| match (a, b) {
+        (None, None) => Ordering::Equal,
+        (None, Some(..)) => Ordering::Less,
+        (Some(..), None) => Ordering::Greater,
+        (Some((la, lb, _)), Some((ra, rb, _))) => (la, lb).cmp(&(ra, rb)),
+    });
+    for chunk in claims.chunk_by_mut(|a, b| match (a, b) {
+        (None, None) => true,
+        (None, Some(_)) | (Some(_), None) => false,
+        (Some((la, _, _)), Some((ra, _, _))) => la == ra,
+    }) {
+        let mut i = chunk.len();
+        if i < 2 {
+            continue;
+        }
+        i -= 1;
+        while i > 0 {
+            let (left, right) = chunk.split_at_mut(i);
+            i -= 1;
+            let claim = match right[0] {
+                Some((_, c, _)) => c,
+                None => continue,
+            };
+            let dom = (claim - ndom[claim])..claim;
+            for check in left.iter_mut() {
+                if match check {
+                    Some((_, c, _)) => dom.contains(c),
+                    None => continue,
+                } {
+                    *check = None;
+                }
             }
         }
+        if chunk.iter().any(|c| match c {
+            Some((_, _, PruneKind::None)) => true,
+            _ => false,
+        }) {
+            chunk.fill(None);
+            continue;
+        }
     }
-    // Print any remaining nodes:
-    let range = i..tree.len();
-    for (ni, node) in range.clone().zip(tree.nodes()[range].iter()) {
-        writeln!(out, "\t{ni}: {node}; dom: {}", ndom[ni]).unwrap();
-    }
-    out
+    let claims = claims.into_iter().filter_map(|c| c).collect::<Vec<_>>();
+    dbg!(claims);
 }
 
 #[cfg(test)]
@@ -2051,6 +1917,18 @@ mod test {
     use super::*;
     use crate::{assert_float_eq, deftree, test_util};
     use rand::{Rng, SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn t_claim() {
+        let tree = deftree!(min (+ 'x 1)(+ 'y (min (+ 'x 1) (+ 'y 1))))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+        println!("{tree}");
+        make_claims(&tree, &ndom, 0);
+        assert!(false);
+    }
 
     #[test]
     fn t_pruning_two_circles() {
