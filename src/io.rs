@@ -360,7 +360,7 @@ impl Tree {
 
 #[cfg(test)]
 mod test {
-    use crate::{dedup::Deduplicater, deftree, prune::Pruner};
+    use crate::{dedup::Deduplicater, deftree, prune::Pruner, tree::Tree};
 
     #[test]
     fn t_tree_string_formatting() {
@@ -540,5 +540,37 @@ mod test {
 "
             .trim()
         );
+    }
+
+    #[test]
+    fn t_serialization_roundtrip() {
+        // Covers: symbols, scalars, unary (neg, sqrt, abs, sin, cos, tan, log, exp, floor),
+        // binary (lt, div, add, sub, mul, pow, min, max), ternary (choose/if).
+        let tree = deftree!(
+            if (< 'x 0.)
+               (min (- (sqrt (abs 'x))) (floor (log (exp 'y))))
+               (max (/ (+ 'x 2.5) (- 'y 3.)) (mul (pow (sin 'x) 2.) (+ (pow (cos 'y) 2.) (tan 'z))))
+        ).unwrap();
+        let mut buf = Vec::new();
+        tree.write_to(&mut buf).unwrap();
+        let restored = Tree::read_from(buf.as_slice()).unwrap();
+        assert_eq!(tree.nodes(), restored.nodes());
+        assert_eq!(tree.dims(), restored.dims());
+    }
+
+    #[test]
+    fn t_serialization_edge_cases() {
+        // Covers: booleans, special floats, multi-output (concat), remainder,
+        // binary (and, or, le, eq, neq, gt, ge), unary (not).
+        let tree = deftree!(concat
+            (or (and true false) (not (<= 'x 'y)))
+            (and (or (== 'x 0.) (!= 'y 1.)) (or (> 'x 'z) (>= 'y 'z)))
+            (+ (rem 'x (const f64::INFINITY)) (const f64::NEG_INFINITY))
+        ).unwrap();
+        let mut buf = Vec::new();
+        tree.write_to(&mut buf).unwrap();
+        let restored = Tree::read_from(buf.as_slice()).unwrap();
+        assert_eq!(tree.nodes(), restored.nodes());
+        assert_eq!(tree.dims(), restored.dims());
     }
 }
