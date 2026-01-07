@@ -1926,6 +1926,7 @@ mod test {
 
     #[test]
     fn t_claim() {
+        // Case 1.
         let tree = deftree!(min (+ 'x 1)(+ 'y (min (+ 'x 1) (+ 'y 1))))
             .unwrap()
             .compacted()
@@ -1936,6 +1937,7 @@ mod test {
             claims.as_ref(),
             &[(2, 7, PruneKind::Left), (6, 7, PruneKind::Right)]
         );
+        // Case 2.
         let tree = deftree!(min
                             (rem (- (- 'x)
                                   0.016_422)
@@ -1949,6 +1951,68 @@ mod test {
         assert_eq!(
             claims.as_ref(),
             &[(3, 6, PruneKind::Right,), (5, 6, PruneKind::Left),]
+        );
+        // Test case I discovered when benchmarking the hex test case.
+        let tree = Tree::read_from(
+            "1 1 # output dims
+var x
+neg 0 # 1
+float 3f90d0edc3bd5992 # 2: 0.016422
+sub 1 2 # 3
+float 3f86f0068db8bac7 # 4: 0.0112
+rem 3 4 # 5
+min 5 3 # 6
+float 3feed288ce703afb # 7: 0.9632
+sub 3 7 # 8
+max 6 8 # 9
+add 9 2 # 10
+sub 10 4 # 11
+float 3f76f0068db8bac7 # 12: 0.0056
+sub 11 12 # 13
+abs 13 # 14
+float 3f9999999999999a # 15: 0.025
+sub 14 15 # 16
+float 0 # 17: 0
+max 16 17 # 18
+mul 18 18 # 19
+var y
+abs 20 # 21
+float 3fcb333333333333 # 22: 0.2125
+sub 21 22 # 23
+max 23 17 # 24
+mul 24 24 # 25
+add 25 19 # 26
+var z
+abs 27 # 28
+sub 28 22 # 29
+max 29 17 # 30
+mul 30 30 # 31
+add 31 26 # 32
+sqrt 32 # 33
+max 23 29 # 34
+max 16 34 # 35
+min 17 35 # 36
+# outputs
+add 36 33 # 37
+"
+            .as_bytes(),
+        )
+        .unwrap();
+        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+        let claims = make_claims(&tree, &ndom, 0).unwrap();
+        assert_eq!(
+            claims.as_ref(),
+            &[
+                (6, 9, PruneKind::Left),
+                (8, 9, PruneKind::Right),
+                (16, 25, PruneKind::Left),
+                (16, 35, PruneKind::Left),
+                (21, 27, PruneKind::Left),
+                (21, 34, PruneKind::Left),
+                (24, 30, PruneKind::Left),
+                (24, 34, PruneKind::Right),
+                (35, 36, PruneKind::Right)
+            ]
         );
     }
 
