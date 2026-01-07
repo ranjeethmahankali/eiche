@@ -2014,6 +2014,19 @@ add 36 33 # 37
                 (35, 36, PruneKind::Right)
             ]
         );
+        // Self owning.
+        let tree = deftree!(if (< (sqrt (+ 1 (pow 'x 2))) 0) (+ 1 'x) (+ 1 (pow 'x 2))).unwrap();
+        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+        let claims = make_claims(&tree, &ndom, 0).unwrap();
+        assert_eq!(
+            claims.as_ref(),
+            &[
+                (7, 7, PruneKind::Constant(Value::Bool(true))),
+                (7, 7, PruneKind::Constant(Value::Bool(false))),
+                (10, 16, PruneKind::Left),
+                (15, 16, PruneKind::Right)
+            ]
+        );
     }
 
     #[test]
