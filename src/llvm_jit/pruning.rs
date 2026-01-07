@@ -1926,12 +1926,16 @@ mod test {
 
     #[test]
     fn t_claim() {
-        // let tree = deftree!(min (+ 'x 1)(+ 'y (min (+ 'x 1) (+ 'y 1))))
-        //     .unwrap()
-        //     .compacted()
-        //     .unwrap();
-        // println!("{tree}");
-        // make_claims(&tree, &ndom, 0);
+        let tree = deftree!(min (+ 'x 1)(+ 'y (min (+ 'x 1) (+ 'y 1))))
+            .unwrap()
+            .compacted()
+            .unwrap();
+        let (tree, ndom) = tree.control_dependence_sorted().unwrap();
+        let claims = make_claims(&tree, &ndom, 0).unwrap();
+        assert_eq!(
+            claims.as_ref(),
+            &[(2, 7, PruneKind::Left), (6, 7, PruneKind::Right)]
+        );
         let tree = deftree!(min
                             (rem (- (- 'x)
                                   0.016_422)
@@ -1941,9 +1945,11 @@ mod test {
         .compacted()
         .unwrap();
         let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        println!("{tree}");
-        make_claims(&tree, &ndom, 0);
-        assert!(false);
+        let claims = make_claims(&tree, &ndom, 0).unwrap();
+        assert_eq!(
+            claims.as_ref(),
+            &[(3, 6, PruneKind::Right,), (5, 6, PruneKind::Left),]
+        );
     }
 
     #[test]
