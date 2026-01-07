@@ -26,6 +26,9 @@ pub enum Error {
     /// Index out of bounds,
     IndexOutOfBounds(usize, usize),
 
+    // Serialization.
+    IOError(String),
+
     // Evaluation related errors
     /// A symbol was not assigned a value before evaluating.
     VariableNotFound(char),
@@ -65,6 +68,7 @@ impl Debug for Error {
             TypeMismatch => write!(f, "TypeMismatch"),
             InvalidInterval => write!(f, "InvalidInterval"),
             IndexOutOfBounds(a, b) => f.debug_tuple("IndexOutOfBounds").field(a).field(b).finish(),
+            IOError(msg) => f.debug_tuple("IOError").field(msg).finish(),
             VariableNotFound(label) => f.debug_tuple("VariableNotFound").field(label).finish(),
             InvalidTemplateCapture => write!(f, "InvalidTemplateCapture"),
             UnboundTemplateSymbol => write!(f, "UnboundTemplateSymbol"),

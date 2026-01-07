@@ -1,5 +1,13 @@
 use crate::{
-    tree::{Node, Node::*, Tree, Value, Value::*},
+    Error,
+    tree::{
+        BinaryOp::*,
+        Node::{self, *},
+        TernaryOp::*,
+        Tree,
+        UnaryOp::*,
+        Value::{self, *},
+    },
     walk::{DepthWalker, NodeOrdering},
 };
 
@@ -95,6 +103,210 @@ impl std::fmt::Display for Node {
             Binary(op, lhs, rhs) => write!(f, "{op:?}({lhs}, {rhs})"),
             Ternary(op, a, b, c) => write!(f, "{op:?}({a}, {b}, {c})"),
         }
+    }
+}
+
+mod alias {
+    // Unary ops.
+    pub const NEGATE: &str = "neg";
+    pub const SQRT: &str = "sqrt";
+    pub const ABS: &str = "abs";
+    pub const SIN: &str = "sin";
+    pub const COS: &str = "cos";
+    pub const TAN: &str = "tan";
+    pub const LOG: &str = "log";
+    pub const EXP: &str = "exp";
+    pub const FLOOR: &str = "floor";
+    pub const NOT: &str = "not";
+    // Binary ops.
+    pub const ADD: &str = "add";
+    pub const SUBTRACT: &str = "sub";
+    pub const MULTIPLY: &str = "mul";
+    pub const DIVIDE: &str = "div";
+    pub const POW: &str = "pow";
+    pub const MIN: &str = "min";
+    pub const MAX: &str = "max";
+    pub const REMAINDER: &str = "";
+    pub const LESS: &str = "lt";
+    pub const LESSOREQUAL: &str = "le";
+    pub const EQUAL: &str = "eq";
+    pub const NOTEQUAL: &str = "neq";
+    pub const GREATER: &str = "gt";
+    pub const GREATEROREQUAL: &str = "ge";
+    pub const AND: &str = "and";
+    pub const OR: &str = "or";
+    // Ternary ops.
+    pub const CHOOSE: &str = "choose";
+}
+
+impl Tree {
+    pub fn write_to<W: std::io::Write>(&self, mut w: W) -> Result<(), std::io::Error> {
+        fn write_node<W: std::io::Write>(
+            node: &Node,
+            index: usize,
+            w: &mut W,
+        ) -> Result<(), std::io::Error> {
+            match node {
+                Constant(value) => match value {
+                    Bool(flag) => {
+                        writeln!(w, "bool {} # {}", if *flag { "t" } else { "f" }, index)?
+                    }
+                    Scalar(value) => {
+                        let bits = value.to_bits();
+                        writeln!(w, "float {bits:x} # {index}: {value}")?
+                    }
+                },
+                Symbol(label) => writeln!(w, "var {label}")?,
+                Unary(op, input) => {
+                    let opstr = match op {
+                        Negate => alias::NEGATE,
+                        Sqrt => alias::SQRT,
+                        Abs => alias::ABS,
+                        Sin => alias::SIN,
+                        Cos => alias::COS,
+                        Tan => alias::TAN,
+                        Log => alias::LOG,
+                        Exp => alias::EXP,
+                        Floor => alias::FLOOR,
+                        Not => alias::NOT,
+                    };
+                    writeln!(w, "{} {} # {}", opstr, input, index)?
+                }
+                Binary(op, lhs, rhs) => {
+                    let opstr = match op {
+                        Add => alias::ADD,
+                        Subtract => alias::SUBTRACT,
+                        Multiply => alias::MULTIPLY,
+                        Divide => alias::DIVIDE,
+                        Pow => alias::POW,
+                        Min => alias::MIN,
+                        Max => alias::MAX,
+                        Remainder => alias::REMAINDER,
+                        Less => alias::LESS,
+                        LessOrEqual => alias::LESSOREQUAL,
+                        Equal => alias::EQUAL,
+                        NotEqual => alias::NOTEQUAL,
+                        Greater => alias::GREATER,
+                        GreaterOrEqual => alias::GREATEROREQUAL,
+                        And => alias::AND,
+                        Or => alias::OR,
+                    };
+                    writeln!(w, "{} {} {} # {}", opstr, lhs, rhs, index)?
+                }
+                Ternary(op, a, b, c) => {
+                    let opstr = match op {
+                        Choose => alias::CHOOSE,
+                    };
+                    writeln!(w, "{} {} {} {} # {}", opstr, a, b, c, index)?
+                }
+            }
+            Ok(())
+        }
+        let (rows, cols) = self.dims();
+        writeln!(w, "{rows} {cols} # output dims")?;
+        // First write non-root nodes.
+        let count = self.len() - self.num_roots();
+        for (i, node) in self.nodes().iter().enumerate().take(count) {
+            write_node(node, i, &mut w)?
+        }
+        writeln!(w, "\n# outputs\n")?;
+        for (i, node) in self.nodes().iter().enumerate().skip(count) {
+            write_node(node, i, &mut w)?
+        }
+        Ok(())
+    }
+
+    pub fn read_from<S: std::io::Read>(mut src: S) -> Result<Tree, Error> {
+        fn read_int<'a>(iter: &mut impl Iterator<Item = &'a str>) -> Result<usize, Error> {
+            iter.next()
+                .ok_or_else(|| Error::IOError("Unable to read integer string".into()))
+                .and_then(|word| {
+                    word.parse::<usize>()
+                        .map_err(|e| Error::IOError(e.to_string()))
+                })
+        }
+        let src = {
+            let mut out = String::new();
+            src.read_to_string(&mut out)
+                .map_err(|e| Error::IOError(e.to_string()))?;
+            out
+        };
+        let src = src.as_str().trim();
+        let mut lines = src.lines();
+        let dims = {
+            let (rows, cols) = lines
+                .next()
+                .map(|s| s.split_once(" "))
+                .flatten()
+                .ok_or_else(|| {
+                    Error::IOError("Unable to read the output dimensions of tree.".into())
+                })?;
+            (
+                rows.parse::<usize>()
+                    .map_err(|e| Error::IOError(e.to_string()))?,
+                cols.parse::<usize>()
+                    .map_err(|e| Error::IOError(e.to_string()))?,
+            )
+        };
+        let mut nodes = Vec::<Node>::new();
+        for line in src.lines() {
+            let line = line
+                .trim()
+                .split_once('#')
+                .map(|(before, _after)| before)
+                .unwrap_or(line)
+                .trim();
+            if line.is_empty() || line.starts_with("#") {
+                continue;
+            }
+            let mut words = line.split_ascii_whitespace();
+            let opstr = words
+                .next()
+                .ok_or_else(|| Error::IOError("Unable to read the op".into()))?;
+            let node = match opstr {
+                alias::NEGATE => Unary(Negate, read_int(&mut words)?),
+                alias::SQRT => Unary(Sqrt, read_int(&mut words)?),
+                alias::ABS => Unary(Abs, read_int(&mut words)?),
+                alias::SIN => Unary(Sin, read_int(&mut words)?),
+                alias::COS => Unary(Cos, read_int(&mut words)?),
+                alias::TAN => Unary(Tan, read_int(&mut words)?),
+                alias::LOG => Unary(Log, read_int(&mut words)?),
+                alias::EXP => Unary(Exp, read_int(&mut words)?),
+                alias::FLOOR => Unary(Floor, read_int(&mut words)?),
+                alias::NOT => Unary(Not, read_int(&mut words)?),
+                // Binary ops.
+                alias::ADD => Binary(Add, read_int(&mut words)?, read_int(&mut words)?),
+                alias::SUBTRACT => Binary(Subtract, read_int(&mut words)?, read_int(&mut words)?),
+                alias::MULTIPLY => Binary(Multiply, read_int(&mut words)?, read_int(&mut words)?),
+                alias::DIVIDE => Binary(Divide, read_int(&mut words)?, read_int(&mut words)?),
+                alias::POW => Binary(Pow, read_int(&mut words)?, read_int(&mut words)?),
+                alias::MIN => Binary(Min, read_int(&mut words)?, read_int(&mut words)?),
+                alias::MAX => Binary(Max, read_int(&mut words)?, read_int(&mut words)?),
+                alias::REMAINDER => Binary(Remainder, read_int(&mut words)?, read_int(&mut words)?),
+                alias::LESS => Binary(Less, read_int(&mut words)?, read_int(&mut words)?),
+                alias::LESSOREQUAL => {
+                    Binary(LessOrEqual, read_int(&mut words)?, read_int(&mut words)?)
+                }
+                alias::EQUAL => Binary(Equal, read_int(&mut words)?, read_int(&mut words)?),
+                alias::NOTEQUAL => Binary(NotEqual, read_int(&mut words)?, read_int(&mut words)?),
+                alias::GREATER => Binary(Greater, read_int(&mut words)?, read_int(&mut words)?),
+                alias::GREATEROREQUAL => {
+                    Binary(GreaterOrEqual, read_int(&mut words)?, read_int(&mut words)?)
+                }
+                alias::AND => Binary(And, read_int(&mut words)?, read_int(&mut words)?),
+                alias::OR => Binary(Or, read_int(&mut words)?, read_int(&mut words)?),
+                // Ternary ops.
+                alias::CHOOSE => Ternary(
+                    Choose,
+                    read_int(&mut words)?,
+                    read_int(&mut words)?,
+                    read_int(&mut words)?,
+                ),
+                _ => return Err(Error::IOError("Unrecognized op".into())),
+            };
+            nodes.push(node);
+        }
+        Tree::from_nodes(nodes, dims)
     }
 }
 
