@@ -1914,7 +1914,7 @@ fn make_claims(
             .iter()
             .filter_map(|(a, b, _)| if *a == *b { Some(*a) } else { None }),
     );
-    claims.retain(|(a, b, _)| *a != *b && !self_owned.contains(a));
+    claims.retain(|(a, b, _)| *a == *b || !self_owned.contains(a));
     Ok(claims.into_boxed_slice())
 }
 
