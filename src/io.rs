@@ -226,7 +226,7 @@ impl Tree {
         Ok(())
     }
 
-    pub fn read_from<S: std::io::Read>(mut src: S) -> Result<Tree, Error> {
+    pub fn read_from<S: std::io::BufRead>(mut src: S) -> Result<Tree, Error> {
         fn read_int<'a>(iter: &mut impl Iterator<Item = &'a str>) -> Result<usize, Error> {
             iter.next()
                 .ok_or_else(|| Error::IOError("Unable to read integer string".into()))
@@ -235,38 +235,37 @@ impl Tree {
                         .map_err(|e| Error::IOError(e.to_string()))
                 })
         }
-        let src = {
-            let mut out = String::new();
-            src.read_to_string(&mut out)
-                .map_err(|e| Error::IOError(e.to_string()))?;
-            out
-        };
-        let src = src.as_str().trim();
-        let mut lines = src.lines();
+        let mut line = String::new();
         let dims = {
-            let (rows, cols) = lines
-                .next()
-                .map(|line| {
-                    line.trim()
-                        .split_once('#')
-                        .map(|(before, _after)| before)
-                        .unwrap_or(line)
-                        .trim()
-                })
-                .map(|s| s.split_once(" "))
-                .flatten()
+            src.read_line(&mut line)
+                .map_err(|e| Error::IOError(e.to_string()))?;
+            let line = line.trim();
+            let (rows, cols) = line
+                .split_once('#')
+                .map(|(before, _after)| before)
+                .unwrap_or(line)
+                .trim()
+                .split_once(" ")
                 .ok_or_else(|| {
                     Error::IOError("Unable to read the output dimensions of tree.".into())
                 })?;
-            (
+            let (rows, cols) = (
                 rows.parse::<usize>()
                     .map_err(|e| Error::IOError(e.to_string()))?,
                 cols.parse::<usize>()
                     .map_err(|e| Error::IOError(e.to_string()))?,
-            )
+            );
+            (rows, cols)
         };
         let mut nodes = Vec::<Node>::new();
-        for line in lines {
+        while {
+            line.clear();
+            // Returns Ok(number_of_bytes_read). That should be zero at EOF.
+            src.read_line(&mut line)
+                .map_err(|e| Error::IOError(e.to_string()))?
+        } > 0
+        {
+            let line = line.as_str();
             let line = line
                 .trim()
                 .split_once('#')
