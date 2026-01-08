@@ -136,7 +136,7 @@ mod alias {
     pub const LESS: &str = "lt";
     pub const LESSOREQUAL: &str = "le";
     pub const EQUAL: &str = "eq";
-    pub const NOTEQUAL: &str = "neq";
+    pub const NOTEQUAL: &str = "ne";
     pub const GREATER: &str = "gt";
     pub const GREATEROREQUAL: &str = "ge";
     pub const AND: &str = "and";

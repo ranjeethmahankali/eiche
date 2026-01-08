@@ -1822,6 +1822,14 @@ fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Bloc
     Ok(blocks.into_boxed_slice())
 }
 
+fn make_interrupts(
+    tree: &Tree,
+    ndom: &[usize],
+    claims: &[(usize, usize, PruneKind)],
+) -> Result<Box<[Interrupt]>, Error> {
+    todo!();
+}
+
 fn make_claims(
     tree: &Tree,
     ndom: &[usize],
