@@ -560,13 +560,16 @@ mod test {
 
     #[test]
     fn t_serialization_edge_cases() {
-        // Covers: booleans, special floats, multi-output (concat), remainder,
+        // Covers: booleans, special floats, multi-output (2x2 matrix), remainder,
         // binary (and, or, le, eq, neq, gt, ge), unary (not).
         let tree = deftree!(concat
             (or (and true false) (not (<= 'x 'y)))
             (and (or (== 'x 0.) (!= 'y 1.)) (or (> 'x 'z) (>= 'y 'z)))
             (+ (rem 'x (const f64::INFINITY)) (const f64::NEG_INFINITY))
+            (* 'x 'y)
         )
+        .unwrap()
+        .reshape(2, 2)
         .unwrap();
         let mut buf = Vec::new();
         tree.write_to(&mut buf).unwrap();
