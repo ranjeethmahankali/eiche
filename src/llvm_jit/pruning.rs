@@ -1830,6 +1830,22 @@ fn make_interrupts(
     todo!();
 }
 
+/**
+# Core Idea
+
+Claims are how we decide which nodes have the pruning rights for which other
+nodes. When a node is pruned, it's dominated node range is skipped during
+evaluation.
+
+Say a node A claims rights over a prunable node P. Then later, another node B
+also claims pruning rights over P. If B dominates A, then A's claims are
+revoked. Similarly, any other claims on rights over P, by nodes that are
+dominated by B are revoked. After this, only remaining claims over P are from
+nodes that don't dominate each other. These are all alternate paths from P to
+the root. For P to get pruned at runtime, all the claimants should agree at
+runtime that P can be pruned.
+*/
+
 fn make_claims(
     tree: &Tree,
     ndom: &[usize],
@@ -1885,20 +1901,24 @@ fn make_claims(
         (Some(..), None) => Ordering::Greater,
         (Some((la, lb, _)), Some((ra, rb, _))) => (la, lb).cmp(&(ra, rb)),
     });
+    // Revoke claims if also claimed by a dominating node.
     for chunk in claims.chunk_by_mut(|a, b| match (a, b) {
         (None, None) => true,
         (None, Some(_)) | (Some(_), None) => false,
         (Some((la, _, _)), Some((ra, _, _))) => la == ra,
     }) {
+        // We start at the last claimant and iterate backwards. For each
+        // claimant, we revoke any claims by another claimant that is dominated
+        // by this claimant.
         let mut i = chunk.len() - 1;
         while i > 0 {
             let (left, right) = chunk.split_at_mut(i);
             i -= 1;
-            let claim = match right[0] {
+            let claimant = match right[0] {
                 Some((_, c, _)) => c,
                 None => continue,
             };
-            let dom = (claim - ndom[claim])..claim;
+            let dom = (claimant - ndom[claimant])..claimant;
             for check in left.iter_mut() {
                 if match check {
                     Some((_, c, _)) => dom.contains(c),
@@ -1908,6 +1928,9 @@ fn make_claims(
                 }
             }
         }
+        // Any claimant that survived the above process has irrevokable pruning
+        // rights. If any of them says the node cannot be pruned, then the
+        // pruning rights of the rest are revoked.
         if chunk.iter().any(|c| match c {
             Some((_, _, PruneKind::None)) => true,
             _ => false,
@@ -1917,6 +1940,10 @@ fn make_claims(
         }
     }
     let mut claims = claims.into_iter().filter_map(|c| c).collect::<Vec<_>>();
+    // If any node owns it's own pruning rights, then we revoke the rights of
+    // other nodes over that node. This is because if the node is capable of
+    // choosing when to prune itself, other nodes' opinion about it is
+    // irrelevant. We can reconsider this decision later.
     let self_owned: HashSet<usize> = HashSet::from_iter(
         claims
             .iter()
