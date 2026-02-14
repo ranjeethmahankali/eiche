@@ -990,6 +990,7 @@ impl Tree {
         }
         let (tree, ndom) = self.control_dependence_sorted()?;
         let deps = DependencyTable::from_tree(&tree);
+        let claims = make_claims(&tree, &ndom, &deps, pruning_threshold)?;
         todo!();
         // let PrunerInfo {
         //     engine,
@@ -1849,6 +1850,7 @@ runtime that P can be pruned.
 fn make_claims(
     tree: &Tree,
     ndom: &[usize],
+    deps: &DependencyTable,
     threshold: usize,
 ) -> Result<Box<[(usize, usize, PruneKind)]>, Error> {
     use std::cmp::Ordering;
@@ -1863,10 +1865,10 @@ fn make_claims(
                 claims
             }
             Binary(Min | Max, lhs, rhs) => {
-                if ndom[*lhs] > threshold {
+                if ndom[*lhs] > threshold && !deps.is_needed_by(*lhs, *rhs) {
                     claims.push(Some((*lhs, ni, PruneKind::Left)));
                 }
-                if ndom[*rhs] > threshold {
+                if ndom[*rhs] > threshold && !deps.is_needed_by(*rhs, *lhs) {
                     claims.push(Some((*rhs, ni, PruneKind::Right)));
                 }
                 claims
@@ -1962,31 +1964,28 @@ mod test {
     #[test]
     fn t_claim() {
         // Case 1.
-        let tree = deftree!(min (+ 'x 1)(+ 'y (min (+ 'x 1) (+ 'y 1))))
+        let tree = deftree!(min (+ 'x 1) (+ 'y (min (+ 'x 1) (+ 'y 1))))
             .unwrap()
             .compacted()
             .unwrap();
         let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let claims = make_claims(&tree, &ndom, 0).unwrap();
+        let deps = DependencyTable::from_tree(&tree);
+        let claims = make_claims(&tree, &ndom, &deps, 0).unwrap();
         assert_eq!(
             claims.as_ref(),
-            &[(2, 7, PruneKind::Left), (6, 7, PruneKind::Right)]
+            &[(2, 5, PruneKind::Left), (6, 7, PruneKind::Right)]
         );
         // Case 2.
         let tree = deftree!(min
-                            (rem (- (- 'x)
-                                  0.016_422)
-                             0.011_2)
+                            (rem (- (- 'x) 0.016_422) 0.011_2)
                             (- (- 'x) 0.016_422))
         .unwrap()
         .compacted()
         .unwrap();
         let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let claims = make_claims(&tree, &ndom, 0).unwrap();
-        assert_eq!(
-            claims.as_ref(),
-            &[(3, 6, PruneKind::Right,), (5, 6, PruneKind::Left),]
-        );
+        let deps = DependencyTable::from_tree(&tree);
+        let claims = make_claims(&tree, &ndom, &deps, 0).unwrap();
+        assert_eq!(claims.as_ref(), &[(5, 6, PruneKind::Left)]);
         // Test case I discovered when benchmarking the hex test case.
         let tree = Tree::read_from(
             "1 1 # output dims
@@ -2036,7 +2035,8 @@ add 36 33 # 37
         .compacted()
         .unwrap();
         let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let claims = make_claims(&tree, &ndom, 0).unwrap();
+        let deps = DependencyTable::from_tree(&tree);
+        let claims = make_claims(&tree, &ndom, &deps, 0).unwrap();
         assert_eq!(
             claims.as_ref(),
             &[
@@ -2057,7 +2057,8 @@ add 36 33 # 37
             .compacted()
             .unwrap();
         let (tree, ndom) = tree.control_dependence_sorted().unwrap();
-        let claims = make_claims(&tree, &ndom, 0).unwrap();
+        let deps = DependencyTable::from_tree(&tree);
+        let claims = make_claims(&tree, &ndom, &deps, 0).unwrap();
         assert_eq!(
             claims.as_ref(),
             &[
