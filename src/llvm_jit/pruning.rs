@@ -530,6 +530,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                     let mut prev_val = None;
                     let mut index = 0u32;
                     for jump in jumps.iter() {
+                        // TODO: use chunk_by.
                         if prev_target != jump.target || prev_val != Some(jump.alternate.clone()) {
                             // New case.
                             index += 1;
@@ -607,7 +608,6 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
             builder.build_store(dst, *reg)?;
         }
         builder.build_return(None)?;
-        // TODO: Copied these passes from single.rs. Find out what is optimal for pruning single evals.
         compiler.run_passes("mem2reg,instcombine,reassociate,gvn,instcombine,slp-vectorizer,instcombine,simplifycfg,adce")?;
         let engine = compiler
             .module
@@ -807,6 +807,7 @@ impl<'ctx, T: NumberType> JitPruner<'ctx, T> {
                     let mut prev_val = None;
                     let mut index = 0u32;
                     for jump in jumps.iter() {
+                        // TODO: use chunk_by.
                         if prev_target != jump.target || prev_val != Some(jump.alternate.clone()) {
                             // New case.
                             index += 1;
@@ -991,34 +992,37 @@ impl Tree {
         let (tree, ndom) = self.control_dependence_sorted()?;
         let deps = DependencyTable::from_tree(&tree);
         let claims = make_claims(&tree, &ndom, &deps, pruning_threshold)?;
-        todo!();
-        // let PrunerInfo {
-        //     engine,
-        //     func_name,
-        //     n_inputs,
-        //     n_outputs,
-        //     n_signals,
-        //     params,
-        //     merge_block_map,
-        //     block_signal_map,
-        // } = compile_pruner_impl::<T, true>(&tree, context, &blocks, params, eps)?;
-        // // SAFETY: The signature is correct, and well tested. The function
-        // // pointer should never be invalidated, because we allocated a dedicated
-        // // execution engine, with it's own block of executable memory, that will
-        // // live as long as the function wrapper lives.
-        // let func = unsafe { engine.get_function(&func_name)? };
-        // Ok(JitPruner {
-        //     func,
-        //     n_inputs,
-        //     n_outputs,
-        //     n_signals,
-        //     params: params.to_string(),
-        //     blocks,
-        //     merge_block_map,
-        //     block_signal_map,
-        //     tree,
-        //     phantom: PhantomData,
-        // })
+        let claims: HashSet<(usize, usize)> =
+            HashSet::from_iter(claims.into_iter().map(|(a, b, _)| (a, b)));
+        let interrupts = make_interrupts(&tree, &ndom, &claims, pruning_threshold)?;
+        let blocks = make_blocks(interrupts, tree.len())?;
+        let PrunerInfo {
+            engine,
+            func_name,
+            n_inputs,
+            n_outputs,
+            n_signals,
+            params,
+            merge_block_map,
+            block_signal_map,
+        } = compile_pruner_impl::<T, true>(&tree, context, &blocks, params, eps)?;
+        // SAFETY: The signature is correct, and well tested. The function
+        // pointer should never be invalidated, because we allocated a dedicated
+        // execution engine, with it's own block of executable memory, that will
+        // live as long as the function wrapper lives.
+        let func = unsafe { engine.get_function(&func_name)? };
+        Ok(JitPruner {
+            func,
+            n_inputs,
+            n_outputs,
+            n_signals,
+            params: params.to_string(),
+            blocks,
+            merge_block_map,
+            block_signal_map,
+            tree,
+            phantom: PhantomData,
+        })
     }
 }
 
@@ -1823,12 +1827,170 @@ fn make_blocks(interrupts: Box<[Interrupt]>, n_nodes: usize) -> Result<Box<[Bloc
     Ok(blocks.into_boxed_slice())
 }
 
+fn push_land(dst: &mut Vec<Interrupt>, after_node: usize, land_map: &mut [Option<usize>]) {
+    let mapped = &mut land_map[after_node];
+    if mapped.is_none() {
+        let idx = dst.len();
+        dst.push(Interrupt::Land { after_node });
+        *mapped = Some(idx);
+    }
+}
+
 fn make_interrupts(
     tree: &Tree,
     ndom: &[usize],
-    claims: &[(usize, usize, PruneKind)],
+    claims: &HashSet<(usize, usize)>,
+    threshold: usize,
 ) -> Result<Box<[Interrupt]>, Error> {
-    todo!();
+    let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
+    let mut land_map: Vec<Option<usize>> = vec![None; tree.len()];
+    for (ni, node) in tree.nodes().iter().enumerate() {
+        match node {
+            Binary(Min | Max, lhs, rhs) => {
+                let ldom = ndom[*lhs];
+                let rdom = ndom[*rhs];
+                let lskip = claims.contains(&(*lhs, ni));
+                let rskip = claims.contains(&(*rhs, ni));
+                if lskip {
+                    push_land(&mut interrupts, *lhs, &mut land_map);
+                    interrupts.push(Interrupt::Jump {
+                        before_node: *lhs - ldom,
+                        target: *lhs,
+                        alternate: Alternate::None,
+                        owner: ni,
+                        trigger: PruneKind::Left,
+                    });
+                }
+                if rskip {
+                    push_land(&mut interrupts, *rhs, &mut land_map);
+                    interrupts.push(Interrupt::Jump {
+                        before_node: *rhs - rdom,
+                        target: *rhs,
+                        alternate: Alternate::None,
+                        owner: ni,
+                        trigger: PruneKind::Right,
+                    });
+                }
+                if lskip || rskip {
+                    push_land(&mut interrupts, ni, &mut land_map);
+                    if lskip {
+                        interrupts.push(Interrupt::Jump {
+                            before_node: ni,
+                            target: ni,
+                            alternate: Alternate::Node(*rhs),
+                            owner: ni,
+                            trigger: PruneKind::Left,
+                        });
+                    }
+                    if rskip {
+                        interrupts.push(Interrupt::Jump {
+                            before_node: ni,
+                            target: ni,
+                            alternate: Alternate::Node(*lhs),
+                            owner: ni,
+                            trigger: PruneKind::Right,
+                        });
+                    }
+                }
+            }
+            Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
+                let dom = ndom[ni];
+                if dom > threshold {
+                    push_land(&mut interrupts, ni, &mut land_map);
+                    interrupts.push(Interrupt::Jump {
+                        before_node: ni - dom,
+                        target: ni,
+                        alternate: Alternate::Constant(Value::Bool(true)),
+                        owner: ni,
+                        trigger: PruneKind::Constant(Value::Bool(true)),
+                    });
+                    interrupts.push(Interrupt::Jump {
+                        before_node: ni - dom,
+                        target: ni,
+                        alternate: Alternate::Constant(Value::Bool(false)),
+                        owner: ni,
+                        trigger: PruneKind::Constant(Value::Bool(false)),
+                    });
+                }
+            }
+            Ternary(Choose, _cond, tt, ff) => {
+                let ttdom = ndom[*tt];
+                let ffdom = ndom[*ff];
+                let tskip = claims.contains(&(*tt, ni));
+                let fskip = claims.contains(&(*tt, ni));
+                if tskip {
+                    push_land(&mut interrupts, *tt, &mut land_map);
+                    interrupts.push(Interrupt::Jump {
+                        before_node: *tt - ttdom,
+                        target: *tt,
+                        alternate: Alternate::None,
+                        owner: ni,
+                        trigger: PruneKind::Left,
+                    });
+                }
+                if fskip {
+                    push_land(&mut interrupts, *ff, &mut land_map);
+                    interrupts.push(Interrupt::Jump {
+                        before_node: *ff - ffdom,
+                        target: *ff,
+                        alternate: Alternate::None,
+                        owner: ni,
+                        trigger: PruneKind::Right,
+                    });
+                }
+                if tskip || fskip {
+                    push_land(&mut interrupts, ni, &mut land_map);
+                    if tskip {
+                        interrupts.push(Interrupt::Jump {
+                            before_node: ni,
+                            target: ni,
+                            alternate: Alternate::Node(*ff),
+                            owner: ni,
+                            trigger: PruneKind::Left,
+                        });
+                    }
+                    if fskip {
+                        interrupts.push(Interrupt::Jump {
+                            before_node: ni,
+                            target: ni,
+                            alternate: Alternate::Node(*tt),
+                            owner: ni,
+                            trigger: PruneKind::Right,
+                        });
+                    }
+                }
+            }
+            _ => continue,
+        }
+    }
+    interrupts.sort_by(|a, b| -> std::cmp::Ordering {
+        match (a, b) {
+            (
+                Interrupt::Jump {
+                    before_node: lbn,
+                    target: lt,
+                    alternate: la,
+                    owner: lo,
+                    ..
+                },
+                Interrupt::Jump {
+                    before_node: rbn,
+                    target: rt,
+                    alternate: ra,
+                    owner: ro,
+                    ..
+                },
+            ) => (lbn, std::cmp::Reverse(lt), la, lo).cmp(&(rbn, std::cmp::Reverse(rt), ra, ro)),
+            (Interrupt::Jump { before_node, .. }, Interrupt::Land { after_node }) => {
+                (before_node, 0).cmp(&(after_node, 1))
+            }
+            (Interrupt::Land { after_node }, Interrupt::Jump { before_node, .. }) => {
+                (after_node, 1).cmp(&(before_node, 0))
+            }
+            (Interrupt::Land { after_node: la }, Interrupt::Land { after_node: ra }) => la.cmp(ra),
+        }
+    });
+    Ok(interrupts.into_boxed_slice())
 }
 
 /**
