@@ -3,16 +3,18 @@ use super::{
     fast_math,
 };
 use crate::{
-    Value,
+    Node, Value,
     error::Error,
     tree::{BinaryOp::*, Node::*, TernaryOp::*, Tree, UnaryOp::*, Value::*},
 };
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
+    builder::Builder,
     context::Context,
     execution_engine::JitFunction,
+    module::Module,
     types::{FloatType, VectorType},
-    values::{BasicValue, BasicValueEnum},
+    values::{BasicValue, BasicValueEnum, IntValue, PointerValue},
 };
 use std::{ffi::c_void, marker::PhantomData, mem::size_of};
 
@@ -958,12 +960,12 @@ where
     Wide: SimdVec<T>,
     T: NumberType,
 {
-    num_samples: usize,
-    num_inputs: usize,
-    num_outputs: usize,
-    inputs: Vec<Wide>,
-    outputs: Vec<Wide>,
-    phantom: PhantomData<T>, // This only exists to specialize the type for type T.
+    pub(crate) n_samples: usize,
+    pub(crate) n_inputs: usize,
+    pub(crate) n_outputs: usize,
+    pub(crate) inputs: Vec<Wide>,
+    pub(crate) outputs: Vec<Wide>,
+    pub(crate) phantom: PhantomData<T>, // This only exists to specialize the type for type T.
 }
 
 impl<'ctx, T> JitSimdFn<'ctx, T>
@@ -1006,7 +1008,7 @@ where
         // wrapper that populates the inputs correctly via it's public API, and
         // knows the correct number of SIMD iterations required.
         unsafe {
-            self.run_raw(
+            self.run_unchecked(
                 buf.inputs.as_ptr().cast(),
                 buf.outputs.as_mut_ptr().cast(),
                 buf.num_simd_iters(),
@@ -1033,7 +1035,7 @@ where
     slice must be `n_symbols * num_iters` long, and the output slice must be
     `n_roots * num_iters` long.
      */
-    pub unsafe fn run_raw(&self, inputs: *const Wide, outputs: *mut Wide, num_iters: usize) {
+    pub unsafe fn run_unchecked(&self, inputs: *const Wide, outputs: *mut Wide, num_iters: usize) {
         // SAFETY: Calling a raw functin pointer. We told the caller it's their
         // responsibility to make sure inputs are correct.
         unsafe {
@@ -1051,9 +1053,9 @@ where
 
     pub fn new(tree: &Tree) -> Self {
         Self {
-            num_samples: 0,
-            num_inputs: tree.symbols().len(),
-            num_outputs: tree.num_roots(),
+            n_samples: 0,
+            n_inputs: tree.symbols().len(),
+            n_outputs: tree.num_roots(),
             inputs: Vec::new(),
             outputs: Vec::new(),
             phantom: PhantomData,
@@ -1070,9 +1072,9 @@ where
         let num_inputs = tree.symbols().len();
         let num_outputs = tree.num_roots();
         Self {
-            num_samples: 0,
-            num_inputs,
-            num_outputs,
+            n_samples: 0,
+            n_inputs: num_inputs,
+            n_outputs: num_outputs,
             inputs: Vec::with_capacity(n_simd * num_inputs),
             outputs: Vec::with_capacity(n_simd * num_outputs),
             phantom: PhantomData,
@@ -1080,16 +1082,16 @@ where
     }
 
     pub fn reset_for_tree(&mut self, tree: &Tree) {
-        self.num_samples = 0;
-        self.num_inputs = tree.symbols().len();
-        self.num_outputs = tree.num_roots();
+        self.n_samples = 0;
+        self.n_inputs = tree.symbols().len();
+        self.n_outputs = tree.num_roots();
         self.inputs.clear();
         self.outputs.clear();
     }
 
-    fn num_simd_iters(&self) -> usize {
-        (self.num_samples / Self::SIMD_VEC_SIZE)
-            + if self.num_samples.is_multiple_of(Self::SIMD_VEC_SIZE) {
+    pub(crate) fn num_simd_iters(&self) -> usize {
+        (self.n_samples / Self::SIMD_VEC_SIZE)
+            + if self.n_samples.is_multiple_of(Self::SIMD_VEC_SIZE) {
                 0
             } else {
                 1
@@ -1102,28 +1104,28 @@ where
     /// variables in the same order as they are returned by calling
     /// `tree.symbols` on the tree that produced this JIT evaluator.
     pub fn pack(&mut self, sample: &[T]) -> Result<(), Error> {
-        if sample.len() != self.num_inputs {
-            return Err(Error::InputSizeMismatch(sample.len(), self.num_inputs));
+        if sample.len() != self.n_inputs {
+            return Err(Error::InputSizeMismatch(sample.len(), self.n_inputs));
         }
-        let lane = self.num_samples % Self::SIMD_VEC_SIZE;
+        let lane = self.n_samples % Self::SIMD_VEC_SIZE;
         if lane == 0 {
             self.inputs.extend(std::iter::repeat_n(
                 <Wide as SimdVec<T>>::nan(),
-                self.num_inputs,
+                self.n_inputs,
             ));
             self.outputs.extend(std::iter::repeat_n(
                 <Wide as SimdVec<T>>::nan(),
-                self.num_outputs,
+                self.n_outputs,
             ));
         }
         let inpsize = self.inputs.len();
-        for (reg, val) in self.inputs[(inpsize - self.num_inputs)..]
+        for (reg, val) in self.inputs[(inpsize - self.n_inputs)..]
             .iter_mut()
             .zip(sample.iter())
         {
             <Wide as SimdVec<T>>::set(reg, *val, lane);
         }
-        self.num_samples += 1;
+        self.n_samples += 1;
         Ok(())
     }
 
@@ -1135,13 +1137,13 @@ where
 
     pub fn clear_outputs(&mut self) {
         self.outputs.clear();
-        self.num_samples = 0;
+        self.n_samples = 0;
     }
 
     pub fn unpack_outputs(&self) -> impl Iterator<Item = T> {
-        debug_assert_eq!(self.outputs.len() % self.num_outputs, 0);
+        debug_assert_eq!(self.outputs.len() % self.n_outputs, 0);
         self.outputs
-            .chunks_exact(self.num_outputs)
+            .chunks_exact(self.n_outputs)
             .flat_map(|chunk| {
                 (0..Self::SIMD_VEC_SIZE).flat_map(|lane| {
                     chunk
@@ -1149,7 +1151,7 @@ where
                         .map(move |simd| <Wide as SimdVec<T>>::get(simd, lane))
                 })
             })
-            .take(self.num_samples * self.num_outputs)
+            .take(self.n_samples * self.n_outputs)
     }
 }
 
@@ -1158,7 +1160,7 @@ impl Tree {
     pub fn jit_compile_array<'ctx, T>(
         &'ctx self,
         context: &'ctx JitContext,
-        symbols: &str,
+        params: &str,
     ) -> Result<JitSimdFn<'ctx, T>, Error>
     where
         Wide: SimdVec<T>,
@@ -1173,14 +1175,13 @@ impl Tree {
         let context = &context.inner;
         let compiler = JitCompiler::new(context)?;
         let builder = &compiler.builder;
-        let float_type = <Wide as SimdVec<T>>::float_type(context);
+        let flt_type = <Wide as SimdVec<T>>::float_type(context);
         let i64_type = context.i64_type();
-        let fvec_type = float_type.vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
-        let fptr_type = context.ptr_type(AddressSpace::default());
-        let fn_type = context.void_type().fn_type(
-            &[fptr_type.into(), fptr_type.into(), i64_type.into()],
-            false,
-        );
+        let fvec_type = flt_type.vec_type(<Wide as SimdVec<T>>::SIMD_VEC_SIZE as u32);
+        let ptr_type = context.ptr_type(AddressSpace::default());
+        let fn_type = context
+            .void_type()
+            .fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
         let function = compiler.module.add_function(&func_name, fn_type, None);
         compiler.set_attributes(function, context)?;
         let start_block = context.append_basic_block(function, "entry");
@@ -1201,252 +1202,26 @@ impl Tree {
         builder.build_unconditional_branch(loop_block)?;
         // Start the loop
         builder.position_at_end(loop_block);
-        let phi = builder.build_phi(i64_type, "counter_phi")?;
-        phi.add_incoming(&[(&i64_type.const_int(0, false), start_block)]);
-        let index = phi.as_basic_value().into_int_value();
+        let loop_index_phi = builder.build_phi(i64_type, "counter_phi")?;
+        loop_index_phi.add_incoming(&[(&i64_type.const_int(0, false), start_block)]);
+        let loop_index = loop_index_phi.as_basic_value().into_int_value();
         let mut regs: Vec<BasicValueEnum> = Vec::with_capacity(self.len());
-        for (ni, node) in self.nodes().iter().enumerate() {
-            let reg = match node {
-                Constant(val) => match val {
-                    Bool(val) => <Wide as SimdVec<T>>::const_bool(*val, context),
-                    Scalar(val) => <Wide as SimdVec<T>>::const_float(*val, context),
+        for (node_index, node) in self.nodes().iter().copied().enumerate() {
+            let reg = build_op::<T>(
+                BuildArgs {
+                    nodes: self.nodes(),
+                    params,
+                    context,
+                    fvec_type,
+                    inputs,
+                    loop_index,
+                    regs: regs.as_ref(),
+                    node_index,
+                    node,
                 },
-                Symbol(label) => {
-                    let offset = builder.build_int_add(
-                        builder.build_int_mul(
-                            index,
-                            i64_type.const_int(symbols.len() as u64, false),
-                            &format!("input_offset_mul_{label}"),
-                        )?,
-                        i64_type.const_int(
-                            symbols.chars().position(|c| c == *label).ok_or(
-                                Error::JitCompilationError("Cannot find symbol".to_string()),
-                            )? as u64,
-                            false,
-                        ),
-                        &format!("input_offset_add_{label}"),
-                    )?;
-                    builder.build_load(
-                        fvec_type,
-                        // SAFETY: GEP can segfault if the index is out of
-                        // bounds. The offset calculation looks pretty solid,
-                        // and is thoroughly tested.
-                        unsafe {
-                            builder.build_gep(fvec_type, inputs, &[offset], &format!("arg_{label}"))
-                        }?,
-                        &format!("arg_{label}"),
-                    )?
-                }
-                Unary(op, input) => {
-                    match op {
-                        Negate => fast_math(builder.build_float_neg(
-                            regs[*input].into_vector_value(),
-                            &format!("reg_{ni}"),
-                        )?)
-                        .as_basic_value_enum(),
-                        Sqrt => fast_math(build_vec_unary_intrinsic(
-                            builder,
-                            &compiler.module,
-                            "llvm.sqrt.*",
-                            "sqrt_call",
-                            regs[*input].into_vector_value(),
-                        )?),
-                        Abs => fast_math(build_vec_unary_intrinsic(
-                            builder,
-                            &compiler.module,
-                            "llvm.fabs.*",
-                            "abs_call",
-                            regs[*input].into_vector_value(),
-                        )?),
-                        Sin => fast_math(build_vec_unary_intrinsic(
-                            builder,
-                            &compiler.module,
-                            "llvm.sin.*",
-                            "sin_call",
-                            regs[*input].into_vector_value(),
-                        )?),
-                        Cos => fast_math(build_vec_unary_intrinsic(
-                            builder,
-                            &compiler.module,
-                            "llvm.cos.*",
-                            "cos_call",
-                            regs[*input].into_vector_value(),
-                        )?),
-                        Tan => {
-                            let sin = fast_math(build_vec_unary_intrinsic(
-                                builder,
-                                &compiler.module,
-                                "llvm.sin.*",
-                                "sin_call",
-                                regs[*input].into_vector_value(),
-                            )?);
-                            let cos = fast_math(build_vec_unary_intrinsic(
-                                builder,
-                                &compiler.module,
-                                "llvm.cos.*",
-                                "cos_call",
-                                regs[*input].into_vector_value(),
-                            )?);
-                            builder
-                                .build_float_div(
-                                    sin.into_vector_value(),
-                                    cos.into_vector_value(),
-                                    &format!("reg_{ni}"),
-                                )?
-                                .as_basic_value_enum()
-                        }
-                        Log => fast_math(build_vec_unary_intrinsic(
-                            builder,
-                            &compiler.module,
-                            "llvm.log.*",
-                            "log_call",
-                            regs[*input].into_vector_value(),
-                        )?),
-                        Exp => fast_math(build_vec_unary_intrinsic(
-                            builder,
-                            &compiler.module,
-                            "llvm.exp.*",
-                            &format!("exp_call_{ni}"),
-                            regs[*input].into_vector_value(),
-                        )?),
-                        Floor => fast_math(build_vec_unary_intrinsic(
-                            builder,
-                            &compiler.module,
-                            "llvm.floor.*",
-                            &format!("floor_call_{ni}"),
-                            regs[*input].into_vector_value(),
-                        )?),
-                        Not => builder
-                            .build_not(regs[*input].into_vector_value(), &format!("reg_{ni}"))?
-                            .as_basic_value_enum(),
-                    }
-                }
-                Binary(op, lhs, rhs) => match op {
-                    Add => fast_math(builder.build_float_add(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    Subtract => fast_math(builder.build_float_sub(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    Multiply => fast_math(builder.build_float_mul(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    Divide => fast_math(builder.build_float_div(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    Pow if matches!(self.node(*rhs), Constant(Value::Scalar(2.0))) => {
-                        let input = regs[*lhs].into_vector_value();
-                        fast_math(builder.build_float_mul(input, input, &format!("reg_{ni}"))?)
-                            .as_basic_value_enum()
-                    }
-                    Pow => fast_math(build_vec_binary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.pow.*",
-                        &format!("pow_call_{ni}"),
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                    )?),
-                    Min => fast_math(build_vec_binary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.minnum.*",
-                        &format!("min_call_{ni}"),
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                    )?),
-                    Max => fast_math(build_vec_binary_intrinsic(
-                        builder,
-                        &compiler.module,
-                        "llvm.maxnum.*",
-                        &format!("max_call_{ni}"),
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                    )?),
-                    Remainder => fast_math(builder.build_float_rem(
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    Less => fast_math(builder.build_float_compare(
-                        FloatPredicate::ULT,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    LessOrEqual => fast_math(builder.build_float_compare(
-                        FloatPredicate::ULE,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    Equal => fast_math(builder.build_float_compare(
-                        FloatPredicate::UEQ,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    NotEqual => fast_math(builder.build_float_compare(
-                        FloatPredicate::UNE,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    Greater => fast_math(builder.build_float_compare(
-                        FloatPredicate::UGT,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    GreaterOrEqual => fast_math(builder.build_float_compare(
-                        FloatPredicate::UGE,
-                        regs[*lhs].into_vector_value(),
-                        regs[*rhs].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?)
-                    .as_basic_value_enum(),
-                    And => builder
-                        .build_and(
-                            regs[*lhs].into_vector_value(),
-                            regs[*rhs].into_vector_value(),
-                            &format!("reg_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                    Or => builder
-                        .build_or(
-                            regs[*lhs].into_vector_value(),
-                            regs[*rhs].into_vector_value(),
-                            &format!("reg_{ni}"),
-                        )?
-                        .as_basic_value_enum(),
-                },
-                Ternary(op, a, b, c) => match op {
-                    Choose => builder.build_select(
-                        regs[*a].into_vector_value(),
-                        regs[*b].into_vector_value(),
-                        regs[*c].into_vector_value(),
-                        &format!("reg_{ni}"),
-                    )?,
-                },
-            };
+                builder,
+                &compiler.module,
+            )?;
             regs.push(reg);
         }
         // Copy the outputs.
@@ -1459,7 +1234,7 @@ impl Tree {
         for (i, reg) in regs[(self.len() - num_roots)..].iter().enumerate() {
             let offset = builder.build_int_add(
                 builder.build_int_mul(
-                    index,
+                    loop_index,
                     i64_type.const_int(num_roots as u64, false),
                     "offset_mul",
                 )?,
@@ -1474,8 +1249,8 @@ impl Tree {
             builder.build_store(dst, *reg)?;
         }
         // Check to see if the loop should go on.
-        let next = builder.build_int_add(index, i64_type.const_int(1, false), "increment")?;
-        phi.add_incoming(&[(&next, loop_block)]);
+        let next = builder.build_int_add(loop_index, i64_type.const_int(1, false), "increment")?;
+        loop_index_phi.add_incoming(&[(&next, loop_block)]);
         let cmp = builder.build_int_compare(IntPredicate::ULT, next, eval_len, "loop-check")?;
         builder.build_conditional_branch(cmp, loop_block, end_block)?;
         // End loop and return.
@@ -1496,6 +1271,283 @@ impl Tree {
             phantom: PhantomData,
         })
     }
+}
+
+pub struct BuildArgs<'a, 'ctx> {
+    pub(crate) nodes: &'a [Node],
+    pub(crate) params: &'a str,
+    pub(crate) context: &'ctx Context,
+    pub(crate) fvec_type: VectorType<'ctx>,
+    pub(crate) inputs: PointerValue<'ctx>,
+    pub(crate) loop_index: IntValue<'ctx>,
+    pub(crate) regs: &'a [BasicValueEnum<'ctx>],
+    pub(crate) node_index: usize,
+    pub(crate) node: Node,
+}
+
+pub fn build_op<'a, 'ctx, T>(
+    comp: BuildArgs<'a, 'ctx>,
+    builder: &'ctx Builder<'ctx>,
+    module: &'ctx Module,
+) -> Result<BasicValueEnum<'ctx>, Error>
+where
+    T: NumberType,
+    Wide: SimdVec<T>,
+{
+    let BuildArgs {
+        nodes,
+        params,
+        context,
+        fvec_type,
+        inputs,
+        loop_index,
+        regs,
+        node_index: ni,
+        node,
+    } = comp;
+    Ok(match node {
+        Constant(val) => match val {
+            Bool(val) => <Wide as SimdVec<T>>::const_bool(val, context),
+            Scalar(val) => <Wide as SimdVec<T>>::const_float(val, context),
+        },
+        Symbol(label) => {
+            let offset = builder.build_int_add(
+                builder.build_int_mul(
+                    loop_index,
+                    module
+                        .get_context()
+                        .i64_type()
+                        .const_int(params.len() as u64, false),
+                    &format!("input_offset_mul_{label}"),
+                )?,
+                module.get_context().i64_type().const_int(
+                    params
+                        .chars()
+                        .position(|c| c == label)
+                        .ok_or(Error::JitCompilationError("Cannot find symbol".to_string()))?
+                        as u64,
+                    false,
+                ),
+                &format!("input_offset_add_{label}"),
+            )?;
+            builder.build_load(
+                fvec_type,
+                // SAFETY: GEP can segfault if the index is out of
+                // bounds. The offset calculation looks pretty solid,
+                // and is thoroughly tested.
+                unsafe {
+                    builder.build_gep(fvec_type, inputs, &[offset], &format!("arg_{label}"))
+                }?,
+                &format!("arg_{label}"),
+            )?
+        }
+        Unary(op, input) => match op {
+            Negate => fast_math(
+                builder.build_float_neg(regs[input].into_vector_value(), &format!("reg_{ni}"))?,
+            )
+            .as_basic_value_enum(),
+            Sqrt => fast_math(build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.sqrt.*",
+                "sqrt_call",
+                regs[input].into_vector_value(),
+            )?),
+            Abs => fast_math(build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.fabs.*",
+                "abs_call",
+                regs[input].into_vector_value(),
+            )?),
+            Sin => fast_math(build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.sin.*",
+                "sin_call",
+                regs[input].into_vector_value(),
+            )?),
+            Cos => fast_math(build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.cos.*",
+                "cos_call",
+                regs[input].into_vector_value(),
+            )?),
+            Tan => {
+                let sin = fast_math(build_vec_unary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.sin.*",
+                    "sin_call",
+                    regs[input].into_vector_value(),
+                )?);
+                let cos = fast_math(build_vec_unary_intrinsic(
+                    builder,
+                    module,
+                    "llvm.cos.*",
+                    "cos_call",
+                    regs[input].into_vector_value(),
+                )?);
+                builder
+                    .build_float_div(
+                        sin.into_vector_value(),
+                        cos.into_vector_value(),
+                        &format!("reg_{ni}"),
+                    )?
+                    .as_basic_value_enum()
+            }
+            Log => fast_math(build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.log.*",
+                "log_call",
+                regs[input].into_vector_value(),
+            )?),
+            Exp => fast_math(build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.exp.*",
+                &format!("exp_call_{ni}"),
+                regs[input].into_vector_value(),
+            )?),
+            Floor => fast_math(build_vec_unary_intrinsic(
+                builder,
+                module,
+                "llvm.floor.*",
+                &format!("floor_call_{ni}"),
+                regs[input].into_vector_value(),
+            )?),
+            Not => builder
+                .build_not(regs[input].into_vector_value(), &format!("reg_{ni}"))?
+                .as_basic_value_enum(),
+        },
+        Binary(op, lhs, rhs) => match op {
+            Add => fast_math(builder.build_float_add(
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            Subtract => fast_math(builder.build_float_sub(
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            Multiply => fast_math(builder.build_float_mul(
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            Divide => fast_math(builder.build_float_div(
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            Pow if matches!(&nodes[rhs], Constant(Value::Scalar(2.0))) => {
+                let input = regs[lhs].into_vector_value();
+                fast_math(builder.build_float_mul(input, input, &format!("reg_{ni}"))?)
+                    .as_basic_value_enum()
+            }
+            Pow => fast_math(build_vec_binary_intrinsic(
+                builder,
+                module,
+                "llvm.pow.*",
+                &format!("pow_call_{ni}"),
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+            )?),
+            Min => fast_math(build_vec_binary_intrinsic(
+                builder,
+                module,
+                "llvm.minnum.*",
+                &format!("min_call_{ni}"),
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+            )?),
+            Max => fast_math(build_vec_binary_intrinsic(
+                builder,
+                module,
+                "llvm.maxnum.*",
+                &format!("max_call_{ni}"),
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+            )?),
+            Remainder => fast_math(builder.build_float_rem(
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            Less => fast_math(builder.build_float_compare(
+                FloatPredicate::ULT,
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            LessOrEqual => fast_math(builder.build_float_compare(
+                FloatPredicate::ULE,
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            Equal => fast_math(builder.build_float_compare(
+                FloatPredicate::UEQ,
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            NotEqual => fast_math(builder.build_float_compare(
+                FloatPredicate::UNE,
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            Greater => fast_math(builder.build_float_compare(
+                FloatPredicate::UGT,
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            GreaterOrEqual => fast_math(builder.build_float_compare(
+                FloatPredicate::UGE,
+                regs[lhs].into_vector_value(),
+                regs[rhs].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?)
+            .as_basic_value_enum(),
+            And => builder
+                .build_and(
+                    regs[lhs].into_vector_value(),
+                    regs[rhs].into_vector_value(),
+                    &format!("reg_{ni}"),
+                )?
+                .as_basic_value_enum(),
+            Or => builder
+                .build_or(
+                    regs[lhs].into_vector_value(),
+                    regs[rhs].into_vector_value(),
+                    &format!("reg_{ni}"),
+                )?
+                .as_basic_value_enum(),
+        },
+        Ternary(op, a, b, c) => match op {
+            Choose => builder.build_select(
+                regs[a].into_vector_value(),
+                regs[b].into_vector_value(),
+                regs[c].into_vector_value(),
+                &format!("reg_{ni}"),
+            )?,
+        },
+    })
 }
 
 #[cfg(test)]

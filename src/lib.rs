@@ -1,7 +1,7 @@
+mod analyze;
 mod compile;
 mod dedup;
 mod derivative;
-mod dominator;
 mod dual;
 mod error;
 mod eval;
@@ -27,12 +27,17 @@ pub mod llvm_jit;
 pub use llvm_jit::{
     JitContext,
     interval::{JitIntervalFn, JitIntervalFnSync},
+    pruning::{
+        JitPruner, JitPrunerSync, JitPruningFn, JitPruningFnSync, JitPruningIntervalFn,
+        JitPruningIntervalFnSync, JitPruningSimdFn, JitPruningSimdFnSync,
+    },
     simd_array::{JitSimdFn, NativeSimdFunc, SimdVec, Wide},
     single::{JitFn, JitFnSync},
 };
 
 pub mod test_util;
 
+pub use analyze::DependencyTable;
 pub use dedup::{Deduplicater, equivalent_trees};
 pub use derivative::{numerical_deriv, symbolic_deriv};
 pub use dual::{Dual, DualEvaluator};
@@ -47,7 +52,7 @@ pub use prune::Pruner;
 pub use reduce::reduce;
 pub use tree::{
     BinaryOp, Node, TernaryOp, Tree, UnaryOp, Value, abs, add, and, cos, div, dot, equals, exp,
-    extract, floor, geq, greater, l2norm, leq, less, log, matmul, max, min, mul, negate, neq,
-    normalize, not, or, pow, rem, reshape, sin, sqrt, sub, tan, transpose,
+    extract, floor, geq, greater, is_node_scalar, l2norm, leq, less, log, matmul, max, min, mul,
+    negate, neq, normalize, not, or, pow, rem, reshape, sin, sqrt, sub, tan, transpose,
 };
 pub use walk::{DepthIterator, DepthWalker, NodeOrdering};

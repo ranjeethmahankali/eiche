@@ -1,5 +1,13 @@
 use crate::{
-    tree::{Node, Node::*, Tree, Value, Value::*},
+    Error,
+    tree::{
+        BinaryOp::*,
+        Node::{self, *},
+        TernaryOp::*,
+        Tree,
+        UnaryOp::*,
+        Value::{self, *},
+    },
     walk::{DepthWalker, NodeOrdering},
 };
 
@@ -98,9 +106,260 @@ impl std::fmt::Display for Node {
     }
 }
 
+mod alias {
+    // Constants.
+    pub const BOOL: &str = "bool";
+    pub const FLOAT: &str = "float";
+    pub const B_TRUE: &str = "t";
+    pub const B_FALSE: &str = "f";
+    pub const VARIABLE: &str = "var";
+    // Unary ops.
+    pub const NEGATE: &str = "neg";
+    pub const SQRT: &str = "sqrt";
+    pub const ABS: &str = "abs";
+    pub const SIN: &str = "sin";
+    pub const COS: &str = "cos";
+    pub const TAN: &str = "tan";
+    pub const LOG: &str = "log";
+    pub const EXP: &str = "exp";
+    pub const FLOOR: &str = "floor";
+    pub const NOT: &str = "not";
+    // Binary ops.
+    pub const ADD: &str = "add";
+    pub const SUBTRACT: &str = "sub";
+    pub const MULTIPLY: &str = "mul";
+    pub const DIVIDE: &str = "div";
+    pub const POW: &str = "pow";
+    pub const MIN: &str = "min";
+    pub const MAX: &str = "max";
+    pub const REMAINDER: &str = "rem";
+    pub const LESS: &str = "lt";
+    pub const LESSOREQUAL: &str = "le";
+    pub const EQUAL: &str = "eq";
+    pub const NOTEQUAL: &str = "ne";
+    pub const GREATER: &str = "gt";
+    pub const GREATEROREQUAL: &str = "ge";
+    pub const AND: &str = "and";
+    pub const OR: &str = "or";
+    // Ternary ops.
+    pub const CHOOSE: &str = "choose";
+}
+
+impl Tree {
+    pub fn write_to<W: std::io::Write>(&self, mut w: W) -> Result<(), std::io::Error> {
+        fn write_node<W: std::io::Write>(
+            node: &Node,
+            index: usize,
+            w: &mut W,
+        ) -> Result<(), std::io::Error> {
+            match node {
+                Constant(value) => match value {
+                    Bool(flag) => writeln!(
+                        w,
+                        "{} {} # {}",
+                        alias::BOOL,
+                        if *flag { "t" } else { "f" },
+                        index
+                    )?,
+                    Scalar(value) => {
+                        let bits = value.to_bits();
+                        writeln!(w, "{} {:x} # {}: {}", alias::FLOAT, bits, index, value)?
+                    }
+                },
+                Symbol(label) => writeln!(w, "{} {}", alias::VARIABLE, label)?,
+                Unary(op, input) => {
+                    let opstr = match op {
+                        Negate => alias::NEGATE,
+                        Sqrt => alias::SQRT,
+                        Abs => alias::ABS,
+                        Sin => alias::SIN,
+                        Cos => alias::COS,
+                        Tan => alias::TAN,
+                        Log => alias::LOG,
+                        Exp => alias::EXP,
+                        Floor => alias::FLOOR,
+                        Not => alias::NOT,
+                    };
+                    writeln!(w, "{} {} # {}", opstr, input, index)?
+                }
+                Binary(op, lhs, rhs) => {
+                    let opstr = match op {
+                        Add => alias::ADD,
+                        Subtract => alias::SUBTRACT,
+                        Multiply => alias::MULTIPLY,
+                        Divide => alias::DIVIDE,
+                        Pow => alias::POW,
+                        Min => alias::MIN,
+                        Max => alias::MAX,
+                        Remainder => alias::REMAINDER,
+                        Less => alias::LESS,
+                        LessOrEqual => alias::LESSOREQUAL,
+                        Equal => alias::EQUAL,
+                        NotEqual => alias::NOTEQUAL,
+                        Greater => alias::GREATER,
+                        GreaterOrEqual => alias::GREATEROREQUAL,
+                        And => alias::AND,
+                        Or => alias::OR,
+                    };
+                    writeln!(w, "{} {} {} # {}", opstr, lhs, rhs, index)?
+                }
+                Ternary(op, a, b, c) => {
+                    let opstr = match op {
+                        Choose => alias::CHOOSE,
+                    };
+                    writeln!(w, "{} {} {} {} # {}", opstr, a, b, c, index)?
+                }
+            }
+            Ok(())
+        }
+        let (rows, cols) = self.dims();
+        writeln!(w, "{rows} {cols} # output dims")?;
+        // First write non-root nodes.
+        let count = self.len() - self.num_roots();
+        for (i, node) in self.nodes().iter().enumerate().take(count) {
+            write_node(node, i, &mut w)?
+        }
+        writeln!(w, "\n# outputs\n")?;
+        for (i, node) in self.nodes().iter().enumerate().skip(count) {
+            write_node(node, i, &mut w)?
+        }
+        Ok(())
+    }
+
+    pub fn read_from<S: std::io::BufRead>(mut src: S) -> Result<Tree, Error> {
+        fn read_int<'a>(iter: &mut impl Iterator<Item = &'a str>) -> Result<usize, Error> {
+            iter.next()
+                .ok_or_else(|| Error::IOError("Unable to read integer string".into()))
+                .and_then(|word| {
+                    word.parse::<usize>()
+                        .map_err(|e| Error::IOError(e.to_string()))
+                })
+        }
+        let mut line = String::new();
+        let dims = {
+            src.read_line(&mut line)
+                .map_err(|e| Error::IOError(e.to_string()))?;
+            let line = line.trim();
+            let (rows, cols) = line
+                .split_once('#')
+                .map(|(before, _after)| before)
+                .unwrap_or(line)
+                .trim()
+                .split_once(" ")
+                .ok_or_else(|| {
+                    Error::IOError("Unable to read the output dimensions of tree.".into())
+                })?;
+            let (rows, cols) = (
+                rows.parse::<usize>()
+                    .map_err(|e| Error::IOError(e.to_string()))?,
+                cols.parse::<usize>()
+                    .map_err(|e| Error::IOError(e.to_string()))?,
+            );
+            (rows, cols)
+        };
+        let mut nodes = Vec::<Node>::new();
+        while {
+            line.clear();
+            // Returns Ok(number_of_bytes_read). That should be zero at EOF.
+            src.read_line(&mut line)
+                .map_err(|e| Error::IOError(e.to_string()))?
+        } > 0
+        {
+            let line = line.as_str();
+            let line = line
+                .trim()
+                .split_once('#')
+                .map(|(before, _after)| before)
+                .unwrap_or(line)
+                .trim();
+            if line.is_empty() || line.starts_with("#") {
+                continue;
+            }
+            let mut words = line.split_ascii_whitespace();
+            let opstr = words
+                .next()
+                .ok_or_else(|| Error::IOError("Unable to read the op".into()))?;
+            let node = match opstr {
+                alias::BOOL => {
+                    match words
+                        .next()
+                        .ok_or_else(|| Error::IOError("Unable to read boolean constant".into()))?
+                    {
+                        alias::B_TRUE => Constant(Value::Bool(true)),
+                        alias::B_FALSE => Constant(Value::Bool(false)),
+                        _ => return Err(Error::IOError("Invalid boolean value".into())),
+                    }
+                }
+                alias::FLOAT => Constant(Value::Scalar(f64::from_bits(
+                    u64::from_str_radix(
+                        words.next().ok_or_else(|| {
+                            Error::IOError("Unable to read float constant".into())
+                        })?,
+                        16,
+                    )
+                    .map_err(|e| Error::IOError(e.to_string()))?,
+                ))),
+                alias::VARIABLE => Symbol(
+                    words
+                        .next()
+                        .ok_or_else(|| Error::IOError("Unable to read boolean constant".into()))?
+                        .chars()
+                        .next()
+                        .ok_or_else(|| {
+                            Error::IOError(
+                                "Cannot read the first char of the variable label".into(),
+                            )
+                        })?,
+                ),
+                alias::NEGATE => Unary(Negate, read_int(&mut words)?),
+                alias::SQRT => Unary(Sqrt, read_int(&mut words)?),
+                alias::ABS => Unary(Abs, read_int(&mut words)?),
+                alias::SIN => Unary(Sin, read_int(&mut words)?),
+                alias::COS => Unary(Cos, read_int(&mut words)?),
+                alias::TAN => Unary(Tan, read_int(&mut words)?),
+                alias::LOG => Unary(Log, read_int(&mut words)?),
+                alias::EXP => Unary(Exp, read_int(&mut words)?),
+                alias::FLOOR => Unary(Floor, read_int(&mut words)?),
+                alias::NOT => Unary(Not, read_int(&mut words)?),
+                // Binary ops.
+                alias::ADD => Binary(Add, read_int(&mut words)?, read_int(&mut words)?),
+                alias::SUBTRACT => Binary(Subtract, read_int(&mut words)?, read_int(&mut words)?),
+                alias::MULTIPLY => Binary(Multiply, read_int(&mut words)?, read_int(&mut words)?),
+                alias::DIVIDE => Binary(Divide, read_int(&mut words)?, read_int(&mut words)?),
+                alias::POW => Binary(Pow, read_int(&mut words)?, read_int(&mut words)?),
+                alias::MIN => Binary(Min, read_int(&mut words)?, read_int(&mut words)?),
+                alias::MAX => Binary(Max, read_int(&mut words)?, read_int(&mut words)?),
+                alias::REMAINDER => Binary(Remainder, read_int(&mut words)?, read_int(&mut words)?),
+                alias::LESS => Binary(Less, read_int(&mut words)?, read_int(&mut words)?),
+                alias::LESSOREQUAL => {
+                    Binary(LessOrEqual, read_int(&mut words)?, read_int(&mut words)?)
+                }
+                alias::EQUAL => Binary(Equal, read_int(&mut words)?, read_int(&mut words)?),
+                alias::NOTEQUAL => Binary(NotEqual, read_int(&mut words)?, read_int(&mut words)?),
+                alias::GREATER => Binary(Greater, read_int(&mut words)?, read_int(&mut words)?),
+                alias::GREATEROREQUAL => {
+                    Binary(GreaterOrEqual, read_int(&mut words)?, read_int(&mut words)?)
+                }
+                alias::AND => Binary(And, read_int(&mut words)?, read_int(&mut words)?),
+                alias::OR => Binary(Or, read_int(&mut words)?, read_int(&mut words)?),
+                // Ternary ops.
+                alias::CHOOSE => Ternary(
+                    Choose,
+                    read_int(&mut words)?,
+                    read_int(&mut words)?,
+                    read_int(&mut words)?,
+                ),
+                op => return Err(Error::IOError(format!("Unrecognized op: {op}"))),
+            };
+            nodes.push(node);
+        }
+        Tree::from_nodes(nodes, dims)
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use crate::{dedup::Deduplicater, deftree, prune::Pruner};
+    use crate::{dedup::Deduplicater, deftree, prune::Pruner, tree::Tree};
 
     #[test]
     fn t_tree_string_formatting() {
@@ -280,5 +539,42 @@ mod test {
 "
             .trim()
         );
+    }
+
+    #[test]
+    fn t_serialization_roundtrip() {
+        // Covers: symbols, scalars, unary (neg, sqrt, abs, sin, cos, tan, log, exp, floor),
+        // binary (lt, div, add, sub, mul, pow, min, max), ternary (choose/if).
+        let tree = deftree!(
+            if (< 'x 0.)
+               (min (- (sqrt (abs 'x))) (floor (log (exp 'y))))
+               (max (/ (+ 'x 2.5) (- 'y 3.)) (mul (pow (sin 'x) 2.) (+ (pow (cos 'y) 2.) (tan 'z))))
+        )
+        .unwrap();
+        let mut buf = Vec::new();
+        tree.write_to(&mut buf).unwrap();
+        let restored = Tree::read_from(buf.as_slice()).unwrap();
+        assert_eq!(tree.nodes(), restored.nodes());
+        assert_eq!(tree.dims(), restored.dims());
+    }
+
+    #[test]
+    fn t_serialization_edge_cases() {
+        // Covers: booleans, special floats, multi-output (2x2 matrix), remainder,
+        // binary (and, or, le, eq, neq, gt, ge), unary (not).
+        let tree = deftree!(concat
+            (or (and true false) (not (<= 'x 'y)))
+            (and (or (== 'x 0.) (!= 'y 1.)) (or (> 'x 'z) (>= 'y 'z)))
+            (+ (rem 'x (const f64::INFINITY)) (const f64::NEG_INFINITY))
+            (* 'x 'y)
+        )
+        .unwrap()
+        .reshape(2, 2)
+        .unwrap();
+        let mut buf = Vec::new();
+        tree.write_to(&mut buf).unwrap();
+        let restored = Tree::read_from(buf.as_slice()).unwrap();
+        assert_eq!(tree.nodes(), restored.nodes());
+        assert_eq!(tree.dims(), restored.dims());
     }
 }

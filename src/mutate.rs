@@ -70,7 +70,7 @@ impl TemplateCapture {
 
     /// Get the bindings in this capture instance. These map the variable labels
     /// in the captured template to the indices of the node they're bound to.
-    pub fn bindings(&self) -> &Vec<(char, usize)> {
+    pub fn bindings(&self) -> &[(char, usize)] {
         &self.bindings
     }
 

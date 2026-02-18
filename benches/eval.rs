@@ -47,7 +47,7 @@ mod circles {
     pub const DIMS: u32 = 1 << PRUNE_DEPTH; // 512 x 512 image.
     pub const DIMS_F64: f64 = DIMS as f64;
     pub const RAD_RANGE: (f64, f64) = (0.02 * DIMS_F64, 0.1 * DIMS_F64);
-    pub const N_CIRCLES: usize = 100;
+    pub const N_CIRCLES: usize = 256;
 }
 
 /// Creates a very large tree for benchmarking. This tree is designed to:
@@ -353,12 +353,14 @@ fn b_spheres_interval_eval(c: &mut Criterion) {
 }
 
 fn b_circles_value_eval(c: &mut Criterion) {
-    let tree = test_util::random_circles(
+    let tree = test_util::random_circles_sorted(
         (0., circles::DIMS_F64),
         (0., circles::DIMS_F64),
         circles::RAD_RANGE,
         circles::N_CIRCLES,
-    );
+    )
+    .compacted()
+    .unwrap();
     let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
     let mut eval = ValueEvaluator::new(&tree);
     let mut group = c.benchmark_group("circles");
@@ -373,7 +375,7 @@ fn b_circles_value_eval(c: &mut Criterion) {
                         .run()
                         .expect("Failed to run value evaluator");
                     *image.get_pixel_mut(x, y) = match outputs[0] {
-                        Value::Bool(_) => panic!("Expecting a scalar"),
+                        Value::Bool(_) => unreachable!("Expecting a scalar"),
                         Value::Scalar(val) => image::Luma([if val < 0. {
                             f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
                         } else {
@@ -390,12 +392,14 @@ fn b_circles_value_eval(c: &mut Criterion) {
 }
 
 fn b_circles_pruned_eval(c: &mut Criterion) {
-    let tree = test_util::random_circles(
+    let tree = test_util::random_circles_sorted(
         (0., circles::DIMS_F64),
         (0., circles::DIMS_F64),
         circles::RAD_RANGE,
         circles::N_CIRCLES,
-    );
+    )
+    .compacted()
+    .unwrap();
     let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
     let mut group = c.benchmark_group("circles");
     group.sample_size(10);
@@ -423,7 +427,7 @@ fn b_circles_pruned_eval(c: &mut Criterion) {
                 match state {
                     PruningState::None => break,
                     PruningState::Valid(_, _) => {} // Keep going.
-                    PruningState::Failure(error) => panic!("Error during pruning: {error:?}"),
+                    PruningState::Failure(error) => unreachable!("Error during pruning: {error:?}"),
                 }
                 for norm in NORM_SAMPLES {
                     let mut sample = [0.; 2];
@@ -437,7 +441,7 @@ fn b_circles_pruned_eval(c: &mut Criterion) {
                         .expect("Failed to run the pruning evaluator");
                     let coords = sample.map(|c| c as u32);
                     *image.get_pixel_mut(coords[0], coords[1]) = match outputs[0] {
-                        Value::Bool(_) => panic!("Expecting a scalar"),
+                        Value::Bool(_) => unreachable!("Expecting a scalar"),
                         Value::Scalar(val) => image::Luma([if val < 0. {
                             f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
                         } else {
@@ -794,12 +798,14 @@ mod jit {
     }
 
     fn b_circles_eval<T: NumberType>(c: &mut Criterion) {
-        let tree = test_util::random_circles(
+        let tree = test_util::random_circles_sorted(
             (0., circles::DIMS_F64),
             (0., circles::DIMS_F64),
             circles::RAD_RANGE,
             circles::N_CIRCLES,
-        );
+        )
+        .compacted()
+        .unwrap();
         let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
         let context = JitContext::default();
         let eval = tree.jit_compile::<T>(&context, "xy").unwrap();
@@ -827,6 +833,70 @@ mod jit {
                     }
                 }
             })
+        });
+    }
+
+    fn b_circles_pruned_eval<T: NumberType>(c: &mut Criterion) {
+        const PRUNE_THRESHOLD: usize = circles::N_CIRCLES / 4;
+        const DIM_INTERVAL: u32 = 1 << (circles::PRUNE_DEPTH - 5);
+        let tree = test_util::random_circles_sorted(
+            (0., circles::DIMS_F64),
+            (0., circles::DIMS_F64),
+            circles::RAD_RANGE,
+            circles::N_CIRCLES,
+        )
+        .compacted()
+        .unwrap();
+        let mut image = circles::ImageBuffer::new(circles::DIMS, circles::DIMS);
+        let context = JitContext::default();
+        let pruner = tree
+            .jit_compile_pruner::<T>(&context, "xy", PRUNE_THRESHOLD, 1e-8)
+            .unwrap();
+        let eval = pruner.compile_single_func(&context).unwrap();
+        let mut signals = vec![0u32; pruner.num_signals()].into_boxed_slice();
+        c.bench_function(&format!("circles-jit-pruned-{}", T::type_str()), |b| {
+            b.iter(|| {
+                for yi in (0..circles::DIMS).step_by(DIM_INTERVAL as usize) {
+                    let mut interval = [
+                        [T::nan(); 2],
+                        [
+                            T::from_f64(yi as f64),
+                            T::from_f64((yi + DIM_INTERVAL) as f64),
+                        ],
+                    ];
+                    for xi in (0..circles::DIMS).step_by(DIM_INTERVAL as usize) {
+                        interval[0] = [
+                            T::from_f64(xi as f64),
+                            T::from_f64((xi + DIM_INTERVAL) as f64),
+                        ];
+                        let mut iout = [[T::nan(); 2]];
+                        signals.fill(0u32);
+                        black_box(&pruner)
+                            .run(&interval, &mut iout, &mut signals)
+                            .unwrap();
+                        for y in yi..(yi + DIM_INTERVAL) {
+                            let mut pos = [T::nan(), T::from_f64(y as f64 + 0.5)];
+                            for x in xi..(xi + DIM_INTERVAL) {
+                                pos[0] = T::from_f64(x as f64 + 0.5);
+                                let mut out = [T::nan()];
+                                black_box(&eval)
+                                    .run(black_box(&pos), &mut out, &signals)
+                                    .unwrap();
+                                let val = out[0].to_f64();
+                                *image.get_pixel_mut(x, y) = image::Luma([if val < 0. {
+                                    f64::min((-val / circles::RAD_RANGE.1) * 255., 255.) as u8
+                                } else {
+                                    f64::min(
+                                        ((circles::RAD_RANGE.1 - val) / circles::RAD_RANGE.1)
+                                            * 255.,
+                                        255.,
+                                    ) as u8
+                                }]);
+                            }
+                        }
+                    }
+                }
+            });
         });
     }
 
@@ -953,12 +1023,14 @@ mod jit {
         b_circles_interval::<f64>,
         b_circles_eval::<f32>,
         b_circles_eval::<f64>,
+        b_circles_pruned_eval::<f32>,
+        b_circles_pruned_eval::<f64>,
         b_small_tree_interval::<f32>,
         b_small_tree_interval::<f64>,
         b_medium_tree_interval::<f32>,
         b_medium_tree_interval::<f64>,
         b_large_tree_interval::<f32>,
-        b_large_tree_interval::<f64>
+        b_large_tree_interval::<f64>,
     );
 }
 

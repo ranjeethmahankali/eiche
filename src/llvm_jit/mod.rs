@@ -126,6 +126,9 @@ impl<'ctx> JitCompiler<'ctx> {
     fn run_passes(&self, passes: &str) -> Result<(), Error> {
         let options = PassBuilderOptions::create();
         self.module
+            .verify()
+            .map_err(|e| Error::JitCompilationError(e.to_string()))?;
+        self.module
             .run_passes(passes, &self.machine, options)
             .map_err(|e| Error::JitCompilationError(e.to_string()))
     }
@@ -293,13 +296,7 @@ fn build_vec_binary_intrinsic<'ctx>(
 ) -> Result<BasicValueEnum<'ctx>, Error> {
     let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
     let intrinsic_fn = intrinsic
-        .get_declaration(
-            module,
-            &[
-                BasicTypeEnum::VectorType(lhs.get_type()),
-                BasicTypeEnum::VectorType(rhs.get_type()),
-            ],
-        )
+        .get_declaration(module, &[BasicTypeEnum::VectorType(lhs.get_type())])
         .ok_or(Error::CannotCompileIntrinsic(name))?;
     builder
         .build_call(
@@ -349,13 +346,7 @@ fn build_float_binary_intrinsic<'ctx>(
 ) -> Result<BasicValueEnum<'ctx>, Error> {
     let intrinsic = Intrinsic::find(name).ok_or(Error::CannotCompileIntrinsic(name))?;
     let intrinsic_fn = intrinsic
-        .get_declaration(
-            module,
-            &[
-                BasicTypeEnum::FloatType(lhs.get_type()),
-                BasicTypeEnum::FloatType(rhs.get_type()),
-            ],
-        )
+        .get_declaration(module, &[BasicTypeEnum::FloatType(lhs.get_type())])
         .ok_or(Error::CannotCompileIntrinsic(name))?;
     builder
         .build_call(
@@ -372,9 +363,9 @@ fn build_float_binary_intrinsic<'ctx>(
         .ok_or(Error::CannotCompileIntrinsic(name))
 }
 
+pub mod interval;
+pub mod pruning;
 pub mod single;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 pub mod simd_array;
-
-pub mod interval;
