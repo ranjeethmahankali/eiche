@@ -992,8 +992,13 @@ impl Tree {
         let (tree, ndom) = self.control_dependence_sorted()?;
         let deps = DependencyTable::from_tree(&tree);
         let claims = make_claims(&tree, &ndom, &deps, pruning_threshold)?;
-        let claims: HashSet<(usize, usize)> =
-            HashSet::from_iter(claims.into_iter().map(|(a, b, _)| (a, b)));
+        let claims: HashSet<(usize, usize)> = HashSet::from_iter(claims.into_iter().map(
+            |Claim {
+                 claimed,
+                 claimant,
+                 kind: _,
+             }| (claimed, claimant),
+        ));
         let interrupts = make_interrupts(&tree, &ndom, &claims, pruning_threshold)?;
         let blocks = make_blocks(interrupts, tree.len())?;
         let PrunerInfo {
@@ -1176,7 +1181,7 @@ fn compile_pruner_impl<'ctx, T: NumberType, const WITH_NOTIFY: bool>(
                             builder.position_at_end(bb);
                             let first = notified.insert((dst_signal, signal));
                             bbs[ci] = build_notify(
-                                tree.node(src_inst).clone(),
+                                *tree.node(src_inst),
                                 src_inst,
                                 kind,
                                 signal,
@@ -1993,6 +1998,13 @@ fn make_interrupts(
     Ok(interrupts.into_boxed_slice())
 }
 
+#[derive(Eq, PartialEq, Debug)]
+struct Claim {
+    claimed: usize,
+    claimant: usize,
+    kind: PruneKind,
+}
+
 /**
 # Core Idea
 
@@ -2008,13 +2020,12 @@ nodes that don't dominate each other. These are all alternate paths from P to
 the root. For P to get pruned at runtime, all the claimants should agree at
 runtime that P can be pruned.
 */
-
 fn make_claims(
     tree: &Tree,
     ndom: &[usize],
     deps: &DependencyTable,
     threshold: usize,
-) -> Result<Box<[(usize, usize, PruneKind)]>, Error> {
+) -> Result<Box<[Claim]>, Error> {
     use std::cmp::Ordering;
     let mut claims = tree
         .nodes()
@@ -2095,15 +2106,15 @@ fn make_claims(
         // Any claimant that survived the above process has irrevokable pruning
         // rights. If any of them says the node cannot be pruned, then the
         // pruning rights of the rest are revoked.
-        if chunk.iter().any(|c| match c {
-            Some((_, _, PruneKind::None)) => true,
-            _ => false,
-        }) {
+        if chunk
+            .iter()
+            .any(|c| matches!(c, Some((_, _, PruneKind::None))))
+        {
             chunk.fill(None);
             continue;
         }
     }
-    let mut claims = claims.into_iter().filter_map(|c| c).collect::<Vec<_>>();
+    let mut claims = claims.into_iter().flatten().collect::<Vec<_>>();
     // If any node owns it's own pruning rights, then we revoke the rights of
     // other nodes over that node. This is because if the node is capable of
     // choosing when to prune itself, other nodes' opinion about it is
@@ -2114,7 +2125,14 @@ fn make_claims(
             .filter_map(|(a, b, _)| if *a == *b { Some(*a) } else { None }),
     );
     claims.retain(|(a, b, _)| *a == *b || !self_owned.contains(a));
-    Ok(claims.into_boxed_slice())
+    Ok(claims
+        .into_iter()
+        .map(|(claimed, claimant, kind)| Claim {
+            claimed,
+            claimant,
+            kind,
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -2135,7 +2153,18 @@ mod test {
         let claims = make_claims(&tree, &ndom, &deps, 0).unwrap();
         assert_eq!(
             claims.as_ref(),
-            &[(2, 5, PruneKind::Left), (6, 7, PruneKind::Right)]
+            &[
+                Claim {
+                    claimed: 2,
+                    claimant: 5,
+                    kind: PruneKind::Left
+                },
+                Claim {
+                    claimed: 6,
+                    claimant: 7,
+                    kind: PruneKind::Right
+                }
+            ]
         );
         // Case 2.
         let tree = deftree!(min
@@ -2147,7 +2176,14 @@ mod test {
         let (tree, ndom) = tree.control_dependence_sorted().unwrap();
         let deps = DependencyTable::from_tree(&tree);
         let claims = make_claims(&tree, &ndom, &deps, 0).unwrap();
-        assert_eq!(claims.as_ref(), &[(5, 6, PruneKind::Left)]);
+        assert_eq!(
+            claims.as_ref(),
+            &[Claim {
+                claimed: 5,
+                claimant: 6,
+                kind: PruneKind::Left
+            }]
+        );
         // Test case I discovered when benchmarking the hex test case.
         let tree = Tree::read_from(
             "1 1 # output dims
@@ -2202,15 +2238,51 @@ add 36 33 # 37
         assert_eq!(
             claims.as_ref(),
             &[
-                (6, 9, PruneKind::Left),
-                (8, 9, PruneKind::Right),
-                (16, 25, PruneKind::Left),
-                (16, 35, PruneKind::Left),
-                (21, 27, PruneKind::Left),
-                (21, 34, PruneKind::Left),
-                (24, 30, PruneKind::Left),
-                (24, 34, PruneKind::Right),
-                (35, 36, PruneKind::Right)
+                Claim {
+                    claimed: 6,
+                    claimant: 9,
+                    kind: PruneKind::Left
+                },
+                Claim {
+                    claimed: 8,
+                    claimant: 9,
+                    kind: PruneKind::Right
+                },
+                Claim {
+                    claimed: 16,
+                    claimant: 25,
+                    kind: PruneKind::Left
+                },
+                Claim {
+                    claimed: 16,
+                    claimant: 35,
+                    kind: PruneKind::Left
+                },
+                Claim {
+                    claimed: 21,
+                    claimant: 27,
+                    kind: PruneKind::Left
+                },
+                Claim {
+                    claimed: 21,
+                    claimant: 34,
+                    kind: PruneKind::Left
+                },
+                Claim {
+                    claimed: 24,
+                    claimant: 30,
+                    kind: PruneKind::Left
+                },
+                Claim {
+                    claimed: 24,
+                    claimant: 34,
+                    kind: PruneKind::Right
+                },
+                Claim {
+                    claimed: 35,
+                    claimant: 36,
+                    kind: PruneKind::Right
+                }
             ]
         );
         // Self owning.
@@ -2224,9 +2296,21 @@ add 36 33 # 37
         assert_eq!(
             claims.as_ref(),
             &[
-                (4, 9, PruneKind::Right),
-                (7, 7, PruneKind::Constant(Value::Bool(true))),
-                (7, 7, PruneKind::Constant(Value::Bool(false)))
+                Claim {
+                    claimed: 4,
+                    claimant: 9,
+                    kind: PruneKind::Right
+                },
+                Claim {
+                    claimed: 7,
+                    claimant: 7,
+                    kind: PruneKind::Constant(Value::Bool(true))
+                },
+                Claim {
+                    claimed: 7,
+                    claimant: 7,
+                    kind: PruneKind::Constant(Value::Bool(false))
+                }
             ]
         );
     }
