@@ -999,7 +999,7 @@ impl Tree {
                  kind: _,
              }| (claimed, claimant),
         ));
-        let interrupts = make_interrupts(&tree, &ndom, &claims, pruning_threshold)?;
+        let interrupts = make_interrupts(&tree, &ndom, &claims)?;
         let blocks = make_blocks(interrupts, tree.len())?;
         let PrunerInfo {
             engine,
@@ -1845,7 +1845,6 @@ fn make_interrupts(
     tree: &Tree,
     ndom: &[usize],
     claims: &HashSet<(usize, usize)>,
-    threshold: usize,
 ) -> Result<Box<[Interrupt]>, Error> {
     let mut interrupts = Vec::<Interrupt>::with_capacity(tree.len() / 2);
     let mut land_map: Vec<Option<usize>> = vec![None; tree.len()];
@@ -1900,7 +1899,7 @@ fn make_interrupts(
             }
             Binary(Less | LessOrEqual | Greater | GreaterOrEqual, _lhs, _rhs) => {
                 let dom = ndom[ni];
-                if dom > threshold {
+                if claims.contains(&(ni, ni)) {
                     push_land(&mut interrupts, ni, &mut land_map);
                     interrupts.push(Interrupt::Jump {
                         before_node: ni - dom,
