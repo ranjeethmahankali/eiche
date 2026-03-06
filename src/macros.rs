@@ -123,7 +123,7 @@ macro_rules! assert_float_eq {
         let b = $b;
         let eps = $eps;
         let error = (a - b).abs();
-        if error > eps {
+        if error > eps || error.is_nan() {
             // Only format on failure
             $(
                 eprintln!($fmt $(, $args)*);

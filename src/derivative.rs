@@ -120,10 +120,19 @@ fn compute_symbolic_deriv(
                 match op {
                     Negate => Unary(Negate, inputderiv),
                     Sqrt => {
+                        // if f > 0 then f'/(2*sqrt(f)) else 0 When f=0 and
+                        // f'=0, the formula gives 0/0 = NaN, but the true
+                        // derivative is 0. Guard with a conditional, matching
+                        // the numerical derivative. This is just a pragmatic
+                        // choice to not break math for something that can
+                        // happen quite often.
+                        let zero = push_node(Constant(Scalar(0.)), dst) + offset;
+                        let cond = push_node(Binary(Greater, *input, zero), dst) + offset;
                         let sf = push_node(Unary(Sqrt, *input), dst) + offset;
                         let c2 = push_node(Constant(Scalar(2.)), dst) + offset;
                         let sf2 = push_node(Binary(Multiply, sf, c2), dst) + offset;
-                        Binary(Divide, inputderiv, sf2)
+                        let div = push_node(Binary(Divide, inputderiv, sf2), dst) + offset;
+                        Ternary(Choose, cond, div, zero)
                     }
                     Abs => {
                         // Technically the gradient should not be defined at
@@ -185,6 +194,20 @@ fn compute_symbolic_deriv(
                         let two = push_node(Constant(Scalar(2.)), dst) + offset;
                         let r2 = push_node(Binary(Pow, *rhs, two), dst) + offset;
                         Binary(Divide, sub, r2)
+                    }
+                    Pow if matches!(&nodes[*rhs], Constant(_)) => {
+                        // d/dx[f^c] = (f' * c) * f^(c-1)
+                        let one = push_node(Constant(Scalar(1.)), dst) + offset;
+                        let c_minus_1 = push_node(Binary(Subtract, *rhs, one), dst) + offset;
+                        let f_pow = push_node(Binary(Pow, *lhs, c_minus_1), dst) + offset;
+                        let fderiv_c = push_node(Binary(Multiply, lderiv, *rhs), dst) + offset;
+                        Binary(Multiply, fderiv_c, f_pow)
+                    }
+                    Pow if matches!(&nodes[*lhs], Constant(_)) => {
+                        // d/dx[c^g] = g' * c^g * ln(c)
+                        let logc = push_node(Unary(Log, *lhs), dst) + offset;
+                        let cg_logc = push_node(Binary(Multiply, logc, ni), dst) + offset;
+                        Binary(Multiply, rderiv, cg_logc)
                     }
                     Pow => {
                         // https://www.physicsforums.com/threads/derivative-of-f-x-to-the-power-of-g-x-and-algebra-problem.273333/
@@ -479,6 +502,37 @@ mod test {
             &[('y', -10., 10.), ('x', -10., 10.)],
             20,
             1e-7,
+        );
+    }
+
+    #[test]
+    fn t_pow_max_zero_nan() {
+        // Minimal reproducer: pow(max(0, -x), 2) produces NaN in the
+        // symbolic derivative when max(0, -x) = 0 (i.e. x > 0), because
+        // the general pow derivative formula uses log(base) and 1/base.
+        let sderiv = &deftree!(sderiv (pow (max 0 (- 'x)) 2) 'x).unwrap();
+        compare_trees(
+            &deftree!(nderiv (pow (max 0 (- 'x)) 2) 'x 1e-4).unwrap(),
+            sderiv,
+            &[('x', -1.0, 1.0)],
+            100,
+            1e-4,
+        );
+    }
+
+    #[test]
+    fn t_sqrt_zero_nan() {
+        // Minimal reproducer: sqrt(pow(max(0, -x), 2) + pow(max(0, -y), 2))
+        // produces NaN in the symbolic derivative when both max terms are 0
+        // (i.e. x > 0 and y > 0), because the sqrt derivative f'/(2*sqrt(f))
+        // evaluates to 0/0 = NaN when f = 0 and f' = 0.
+        let tree = deftree!(sqrt (+ (pow (max 0 (- 'x)) 2) (pow (max 0 (- 'y)) 2))).unwrap();
+        compare_trees(
+            &tree.numerical_deriv("xy", 1e-4).unwrap(),
+            &tree.symbolic_deriv("xy").unwrap(),
+            &[('x', -1.0, 1.0), ('y', -1.0, 1.0)],
+            20,
+            1e-4,
         );
     }
 }

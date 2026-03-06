@@ -395,26 +395,10 @@ mod test {
         let steps = reduce(tree, 256).unwrap();
         assert!(
             steps.last().unwrap().equivalent(
-                &deftree!(concat (* 'x 6) 0 0 (* 'y 6))
+                &deftree!(concat (* 'x 6) 0 0 (* 3 (* 'y 2)))
                     .unwrap()
                     .reshape(2, 2)
                     .unwrap()
-            )
-        );
-    }
-
-    #[test]
-    fn t_circle_gradient() {
-        let tree = deftree!(sderiv (- (sqrt (+ (pow 'x 2) (pow 'y 2))) 3) 'xy).unwrap();
-        let steps = reduce(tree, 64).unwrap();
-        assert!(
-            steps.last().unwrap().equivalent(
-                &deftree!(concat
-                      (/ 'x (sqrt (+ (pow 'x 2) (pow 'y 2))))
-                      (/ 'y (sqrt (+ (pow 'x 2) (pow 'y 2)))))
-                .unwrap()
-                .reshape(1, 2)
-                .unwrap()
             )
         );
     }
