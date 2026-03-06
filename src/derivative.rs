@@ -483,6 +483,21 @@ mod test {
     }
 
     #[test]
+    #[test]
+    fn t_pow_max_zero_nan() {
+        // Minimal reproducer: pow(max(0, -x), 2) produces NaN in the
+        // symbolic derivative when max(0, -x) = 0 (i.e. x > 0), because
+        // the general pow derivative formula uses log(base) and 1/base.
+        compare_trees(
+            &deftree!(nderiv (pow (max 0 (- 'x)) 2) 'x 1e-4).unwrap(),
+            &deftree!(sderiv (pow (max 0 (- 'x)) 2) 'x).unwrap(),
+            &[('x', -1.0, 1.0)],
+            100,
+            1e-4,
+        );
+    }
+
+    #[test]
     fn t_compare_numerical_with_symbolic_box_cyl() {
         let tree = Tree::read_from(
             "
