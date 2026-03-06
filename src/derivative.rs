@@ -186,6 +186,24 @@ fn compute_symbolic_deriv(
                         let r2 = push_node(Binary(Pow, *rhs, two), dst) + offset;
                         Binary(Divide, sub, r2)
                     }
+                    Pow if matches!(&nodes[*rhs], Constant(_)) => {
+                        // d/dx[f^c] = (f' * c) * f^(c-1)
+                        let one = push_node(Constant(Scalar(1.)), dst) + offset;
+                        let c_minus_1 =
+                            push_node(Binary(Subtract, *rhs, one), dst) + offset;
+                        let f_pow =
+                            push_node(Binary(Pow, *lhs, c_minus_1), dst) + offset;
+                        let fderiv_c =
+                            push_node(Binary(Multiply, lderiv, *rhs), dst) + offset;
+                        Binary(Multiply, fderiv_c, f_pow)
+                    }
+                    Pow if matches!(&nodes[*lhs], Constant(_)) => {
+                        // d/dx[c^g] = g' * c^g * ln(c)
+                        let logc = push_node(Unary(Log, *lhs), dst) + offset;
+                        let cg_logc =
+                            push_node(Binary(Multiply, logc, ni), dst) + offset;
+                        Binary(Multiply, rderiv, cg_logc)
+                    }
                     Pow => {
                         // https://www.physicsforums.com/threads/derivative-of-f-x-to-the-power-of-g-x-and-algebra-problem.273333/
                         let logf = push_node(Unary(Log, *lhs), dst) + offset;
@@ -483,14 +501,14 @@ mod test {
     }
 
     #[test]
-    #[test]
     fn t_pow_max_zero_nan() {
         // Minimal reproducer: pow(max(0, -x), 2) produces NaN in the
         // symbolic derivative when max(0, -x) = 0 (i.e. x > 0), because
         // the general pow derivative formula uses log(base) and 1/base.
+        let sderiv = &deftree!(sderiv (pow (max 0 (- 'x)) 2) 'x).unwrap();
         compare_trees(
             &deftree!(nderiv (pow (max 0 (- 'x)) 2) 'x 1e-4).unwrap(),
-            &deftree!(sderiv (pow (max 0 (- 'x)) 2) 'x).unwrap(),
+            sderiv,
             &[('x', -1.0, 1.0)],
             100,
             1e-4,

@@ -395,7 +395,7 @@ mod test {
         let steps = reduce(tree, 256).unwrap();
         assert!(
             steps.last().unwrap().equivalent(
-                &deftree!(concat (* 'x 6) 0 0 (* 'y 6))
+                &deftree!(concat (* 'x 6) 0 0 (* 3 (* 'y 2)))
                     .unwrap()
                     .reshape(2, 2)
                     .unwrap()
