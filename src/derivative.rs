@@ -516,6 +516,22 @@ mod test {
     }
 
     #[test]
+    fn t_sqrt_zero_nan() {
+        // Minimal reproducer: sqrt(pow(max(0, -x), 2) + pow(max(0, -y), 2))
+        // produces NaN in the symbolic derivative when both max terms are 0
+        // (i.e. x > 0 and y > 0), because the sqrt derivative f'/(2*sqrt(f))
+        // evaluates to 0/0 = NaN when f = 0 and f' = 0.
+        let tree = deftree!(sqrt (+ (pow (max 0 (- 'x)) 2) (pow (max 0 (- 'y)) 2))).unwrap();
+        compare_trees(
+            &tree.numerical_deriv("xy", 1e-4).unwrap(),
+            &tree.symbolic_deriv("xy").unwrap(),
+            &[('x', -1.0, 1.0), ('y', -1.0, 1.0)],
+            20,
+            1e-4,
+        );
+    }
+
+    #[test]
     fn t_compare_numerical_with_symbolic_box_cyl() {
         let tree = Tree::read_from(
             "
